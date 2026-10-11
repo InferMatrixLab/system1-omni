@@ -99,7 +99,7 @@ Pillow: 12.3.0
 av: 16.1.0
 GPU capability: sm_120
 dtype: bfloat16
-system1-omni: 2fd8ce9 (GPU serving, smoke and parity records on this branch)
+system1-omni: 2fd8ce9 (GPU serving and smoke records); parity blocks re-verified verbatim at c9fb2d2
 ~~~
 
 FP32 and BF16 small-operator checks passed. Startup memory was approximately
