@@ -1,6 +1,7 @@
 # Supported models and hardware
 
-This page covers what runs from `main`. Start with the
+This page distinguishes validated serving paths from experimental integrations.
+Start with the
 [CPU decision walkthrough](getting-started.md). The
 [rolling model tracker (#83)](https://github.com/ThinkFlowLab/system1-omni/issues/83)
 records available paths separately from proposed integrations and hardware evidence.
@@ -17,7 +18,9 @@ Models that are being added are also tracked in issues labeled [new model](https
 | Valen-Preview-0923 | [Python reference worker](../recipe/valen/reference.md); text state or one inline PNG/JPEG image; `choice` questions | Not supported | Validated on RTX 5060 Laptop GPU (sm_120) for text and image state, with recorded reference parity for both | Not supported | Python 3.12, pinned Valen source/checkpoint, Qwen3.5-2B base, BF16 CUDA |
 | Open-Jev-27B-v1.1 | [Native Rust/CUDA worker](../recipe/open_jev/native.md) on the shared Qwen3.5/3.8 executor | Not supported | Validated on H200 (sm_90) for the [74 single-candidate workload](../recipe/open_jev/validation.md) | Not supported | Compute capability 8.0 or newer, CUDA toolkit to build, exported merged weights and trained head |
 | Open-Jev-9B | The same [native Rust/CUDA worker](../recipe/open_jev/native.md) | Not supported | Validated on compute capability 8.9 against the reference for [253 requests](../recipe/open_jev/validation-9b.md) | Not supported | Compute capability 8.0 or newer, CUDA toolkit to build, exported merged weights and trained head |
+| autotrust/JEV-27B-VL | [Experimental native worker](../recipe/jev_vl/README.md), single-question API | Contract tests only; no CPU inference | H800 frozen-corpus check; [experimental scope and limits](../recipe/jev_vl/validation.md) | Not supported | Pinned merged checkpoint, rebuilt ABI 6 CUDA library; image inputs require offline Transformers preencoding |
 | CLM-v0.1-8B | [External `clm-serve` recipe](../recipe/clm/README.md) with a CPU stub embeddings server | **Stub-encoder contract checks only** ([#23](https://github.com/ThinkFlowLab/system1-omni/pull/23)); not real Qwen3-8B decisions | Real encoder unverified by the merged recipe | Unverified | Python, upstream CLM and head checkpoint; a real encoder requires a separate embeddings server |
+| OmniJev-4B v1.1 | None yet: [checkpoint export and CPU contract](../recipe/omnijev/README.md); the native worker is in progress ([#114](https://github.com/ThinkFlowLab/system1-omni/issues/114)) | Request contract, preparation, heads and finishing checked against the reference ([#120](https://github.com/ThinkFlowLab/system1-omni/pull/120)); no inference | Not yet | Not supported | Python 3.10 reference environment for the export and fixtures |
 
 - **Validated:** covered by the recipe on `main` or by the checks in the linked merged pull request.
 - **Unverified:** the worker accepts this device, but no recipe or merged pull request covers it.

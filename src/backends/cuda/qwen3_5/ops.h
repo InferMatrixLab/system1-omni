@@ -13,7 +13,7 @@
 #include <stdint.h>
 
 // Bumped whenever the required interface below changes.
-#define CS1_ABI_VERSION 5
+#define CS1_ABI_VERSION 6
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,6 +36,11 @@ int cs1_graph_destroy(void* exec);
 // Copy and wait for the copy.
 int cs1_upload(void* dst, const void* src, size_t bytes, void* stream);
 int cs1_download(void* dst, const void* src, size_t bytes, void* stream);
+// Device-to-device copy of `bytes` (queue-only completion).
+int cs1_copy_dd(void* dst, const void* src, size_t bytes, void* stream);
+// Pitched copy both ways (default direction = device-to-device):
+// height rows of `width`, output pitch dpitch, input pitch spitch, in bytes.
+int cs1_copy2d(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, void* stream);
 
 // ---- operations ----
 
@@ -70,6 +75,15 @@ size_t cs1_gdn_workspace_floats(int T, int H);
 int cs1_gdn_prefill(const void* q, const void* k, const void* v, const float* g, const void* beta,
                     void* o, float* workspace, int T, int H, int HK, float scale, void* stream);
 
+// Same scan with an explicit state: s_in is the [H, K, V] float32 state before
+// this window (null = zero), s_out receives the [H, K, V] float32 state after
+// it (null = skip). The float32 state makes a continuation starting exactly at
+// a chunk boundary repeat the arithmetic of one full pass bit for bit. Used
+// for the cached-prefix continuation and for its capture.
+int cs1_gdn_prefill_x(const void* q, const void* k, const void* v, const float* g, const void* beta,
+                      void* o, float* workspace, int T, int H, int HK, float scale,
+                      const void* s_in, void* s_out, void* stream);
+
 // Attention inputs: q and gate from qg [T, Hq, 2*Dh], k from kr [T, Hk, Dh], both in rows
 // of ld; per-head zero-centred RMSNorm, then rotary embedding on the first 2*half dims
 // using cos/sin [T, half] (bfloat16). Writes q [T, Hq, Dh], gate [T, Hq*Dh], k [T, Hk, Dh].
@@ -87,6 +101,13 @@ int cs1_attention(const void* q, const void* k, const void* v, int ldv, void* ou
 // exactly as cs1_attention followed by cs1_sigmoid_gate. gate must be non-null if T > 0.
 int cs1_attention_gated(const void* q, const void* k, const void* v, int ldv, const void* gate,
                         void* out, int T, int Hq, int Hk, int Dh, float scale, void* stream);
+
+// Windowed variant for the cached prefix: k and v cover rows [0, T) (the cached
+// prefix must already be in place); q, gate and out cover rows [q_base, T) only.
+// q_base must be a multiple of 64; q_base = 0 reduces to cs1_attention_gated.
+int cs1_attention_gated_prefix(const void* q, const void* k, const void* v, int ldv, const void* gate,
+                               void* out, int T, int Hq, int Hk, int Dh, float scale, int q_base,
+                               void* stream);
 
 // x = x * sigmoid(gate), n elements.
 int cs1_sigmoid_gate(void* x, const void* gate, size_t n, void* stream);
