@@ -148,13 +148,13 @@ pub struct Processor {
 impl Processor {
     pub fn load(dir: &Path, manifest: &Value) -> Result<Self> {
         ensure!(
-            manifest["format"] == "jemm-native/1"
+            manifest["format"] == "jemm-native/2"
                 && manifest["model_id"] == "JEMM"
                 && manifest["base_model_id"] == "Qwen/Qwen3.8-27B"
                 && manifest["base_revision"] == contract::BASE_REVISION
                 && manifest["checkpoint_revision"] == contract::CHECKPOINT_REVISION
                 && manifest["source_revision"] == contract::SOURCE_REVISION,
-            "expected pinned JEMM native export"
+            "expected pinned JEMM jemm-native/2 export; legacy premerged BF16 exports are unsupported"
         );
         ensure!(
             manifest["max_tokens"] == 8192 && manifest["max_mm_tokens"] == 3072,

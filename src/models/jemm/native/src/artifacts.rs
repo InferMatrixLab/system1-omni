@@ -13,7 +13,69 @@ fn relative(name: &str) -> bool {
             .components()
             .all(|p| matches!(p, Component::Normal(_)))
 }
+const ADAPTER_FILE: &str = "adapter_model.safetensors";
+const PINNED_INVENTORY: &str = include_str!("../../../../../recipe/jemm/pinned_inventory.json");
+
+/// Validate the unmerged adapter contract before opening a device or artifact file.
+pub fn lora_contract(manifest: &Value) -> Result<(&'static str, f32)> {
+    ensure!(
+        manifest["format"] == "jemm-native/2",
+        "expected jemm-native/2; legacy premerged BF16 exports are unsupported"
+    );
+    ensure!(
+        manifest["lora_mode"] == "unmerged_fp32"
+            && manifest["lora_file"] == ADAPTER_FILE
+            && manifest["lora_rank"].as_u64() == Some(16)
+            && manifest["lora_pairs"].as_u64() == Some(496)
+            && manifest["lora_scale"].as_f64() == Some(2.)
+            && manifest.get("lora_merge").is_none(),
+        "expected unmerged FP32 JEMM LoRA: rank16, 496 pairs, scale2"
+    );
+    let pinned: Value = serde_json::from_str(PINNED_INVENTORY)?;
+    let files = &pinned["adapter"]["files"];
+    ensure!(
+        manifest["lora_sha256"] == files[ADAPTER_FILE],
+        "LoRA checksum differs from pinned JEMM adapter"
+    );
+    for name in [ADAPTER_FILE, "adapter_config.json"] {
+        ensure!(
+            manifest["source_sha256"]["adapter"][name] == files[name]
+                && manifest["export_sha256"][name] == files[name],
+            "LoRA source/export checksum differs from pinned artifact {name}"
+        );
+    }
+    Ok((ADAPTER_FILE, 2.))
+}
+
 pub fn verify_export(dir: &Path, manifest: &Value) -> Result<()> {
+    lora_contract(manifest)?;
+    let pinned: Value = serde_json::from_str(PINNED_INVENTORY)?;
+    let expected: serde_json::Map<String, Value> = pinned["base"]["tensors"]
+        .as_object()
+        .context("pinned tensor inventory")?
+        .iter()
+        .filter(|(key, _)| key.starts_with("model.language_model."))
+        .map(|(key, spec)| (key.clone(), spec["file"].clone()))
+        .collect();
+    let index: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("model.safetensors.index.json"))?)?;
+    ensure!(
+        index["weight_map"].as_object() == Some(&expected),
+        "expected language-only index with original pinned tensor keys/shards"
+    );
+    for filename in expected.values() {
+        let filename = filename.as_str().context("pinned language shard")?;
+        ensure!(
+            manifest["export_sha256"][filename] == pinned["base"]["files"][filename]
+                && manifest["source_sha256"]["base"][filename] == pinned["base"]["files"][filename],
+            "expected original unmerged BF16 language shard {filename}"
+        );
+    }
+    verify_export_files(dir, manifest)
+}
+
+/// Stream every checksum-covered file; model-specific pins are checked by verify_export.
+pub fn verify_export_files(dir: &Path, manifest: &Value) -> Result<()> {
     let hashes = manifest["export_sha256"]
         .as_object()
         .context("export_sha256 must contain all native artifact hashes")?;
@@ -46,6 +108,8 @@ pub fn verify_export(dir: &Path, manifest: &Value) -> Result<()> {
         "model.safetensors.index.json",
         "vision.safetensors",
         "jemm_lm_head.safetensors",
+        ADAPTER_FILE,
+        "adapter_config.json",
     ] {
         ensure!(
             hashes.contains_key(name),

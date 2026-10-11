@@ -42,7 +42,7 @@ fn fixture() -> (Fixture, Value) {
         br#"{"size":{"shortest_edge":65536,"longest_edge":16777216}}"#,
     )
     .unwrap();
-    let manifest = json!({"format":"jemm-native/1","model_id":"JEMM","base_model_id":"Qwen/Qwen3.8-27B","base_revision":contract::BASE_REVISION,"checkpoint_revision":contract::CHECKPOINT_REVISION,"source_revision":contract::SOURCE_REVISION,"max_tokens":8192,"max_mm_tokens":3072,"label_token_ids":(1..=32).collect::<Vec<_>>(),"chat_prefix":format!("<|im_start|>system\n{}<|im_end|>\n<|im_start|>user\n",contract::SYSTEM),"chat_suffix":"<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n","temperature":1.3480874159655591,"mm_temperature":1.3954832341582943,"threshold":0.9872681877423998});
+    let manifest = json!({"format":"jemm-native/2","model_id":"JEMM","base_model_id":"Qwen/Qwen3.8-27B","base_revision":contract::BASE_REVISION,"checkpoint_revision":contract::CHECKPOINT_REVISION,"source_revision":contract::SOURCE_REVISION,"max_tokens":8192,"max_mm_tokens":3072,"label_token_ids":(1..=32).collect::<Vec<_>>(),"chat_prefix":format!("<|im_start|>system\n{}<|im_end|>\n<|im_start|>user\n",contract::SYSTEM),"chat_suffix":"<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n","temperature":1.3480874159655591,"mm_temperature":1.3954832341582943,"threshold":0.9872681877423998});
     std::fs::write(
         dir.join("decision_config.json"),
         serde_json::to_vec(&json!({"temperature":manifest["temperature"],
@@ -148,4 +148,14 @@ fn file_driven_calibration_must_be_finite_in_range_and_agree_with_manifest() {
         (response["answers"]["q"]["noul"].as_f64().unwrap() - 1.0 / (1.0 + (-1.0f64).exp())).abs()
             < 1e-12
     );
+}
+
+#[test]
+fn accepts_v2_and_rejects_legacy_premerged_format_before_tokenizer_io() {
+    let (f, mut manifest) = fixture();
+    manifest["format"] = json!("jemm-native/2");
+    assert!(Processor::load(&f.0, &manifest).is_ok());
+    manifest["format"] = json!("jemm-native/1");
+    let error = Processor::load(&f.0, &manifest).err().unwrap().to_string();
+    assert!(error.contains("jemm-native/2"), "{error}");
 }
