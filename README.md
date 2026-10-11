@@ -159,7 +159,8 @@ LAYA text serving uses the upstream CPU worker, the in-repository Python MPS/CPU
 worker, or a native Rust/CUDA worker on Hopper. The Cua-S1 4B 0.2 `text` adapter
 runs as a Python worker or as a native worker on CUDA. Open-Jev-27B-v1.1
 and Open-Jev-9B run on the same native Rust/CUDA worker. Cua-S1 also has a
-Python screenshot worker, CLM has a stub-encoder contract recipe, and OmniJev-4B
+Python screenshot worker, Valen-Preview-0923 has a Python reference worker for
+text and one-image state, CLM has a stub-encoder contract recipe, and OmniJev-4B
 v1.1 has its checkpoint export and CPU contract, with no worker yet:
 
 | Model | Status |
@@ -167,6 +168,7 @@ v1.1 has its checkpoint export and CPU contract, with no worker yet:
 | LAYA | [External worker](recipe/laya/README.md); [Python worker on Apple Silicon (MPS) and CPU](recipe/laya/apple-silicon.md); [CPU checkpoint reader](src/models/laya/README.md); [native Rust/CUDA worker on Hopper](recipe/laya/native/README.md) |
 | Cua-S1 4B 0.2 (`text` adapter) | [Python worker](recipe/cua_s1/text.md); [native worker](recipe/cua_s1/native.md), CUDA, run on sm_89 |
 | Cua-S1 4B 0.2 (`multimodal` adapter) | [Python CUDA worker](src/frontend/cua_s1.py); one PNG/JPEG screenshot, `choice`; native screenshot execution remains in progress |
+| Valen-Preview-0923 | [Python reference worker](recipe/valen/reference.md); text state or one inline PNG/JPEG image, `choice`; author-run on RTX 5060 Laptop GPU (sm_120, WSL2), owner: community |
 | Open-Jev-27B-v1.1 | [Native Rust/CUDA worker](recipe/open_jev/native.md); eager independent text candidates; [H200 validation](recipe/open_jev/validation.md) |
 | Open-Jev-9B | The same [native Rust/CUDA worker](recipe/open_jev/native.md); eager independent text candidates; [reference comparison on sm_89](recipe/open_jev/validation-9b.md) |
 | autotrust/JEV-27B-VL | [Experimental Rust/CUDA worker](recipe/jev_vl/README.md); single-question text and offline-preencoded image inputs; [bounded H800 validation and limits](recipe/jev_vl/validation.md) |
