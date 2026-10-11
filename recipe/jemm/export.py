@@ -3,8 +3,8 @@
 No full Transformers model is instantiated. Raw inputs remain untouched. The
 completion marker is written last; restart with the same arguments to verify
 and reuse atomically completed shards under the same producer script/runtime.
-Changed producers require a new export directory. Needs roughly one base shard plus a
-bounded FP32 LoRA delta in RAM, rather than two copies of the full model.
+Changed producers require a new export directory. Language shards and the FP32
+adapter are hardlinked or copied byte for byte, never merged into BF16 weights.
 """
 import argparse
 import gc
@@ -77,26 +77,18 @@ def atomic_tensors(path, tensors):
     os.replace(temporary, path)
 
 
-def safe_merge(base, a, b, scale, chunk_rows=1024):
-    """PEFT safe_merge semantics: FP32 B@A delta, in-place BF16 addition.
-
-    Clone the base first and reject nonfinite adapter values and the final
-    rounded BF16 result. The caller's base tensor never changes.
-    """
-    if base.dtype != torch.bfloat16 or a.dtype != torch.float32 or b.dtype != torch.float32:
-        raise ValueError("expected BF16 base and FP32 JEMM adapter")
-    if base.ndim != 2 or a.ndim != 2 or b.ndim != 2 or (b.shape[0], a.shape[1]) != tuple(base.shape) or b.shape[1] != a.shape[0]:
-        raise ValueError("LoRA dimensions do not match base")
-    if chunk_rows < 1 or not torch.isfinite(a).all() or not torch.isfinite(b).all():
-        raise ValueError("nonfinite LoRA tensors or invalid chunk size")
-    result = base.clone()
-    for start in range(0, base.shape[0], chunk_rows):
-        end = min(start + chunk_rows, base.shape[0])
-        delta = (b[start:end] @ a) * scale
-        result[start:end] += delta
-        if not torch.isfinite(result[start:end]).all():
-            raise ValueError("nonfinite merged BF16 tensor")
-    return result
+def atomic_original(source, destination):
+    """Publish an unchanged regular source file, using a hardlink where possible."""
+    source = Path(source).resolve(strict=True)
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    temporary.unlink(missing_ok=True)
+    try:
+        os.link(source, temporary)
+    except OSError:
+        shutil.copyfile(source, temporary)
+    with temporary.open("rb") as stream:
+        os.fsync(stream.fileno())
+    os.replace(temporary, destination)
 
 
 def validate_artifacts(directory, inventory):
@@ -140,7 +132,7 @@ def adapter_pairs(base_inventory, adapter_inventory, config):
     if config.get("bias", "none") != "none":
         raise ValueError("adapter bias unsupported")
     rank, alpha = config["r"], config["lora_alpha"]
-    if rank < 1 or alpha <= 0:
+    if type(rank) is not int or rank < 1 or type(alpha) not in (int, float) or not 0 < alpha < float("inf"):
         raise ValueError("invalid LoRA rank/alpha")
     pairs = {}
     for name, spec in adapter_inventory.items():
@@ -176,6 +168,9 @@ def export_checkpoint(base, adapter, out, provenance, *, tokenizer=None, invento
         raise ValueError("export directory must be separate from source checkpoints")
     if any(provenance.get(key) != value for key, value in PINS.items()):
         raise ValueError("download provenance does not match pinned revisions")
+    manifest_path, progress_path = out / "jemm_export.json", out / "export_progress.json"
+    if manifest_path.exists() and json.loads(manifest_path.read_text()).get("format") != "jemm-native/2":
+        raise ValueError("legacy export is unsupported; jemm-native/2 requires a new export directory")
     inventory = inventory or json.loads(INVENTORY_PATH.read_text())
     source_hashes = {"base": validate_artifacts(base, inventory["base"]), "adapter": validate_artifacts(adapter, inventory["adapter"])}
     index = json.loads((base / "model.safetensors.index.json").read_text())["weight_map"]
@@ -190,6 +185,8 @@ def export_checkpoint(base, adapter, out, provenance, *, tokenizer=None, invento
         raise ValueError("untied head shape disagrees with text configuration")
     adapter_config = json.loads((adapter / "adapter_config.json").read_text())
     pairs, scale = adapter_pairs(inventory["base"]["tensors"], inventory["adapter"]["tensors"], adapter_config)
+    if inventory.get("provenance") == PINS and (adapter_config["r"] != 16 or len(pairs) != 496 or scale != 2.):
+        raise ValueError("pinned JEMM requires rank16, 496 FP32 LoRA pairs and scale2")
     decision = json.loads((adapter / "decision_config.json").read_text())
     calibration = {}
     for key in ("temperature", "mm_temperature", "threshold"):
@@ -218,10 +215,9 @@ def export_checkpoint(base, adapter, out, provenance, *, tokenizer=None, invento
         raise ValueError("chat template did not preserve a unique user marker")
     chat_prefix, chat_suffix = chat.split(marker)
     producer = {"exporter_sha256": sha256(Path(__file__)), "runtime": producer_runtime()}
-    contract = {"pins": PINS, "inventory_sha256": canonical_hash(inventory), "source_sha256": source_hashes,
+    contract = {"format": "jemm-native/2", "lora_mode": "unmerged_fp32", "pins": PINS, "inventory_sha256": canonical_hash(inventory), "source_sha256": source_hashes,
                 "label_token_ids": label_ids, "chat_prefix": chat_prefix, "chat_suffix": chat_suffix, "producer": producer}
     fingerprint = canonical_hash(contract)
-    manifest_path, progress_path = out / "jemm_export.json", out / "export_progress.json"
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text())
         if manifest.get("exporter_sha256") != producer["exporter_sha256"] or manifest.get("producer_runtime") != producer["runtime"]:
@@ -266,21 +262,25 @@ def export_checkpoint(base, adapter, out, provenance, *, tokenizer=None, invento
                         selected_head = torch.cat([view[token:token + 1] for token in label_ids], dim=0).contiguous()
                     elif key.startswith("model.visual."):
                         visual[key] = reader.get_tensor(key)
+                        if not torch.isfinite(visual[key]).all():
+                            raise ValueError(f"nonfinite vision tensor: {key}")
                     elif key.startswith("model.language_model."):
                         value = reader.get_tensor(key)
-                        if key in pairs:
-                            pair = pairs[key]
-                            value = safe_merge(value, lora.get_tensor(pair["A"]), lora.get_tensor(pair["B"]), scale)
-                        language[key[len("model.language_model."):]] = value
+                        if not torch.isfinite(value).all():
+                            raise ValueError(f"nonfinite base tensor: {key}")
+                        language[key] = inventory["base"]["tensors"][key]
+                        del value
                     elif not key.startswith("mtp."):
                         raise ValueError(f"unexpected base tensor outside validated native scope: {key}")
                 outputs, mapping, language_bytes = {}, {}, 0
                 if language:
-                    filename = f"model-{number:05d}.safetensors"
-                    atomic_tensors(out / filename, language)
+                    filename = shard
+                    atomic_original(base / shard, out / filename)
                     outputs[filename] = sha256(out / filename)
+                    if outputs[filename] != source_hashes["base"][shard]:
+                        raise ValueError(f"original language shard checksum mismatch: {shard}")
                     mapping = {key: filename for key in language}
-                    language_bytes = sum(value.numel() * value.element_size() for value in language.values())
+                    language_bytes = sum(math.prod(spec["shape"]) * 2 for spec in language.values())
                 if visual:
                     filename = "vision.safetensors"
                     if any(filename in x["outputs"] for x in progress["completed"].values()):
@@ -288,6 +288,8 @@ def export_checkpoint(base, adapter, out, provenance, *, tokenizer=None, invento
                     atomic_tensors(out / filename, visual)
                     outputs[filename] = sha256(out / filename)
                 if selected_head is not None:
+                    if not torch.isfinite(selected_head).all():
+                        raise ValueError("nonfinite selected head")
                     atomic_tensors(out / "jemm_lm_head.safetensors", {"weight": selected_head})
                     outputs["jemm_lm_head.safetensors"] = sha256(out / "jemm_lm_head.safetensors")
             progress["completed"][shard] = {"source_sha256": source_hashes["base"][shard], "outputs": outputs,
@@ -304,22 +306,26 @@ def export_checkpoint(base, adapter, out, provenance, *, tokenizer=None, invento
             temporary = out / (name + ".tmp")
             shutil.copyfile(base / name, temporary)
             os.replace(temporary, out / name)
-    for name in ("adapter_config.json", "decision_config.json"):
-        shutil.copyfile(adapter / name, out / name)
+    for name in ("adapter_config.json", "decision_config.json", "adapter_model.safetensors"):
+        atomic_original(adapter / name, out / name)
     exports = {p.name: sha256(p) for p in sorted(out.iterdir()) if p.is_file() and not p.name.endswith(".tmp") and p.name != "export_progress.json"}
+    if exports["adapter_model.safetensors"] != source_hashes["adapter"]["adapter_model.safetensors"]:
+        raise ValueError("original FP32 adapter checksum mismatch")
     if "jemm_lm_head.safetensors" not in exports or "vision.safetensors" not in exports:
         raise ValueError("export lacks selected head or vision tensors")
-    manifest = {"format": "jemm-native/1", "model_id": "JEMM", **PINS, **calibration,
+    manifest = {"format": "jemm-native/2", "model_id": "JEMM", **PINS, **calibration,
                 "max_tokens": 8192, "max_mm_tokens": 3072, "chat_prefix": chat_prefix, "chat_suffix": chat_suffix,
                 "enable_thinking": False, "preserve_thinking": False, "labels": list(LABELS), "label_token_ids": label_ids,
                 "label_head_file": "jemm_lm_head.safetensors", "label_head_tensor": "weight", "label_head_dtype": "BF16",
                 "label_head_shape": [32, text["hidden_size"]], "untied_lm_head": True, "vision_file": "vision.safetensors",
-                "lora_scale": scale, "lora_merge": "FP32 delta into BF16 base, finite checked", "source_sha256": source_hashes,
+                "lora_mode": "unmerged_fp32", "lora_file": "adapter_model.safetensors",
+                "lora_rank": adapter_config["r"], "lora_pairs": len(pairs), "lora_scale": scale,
+                "lora_sha256": source_hashes["adapter"]["adapter_model.safetensors"], "source_sha256": source_hashes,
                 "upstream_source_sha256": inventory.get("upstream_source_sha256", {}), "export_sha256": exports,
                 "inventory_sha256": canonical_hash(inventory), "exporter_sha256": producer["exporter_sha256"],
                 "producer_runtime": producer["runtime"],
                 "download_provenance": provenance, "export_fingerprint": fingerprint,
-                "omitted_tensors": [k for k in index if k.startswith("mtp.") or k == "lm_head.weight"]}
+                "unindexed_tensors": [k for k in index if k.startswith("mtp.") or k == "lm_head.weight"]}
     atomic_json(manifest_path, manifest)
     return manifest
 

@@ -81,7 +81,7 @@ impl LabelHead {
             cuda::upload(weight.at(0), bytes, stream.0)?;
         }
         // SAFETY: backend initialization returns an owning handle or null.
-        let gemm = unsafe { (cuda::api().cs1_gemm_create)(32 << 20) };
+        let gemm = unsafe { (cuda::api().reference()?.gemm_create)(32 << 20) };
         ensure!(!gemm.is_null(), "LM head cuBLASLt setup failed");
         Ok(Self {
             stream,
@@ -159,9 +159,7 @@ impl Loaded {
     fn execute(&mut self, inputs: &[Input]) -> Result<Vec<Vec<f32>>> {
         let mut embeddings = Vec::new();
         if let Some(first) = inputs.first() {
-            for image in first.images.iter() {
-                embeddings.extend(self.vision.forward(image)?);
-            }
+            embeddings = self.vision.forward_images(&first.images)?;
         }
         let mut rows = Vec::with_capacity(inputs.len());
         for input in inputs {
@@ -192,6 +190,8 @@ pub struct Executor {
 impl Executor {
     pub async fn load(dir: &Path, library: &Path, manifest: &Value) -> Result<Self> {
         crate::artifacts::verify_export(dir, manifest)?;
+        let (adapter_file, scale) = crate::artifacts::lora_contract(manifest)?;
+        let adapter_path = dir.join(adapter_file);
         let cfg = Config::load(dir)?;
         ensure!(
             (
@@ -215,8 +215,10 @@ impl Executor {
         )?;
         let (dir, library) = (dir.to_path_buf(), library.to_path_buf());
         let state = tokio::task::spawn_blocking(move || -> Result<Loaded> {
-            let language = Model::load(&dir, &library)?;
-            let vision = VisionModel::load(&dir, &library)?;
+            let mut language = Model::load_with_lora(&dir, &library, &adapter_path, scale)?;
+            language.enable_reference_numerics()?;
+            let mut vision = VisionModel::load(&dir, &library)?;
+            vision.enable_reference_numerics()?;
             let head = LabelHead::load(&bytes, cfg.hidden)?;
             Ok(Loaded {
                 language,

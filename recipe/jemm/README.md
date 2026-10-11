@@ -1,8 +1,10 @@
 # JEMM setup and validation
 
 Run from the repository root on Linux with a CUDA GPU (compute capability 8.0+),
-nvcc/cuBLASLt and Rust. Historical validation used one A800 80 GB. The raw base
-and adapter need about 55.6 GB disk and the export about 52 GB more. Export is an
+nvcc/cuBLASLt, cuDNN 9 headers/library and Rust. Historical validation used one A800 80 GB. The raw base
+and adapter need about 55.6 GB disk. V2 exports hardlink unchanged files on the
+same filesystem; cross-filesystem exports copy the 17 language shards and raw
+FP32 adapter, requiring additional disk for those files. Export is an
 offline CPU operation using torch, safetensors and Transformers; the running
 Rust worker needs no Python serving process. Keep inputs/exports immutable.
 
@@ -36,11 +38,17 @@ python recipe/jemm/export.py --base "$JEMM_DATA/base" \
 The checked-in pinned inventory verifies every required input file and tensor.
 Interrupted exports may resume only with matching inputs, producer and recorded
 runtime. Do not substitute similarly named checkpoints or newer revisions.
+The `jemm-native/2` format keeps the original BF16 language weights and FP32
+adapter separate, with rank 16, 496 pairs and scale 2. Use a new directory for v2;
+legacy premerged v1 directories are rejected rather than reused. Hardlinked
+inputs and outputs share file contents and must remain immutable.
 
 ## Build, launch and request
 
 ```sh
-src/backends/cuda/qwen3_5/build.sh target/release 80
+CUDNN_INCLUDE_DIR=/path/to/cudnn/include \
+CUDNN_LIB_DIR=/path/to/cudnn/lib \
+  src/backends/cuda/qwen3_5/build.sh target/release 80
 cargo build --release --locked -p omni-jemm-native -p omni-jev
 JEMM_MODEL="$JEMM_DATA/native" \
 JEMM_CUDA_LIB="$PWD/target/release/libqwen3_5_cuda.so" \
@@ -48,7 +56,8 @@ JEMM_CUDA_LIB="$PWD/target/release/libqwen3_5_cuda.so" \
 ```
 
 Replace `80` with the GPU's compute capability. Rebuild the CUDA library and
-consumers together; JEMM's 27B vision path requires the additive v2 symbols.
+consumers together; JEMM requires the additive reference-numerics symbols and a
+cuDNN-enabled build. The other Qwen workers keep their existing CUDA entry points.
 The default listener is `127.0.0.1:8000`, set by `JEMM_HOST`/`JEMM_PORT`.
 It binds after text and image warmup complete. In another terminal:
 
@@ -62,15 +71,16 @@ curl --fail http://127.0.0.1:8080/v1/systemone \
 ```
 
 Optional `images` contains up to four base64 PNG/JPEG/WebP strings; images precede
-text and are shared across questions. **Two-/four-image reference parity exceeds
-the predeclared probability gate in the supplemental corpus.** See the
-[model contract and numerical limitation](../../src/models/jemm/README.md#validation-and-known-multi-image-limitation)
-before relying on multi-image outputs. This is a documented limitation, not a
-claim that those inputs now pass. Native CPU/Metal execution is unsupported.
+text and are shared across questions. The frozen 16-request / 25-question corpus
+passes the original numerical gates, including 2/3/4-image cases. See the
+[validation scope and evidence](../../docs/benchmarks/jemm-reference-20261011/README.md).
+Native CPU/Metal execution is unsupported.
 
 ## Checks and reference
 
 ```sh
+# CPU exporter tests, in the environment containing torch and safetensors:
+python -m unittest discover -s tests/jemm -p 'test_export.py' -v
 cargo fmt --all --check
 cargo clippy --workspace --locked --all-targets -- -D warnings
 cargo test --workspace --locked
@@ -81,9 +91,21 @@ JEMM_CUDA_LIB="$PWD/target/release/libqwen3_5_cuda.so" \
   --ignored --test-threads=1
 ```
 
-CPU checks compile the worker and exercise host contracts. They cannot prove the
-real image warmup, multi-image parity or device failure recovery. Hardware tests
-require a separately reserved device; normal CI compiles and ignores the CUDA case.
+CPU checks compile the worker and exercise host/export contracts. Device checks
+require a separately reserved GPU; normal CI compiles and ignores CUDA tests.
+The [frozen numerical campaign](../../docs/benchmarks/jemm-reference-20261011/README.md)
+records the unmerged adapter path and its validation scope.
+
+```sh
+# Pinned Torch/FLA environment; tests graph replay as well as eager values:
+python tests/jemm/reference_kernels.py target/release/libqwen3_5_cuda.so \
+  --report /tmp/jemm-operators.json
+# Against the running native worker, on the reserved device:
+python tests/jemm/parity.py --url http://127.0.0.1:8000 \
+  --corpus tests/jemm/data/parity/corpus.jsonl \
+  --reference tests/jemm/data/parity/reference.json \
+  --report /tmp/jemm-parity.json
+```
 
 For the official reference, clone ypcypc/JEMM and detach at
 `6822fe0fd53c5e6670af6ba99fb2c857a661e532`, then use `python -m jemm.serve
