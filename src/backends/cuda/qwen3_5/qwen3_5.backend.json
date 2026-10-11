@@ -17,7 +17,8 @@
   "models": [
     "src/models/cua_s1/native/",
     "src/models/open_jev/native/",
-    "src/models/jev_vl/native/"
+    "src/models/jev_vl/native/",
+    "src/models/omnijev/native/"
   ],
   "build": {
     "script": "build.sh",
