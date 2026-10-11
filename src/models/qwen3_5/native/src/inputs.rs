@@ -4,6 +4,10 @@ use crate::cuda::DeviceBf16Matrix;
 use anyhow::{Result, ensure};
 use half::bf16;
 
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/device_inputs.rs"]
+mod device_input_tests;
+
 /// Image rows are already adapted to the language hidden size, in placeholder
 /// order. Positions are the T/H/W slices of an int64 `[3, 1, sequence]` tensor.
 /// The caller owns preprocessing, vision execution and the position calculation.

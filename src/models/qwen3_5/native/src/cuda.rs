@@ -471,3 +471,7 @@ impl Drop for Graph {
         unsafe { (api().cs1_graph_destroy)(self.exec) };
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/device_cuda.rs"]
+mod device_tests;

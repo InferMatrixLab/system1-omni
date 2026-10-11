@@ -312,3 +312,11 @@ fn letter_rows(dir: &Path, ids: &[u32], hidden: usize) -> Result<Vec<f32>> {
     }
     Ok(result)
 }
+
+#[cfg(test)]
+#[path = "../../../../../tests/cua_s1/device_features_gpu.rs"]
+mod device_feature_tests;
+
+#[cfg(test)]
+#[path = "../../../../../tests/cua_s1/device_copy_failure_gpu.rs"]
+mod device_copy_failure_tests;
