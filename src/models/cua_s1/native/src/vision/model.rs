@@ -28,10 +28,13 @@ impl Drop for Gemm {
 /// The base remains BF16; all 50 LoRA A/B pairs remain FP32, applied at scale 2.
 /// A model is used by one request at a time and returns row-major [image_tokens,2560].
 pub struct VisionModel {
+    // Field order retires graph/scratch before weights, GEMM workspace and stream.
+    scratch: Option<Scratch>,
     base: BTreeMap<String, DeviceBuffer>,
     lora: BTreeMap<String, DeviceBuffer>,
-    stream: OwnedStream,
     gemm: Gemm,
+    stream: OwnedStream,
+    graph_enabled: bool,
 }
 impl VisionModel {
     pub fn load(base: impl AsRef<Path>, adapter: impl AsRef<Path>, library: &Path) -> Result<Self> {
@@ -42,6 +45,8 @@ impl VisionModel {
         let gemm = Gemm(unsafe { (api().cs1_gemm_create)(32 << 20) });
         ensure!(!gemm.0.is_null(), "cannot create vision cuBLAS handle");
         let mut model = Self {
+            scratch: None,
+            graph_enabled: std::env::var("CUA_S1_VISION_GRAPH").as_deref() == Ok("1"),
             base: BTreeMap::new(),
             lora: BTreeMap::new(),
             stream,
@@ -232,7 +237,15 @@ impl VisionModel {
     }
     fn run(&mut self, image: &ProcessedImage, mut callback: Trace<'_>) -> Result<Vec<bf16>> {
         cuda::set_device(0)?;
-        let geo = Geometry::new(image.image_grid_thw)?;
+        let geo = if self
+            .scratch
+            .as_ref()
+            .is_some_and(|s| s.grid == image.image_grid_thw)
+        {
+            None
+        } else {
+            Some(Geometry::new(image.image_grid_thw)?)
+        };
         let n = image.image_grid_thw[1] * image.image_grid_thw[2];
         ensure!(
             image.pixel_values.len() == n * 1536,
@@ -252,42 +265,75 @@ impl VisionModel {
             .iter()
             .flat_map(|v| bf16::from_f32(*v).to_bits().to_le_bytes())
             .collect();
-        let pixels = self.upload(&pixels)?;
-        let indices = self.upload(
-            &geo.indices
-                .iter()
-                .flat_map(|v| v.to_le_bytes())
-                .collect::<Vec<_>>(),
-        )?;
-        let weights = self.upload(
-            &geo.weights
-                .iter()
-                .flat_map(|v| v.to_le_bytes())
-                .collect::<Vec<_>>(),
-        )?;
-        let co = self.upload(
-            &geo.cos
-                .iter()
-                .flat_map(|v| v.to_le_bytes())
-                .collect::<Vec<_>>(),
-        )?;
-        let si = self.upload(
-            &geo.sin
-                .iter()
-                .flat_map(|v| v.to_le_bytes())
-                .collect::<Vec<_>>(),
-        )?;
-        let w = Work::new(n)?;
-        let x = DeviceBuffer::new(n * 1024 * 2)?;
-        let norm = DeviceBuffer::new(n * 1024 * 2)?;
-        let qkv = DeviceBuffer::new(n * 3072 * 2)?;
-        let q = DeviceBuffer::new(n * 1024 * 2)?;
-        let k = DeviceBuffer::new(n * 1024 * 2)?;
-        let attn = DeviceBuffer::new(n * 1024 * 2)?;
-        let delta = DeviceBuffer::new(n * 1024 * 2)?;
-        let mlp = DeviceBuffer::new(n * 4096 * 2)?;
-        self.linear("patch_embed.proj", &pixels, &x, n, 1024, 1536, &w)?;
-        self.trace(&mut callback, "patch_embed", &x, n * 1024)?;
+        if let Some(geo) = geo {
+            self.synchronize()?;
+            // Destroy the executable before releasing any address it references.
+            self.scratch = None;
+            self.scratch = Some(Scratch::new(self, image.image_grid_thw, geo)?);
+        }
+        let scratch = self.scratch.as_ref().unwrap();
+        // SAFETY: pixels have the validated exact size of the resident allocation.
+        unsafe {
+            cuda::upload(scratch.pixels.at(0), &pixels, self.stream.0)?;
+        }
+        if callback.is_none()
+            && self.graph_enabled
+            && let Some(graph) = &scratch.graph
+        {
+            graph.launch(self.stream.0)?;
+            graph_trace("replayed", scratch.grid);
+            return self.read(&scratch.out, n / 4 * 2560);
+        }
+        self.enqueue(scratch, &mut callback)?;
+        let result = self.read(&scratch.out, n / 4 * 2560)?;
+        if let Some(callback) = callback.as_mut() {
+            callback("merger.output", &result)?;
+        } else if self.graph_enabled {
+            // The eager read completed warmup. Capture does not execute the operators;
+            // return the already completed result even if recording fails.
+            let captured = cuda::Graph::capture(self.stream.0, || self.enqueue(scratch, &mut None));
+            self.finish_capture(captured);
+        }
+        Ok(result)
+    }
+    fn finish_capture(&mut self, captured: Result<cuda::Graph>) {
+        match captured {
+            Ok(graph) => {
+                let scratch = self.scratch.as_mut().unwrap();
+                scratch.graph = Some(graph);
+                graph_trace("captured", scratch.grid);
+            }
+            Err(error) => {
+                eprintln!("Vision CUDA Graph capture failed; using eager execution: {error:#}");
+                self.graph_enabled = false;
+                if let Some(scratch) = self.scratch.as_mut() {
+                    scratch.graph = None;
+                }
+            }
+        }
+    }
+    fn enqueue(&self, scratch: &Scratch, callback: &mut Trace<'_>) -> Result<()> {
+        let n = scratch.grid[1] * scratch.grid[2];
+        let Scratch {
+            pixels,
+            indices,
+            weights,
+            co,
+            si,
+            w,
+            x,
+            norm,
+            qkv,
+            q,
+            k,
+            attn,
+            delta,
+            mlp,
+            out,
+            ..
+        } = scratch;
+        self.linear("patch_embed.proj", pixels, x, n, 1024, 1536, w)?;
+        self.trace(callback, "patch_embed", x, n * 1024)?;
         unsafe {
             check(
                 (api().cs1_vision_position)(
@@ -301,11 +347,11 @@ impl VisionModel {
                 "vision learned positions",
             )?;
         }
-        self.trace(&mut callback, "position", &x, n * 1024)?;
+        self.trace(callback, "position", x, n * 1024)?;
         for i in 0..24 {
             let p = format!("blocks.{i}");
-            self.norm(&format!("{p}.norm1"), &x, &norm, n)?;
-            self.linear(&format!("{p}.attn.qkv"), &norm, &qkv, n, 3072, 1024, &w)?;
+            self.norm(&format!("{p}.norm1"), x, norm, n)?;
+            self.linear(&format!("{p}.attn.qkv"), norm, qkv, n, 3072, 1024, w)?;
             unsafe {
                 check(
                     (api().cs1_vision_rope)(
@@ -331,64 +377,118 @@ impl VisionModel {
                     "vision attention",
                 )?;
             }
-            self.linear(&format!("{p}.attn.proj"), &attn, &delta, n, 1024, 1024, &w)?;
+            self.linear(&format!("{p}.attn.proj"), attn, delta, n, 1024, 1024, w)?;
             unsafe {
                 check(
                     (api().cs1_vision_add)(x.at(0), delta.at(0), n * 1024, self.stream.0),
                     "vision attention residual",
                 )?;
             }
-            self.norm(&format!("{p}.norm2"), &x, &norm, n)?;
-            self.linear(
-                &format!("{p}.mlp.linear_fc1"),
-                &norm,
-                &mlp,
-                n,
-                4096,
-                1024,
-                &w,
-            )?;
+            self.norm(&format!("{p}.norm2"), x, norm, n)?;
+            self.linear(&format!("{p}.mlp.linear_fc1"), norm, mlp, n, 4096, 1024, w)?;
             unsafe {
                 check(
                     (api().cs1_vision_gelu)(mlp.at(0), n * 4096, 0, self.stream.0),
                     "vision tanh GELU",
                 )?;
             }
-            self.linear(
-                &format!("{p}.mlp.linear_fc2"),
-                &mlp,
-                &delta,
-                n,
-                1024,
-                4096,
-                &w,
-            )?;
+            self.linear(&format!("{p}.mlp.linear_fc2"), mlp, delta, n, 1024, 4096, w)?;
             unsafe {
                 check(
                     (api().cs1_vision_add)(x.at(0), delta.at(0), n * 1024, self.stream.0),
                     "vision MLP residual",
                 )?;
             }
-            self.trace(&mut callback, &p, &x, n * 1024)?;
+            self.trace(callback, &p, x, n * 1024)?;
         }
-        self.norm("merger.norm", &x, &norm, n)?;
-        self.trace(&mut callback, "merger.norm", &norm, n * 1024)?;
+        self.norm("merger.norm", x, norm, n)?;
+        self.trace(callback, "merger.norm", norm, n * 1024)?;
         // Consecutive groups of four patches already have the required 2x2 merge order.
-        self.linear("merger.linear_fc1", &norm, &mlp, n / 4, 4096, 4096, &w)?;
-        self.trace(&mut callback, "merger.linear_fc1", &mlp, n * 1024)?;
+        self.linear("merger.linear_fc1", norm, mlp, n / 4, 4096, 4096, w)?;
+        self.trace(callback, "merger.linear_fc1", mlp, n * 1024)?;
         unsafe {
             check(
                 (api().cs1_vision_gelu)(mlp.at(0), n * 1024, 1, self.stream.0),
                 "vision exact GELU",
             )?;
         }
-        let out = DeviceBuffer::new(n / 4 * 2560 * 2)?;
-        self.linear("merger.linear_fc2", &mlp, &out, n / 4, 2560, 4096, &w)?;
-        let result = self.read(&out, n / 4 * 2560)?;
-        if let Some(callback) = callback.as_mut() {
-            callback("merger.output", &result)?;
-        }
-        Ok(result)
+        self.linear("merger.linear_fc2", mlp, out, n / 4, 2560, 4096, w)?;
+        Ok(())
+    }
+}
+impl Drop for VisionModel {
+    fn drop(&mut self) {
+        // Error paths can leave work queued; all referenced resources are still alive here.
+        let _ = self.synchronize();
+    }
+}
+fn graph_trace(action: &str, grid: [usize; 3]) {
+    if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
+        eprintln!("Vision CUDA Graph {action} grid={grid:?}");
+    }
+}
+struct Scratch {
+    // Executable is dropped first. One exact grid bounds resident activation memory.
+    graph: Option<cuda::Graph>,
+    grid: [usize; 3],
+    pixels: DeviceBuffer,
+    indices: DeviceBuffer,
+    weights: DeviceBuffer,
+    co: DeviceBuffer,
+    si: DeviceBuffer,
+    w: Work,
+    x: DeviceBuffer,
+    norm: DeviceBuffer,
+    qkv: DeviceBuffer,
+    q: DeviceBuffer,
+    k: DeviceBuffer,
+    attn: DeviceBuffer,
+    delta: DeviceBuffer,
+    mlp: DeviceBuffer,
+    out: DeviceBuffer,
+}
+impl Scratch {
+    fn new(model: &VisionModel, grid: [usize; 3], geo: Geometry) -> Result<Self> {
+        let n = grid[1] * grid[2];
+        Ok(Self {
+            graph: None,
+            grid,
+            pixels: DeviceBuffer::new(n * 1536 * 2)?,
+            indices: model.upload(
+                &geo.indices
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect::<Vec<_>>(),
+            )?,
+            weights: model.upload(
+                &geo.weights
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect::<Vec<_>>(),
+            )?,
+            co: model.upload(
+                &geo.cos
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect::<Vec<_>>(),
+            )?,
+            si: model.upload(
+                &geo.sin
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect::<Vec<_>>(),
+            )?,
+            w: Work::new(n)?,
+            x: DeviceBuffer::new(n * 1024 * 2)?,
+            norm: DeviceBuffer::new(n * 1024 * 2)?,
+            qkv: DeviceBuffer::new(n * 3072 * 2)?,
+            q: DeviceBuffer::new(n * 1024 * 2)?,
+            k: DeviceBuffer::new(n * 1024 * 2)?,
+            attn: DeviceBuffer::new(n * 1024 * 2)?,
+            delta: DeviceBuffer::new(n * 1024 * 2)?,
+            mlp: DeviceBuffer::new(n * 4096 * 2)?,
+            out: DeviceBuffer::new(n / 4 * 2560 * 2)?,
+        })
     }
 }
 struct Work {
@@ -405,3 +505,7 @@ impl Work {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../../../tests/cua_s1/vision_graph.rs"]
+mod graph_tests;
