@@ -1,7 +1,7 @@
 //! GPU vision forward for the structurally validated, unmerged checkpoint.
 use super::{VisionCheckpoint, geometry::Geometry};
 use crate::{
-    cuda::{self, DeviceBuffer, Stream, api, check},
+    cuda::{self, DeviceBf16Matrix, DeviceBuffer, Stream, api, check},
     image_preprocess::ProcessedImage,
 };
 use anyhow::{Result, ensure};
@@ -235,7 +235,56 @@ impl VisionModel {
     ) -> Result<Vec<bf16>> {
         self.run(image, Some(&mut callback))
     }
+    /// Synchronized resident merger output, borrowed from geometry-specific scratch.
+    /// Holding the view prevents another forward or scratch retirement on this model.
+    pub fn forward_device(&mut self, image: &ProcessedImage) -> Result<DeviceBf16Matrix<'_>> {
+        let result: Result<usize> = (|| {
+            let (n, capture) = self.enqueue_image(image, &mut None)?;
+            self.synchronize()?;
+            if capture {
+                self.capture_current();
+            }
+            Ok(n)
+        })();
+        // Drain errors while every allocation/Graph referenced by queued work lives.
+        if result.is_err() {
+            self.synchronize()?;
+        }
+        let n = result?;
+        self.scratch.as_ref().unwrap().out.bf16_matrix(n / 4, 2560)
+    }
+
     fn run(&mut self, image: &ProcessedImage, mut callback: Trace<'_>) -> Result<Vec<bf16>> {
+        let result = (|| {
+            let (n, capture) = self.enqueue_image(image, &mut callback)?;
+            // This read is the host path's completion boundary, as before.
+            let output = self.read(&self.scratch.as_ref().unwrap().out, n / 4 * 2560)?;
+            if let Some(callback) = callback.as_mut() {
+                callback("merger.output", &output)?;
+            } else if capture {
+                self.capture_current();
+            }
+            Ok(output)
+        })();
+        if result.is_err() {
+            self.synchronize()?;
+        }
+        result
+    }
+
+    fn capture_current(&mut self) {
+        let scratch = self.scratch.as_ref().unwrap();
+        // Warmup is completed before capture. Recording never reruns the math.
+        let captured = cuda::Graph::capture(self.stream.0, || self.enqueue(scratch, &mut None));
+        self.finish_capture(captured);
+    }
+
+    // Enqueue only; each caller supplies its completion boundary before capture.
+    fn enqueue_image(
+        &mut self,
+        image: &ProcessedImage,
+        callback: &mut Trace<'_>,
+    ) -> Result<(usize, bool)> {
         cuda::set_device(0)?;
         let geo = if self
             .scratch
@@ -282,19 +331,10 @@ impl VisionModel {
         {
             graph.launch(self.stream.0)?;
             graph_trace("replayed", scratch.grid);
-            return self.read(&scratch.out, n / 4 * 2560);
+            return Ok((n, false));
         }
-        self.enqueue(scratch, &mut callback)?;
-        let result = self.read(&scratch.out, n / 4 * 2560)?;
-        if let Some(callback) = callback.as_mut() {
-            callback("merger.output", &result)?;
-        } else if self.graph_enabled {
-            // The eager read completed warmup. Capture does not execute the operators;
-            // return the already completed result even if recording fails.
-            let captured = cuda::Graph::capture(self.stream.0, || self.enqueue(scratch, &mut None));
-            self.finish_capture(captured);
-        }
-        Ok(result)
+        self.enqueue(scratch, callback)?;
+        Ok((n, callback.is_none() && self.graph_enabled))
     }
     fn finish_capture(&mut self, captured: Result<cuda::Graph>) {
         match captured {
