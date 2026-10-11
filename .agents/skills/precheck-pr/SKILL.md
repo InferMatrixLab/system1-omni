@@ -15,6 +15,14 @@ This skill produces a local report. It does not itself authorize edits, commits,
 pushes, GitHub comments, or changing a PR's review status. Follow any separate
 user instructions for those actions.
 
+## Confirm contributor intent
+
+First apply the canonical
+[human contributor-intent gate](../self-review/SKILL.md#human-contributor-intent-gate).
+It applies before implementation and submission, including draft PRs; reuse
+explicit human answers, ask only what is missing, and wait. Independent read-only
+review and automated review selection are outside this contributor gate.
+
 ## Establish the review scope
 
 - Inspect the branch, remotes, working-tree status, and PR target when available.
