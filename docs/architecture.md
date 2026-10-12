@@ -61,6 +61,13 @@ the existing FP32 rounding and bias order. Finishing checks output cardinality
 before reconstruction. HTTP validation, error status/body conventions, and real
 warmup before readiness remain model-specific and unchanged.
 
+The experimental [JEV-VL worker](../recipe/jev_vl/README.md) also uses the shared
+Qwen executor. It admits one official single-decision request at a time, reads
+selected LM-head rows, and can retain image-prefix state across requests. Image
+features must be prepared offline. Its `{kind, state, question, options}` contract
+is distinct from the existing `{model, state, questions}` envelope; frontend
+transport alone does not adapt those schemas.
+
 ## Layer ownership and implementation language
 
 | Component | Owns | Native target implementation |
