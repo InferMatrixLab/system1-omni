@@ -23,5 +23,5 @@ library until their CUDA handles are dropped. These native fixture tests are
 Unix-only. CI enables `omni-laya/serve`, compiling the native model/worker and
 running its root-tree private tests on Linux.
 
-The registered tests at this stage cover resolved dispatch plus grouped input updates and failed-copy draining.
+The registered tests at this stage cover resolved dispatch, grouped uploads and Graph capture cleanup.
 They validate host behavior without Laya tensor math or a CUDA driver.
