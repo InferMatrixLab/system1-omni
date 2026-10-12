@@ -1137,6 +1137,7 @@ name = "omni-clm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "memmap2",
  "reqwest",
  "safetensors 0.6.2",
@@ -1171,6 +1172,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "libloading",
+ "tempfile",
 ]
 
 [[package]]
@@ -1197,6 +1199,8 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "futures-util",
+ "http-body-util",
+ "omni-runtime",
  "reqwest",
  "tokio",
 ]
