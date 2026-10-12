@@ -972,6 +972,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libm"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1131,6 +1137,7 @@ name = "omni-clm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "memmap2",
  "reqwest",
  "safetensors 0.6.2",
@@ -1165,6 +1172,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "libloading",
+ "tempfile",
 ]
 
 [[package]]
@@ -1173,6 +1181,8 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "futures-util",
+ "http-body-util",
+ "omni-runtime",
  "reqwest",
  "tokio",
 ]
@@ -1211,6 +1221,21 @@ dependencies = [
  "tempfile",
  "tokenizers 0.23.2",
  "tokio",
+]
+
+[[package]]
+name = "omni-omnijev-native"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "image",
+ "libm",
+ "omni-qwen3-5-native",
+ "safetensors 0.8.0",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokenizers 0.22.2",
 ]
 
 [[package]]
