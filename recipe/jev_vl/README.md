@@ -101,8 +101,9 @@ With `JEV_VL_VISION` set, startup runs an online vision warmup after the text
 warmup: one full inline-image decision, a 1×1 PNG through decode, preprocessing
 and the vision forward. The worker does not bind its port unless that warmup
 succeeds, so in online mode `/health` implies the inline image path executed
-end to end once at startup. It still does not validate user images; each
-request image is decoded and checked on arrival.
+end to end once at startup. It does not validate future user images. New image
+inputs are decoded and checked when prepared; cache hits may reuse validated
+assets or retained image-prefix state.
 
 Online mode accepts single-frame inline PNG/JPEG data URIs. Each image is bounded
 to 4 MiB of decoded file bytes, 2048 pixels per side, 1,048,576 source pixels,
@@ -111,12 +112,12 @@ and text. Remote URLs, animations and video are unsupported. Oversized inputs
 are rejected; resource limits do not change the model's resize policy.
 
 No per-request image-count limit applies beyond the body and token budgets.
-A request's resized pixel values and post-vision embeddings stay in host memory
-until the request completes, and cache budgets exclude these in-flight inputs.
-Each minimum-size image holds about 1.5 MiB of pixels and 1.25 MiB of
-embeddings, so a body full of tiny images (roughly 250 within the 4 MiB body
-and 16,384-token budgets) transiently adds up to about 0.7 GiB on top of
-weights, scratch and caches; size online workloads accordingly on shared hosts.
+A minimum-size image uses 1.5 MiB of FP32 processed pixels and produces
+0.625 MiB of BF16 embeddings. Pixel buffers are released as image inputs are
+consumed during vision resolution; embeddings remain for language execution.
+Cache budgets exclude in-flight inputs. Hundreds of tiny images can therefore
+require hundreds of MiB of host memory, plus temporary copies, weights, scratch
+and caches. These array sizes are not a measured peak-memory bound.
 
 `JEV_VL_VISION` and `JEV_VL_IMGCACHE` are mutually exclusive. Online mode also
 ignores the default `imgcache/` directory. The source and processor stay fixed
