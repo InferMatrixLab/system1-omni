@@ -2,5 +2,7 @@
 #![cfg(unix)]
 #[path = "laya/fixture.rs"]
 mod fixture;
+#[path = "laya/grouped.rs"]
+mod grouped;
 #[path = "laya/resolved.rs"]
 mod resolved;

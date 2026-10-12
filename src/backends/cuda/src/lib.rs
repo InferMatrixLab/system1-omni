@@ -83,6 +83,46 @@ impl Cuda {
         b.write(bytes)?;
         Ok(b)
     }
+    /// Complete a prevalidated group with one synchronization before host borrows end.
+    /// A failed submission is also drained; this does not overlap copies and compute.
+    pub fn write_many(&self, writes: &[(&Buffer, &[u8])]) -> Result<()> {
+        for (buffer, bytes) in writes {
+            ensure!(
+                Rc::ptr_eq(&self.ctx, &buffer.ctx),
+                "upload buffer belongs to another CUDA context"
+            );
+            ensure!(bytes.len() <= buffer.bytes, "upload exceeds allocation");
+        }
+        if writes.iter().all(|(_, bytes)| bytes.is_empty()) {
+            return Ok(());
+        }
+        let upload = self
+            .ctx
+            .symbol::<unsafe extern "C" fn(Ptr, *const u8, usize, Ptr) -> i32>(b"laya_upload\0")?;
+        let sync = self
+            .ctx
+            .symbol::<unsafe extern "C" fn(Ptr) -> i32>(b"laya_sync\0")?;
+        let mut copied = 0;
+        for (buffer, bytes) in writes {
+            if bytes.is_empty() {
+                continue;
+            }
+            copied = unsafe { upload(buffer.p, bytes.as_ptr(), bytes.len(), self.ctx.stream) };
+            if copied != 0 {
+                break;
+            }
+        }
+        // Resolve both entry points before submission and keep every source borrowed
+        // through the drain even when a copy reports an error after queuing work.
+        let synced = unsafe { sync(self.ctx.stream) };
+        match (self.ctx.check(copied), self.ctx.check(synced)) {
+            (Err(copy), Err(sync)) => Err(anyhow!(
+                "{copy}; stream synchronization also failed: {sync}"
+            )),
+            (Err(e), _) | (_, Err(e)) => Err(e),
+            (Ok(()), Ok(())) => Ok(()),
+        }
+    }
     pub fn sync(&self) -> Result<()> {
         self.ctx.sync()
     }
@@ -196,13 +236,10 @@ impl Buffer {
         self.p
     }
     pub fn write(&self, bytes: &[u8]) -> Result<()> {
-        ensure!(bytes.len() <= self.bytes, "upload exceeds allocation");
-        let f = self
-            .ctx
-            .symbol::<unsafe extern "C" fn(Ptr, *const u8, usize, Ptr) -> i32>(b"laya_upload\0")?;
-        self.ctx
-            .check(unsafe { f(self.p, bytes.as_ptr(), bytes.len(), self.ctx.stream) })?;
-        self.ctx.sync()
+        Cuda {
+            ctx: self.ctx.clone(),
+        }
+        .write_many(&[(self, bytes)])
     }
     pub fn read(&self, bytes: usize) -> Result<Vec<u8>> {
         ensure!(bytes <= self.bytes, "download exceeds allocation");

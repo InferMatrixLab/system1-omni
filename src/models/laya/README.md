@@ -38,7 +38,7 @@ and [measured scope](../../../recipe/laya/native/VALIDATION.md).
 
 The normal workspace tests cover configuration errors, malformed tensors, inventory mismatches and conversion boundaries without downloading weights.
 Feature-enabled CI also runs [CPU host/ABI regressions](../../../tests/cuda/laya/README.md)
-for resolved-handle lifetimes, exact dispatch traces and sparse wrappers. They compile a small
+for resolved dispatch plus grouped input updates and failed-copy draining. They compile a small
 native fixture with `cc` on Linux/macOS and require no CUDA toolkit or weights;
 they do not establish GPU numerical parity.
 
