@@ -185,10 +185,10 @@ pub fn answer(q: &Question, scores: &[f64]) -> Result<Value> {
     // The helper fails the request rather than flooring a missing score (READOUT_TARGETED=1).
     if scores.len() != q.keys.len() {
         bail!(
-            "questions.{} has {} candidates but {} scores",
+            "questions.{} has {} but {}",
             q.id,
-            q.keys.len(),
-            scores.len()
+            count(q.keys.len(), "candidate"),
+            count(scores.len(), "score")
         );
     }
     let bad = scores.iter().filter(|s| !s.is_finite()).count();
@@ -225,6 +225,11 @@ pub fn answer(q: &Question, scores: &[f64]) -> Result<Value> {
             json!({"type": "noul", "noul": round4(1.0 / (1.0 + (-z).exp()))})
         }
     })
+}
+
+/// `1 score`, `2 scores`.
+fn count(n: usize, noun: &str) -> String {
+    format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
 
 /// `exp(v / t - max)` normalised, as the helper computes it.

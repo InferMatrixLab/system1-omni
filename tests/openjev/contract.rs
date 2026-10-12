@@ -129,7 +129,8 @@ fn a_short_screenshot_field_stays_text() {
 fn missing_or_non_finite_scores_fail_the_request() {
     let request = json!({"state": "x", "questions": {"q": {"type": "choice", "instructions": "x", "criteria": {"a": null, "b": null}}}});
     let questions = compile(&serde_json::to_vec(&request).unwrap()).unwrap();
-    assert!(answer(&questions[0], &[0.0]).is_err());
+    let error = answer(&questions[0], &[0.0]).unwrap_err().to_string();
+    assert!(error.contains("2 candidates but 1 score"), "{error}");
     assert!(answer(&questions[0], &[0.0, f64::NAN]).is_err());
     let error = answer(&questions[0], &[0.0, 1.0, 2.0])
         .unwrap_err()
