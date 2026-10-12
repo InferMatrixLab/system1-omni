@@ -1,4 +1,4 @@
-# Decider CPU contract attribution
+# Decider native contract attribution
 
 The request rendering, row planning, token construction and answer formulas in
 `src/contract.rs` and `src/processing.rs` adapt Mapika/decider's
@@ -10,7 +10,7 @@ see [the retained license](LICENSE.decider).
 
 The adaptation uses Rust CPU buffers, the frozen Decider-2B v11 tokenizer and
 configuration, explicit native input/admission restrictions, independent rows
-and isolated Score levels. It performs no model forward or checkpoint tensor
-loading. The model-private JSON renderer follows this repository's shared JSON
+and isolated Score levels. Native execution reuses the repository Qwen3.5 CUDA
+backbone and the reference BF16 selected tied-embedding projection contract. The model-private JSON renderer follows this repository's shared JSON
 helper's Python notation conventions, with stricter integer decoding to prevent
 arbitrary_precision feature unification from changing state values.
