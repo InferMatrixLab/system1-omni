@@ -14,10 +14,7 @@ use crate::contract::{self, Compiled, Kind, Reject};
 use crate::executor::{ContinueMm, ImgBlock, MmPlan, PreparedMm, Readout, SuffixBlock};
 use crate::images::{self, ImageAsset, ImageInput};
 use crate::vision::ImageSource;
-use omni_qwen3_5_native::{
-    image_decode::decode_data_url,
-    image_preprocess::{ImageLimits, preprocess_rgb8_with_limits},
-};
+use omni_qwen3_5_native::{image_decode::decode_data_url, image_preprocess::preprocess_rgb8};
 
 pub struct Processor {
     tokenizer: Tokenizer,
@@ -93,13 +90,8 @@ impl Processor {
             ImageSource::Online(_) => {
                 let decoded = decode_data_url(url)
                     .map_err(|e| Reject::bad_request(format!("invalid image: {e:#}")))?;
-                let pixels = preprocess_rgb8_with_limits(
-                    decoded.width,
-                    decoded.height,
-                    &decoded.rgb,
-                    &ImageLimits::cua(),
-                )
-                .map_err(|e| Reject::bad_request(format!("invalid image: {e:#}")))?;
+                let pixels = preprocess_rgb8(decoded.width, decoded.height, &decoded.rgb)
+                    .map_err(|e| Reject::bad_request(format!("invalid image: {e:#}")))?;
                 Ok(ImageInput::Inline {
                     key,
                     pixels: Arc::new(pixels),
@@ -282,36 +274,25 @@ impl Processor {
                         format!("l1=hit,l3=hit,p={p}"),
                     );
                 }
-                (true, None) => {
-                    self.caches.l3_miss();
+                (l3, _) => {
+                    if l3 {
+                        self.caches.l3_miss();
+                    }
                     let asset = match suffix_asset {
                         Some(asset) => asset,
                         None => self.load_image(&compiled.images[0])?,
                     };
                     let mm = rebuild_full(&ids, &pos, &record.meta, &asset);
-                    return self.finish_c(
-                        mm.ids.len(),
-                        MmPlan::Populate { mm, record },
-                        readout,
-                        compiled,
-                        start,
-                        format!("l1=hit,l3=miss,p={p}"),
-                    );
-                }
-                (false, _) => {
-                    let asset = match suffix_asset {
-                        Some(asset) => asset,
-                        None => self.load_image(&compiled.images[0])?,
+                    let input_tokens = mm.ids.len();
+                    let (plan, note) = if l3 {
+                        (
+                            MmPlan::Populate { mm, record },
+                            format!("l1=hit,l3=miss,p={p}"),
+                        )
+                    } else {
+                        (MmPlan::Full(mm), "l1=hit,l3=off,p=-".to_string())
                     };
-                    let mm = rebuild_full(&ids, &pos, &record.meta, &asset);
-                    return self.finish_c(
-                        mm.ids.len(),
-                        MmPlan::Full(mm),
-                        readout,
-                        compiled,
-                        start,
-                        "l1=hit,l3=off,p=-".to_string(),
-                    );
+                    return self.finish_c(input_tokens, plan, readout, compiled, start, note);
                 }
             }
         }

@@ -183,31 +183,6 @@ fn online_preparation_has_pixels_not_empty_embeddings_and_preserves_l1_geometry(
 }
 
 #[test]
-fn same_size_images_keep_distinct_keys_and_repeated_references_keep_all_blocks() {
-    let mut processor = processor();
-    processor.source = ImageSource::Online("unused-by-cpu".into());
-    let plan = prepare_online(&processor, &[RED, GREEN, RED]).unwrap().plan;
-    let MmPlan::Full(mm) = plan else {
-        panic!("expected full plan")
-    };
-    let keys: Vec<_> = mm
-        .blocks
-        .iter()
-        .map(|b| match &b.asset {
-            ImageInput::Inline { key, .. } => key,
-            _ => panic!("expected inline image"),
-        })
-        .collect();
-    assert_eq!(keys.len(), 3);
-    assert_eq!(keys[0], keys[2]);
-    assert_ne!(keys[0], keys[1]);
-    assert_eq!(
-        mm.blocks.iter().map(|b| b.end - b.start).sum::<usize>(),
-        192
-    );
-}
-
-#[test]
 fn online_rejects_unsupported_urls_and_full_context_overflow_before_admission() {
     let mut processor = processor();
     processor.source = ImageSource::Online("unused-by-cpu".into());
@@ -264,17 +239,23 @@ fn repeated_references_share_pixels_without_losing_blocks_or_positions() {
         let MmPlan::Full(mm) = prepare_request(&processor, &raw).unwrap().plan else {
             panic!("expected full plan")
         };
-        let pixels: Vec<_> = mm
+        let images: Vec<_> = mm
             .blocks
             .iter()
             .map(|b| match &b.asset {
-                ImageInput::Inline { pixels, .. } => pixels,
+                ImageInput::Inline { key, pixels } => (key, pixels),
                 _ => panic!("expected inline pixels"),
             })
             .collect();
-        assert_eq!(pixels.len(), 3);
-        assert!(Arc::ptr_eq(pixels[0], pixels[2]));
-        assert!(!Arc::ptr_eq(pixels[0], pixels[1]));
+        assert_eq!(images.len(), 3);
+        assert_eq!(images[0].0, images[2].0);
+        assert_ne!(images[0].0, images[1].0);
+        assert!(Arc::ptr_eq(images[0].1, images[2].1));
+        assert!(!Arc::ptr_eq(images[0].1, images[1].1));
+        assert_eq!(
+            mm.blocks.iter().map(|b| b.end - b.start).sum::<usize>(),
+            192
+        );
         let compiled =
             contract::compile(&serde_json::to_vec(&raw).unwrap(), &processor.labels).unwrap();
         let text_ids = processor.tokenize(&compiled.prompt).unwrap();
@@ -324,17 +305,7 @@ fn warm_single_image_checks_full_length_before_reloading_pixels() {
 
 #[test]
 fn disabling_l2_retains_typed_images_and_does_not_publish_embeddings_on_cpu() {
-    let mut processor = processor();
-    processor.source = ImageSource::Online("unused-by-cpu".into());
-    processor.caches = Caches::new(CacheCfg {
-        enabled: true,
-        l1: true,
-        l2: false,
-        l3: false,
-        l1_max: 8,
-        l2_bytes: 1 << 20,
-        l3_bytes: 0,
-    });
+    let processor = online_processor(true, false);
     for _ in 0..2 {
         let MmPlan::Full(mm) = prepare_online(&processor, &[RED, RED]).unwrap().plan else {
             panic!("expected full plan")
@@ -385,7 +356,14 @@ fn aligned_image_end_still_loads_images_without_a_live_prefix() {
         let before = processor.caches.snapshot();
         let warm = prepare_request(&processor, &request).unwrap();
         assert!(warm.cache_note.contains("l1=hit"));
-        assert!(processor.caches.snapshot().l2_miss > before.l2_miss);
+        let after = processor.caches.snapshot();
+        assert!(after.l2_miss > before.l2_miss);
+        assert_eq!(after.l3_miss, before.l3_miss + u64::from(l3));
+        assert_eq!(matches!(warm.plan, MmPlan::Populate { .. }), l3);
+        assert!(
+            warm.cache_note
+                .contains(if l3 { "l3=miss" } else { "l3=off" })
+        );
         let full = |plan| match plan {
             MmPlan::Full(mm) | MmPlan::Populate { mm, .. } => mm,
             _ => panic!("no live GPU prefix exists"),

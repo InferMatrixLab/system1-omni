@@ -5,7 +5,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
-use omni_qwen3_5_native::vision::{VisionCheckpoint, VisionConfig};
+use omni_qwen3_5_native::vision::VisionConfig;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -165,9 +165,6 @@ pub(crate) fn validate_export(dir: &Path, language_dir: &Path, language: &Value)
     validate_processor(&serde_json::from_slice(&std::fs::read(
         dir.join("preprocessor_config.json"),
     )?)?)?;
-    // The shared loader validates the complete tensor inventory on CPU before
-    // either language or vision weights can be uploaded.
-    VisionCheckpoint::load(dir)?;
     Ok(())
 }
 

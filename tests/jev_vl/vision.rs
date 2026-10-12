@@ -105,19 +105,26 @@ fn export() -> (tempfile::TempDir, Value, Value) {
     (dir, language, manifest)
 }
 
-fn validate_fixture(dir: &Path, language: &Value, manifest: &Value) -> String {
+fn validate_fixture(dir: &Path, language: &Value, manifest: &Value) -> Result<()> {
     std::fs::write(
         dir.join("jev_vl_vision.json"),
         serde_json::to_vec(manifest).unwrap(),
     )
     .unwrap();
-    format!("{:#}", validate_export(dir, dir, language).unwrap_err())
+    validate_export(dir, dir, language)
 }
 
 #[test]
 fn export_checks_all_source_pins_and_exact_files_before_weights() {
     let (dir, language, manifest) = export();
-    assert!(validate_fixture(dir.path(), &language, &manifest).contains("missing visual tensor"));
+    validate_fixture(dir.path(), &language, &manifest).unwrap();
+    let error = omni_qwen3_5_native::vision::VisionModel::load(
+        dir.path(),
+        &dir.path().join("missing-cuda-library"),
+    )
+    .err()
+    .expect("empty inventory must fail before loading CUDA");
+    assert!(format!("{error:#}").contains("missing visual tensor"));
     for pin in [
         "model_index_sha256",
         "adapter_config_sha256",
@@ -125,11 +132,21 @@ fn export_checks_all_source_pins_and_exact_files_before_weights() {
     ] {
         let mut changed = manifest.clone();
         changed["pins"][pin] = json!("d".repeat(64));
-        assert!(validate_fixture(dir.path(), &language, &changed).contains("source pin mismatch"));
+        assert!(
+            validate_fixture(dir.path(), &language, &changed)
+                .unwrap_err()
+                .to_string()
+                .contains("source pin mismatch")
+        );
     }
     let mut changed = manifest.clone();
     changed["files"]["other.json"] = json!("d".repeat(64));
-    assert!(validate_fixture(dir.path(), &language, &changed).contains("pin exactly"));
+    assert!(
+        validate_fixture(dir.path(), &language, &changed)
+            .unwrap_err()
+            .to_string()
+            .contains("pin exactly")
+    );
     for name in [
         "config.json",
         "preprocessor_config.json",
@@ -139,6 +156,8 @@ fn export_checks_all_source_pins_and_exact_files_before_weights() {
         changed["files"][name] = json!("d".repeat(64));
         assert!(
             validate_fixture(dir.path(), &language, &changed)
+                .unwrap_err()
+                .to_string()
                 .contains(&format!("file hash mismatch: {name}"))
         );
     }
