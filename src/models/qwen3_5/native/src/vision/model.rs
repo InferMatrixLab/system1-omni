@@ -7,7 +7,11 @@ use crate::{
 use anyhow::{Result, ensure};
 use half::bf16;
 use safetensors::{Dtype, tensor::TensorView};
-use std::{collections::BTreeMap, ffi::c_void, path::Path};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    ffi::c_void,
+    path::Path,
+};
 
 type Trace<'a> = Option<&'a mut dyn FnMut(&str, &[bf16]) -> Result<()>>;
 
@@ -30,10 +34,13 @@ impl Drop for Gemm {
 /// One request at a time; returns row-major [image_tokens, config.out_hidden_size].
 pub struct VisionModel {
     config: VisionConfig,
+    // Captures and their buffers retire before weights, GEMM workspace and stream.
+    scratch: VecDeque<Scratch>,
+    graph_enabled: bool,
     base: BTreeMap<String, DeviceBuffer>,
     lora: BTreeMap<String, DeviceBuffer>,
-    stream: OwnedStream,
     gemm: Gemm,
+    stream: OwnedStream,
 }
 impl VisionModel {
     pub fn load(dir: impl AsRef<Path>, library: &Path) -> Result<Self> {
@@ -109,7 +116,7 @@ impl VisionModel {
             );
         }
         cuda::load(library)?;
-        // Original ABI5 libraries remain usable for the Cua layout.
+        // ABI6 is required; head-64 Cua layouts use the original vision entry points.
         if config.hidden_size != 1024 {
             api().vision_v2()?;
         }
@@ -119,6 +126,8 @@ impl VisionModel {
         ensure!(!gemm.0.is_null(), "cannot create vision cuBLAS handle");
         let mut model = Self {
             config,
+            scratch: VecDeque::new(),
+            graph_enabled: std::env::var("CUA_S1_VISION_GRAPH").as_deref() == Ok("1"),
             base: BTreeMap::new(),
             lora: BTreeMap::new(),
             stream,
@@ -308,11 +317,15 @@ impl VisionModel {
     }
     fn run(&mut self, image: &ProcessedImage, mut callback: Trace<'_>) -> Result<Vec<bf16>> {
         cuda::set_device(0)?;
-        let geo = VisionGeometry::new(image.image_grid_thw, &self.config)?;
-        let h = self.config.hidden_size;
-        let intermediate = self.config.intermediate_size;
-        let merged = h * 4;
-        let output = self.config.out_hidden_size;
+        let cached = self
+            .scratch
+            .iter()
+            .position(|s| s.grid == image.image_grid_thw);
+        let geometry = if cached.is_none() {
+            Some(VisionGeometry::new(image.image_grid_thw, &self.config)?)
+        } else {
+            None
+        };
         let n = image.image_grid_thw[1] * image.image_grid_thw[2];
         ensure!(
             image.pixel_values.len() == n * 1536,
@@ -332,50 +345,82 @@ impl VisionModel {
             .iter()
             .flat_map(|v| bf16::from_f32(*v).to_bits().to_le_bytes())
             .collect();
-        let pixels = self.upload(&pixels)?;
-        let indices = self.upload(
-            &geo.indices
-                .iter()
-                .flat_map(|v| v.to_le_bytes())
-                .collect::<Vec<_>>(),
-        )?;
-        let weights = self.upload(
-            &geo.weights
-                .iter()
-                .flat_map(|v| v.to_le_bytes())
-                .collect::<Vec<_>>(),
-        )?;
-        let co = self.upload(
-            &geo.cos
-                .iter()
-                .flat_map(|v| v.to_le_bytes())
-                .collect::<Vec<_>>(),
-        )?;
-        let si = self.upload(
-            &geo.sin
-                .iter()
-                .flat_map(|v| v.to_le_bytes())
-                .collect::<Vec<_>>(),
-        )?;
-        let w = Work::new(
-            if self.lora.is_empty() { 0 } else { n },
-            intermediate.max(merged).max(output),
-        )?;
-        let attention_workspace = DeviceBuffer::new(if h == 1024 {
-            0
+        let index = if let Some(index) = cached {
+            index
         } else {
-            n * self.config.num_heads * 80 * 4 * 2
-        })?;
-        let x = DeviceBuffer::new(n * h * 2)?;
-        let norm = DeviceBuffer::new(n * h * 2)?;
-        let qkv = DeviceBuffer::new(n * h * 3 * 2)?;
-        let q = DeviceBuffer::new(n * h * 2)?;
-        let k = DeviceBuffer::new(n * h * 2)?;
-        let attn = DeviceBuffer::new(n * h * 2)?;
-        let delta = DeviceBuffer::new(n * h * 2)?;
-        let mlp = DeviceBuffer::new(n * intermediate.max(merged) * 2)?;
-        self.linear("patch_embed.proj", &pixels, &x, n, h, 1536, &w)?;
-        self.trace(&mut callback, "patch_embed", &x, n * h)?;
+            self.synchronize()?;
+            // FIFO is bounded to four exact grids; graph drops before its buffers.
+            if self.scratch.len() == 4 {
+                self.scratch.pop_front();
+            }
+            let scratch = Scratch::new(self, image.image_grid_thw, geometry.unwrap())?;
+            self.scratch.push_back(scratch);
+            self.scratch.len() - 1
+        };
+        let scratch = &self.scratch[index];
+        // SAFETY: the current image has the validated exact resident buffer size.
+        unsafe {
+            cuda::upload(scratch.pixels.at(0), &pixels, self.stream.0)?;
+        }
+        if callback.is_none()
+            && self.graph_enabled
+            && let Some(graph) = &scratch.graph
+        {
+            graph.launch(self.stream.0)?;
+            graph_trace("replayed", scratch.grid);
+            return self.read(&scratch.out, n / 4 * self.config.out_hidden_size);
+        }
+        self.enqueue(scratch, &mut callback)?;
+        let result = self.read(&scratch.out, n / 4 * self.config.out_hidden_size)?;
+        if let Some(callback) = callback.as_mut() {
+            callback("merger.output", &result)?;
+        } else if self.graph_enabled {
+            // Readback completed warmup. Capture records without executing; keep
+            // the eager result even when recording/instantiation fails.
+            let captured = cuda::Graph::capture(self.stream.0, || self.enqueue(scratch, &mut None));
+            match captured {
+                Ok(graph) => {
+                    self.scratch[index].graph = Some(graph);
+                    graph_trace("captured", image.image_grid_thw);
+                }
+                Err(error) => {
+                    eprintln!("Vision CUDA Graph capture failed; using eager execution: {error:#}");
+                    self.graph_enabled = false;
+                    for scratch in &mut self.scratch {
+                        scratch.graph = None;
+                    }
+                }
+            }
+        }
+        Ok(result)
+    }
+    fn enqueue(&self, scratch: &Scratch, callback: &mut Trace<'_>) -> Result<()> {
+        let n = scratch.grid[1] * scratch.grid[2];
+        let h = self.config.hidden_size;
+        let intermediate = self.config.intermediate_size;
+        let merged = h * 4;
+        let output = self.config.out_hidden_size;
+        let Scratch {
+            pixels,
+            indices,
+            weights,
+            co,
+            si,
+            w,
+            attention_workspace,
+            x,
+            norm,
+            qkv,
+            q,
+            k,
+            attn,
+            delta,
+            mlp,
+            out,
+            ..
+        } = scratch;
+        self.linear("patch_embed.proj", pixels, x, n, h, 1536, w)?;
+        self.trace(callback, "patch_embed", x, n * h)?;
         unsafe {
             if h == 1024 {
                 check(
@@ -404,11 +449,11 @@ impl VisionModel {
                 )?;
             }
         }
-        self.trace(&mut callback, "position", &x, n * h)?;
+        self.trace(callback, "position", x, n * h)?;
         for i in 0..self.config.depth {
             let p = format!("blocks.{i}");
-            self.norm(&format!("{p}.norm1"), &x, &norm, n)?;
-            self.linear(&format!("{p}.attn.qkv"), &norm, &qkv, n, h * 3, h, &w)?;
+            self.norm(&format!("{p}.norm1"), x, norm, n)?;
+            self.linear(&format!("{p}.attn.qkv"), norm, qkv, n, h * 3, h, w)?;
             unsafe {
                 if h == 1024 {
                     check(
@@ -466,22 +511,22 @@ impl VisionModel {
                     )?;
                 }
             }
-            self.linear(&format!("{p}.attn.proj"), &attn, &delta, n, h, h, &w)?;
+            self.linear(&format!("{p}.attn.proj"), attn, delta, n, h, h, w)?;
             unsafe {
                 check(
                     (api().cs1_vision_add)(x.at(0), delta.at(0), n * h, self.stream.0),
                     "vision attention residual",
                 )?;
             }
-            self.norm(&format!("{p}.norm2"), &x, &norm, n)?;
+            self.norm(&format!("{p}.norm2"), x, norm, n)?;
             self.linear(
                 &format!("{p}.mlp.linear_fc1"),
-                &norm,
-                &mlp,
+                norm,
+                mlp,
                 n,
                 intermediate,
                 h,
-                &w,
+                w,
             )?;
             unsafe {
                 check(
@@ -491,12 +536,12 @@ impl VisionModel {
             }
             self.linear(
                 &format!("{p}.mlp.linear_fc2"),
-                &mlp,
-                &delta,
+                mlp,
+                delta,
                 n,
                 h,
                 intermediate,
-                &w,
+                w,
             )?;
             unsafe {
                 check(
@@ -504,28 +549,110 @@ impl VisionModel {
                     "vision MLP residual",
                 )?;
             }
-            self.trace(&mut callback, &p, &x, n * h)?;
+            self.trace(callback, &p, x, n * h)?;
         }
-        self.norm("merger.norm", &x, &norm, n)?;
-        self.trace(&mut callback, "merger.norm", &norm, n * h)?;
+        self.norm("merger.norm", x, norm, n)?;
+        self.trace(callback, "merger.norm", norm, n * h)?;
         // Consecutive groups of four patches already have the required 2x2 merge order.
-        self.linear("merger.linear_fc1", &norm, &mlp, n / 4, merged, merged, &w)?;
-        self.trace(&mut callback, "merger.linear_fc1", &mlp, n * h)?;
+        self.linear("merger.linear_fc1", norm, mlp, n / 4, merged, merged, w)?;
+        self.trace(callback, "merger.linear_fc1", mlp, n * h)?;
         unsafe {
             check(
                 (api().cs1_vision_gelu)(mlp.at(0), n * h, 1, self.stream.0),
                 "vision exact GELU",
             )?;
         }
-        let out = DeviceBuffer::new(n / 4 * output * 2)?;
-        self.linear("merger.linear_fc2", &mlp, &out, n / 4, output, merged, &w)?;
-        let result = self.read(&out, n / 4 * output)?;
-        if let Some(callback) = callback.as_mut() {
-            callback("merger.output", &result)?;
-        }
-        Ok(result)
+        self.linear("merger.linear_fc2", mlp, out, n / 4, output, merged, w)?;
+        Ok(())
     }
 }
+impl Drop for VisionModel {
+    fn drop(&mut self) {
+        // Even failure paths retain every referenced address through synchronization.
+        let _ = self.synchronize();
+    }
+}
+fn graph_trace(action: &str, grid: [usize; 3]) {
+    if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
+        eprintln!("Vision CUDA Graph {action} grid={grid:?}");
+    }
+}
+struct Scratch {
+    graph: Option<cuda::Graph>,
+    grid: [usize; 3],
+    pixels: DeviceBuffer,
+    indices: DeviceBuffer,
+    weights: DeviceBuffer,
+    co: DeviceBuffer,
+    si: DeviceBuffer,
+    w: Work,
+    attention_workspace: DeviceBuffer,
+    x: DeviceBuffer,
+    norm: DeviceBuffer,
+    qkv: DeviceBuffer,
+    q: DeviceBuffer,
+    k: DeviceBuffer,
+    attn: DeviceBuffer,
+    delta: DeviceBuffer,
+    mlp: DeviceBuffer,
+    out: DeviceBuffer,
+}
+impl Scratch {
+    fn new(model: &VisionModel, grid: [usize; 3], geo: VisionGeometry) -> Result<Self> {
+        let n = grid[1] * grid[2];
+        let h = model.config.hidden_size;
+        let width = model
+            .config
+            .intermediate_size
+            .max(h * 4)
+            .max(model.config.out_hidden_size);
+        Ok(Self {
+            graph: None,
+            grid,
+            pixels: DeviceBuffer::new(n * 1536 * 2)?,
+            indices: model.upload(
+                &geo.indices
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect::<Vec<_>>(),
+            )?,
+            weights: model.upload(
+                &geo.weights
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect::<Vec<_>>(),
+            )?,
+            co: model.upload(
+                &geo.cos
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect::<Vec<_>>(),
+            )?,
+            si: model.upload(
+                &geo.sin
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect::<Vec<_>>(),
+            )?,
+            w: Work::new(if model.lora.is_empty() { 0 } else { n }, width)?,
+            attention_workspace: DeviceBuffer::new(if h == 1024 {
+                0
+            } else {
+                n * model.config.num_heads * 80 * 4 * 2
+            })?,
+            x: DeviceBuffer::new(n * h * 2)?,
+            norm: DeviceBuffer::new(n * h * 2)?,
+            qkv: DeviceBuffer::new(n * h * 3 * 2)?,
+            q: DeviceBuffer::new(n * h * 2)?,
+            k: DeviceBuffer::new(n * h * 2)?,
+            attn: DeviceBuffer::new(n * h * 2)?,
+            delta: DeviceBuffer::new(n * h * 2)?,
+            mlp: DeviceBuffer::new(n * width * 2)?,
+            out: DeviceBuffer::new(n / 4 * model.config.out_hidden_size * 2)?,
+        })
+    }
+}
+
 struct Work {
     float_input: DeviceBuffer,
     rank: DeviceBuffer,
@@ -540,3 +667,7 @@ impl Work {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../../../tests/qwen3_5/vision_graph.rs"]
+mod graph_tests;

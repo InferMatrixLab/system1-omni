@@ -30,3 +30,7 @@ tokio = { version = "1.49.0", features = ["macros", "net", "rt-multi-thread", "s
 [[bin]]
 name = "omni-cua-s1-vision"
 path = "src/vision_main.rs"
+
+[[example]]
+name = "vision_graph_bench"
+path = "../../../../tests/cua_s1/vision_graph_bench.rs"

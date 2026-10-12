@@ -21,7 +21,7 @@ pub struct Stream(*mut c_void);
 // from one thread at a time.
 unsafe impl Send for Stream {}
 
-/// Additive dimension-aware vision entry points. Old ABI5 libraries may omit them.
+/// Additive dimension-aware vision entry points. Libraries at the required ABI may omit these optional symbols.
 pub struct VisionV2 {
     pub position: unsafe extern "C" fn(
         *mut c_void,
