@@ -396,10 +396,26 @@ impl Executor {
                 // Keep admission until all queued device work has drained, including errors.
                 let language_drain = model.synchronize();
                 let vision_drain = vision.as_ref().map(VisionModel::synchronize).transpose();
-                // Both drain attempts must happen even if either one fails.
-                language_drain?;
-                vision_drain?;
-                let probabilities = result?;
+                // Both drain attempts must happen even if either one fails. The
+                // request's own error names the failing stage, so surface it ahead
+                // of sticky drain failures; a drain error only fails an otherwise
+                // successful request.
+                let mut probabilities = result;
+                if let Err(drain) = language_drain {
+                    if probabilities.is_ok() {
+                        probabilities = Err(drain).context("language drain");
+                    } else {
+                        eprintln!("language drain also failed after the request error: {drain:#}");
+                    }
+                }
+                if let Err(drain) = vision_drain {
+                    if probabilities.is_ok() {
+                        probabilities = Err(drain).context("vision drain");
+                    } else {
+                        eprintln!("vision drain also failed after the request error: {drain:#}");
+                    }
+                }
+                let probabilities = probabilities?;
                 for (key, asset) in pending_images {
                     caches.l2_insert(key, asset);
                 }
