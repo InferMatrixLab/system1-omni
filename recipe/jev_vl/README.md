@@ -53,7 +53,8 @@ JEV_VL_MODEL=weights/jev-vl-merged \
 `JEV_VL_HOST` defaults to `127.0.0.1`, `JEV_VL_PORT` to `8001`, and the CUDA
 library defaults to the file beside the executable. The worker uses visible
 CUDA device 0. `/health` becomes available after model loading and a successful
-text warmup; that health check does not validate image assets.
+text warmup. With `JEV_VL_VISION`, readiness also requires a successful inline-image
+warmup; it does not validate every user image or offline-preencoded asset.
 
 In separate terminals, start the frontend and send the same request directly and
 through it:
@@ -96,11 +97,26 @@ JEV_VL_MODEL=weights/jev-vl-merged JEV_VL_VISION=weights/jev-vl-vision \
   JEV_VL_CACHE=1 target/release/omni-jev-vl-native
 ```
 
+With `JEV_VL_VISION` set, startup runs an online vision warmup after the text
+warmup: one full inline-image decision, a 1×1 PNG through decode, preprocessing
+and the vision forward. The worker does not bind its port unless that warmup
+succeeds, so in online mode `/health` implies the inline image path executed
+end to end once at startup. It still does not validate user images; each
+request image is decoded and checked on arrival.
+
 Online mode accepts single-frame inline PNG/JPEG data URIs. Each image is bounded
 to 4 MiB of decoded file bytes, 2048 pixels per side, 1,048,576 source pixels,
 and 4608 vision patches. The full HTTP body is limited to 4 MiB, including base64
 and text. Remote URLs, animations and video are unsupported. Oversized inputs
 are rejected; resource limits do not change the model's resize policy.
+
+No per-request image-count limit applies beyond the body and token budgets.
+A request's resized pixel values and post-vision embeddings stay in host memory
+until the request completes, and cache budgets exclude these in-flight inputs.
+Each minimum-size image holds about 1.5 MiB of pixels and 1.25 MiB of
+embeddings, so a body full of tiny images (roughly 250 within the 4 MiB body
+and 16,384-token budgets) transiently adds up to about 0.7 GiB on top of
+weights, scratch and caches; size online workloads accordingly on shared hosts.
 
 `JEV_VL_VISION` and `JEV_VL_IMGCACHE` are mutually exclusive. Online mode also
 ignores the default `imgcache/` directory. The source and processor stay fixed
