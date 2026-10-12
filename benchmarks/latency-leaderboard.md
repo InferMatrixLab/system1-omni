@@ -35,6 +35,16 @@ Inputs and scorer are fixed to [JevBench 7ce310c7](https://github.com/fstandhart
 canonical dataset SHA-256 (`dataset_hash` of the pinned tasks, recorded as
 `canonical_dataset_sha256` in the numeric attachment's source manifest):
 `dc3995d8ae1e2fc8e81ce38431add509eb8bb39b85aadfd0c7c32079382dde51`.
+
+The input SHA-256
+`00d1f10ca1142499a598b5f1c6602d329cce1cef04c961c46fc0318daa2c67d3`
+in [issue #130](https://github.com/ThinkFlowLab/system1-omni/issues/130) hashes the
+exported public231 JSONL request-manifest bytes for the separate two-model run
+(Slurm 416135). The `dataset_hash` above hashes sorted canonical JevBench task
+records for this five-model campaign (Slurm 415076). Both reference JevBench
+`7ce310c7`, but hash different representations and are not interchangeable file
+checksums.
+
 All arms used BF16, concurrency 1, thinking off, no retries and the same request
 order. Intern used upstream HF at T=1 with Torch fallback for unavailable optional
 fast paths. Open-Jev used native Rust/CUDA with checkpoint temperatures, merged

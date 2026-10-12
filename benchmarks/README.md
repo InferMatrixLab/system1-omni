@@ -179,6 +179,16 @@ Runs recorded before `warmup_sha256` was added must use their original collector
 for offline summaries. Do not add a checksum to historical evidence to make it
 look verified at collection time.
 
+For pooled percentiles, first validate each of the three measured rounds with its
+original collector's `summary`; pool only rounds with the same deployment,
+manifest and timing/collection settings. Concatenate `latency_ms` from their
+`responses.jsonl` records where `state` is `completed` and `error` is `null`,
+keeping every repetition and excluding warmups and unsuccessful records. For
+sorted samples `x` and `n = len(x)`, p50 is `statistics.median(x)` and p95 is
+`x[math.ceil(0.95 * n) - 1]` (zero-based nearest rank; both null if empty).
+Recompute from these samples, never average round percentiles; report per-round
+and pooled request counts alongside them.
+
 After a hard kill, a valid start snapshot can distinguish unattempted IDs from
 attempted IDs without completed records. Without a saved terminal boundary,
 `wall_seconds` and both throughput fields are null and `evidence_complete` is
