@@ -67,7 +67,10 @@ impl CacheCfg {
 pub struct CacheStats {
     pub l1_hit: u64,
     pub l1_miss: u64,
+    /// L2 lookup hits, including online executor rechecks after admission.
     pub l2_hit: u64,
+    /// L2 lookup misses, not unique images or encoding attempts. A cold single-image
+    /// request checks once in prepared mode and twice online.
     pub l2_miss: u64,
     pub l3_hit: u64,
     pub l3_miss: u64,
@@ -194,6 +197,7 @@ impl Caches {
 
     // ---- L2: parsed image assets ----
 
+    /// Count every lookup, including disabled-cache misses, and refresh hit LRU.
     pub fn l2_get(&self, key: &str) -> Option<Arc<ImageAsset>> {
         if !(self.cfg.enabled && self.cfg.l2) {
             self.bump(|s| s.l2_miss += 1);

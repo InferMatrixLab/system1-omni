@@ -15,7 +15,9 @@ fn source_selection_checks_presence_and_never_falls_back_from_online() {
     let dir = tempfile::tempdir().unwrap();
     let missing = dir.path().join("missing");
     assert!(ImageSource::from_paths(dir.path(), Some(missing.clone()), None).is_err());
-    assert!(ImageSource::from_paths(dir.path(), Some(dir.path().into()), Some(missing)).is_err());
+    assert!(
+        ImageSource::from_paths(dir.path(), Some(dir.path().into()), Some(missing.into())).is_err()
+    );
     assert!(matches!(
         ImageSource::from_paths(dir.path(), Some(dir.path().into()), None).unwrap(),
         ImageSource::Online(_)
@@ -24,6 +26,31 @@ fn source_selection_checks_presence_and_never_falls_back_from_online() {
         ImageSource::from_paths(dir.path(), None, None).unwrap(),
         ImageSource::Prepared(None)
     ));
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_imgcache_preserves_default_selection_and_online_mode() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let default = dir.path().join("imgcache");
+    std::fs::create_dir(&default).unwrap();
+    let non_utf8 = std::ffi::OsString::from_vec(vec![b'i', 0xff]);
+    let source = ImageSource::from_paths(dir.path(), None, Some(non_utf8.clone())).unwrap();
+    let ImageSource::Prepared(Some(selected)) = source else {
+        panic!("non-UTF8 imgcache must retain the default directory")
+    };
+    assert_eq!(selected, default);
+
+    assert!(ImageSource::from_paths(dir.path(), Some(dir.path().join(&non_utf8)), None).is_err());
+    let vision = dir.path().join("vision");
+    std::fs::create_dir(&vision).unwrap();
+    let source = ImageSource::from_paths(dir.path(), Some(vision.clone()), Some(non_utf8)).unwrap();
+    let ImageSource::Online(selected) = source else {
+        panic!("non-UTF8 imgcache must not conflict with online vision")
+    };
+    assert_eq!(selected, vision);
 }
 
 #[test]

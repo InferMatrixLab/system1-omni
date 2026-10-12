@@ -94,7 +94,7 @@ CUDA_VISIBLE_DEVICES='' .venv-jev-vl/bin/python recipe/jev_vl/export_vision.py \
   --model weights/JEV-27B-VL --out weights/jev-vl-vision
 JEV_VL_MODEL=weights/jev-vl-merged JEV_VL_VISION=weights/jev-vl-vision \
   JEV_VL_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
-  JEV_VL_CACHE=1 target/release/omni-jev-vl-native
+  JEV_VL_CACHE=1 CUA_S1_VISION_GRAPH=0 target/release/omni-jev-vl-native
 ```
 
 With `JEV_VL_VISION` set, startup runs an online vision warmup after the text
@@ -118,6 +118,13 @@ consumed during vision resolution; embeddings remain for language execution.
 Cache budgets exclude in-flight inputs. Hundreds of tiny images can therefore
 require hundreds of MiB of host memory, plus temporary copies, weights, scratch
 and caches. These array sizes are not a measured peak-memory bound.
+
+The shared vision backend also reads `CUA_S1_VISION_GRAPH` and
+`CUA_S1_GRAPH_TRACE`, including when called by JEV. They enable capture and
+capture diagnostics respectively only when set to `1`; both default to off.
+Set `CUA_S1_VISION_GRAPH=0` explicitly as above to prevent an inherited Cua
+setting from changing the JEV execution path. Current JEV validation uses
+eager vision and does not cover the opt-in graph path.
 
 `JEV_VL_VISION` and `JEV_VL_IMGCACHE` are mutually exclusive. Online mode also
 ignores the default `imgcache/` directory. The source and processor stay fixed
@@ -168,8 +175,12 @@ not an end-to-end live screenshot service.
 
 Cache budgets do not include weights, model scratch, in-flight request inputs or
 total process memory. `GET /v1/cache/stats` exposes counters and resident cache
-accounting. Use those counters to assess L2 hits; `x-jev-cache` does not report
-an L2 hit field. `POST /v1/cache/reset` resets counters only; restart the worker for
+accounting. `l2_hit` and `l2_miss` count lookups, not unique images or requests.
+Cold online images are checked during preparation and again after queueing;
+prepared mode normally checks once. Retained-prefix continuations may skip L2
+entirely. Compare these counters within the same execution path rather than as
+cross-mode per-image hit rates. `x-jev-cache` does not report an L2 hit field.
+`POST /v1/cache/reset` resets counters only; restart the worker for
 a cold cache. Request preparation may overlap, while GPU execution stays serial.
 Use cache modes as experimental controls within the documented validation scope.
 

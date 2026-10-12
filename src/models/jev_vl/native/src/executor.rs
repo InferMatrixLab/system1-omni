@@ -295,6 +295,7 @@ impl Executor {
                 let mut resolved_plan = None;
                 let result = (|| {
                     // Requests may have waited behind another request for this image.
+                    // The L2 recheck counts a lookup hit/miss independently of preparation.
                     // Pending assets also share duplicate references within this request
                     // when L2 retention is disabled or the asset exceeds its budget.
                     resolved_plan = Some(resolve_images(plan, |input| match input {

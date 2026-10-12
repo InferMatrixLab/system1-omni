@@ -1,5 +1,6 @@
 //! CPU validation of the pinned online vision export and its processor contract.
 
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -19,8 +20,12 @@ impl ImageSource {
     pub(crate) fn from_paths(
         dir: &Path,
         vision: Option<PathBuf>,
-        imgcache: Option<PathBuf>,
+        imgcache: Option<OsString>,
     ) -> Result<Self> {
+        // Preserve the prepared worker's env::var fallback for non-UTF8 values.
+        let imgcache = imgcache
+            .and_then(|p| p.into_string().ok())
+            .map(PathBuf::from);
         ensure!(
             vision.is_none() || imgcache.is_none(),
             "JEV_VL_VISION and JEV_VL_IMGCACHE are mutually exclusive"

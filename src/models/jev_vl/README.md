@@ -101,6 +101,9 @@ L3 path targets a compatible single-image prefix aligned to a 64-token chunk;
 other inputs use a full forward. L2 avoids file parsing and copying of prepared
 assets in prepared mode and vision encoding in online mode. Cache sizes and controls
 are listed in the [recipe](../../../recipe/jev_vl/README.md#cache-controls).
+The shared vision backend's `CUA_S1_VISION_GRAPH` and `CUA_S1_GRAPH_TRACE` controls
+also apply here; see [online images](../../../recipe/jev_vl/README.md#online-images)
+for explicit eager settings and their validation scope.
 
 Tests are registered under [`tests/jev_vl/`](../../../tests/jev_vl/) and
 [`tests/qwen3_5/`](../../../tests/qwen3_5/). CPU tests establish contract and

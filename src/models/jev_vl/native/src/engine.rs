@@ -28,7 +28,7 @@ impl Engine {
         let source = ImageSource::from_paths(
             dir,
             std::env::var_os("JEV_VL_VISION").map(Into::into),
-            std::env::var_os("JEV_VL_IMGCACHE").map(Into::into),
+            std::env::var_os("JEV_VL_IMGCACHE"),
         )?;
         let manifest: Value = serde_json::from_slice(
             &std::fs::read(dir.join("jev_vl_export.json"))
