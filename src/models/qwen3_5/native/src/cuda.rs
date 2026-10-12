@@ -264,7 +264,7 @@ impl DeviceBuffer {
 
     /// The device address `offset` bytes into the buffer.
     pub fn at(&self, offset: usize) -> *mut c_void {
-        debug_assert!(offset <= self.bytes);
+        assert!(offset <= self.bytes);
         self.ptr.wrapping_byte_add(offset)
     }
 }

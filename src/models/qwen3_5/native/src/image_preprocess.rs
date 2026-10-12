@@ -55,7 +55,7 @@ impl ProcessedImage {
     }
 }
 
-/// Preprocess a decoded RGB8 image using the fixed 4B processor settings.
+/// Preprocess a decoded RGB8 image with CUA source and patch limits.
 ///
 /// Rejects empty dimensions, sides over 2048, area over 1,048,576 pixels,
 /// aspect ratios over 200, and buffers whose length is not `width * height * 3`.

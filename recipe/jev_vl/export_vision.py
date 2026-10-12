@@ -16,14 +16,12 @@ def sha256(path):
 
 
 def export(model, out):
-    import torch
-    from safetensors import safe_open
-    from safetensors.torch import save_file
-
     if out.exists():
         raise ValueError("output already exists; choose a new export directory")
     config = json.loads((model / "config.json").read_text())
     if (config.get("model_type") != "qwen3_5"
+            or config.get("vision_config", {}).get("hidden_size") != 1152
+            or config.get("vision_config", {}).get("out_hidden_size") != 5120
             or config.get("text_config", {}).get("hidden_size") != 5120):
         raise ValueError("expected the JEV-27B-VL Qwen3.8 backbone")
     processor = json.loads((model / "preprocessor_config.json").read_text())
@@ -36,6 +34,10 @@ def export(model, out):
     }
     if processor != expected_processor:
         raise ValueError("unsupported image processor; verify resize and normalization first")
+
+    import torch
+    from safetensors import safe_open
+    from safetensors.torch import save_file
 
     adapter = model / "adapter_vllm"
     with safe_open(adapter / "adapter_model.safetensors", framework="pt") as weights:

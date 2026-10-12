@@ -27,3 +27,7 @@ path = "../../../../tests/qwen3_5/kernels.rs"
 [[test]]
 name = "image_decode"
 path = "../../../../tests/qwen3_5/image_decode.rs"
+
+[[test]]
+name = "device_buffer"
+path = "../../../../tests/qwen3_5/device_buffer.rs"
