@@ -1,0 +1,21 @@
+[package]
+name = "omni-pplx-decider-native"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "pplx-decider-v1.1-27b decision contract: prompts, answer codes and calibrated typed answers"
+
+[dependencies]
+anyhow = "1.0.100"
+omni-qwen3-5-native = { path = "../../qwen3_5/native" }
+serde_json = { version = "1.0.149", features = ["float_roundtrip", "preserve_order"] }
+# the onig regex backend, as in the Python tokenizers wheel
+tokenizers = { version = "=0.22.2", default-features = false, features = ["onig"] }
+
+[[test]]
+name = "contract"
+path = "../../../../tests/pplx_decider/contract.rs"
+
+[[test]]
+name = "tokenization"
+path = "../../../../tests/pplx_decider/tokenization.rs"
