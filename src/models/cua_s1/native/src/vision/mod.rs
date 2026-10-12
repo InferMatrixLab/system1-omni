@@ -8,7 +8,7 @@
 use anyhow::{Context, Result, ensure};
 use omni_qwen3_5_native::vision::{TensorStore, UniqueMap, inside, is_visual};
 use safetensors::{Dtype, tensor::TensorView};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -21,7 +21,7 @@ const ADAPTER: &str = "base_model.model.model.visual.";
 type Inventory = BTreeMap<String, Vec<usize>>;
 
 /// The supported Qwen3.5-4B vision architecture; all fields are validated at load.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct VisionConfig {
     pub depth: usize,
     pub hidden_size: usize,
