@@ -10,7 +10,10 @@ weights. Those files are the code this process executes, so — stronger than
 the upstream default, whose ``verify_package`` walks only the 39-entry
 ``files_sha256`` table and skips hashing files over 64 MiB in fast mode — the
 executor hashes every file of the manifest's ``runtime.files_sha256`` table
-in full before importing anything from the package directory.
+in full before importing anything from the package directory. Hash agreement
+proves only internal consistency — a later snapshot ships a self-consistent
+table of its own — so the gate first requires the manifest to carry exactly
+the repo id and runtime digests checked in for ``REFERENCE_REVISION``.
 """
 
 from __future__ import annotations
@@ -27,6 +30,20 @@ REFERENCE_REVISION = "cbff3a3cb0b074b6585fe9f747b9f9f5557a0e75"
 MANIFEST_NAME = "MODEL_MANIFEST.json"
 MANIFEST_SCHEMA = "d3-package-manifest/1"
 VERIFY_MODES = ("fast", "full", "none")
+# The runtime.files_sha256 table of REFERENCE_REVISION, transcribed from the
+# pinned package's manifest; repinning means updating this table together
+# with REFERENCE_REVISION.
+PINNED_RUNTIME_SHA256 = {
+    "d3_runtime.py": "6c049aa7d3da8da3738602a2812572879d0a47b03c28c3e33f36d7300257de89",
+    "d3_fast.py": "68a1fb9a2c3bde9ac2763bf504decae592ca12722698fbde1b39a31262955535",
+    "d3_kernels.py": "8f7534ca1e1846ebf7c4c73058002f3be4dbf0d5d426f0815150ae0cbe7677bd",
+    "modeling_d3.py": "f8f8db23ff58f1a990ffa24977d744a50e1b4446d02a64c22070967705b6dbef",
+    "pipeline_d3.py": "4f9297c7c74e596e9b67df91a1e6823cfada48bf781336f141974ff6a2f1038e",
+    "d3_server.py": "f9b8f2481461a074f469b4f58da3b0d7004824096528366d5b1f23187dd6e692",
+    "d3_engine.py": "086238942762df45047a32cd9a8e2bedd9b63167eb40be260c776de567979f53",
+    "requirements.txt": "57a1938448bc240bdf4fee5d1b9cbc8450109fa1f6cee11e94dc04f274be8a32",
+    "d3_format.py": "e5036154d2e54793f59b320c8726632957bc343c382bac26d825b263a6e9ce62",
+}
 
 
 def _sha256_safe(path: Path) -> str:
@@ -50,6 +67,31 @@ def load_manifest(root: Path) -> dict[str, Any]:
     if manifest.get("schema") != MANIFEST_SCHEMA:
         raise ValueError(f"{MANIFEST_NAME} is not a {MANIFEST_SCHEMA} manifest")
     return manifest
+
+
+def verify_pinned_package(manifest: dict[str, Any]) -> None:
+    """Refuse any package that is not the pinned reference snapshot.
+
+    A package whose files hash to its own manifest is only internally
+    consistent: a later snapshot rewrites its ``runtime.files_sha256`` and
+    would pass the full-hash gate on a changed baseline. The manifest must
+    therefore carry exactly the repo id and runtime digests checked in for
+    ``REFERENCE_REVISION`` before any file is hashed or imported.
+    """
+
+    repo_id = manifest.get("repo_id")
+    if repo_id != REFERENCE_REPO:
+        raise ValueError(
+            f"{MANIFEST_NAME} declares repo_id {repo_id!r}; this worker only "
+            f"serves {REFERENCE_REPO} at {REFERENCE_REVISION}"
+        )
+    table = (manifest.get("runtime") or {}).get("files_sha256")
+    if table != PINNED_RUNTIME_SHA256:
+        raise ValueError(
+            f"{MANIFEST_NAME} runtime.files_sha256 is not the table pinned for "
+            f"{REFERENCE_REPO}@{REFERENCE_REVISION}; re-pin deliberately or "
+            "download the pinned revision"
+        )
 
 
 def verify_runtime_files(root: Path, manifest: dict[str, Any]) -> list[str]:
@@ -101,6 +143,7 @@ class D3Executor:
         if not root.is_dir():
             raise ValueError(f"the d3 package directory does not exist: {root}")
         manifest = load_manifest(root)
+        verify_pinned_package(manifest)
         verify_runtime_files(root, manifest)
 
         # Import the just-verified runtime the way upstream d3_server.py does:

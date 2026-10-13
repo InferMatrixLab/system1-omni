@@ -25,7 +25,12 @@ The checkpoint ships its runtime as flat Python files next to the weights
 This worker additionally hashes every file of
 `runtime.files_sha256` (8 runtime modules plus `requirements.txt`) in full
 **before importing anything** from the package directory, and refuses to
-serve packages without a manifest. Shard and config verification uses the
+serve packages without a manifest. Because hash agreement with a manifest
+proves only internal consistency — a later snapshot ships a self-consistent
+table of its own — the gate first requires the manifest to carry exactly
+the `repo_id` and `runtime.files_sha256` table checked in for the pinned
+revision in `engine.py`; a foreign manifest is refused before any file is
+hashed. Shard and config verification uses the
 upstream `verify` mechanism (`fast` default, `full` via CLI).
 
 ## Current serving scope
@@ -108,8 +113,8 @@ after loading and warmup; the upstream `authentication` field is dropped
   slice-scoped media rejection, question-ID admission.
 - `preprocess.py` owns the mapping of the pinned runtime's per-question
   preparation errors to the two pre-execution 422 shapes.
-- `engine.py` owns the pinned runtime, the full-hash manifest gate that
-  precedes its import, device state, and warmup.
+- `engine.py` owns the pinned runtime, the identity pin and full-hash
+  manifest gate that precede its import, device state, and warmup.
 - `postprocess.py` owns the pure answer formulas, response finishing, and
   the embedded-failure warning.
 - `src/frontend/d3.py` owns HTTP lifecycle and orchestration.

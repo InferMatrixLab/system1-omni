@@ -16,7 +16,8 @@ exact decision agreement (including embedded ``invalid_model_output``
 shapes), equal token accounting, and a probability tolerance of 1e-6
 (``--tolerance``). ``--export`` additionally freezes the oracle fixture —
 token ids, probabilities and answers per question — for the future native
-worker. Requires the pinned d3 package and a working device; see
+worker, and writes it only after a passing, non-rejected comparison.
+Requires the pinned d3 package and a working device; see
 recipe/d3/reference.md. GPU use is opt-in: run this tool by hand only.
 """
 
@@ -46,7 +47,8 @@ def parse_args(argv=None):
     parser.add_argument(
         "--export",
         default=None,
-        help="write the frozen oracle fixture (token ids, probabilities, answers)",
+        help="write the frozen oracle fixture (token ids, probabilities, answers); "
+        "only a passing, non-rejected comparison is written",
     )
     return parser.parse_args(argv)
 
@@ -155,6 +157,22 @@ def compare_case(name, worker_response, reference, tolerance=PROBABILITY_TOLERAN
     return lines, not problems and tolerance_ok and tokens_exact
 
 
+def export_allowed(ok, worker_response, reference):
+    """The oracle freezes a served 200 response, never a rejection.
+
+    A comparison can pass on an agreed 422 rejection, but that path has no
+    answers or token ids to freeze — the worker side is a synthetic empty
+    response with ``-1`` usage — so only a passing non-rejected case may
+    overwrite the fixture.
+    """
+
+    return (
+        ok
+        and not isinstance(reference, tuple)
+        and "worker rejected the request" not in worker_response
+    )
+
+
 def export_oracle(body, prepared, probabilities, worker_response, path):
     """Freeze the oracle fixture for the future native worker."""
 
@@ -199,12 +217,15 @@ def main(argv=None):
                 "worker rejected the request": {"status": status, "body": rejection_body},
             }
         reference = reference_decide(executor.model, body)
-        if args.export:
+        lines, ok = compare_case(Path(args.fixture).name, worker_response, reference, args.tolerance)
+        print("\n".join(lines))
+        if args.export and export_allowed(ok, worker_response, reference):
             prepared = executor.prepare(body.get("state"), dict(body["questions"]))
             probabilities, _ = executor.run(prepared)
             export_oracle(body, prepared, probabilities, worker_response, args.export)
-        lines, ok = compare_case(Path(args.fixture).name, worker_response, reference, args.tolerance)
-        print("\n".join(lines))
+            print(f"oracle exported: {args.export}")
+        elif args.export:
+            print("oracle export skipped: no passing 200-response comparison to freeze")
         print()
         if not ok:
             failed += 1

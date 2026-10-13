@@ -2,8 +2,9 @@
 
 Uses the pinned upstream manifest as a fixture and temp directories with
 recomputed hashes: no weights, no torch, no network. What is under test is
-the worker's own admission — the full-hash gate over the runtime table that
-runs before any package code is imported.
+the worker's own admission — the identity pin that binds the manifest to
+REFERENCE_REVISION, and the full-hash gate over the runtime table that runs
+before any package code is imported.
 """
 
 from __future__ import annotations
@@ -16,8 +17,10 @@ import pytest
 
 from models.d3.engine import (
     MANIFEST_SCHEMA,
+    PINNED_RUNTIME_SHA256,
     REFERENCE_REPO,
     load_manifest,
+    verify_pinned_package,
     verify_runtime_files,
 )
 
@@ -32,10 +35,12 @@ def pinned_manifest():
 
 
 def build_package(root: Path, files: dict[str, bytes]) -> dict:
-    """Materialize a package whose runtime files hash to its own manifest."""
+    """Materialize a same-repo package whose runtime files hash to its own
+    manifest — the shape a later self-consistent snapshot would have."""
 
     manifest = {
         "schema": MANIFEST_SCHEMA,
+        "repo_id": REFERENCE_REPO,
         "runtime": {
             "files_sha256": {
                 name: hashlib.sha256(content).hexdigest() for name, content in files.items()
@@ -63,8 +68,30 @@ def test_the_pinned_manifest_fixture_shape_is_locked():
     # The upstream runtime this worker was integrated against; the repo may
     # have moved since (drift is why the pin and the hashes exist).
     assert manifest["runtime"]["files_sha256"]["d3_runtime.py"] == PINNED_RUNTIME_SHA
+    assert manifest["runtime"]["files_sha256"] == PINNED_RUNTIME_SHA256
     assert len(manifest["files_sha256"]) == 39
     assert len(manifest["runtime"]["files_sha256"]) == 9
+
+
+def test_the_pinned_manifest_passes_the_identity_gate():
+    assert verify_pinned_package(pinned_manifest()) is None
+
+
+def test_self_consistent_but_unpinned_tables_are_refused(tmp_path):
+    # What a later snapshot looks like to the full-hash gate: every file
+    # hashes to the package's own manifest, yet the baseline changed.
+    manifest = build_package(tmp_path, small_files())
+
+    with pytest.raises(ValueError, match="not the table pinned for"):
+        verify_pinned_package(manifest)
+
+
+def test_foreign_repo_ids_are_refused():
+    manifest = pinned_manifest()
+    manifest["repo_id"] = "other/d3"
+
+    with pytest.raises(ValueError, match="this worker only serves"):
+        verify_pinned_package(manifest)
 
 
 def test_verification_accepts_a_package_matching_the_manifest(tmp_path):

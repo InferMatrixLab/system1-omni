@@ -34,7 +34,8 @@ timing), and any native Rust/CUDA executor.
 Rust frontend
   -> Python worker
      -> admit: envelope (protocol), pinned-runtime question errors (preprocess)
-     -> verify: full SHA-256 of the manifest runtime table, then import it (engine)
+     -> verify: manifest identity pin (repo id + runtime digests), full
+        SHA-256 of the manifest runtime table, then import it (engine)
      -> execute: the checkpoint's own d3_runtime prepare/run/respond
      -> finish: response validation + embedded-failure warning (postprocess)
 ~~~
@@ -62,7 +63,7 @@ The ownership boundary follows
 | Package | [vllm-sr/d3](https://huggingface.co/vllm-sr/d3) |
 | Pinned revision | `cbff3a3cb0b074b6585fe9f747b9f9f5557a0e75` |
 | Manifest | `d3-package-manifest/1`, built 2026-10-11T03:30:34Z |
-| Runtime gate | `runtime.files_sha256`, 9 files, full SHA-256 before import |
+| Runtime gate | `repo_id` + `runtime.files_sha256` pinned per revision in `engine.py`, 9 files, full SHA-256 before import |
 | License | Apache-2.0 (package metadata) |
 
 The pinned revision predates later upstream commits (the repository's
@@ -107,8 +108,11 @@ mkdir -p weights
 
 The package is about 52 GB (26.09B BF16 parameters plus the FP32
 (255, 5120) readout). The worker refuses to start when
-`MODEL_MANIFEST.json` is missing or when any of the 9 runtime files fails
-its full-hash check — that gate runs before any package code is imported.
+`MODEL_MANIFEST.json` is missing, when the manifest is not the pinned
+revision's own (a self-consistent manifest from a later snapshot carries a
+different `repo_id` or runtime table), or when any of the 9 runtime files
+fails its full-hash check — that gate runs before any package code is
+imported.
 
 ## Start the worker
 
@@ -219,7 +223,9 @@ two paths that share the loaded pinned model: the upstream
 production `frontend.d3.decide` pipeline. The criteria are exact decision
 agreement including embedded `invalid_model_output` shapes, equal token
 accounting, and a numeric tolerance of 1e-6. `--export` freezes the oracle
-fixture (token ids, probabilities, answers) for the future native worker.
+fixture (token ids, probabilities, answers) for the future native worker,
+and writes it only after a passing, non-rejected comparison — a failed run
+or an agreed 422 never touches the existing fixture.
 
 ~~~sh
 PYTHONPATH=src .venv/bin/python recipe/d3/compare_reference.py \
@@ -238,9 +244,11 @@ stage-3 native worker and is committed with the integration.
 ## Troubleshooting and limits
 
 - The package directory must be the pinned revision's download; the worker
-  refuses missing manifests and any runtime-file hash mismatch at startup.
+  refuses missing manifests, foreign manifests (wrong `repo_id` or runtime
+  table) and any runtime-file hash mismatch at startup.
 - Upstream moved after the manifest was built — do not track `main` of the
-  repository; re-pin deliberately and re-record the revision.
+  repository; re-pin deliberately and re-record the revision and the pinned
+  runtime table (`PINNED_RUNTIME_SHA256`) in `src/models/d3/engine.py`.
 - `images`/`videos` non-empty lists are rejected with 422 in this slice;
   the 8 MiB body cap is slice-scoped and will re-align to the upstream
   per-item budgets when media opens (stage 2).

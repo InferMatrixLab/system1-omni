@@ -3,7 +3,7 @@
 
 Checks the pure comparison and export helpers without the pinned d3 package,
 weights or a GPU: the PASS/FAIL verdicts of compare_case, embedded-error
-shape agreement, and the oracle export structure.
+shape agreement, the oracle export gate, and the oracle export structure.
 
     python recipe/d3/test_compare_reference.py
 """
@@ -207,6 +207,27 @@ def main() -> None:
             and oracle["usage"] == {"input_tokens": 17, "output_tokens": 0},
             json.dumps(oracle)[:200],
         )
+
+    # 7. The oracle is frozen only for a passing, non-rejected comparison.
+    served = worker_response({"q": dict(NOUL)})
+    check(
+        "export allowed for a passing 200 case",
+        tool.export_allowed(True, served, worker_response({"q": dict(NOUL)})),
+    )
+    check(
+        "export refused for a failed comparison",
+        not tool.export_allowed(False, served, worker_response({"q": dict(NOUL)})),
+    )
+    mutual_422 = worker_response({})
+    mutual_422["worker rejected the request"] = {"status": 422, "body": {"detail": "too long"}}
+    check(
+        "export refused for an agreed 422 (nothing to freeze)",
+        not tool.export_allowed(True, mutual_422, ("422", "too long")),
+    )
+    check(
+        "export refused when only the worker rejected",
+        not tool.export_allowed(True, mutual_422, worker_response({"q": dict(NOUL)})),
+    )
 
     failed = 0
     for name, passed, detail in results:
