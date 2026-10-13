@@ -1,0 +1,226 @@
+{
+ "endpoint": "https://openrouter.ai/api/alpha/decisions",
+ "requested_model": "perplexity/pplx-decider-v1.1-27b",
+ "cases": [
+  {
+   "name": "choice with descriptions and a null option",
+   "model": "perplexity/pplx-decider-v1.1-27b-20261006",
+   "answers": {
+    "team": {
+     "type": "choice",
+     "choice": "support",
+     "probabilities": {
+      "billing": 3.427455022049083e-05,
+      "support": 0.9998559049654097,
+      "sales": 0.0001098204843696744
+     },
+     "confidence": 0.9997838574481145
+    }
+   },
+   "input_tokens": 102
+  },
+  {
+   "name": "noul without criteria, default instructions",
+   "status": 400,
+   "error": {
+    "error": {
+     "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"string\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected string, received undefined\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"record\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected record, received undefined\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected array, received undefined\"\n        }\n      ]\n    ],\n    \"path\": [\n      \"questions\",\n      \"duplicate\",\n      \"instructions\"\n    ],\n    \"message\": \"Invalid input\"\n  }\n]",
+     "code": 400
+    }
+   }
+  },
+  {
+   "name": "noul with one side described and an empty side",
+   "model": "perplexity/pplx-decider-v1.1-27b-20261006",
+   "answers": {
+    "paid": {
+     "type": "noul",
+     "noul": 0.9972266681970486
+    }
+   },
+   "input_tokens": 91
+  },
+  {
+   "name": "score with four levels",
+   "model": "perplexity/pplx-decider-v1.1-27b-20261006",
+   "answers": {
+    "urgency": {
+     "type": "score",
+     "score": 2.9604603331315484,
+     "legend": {
+      "0": "not urgent",
+      "1": "within the week",
+      "2": "within the day",
+      "3": "critical, now"
+     },
+     "probabilities": {
+      "0": 0.0004496883757113886,
+      "1": 0.0011780627930387082,
+      "2": 0.03583447615524022,
+      "3": 0.9625377726760097
+     },
+     "confidence": 0.9736402220876988
+    }
+   },
+   "input_tokens": 105
+  },
+  {
+   "name": "score with object levels and an object state",
+   "status": 400,
+   "error": {
+    "error": {
+     "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"string\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected string, received undefined\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"record\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected record, received undefined\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected array, received undefined\"\n        }\n      ]\n    ],\n    \"path\": [\n      \"questions\",\n      \"severity\",\n      \"instructions\"\n    ],\n    \"message\": \"Invalid input\"\n  }\n]",
+     "code": 400
+    }
+   }
+  },
+  {
+   "name": "list state, object instructions, empty instructions",
+   "model": "perplexity/pplx-decider-v1.1-27b-20261006",
+   "answers": {
+    "a": {
+     "type": "choice",
+     "choice": "x",
+     "probabilities": {
+      "x": 0.952123425770238,
+      "y": 0.04787657422976209
+     },
+     "confidence": 0.904246851540476
+    },
+    "b": {
+     "type": "choice",
+     "choice": "only",
+     "probabilities": {
+      "only": 1
+     },
+     "confidence": 1
+    }
+   },
+   "input_tokens": 112
+  },
+  {
+   "name": "thirty options use two-letter codes",
+   "model": "perplexity/pplx-decider-v1.1-27b-20261006",
+   "answers": {
+    "target": {
+     "type": "choice",
+     "choice": "5",
+     "probabilities": {
+      "1": 0.036726341763646454,
+      "2": 0.04630961696163504,
+      "3": 0.04415503402287864,
+      "4": 0.044605998312504905,
+      "5": 0.04992410507646277,
+      "6": 0.032945935216221314,
+      "7": 0.035353009524758505,
+      "8": 0.032075929290094514,
+      "9": 0.04067779504076228,
+      "10": 0.033104576931241136,
+      "11": 0.03210463553827993,
+      "12": 0.0337031105883303,
+      "13": 0.03028387927114841,
+      "14": 0.02497070735119372,
+      "15": 0.037207557946252336,
+      "16": 0.025959881026866864,
+      "17": 0.04118846883686923,
+      "18": 0.037457061896463556,
+      "19": 0.02552669393403547,
+      "20": 0.04123693003810907,
+      "21": 0.043938534057314904,
+      "22": 0.03187488219808175,
+      "23": 0.030334405287798905,
+      "24": 0.03166461489264519,
+      "25": 0.032688487975282114,
+      "26": 0.035256345414866185,
+      "27": 0.020724989859169755,
+      "28": 0.01582715199334038,
+      "29": 0.01170854751248672,
+      "30": 0.02046477224125972
+     },
+     "confidence": 0.01716286732047873
+    }
+   },
+   "input_tokens": 386
+  },
+  {
+   "name": "several questions keep request order",
+   "status": 400,
+   "error": {
+    "error": {
+     "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"string\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected string, received undefined\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"record\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected record, received undefined\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected array, received undefined\"\n        }\n      ]\n    ],\n    \"path\": [\n      \"questions\",\n      \"op\",\n      \"instructions\"\n    ],\n    \"message\": \"Invalid input\"\n  },\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"string\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected string, received undefined\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"record\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected record, received undefined\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected array, received undefined\"\n        }\n      ]\n    ],\n    \"path\": [\n      \"questions\",\n      \"progress\",\n      \"instructions\"\n    ],\n    \"message\": \"Invalid input\"\n  }\n]",
+     "code": 400
+    }
+   }
+  },
+  {
+   "name": "s1a Google Flights step",
+   "model": "perplexity/pplx-decider-v1.1-27b-20261006",
+   "answers": {
+    "operation": {
+     "type": "choice",
+     "choice": "CLICK",
+     "probabilities": {
+      "CLICK": 0.9416887771154567,
+      "TYPE_TEXT": 0.046225770931312214,
+      "PRESS_ENTER": 0.006891026124396615,
+      "SCROLL_DOWN": 0.000497178377162112,
+      "WAIT": 0.004044590172711664,
+      "DONE": 0.0002781389140253985,
+      "BLOCKED": 0.00037451836493538785
+     },
+     "confidence": 0.9319702399680329
+    },
+    "click_target": {
+     "type": "choice",
+     "choice": "12",
+     "probabilities": {
+      "1": 7.181479638403508e-05,
+      "2": 4.267166156713561e-05,
+      "5": 0.00011424038372766881,
+      "6": 0.0005637665619787074,
+      "7": 4.1983144384990754e-05,
+      "8": 4.762751856939374e-05,
+      "9": 3.193080807626171e-05,
+      "10": 3.517655282348414e-05,
+      "11": 0.00011729499333787732,
+      "12": 0.9909070947448657,
+      "13": 0.0002244247823515248,
+      "14": 0.00010858446788102025,
+      "15": 0.006554132851239815,
+      "16": 0.0004550081438882299,
+      "17": 0.0002805002204461252,
+      "18": 5.69126151180511e-05,
+      "19": 3.2627293082721305e-05,
+      "20": 2.585843039294907e-05,
+      "21": 5.56337488460586e-05,
+      "22": 9.134838725658297e-05,
+      "23": 4.77448493995974e-05,
+      "24": 5.063298431765461e-05,
+      "25": 4.2990060064273806e-05
+     },
+     "confidence": 0.9904937808696324
+    },
+    "type_text_target": {
+     "type": "choice",
+     "choice": "15",
+     "probabilities": {
+      "15": 0.9511621486691507,
+      "16": 0.03940232478827664,
+      "17": 0.00928479254253473,
+      "18": 0.00015073400003812293
+     },
+     "confidence": 0.934882864892201
+    },
+    "press_enter_target": {
+     "type": "choice",
+     "choice": "15",
+     "probabilities": {
+      "15": 1
+     },
+     "confidence": 1
+    }
+   },
+   "input_tokens": 1501
+  }
+ ]
+}

@@ -73,6 +73,7 @@ nav:
       - JEV-27B-VL experimental worker: recipe/jev_vl/README.md
       - JEV-27B-VL validation status: recipe/jev_vl/validation.md
       - OmniJev preparation: recipe/omnijev/README.md
+      - pplx-decider preparation: recipe/pplx_decider/README.md
       - CLM stub-encoder contract: recipe/clm/README.md
       - LFM2.5-350M choice worker: recipe/lfm2/README.md
   - Contributing: CONTRIBUTING.md

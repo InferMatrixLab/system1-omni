@@ -1,0 +1,96 @@
+{
+ "state": {
+  "page": {
+   "url": "https://www.google.com/travel/flights?hl=en",
+   "title": "Find Cheap Flights Worldwide & Book Your Ticket - Google Flights"
+  },
+  "elements": [
+   "1 button Main menu",
+   "2 link Google",
+   "3 button Skip to main content (blocked by DIV)",
+   "4 button Accessibility feedback (blocked by Hotels)",
+   "5 link Explore",
+   "6 link Flights",
+   "7 link Hotels",
+   "8 link Vacation rentals",
+   "9 button Change appearance",
+   "10 button Google apps",
+   "11 button Google Account",
+   "12 combobox Change ticket type. Round trip =Round trip",
+   "13 button 1 passenger, change number of passengers",
+   "14 combobox Change seating class. Economy =Economy",
+   "15 combobox Where from? =Munich",
+   "16 combobox Where to?",
+   "17 textbox Departure",
+   "18 textbox Return",
+   "19 button Explore destinations",
+   "20 button Explore deals with AI",
+   "21 button Learn more about this section",
+   "22 tab Munich [S]",
+   "23 tab Frankfurt am Main",
+   "24 tab Berlin",
+   "25 tab Düsseldorf"
+  ]
+ },
+ "questions": {
+  "operation": {
+   "type": "choice",
+   "instructions": "Task: Open https://www.google.com/travel/flights?hl=en and find one-way flights from Zurich to London on October 25, 2026, for one adult in economy. Stop when matching flight options are visible. Which operation comes next?",
+   "criteria": {
+    "CLICK": "Press a control on the page: a button, a link, a menu entry, an autocomplete suggestion or a calendar day.",
+    "TYPE_TEXT": "Type a value into an editable field, replacing what it holds.",
+    "PRESS_ENTER": "Submit a filled field by pressing Enter in it, the way a person submits a search.",
+    "SCROLL_DOWN": "Move the viewport down the page.",
+    "WAIT": "Give the page time to finish updating.",
+    "DONE": "The page shows every requirement of the task met.",
+    "BLOCKED": "None of the offered operations can move the task forward."
+   }
+  },
+  "click_target": {
+   "type": "choice",
+   "instructions": "Task: Open https://www.google.com/travel/flights?hl=en and find one-way flights from Zurich to London on October 25, 2026, for one adult in economy. Stop when matching flight options are visible. Which element should CLICK act on?",
+   "criteria": {
+    "1": "Main menu",
+    "2": "Google",
+    "5": "Explore",
+    "6": "Flights",
+    "7": "Hotels",
+    "8": "Vacation rentals",
+    "9": "Change appearance",
+    "10": "Google apps",
+    "11": "Google Account",
+    "12": "Change ticket type. Round tr = Round trip",
+    "13": "1 passenger, change number o",
+    "14": "Change seating class. Econom = Economy",
+    "15": "Where from? = Munich",
+    "16": "Where to?",
+    "17": "Departure",
+    "18": "Return",
+    "19": "Explore destinations",
+    "20": "Explore deals with AI",
+    "21": "Learn more about this sectio",
+    "22": "Munich",
+    "23": "Frankfurt am Main",
+    "24": "Berlin",
+    "25": "Düsseldorf"
+   }
+  },
+  "type_text_target": {
+   "type": "choice",
+   "instructions": "Task: Open https://www.google.com/travel/flights?hl=en and find one-way flights from Zurich to London on October 25, 2026, for one adult in economy. Stop when matching flight options are visible. Which element should TYPE_TEXT act on?",
+   "criteria": {
+    "15": "Where from? = Munich",
+    "16": "Where to?",
+    "17": "Departure",
+    "18": "Return"
+   }
+  },
+  "press_enter_target": {
+   "type": "choice",
+   "instructions": "Task: Open https://www.google.com/travel/flights?hl=en and find one-way flights from Zurich to London on October 25, 2026, for one adult in economy. Stop when matching flight options are visible. Which element should PRESS_ENTER act on?",
+   "criteria": {
+    "15": "Where from? = Munich"
+   }
+  }
+ }
+}
