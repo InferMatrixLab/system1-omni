@@ -96,6 +96,13 @@ keep-alive pool, so their latency/throughput figures are not directly comparable
 Evidence encoding and sink writes affect client dispatch and complete-wave elapsed
 time, but are outside the recorded exchange latency.
 
+The complete-exchange budget is checked after connection and again after validation
+and close; an over-budget exchange is classified as a timeout even if the watchdog
+fires late. Raw status and body remain available, and timed-out decisions do not
+count as successes. This is not a hard wall-clock return bound: system DNS lookup,
+multiple-address connection attempts, JSON validation and close are not preempted
+by the body-read watchdog. They can finish after the budget and are then rejected.
+
 Round requests/s and decisions/s use actual successful counts
 and whole-round elapsed time; planned, attempted and successful denominators are
 separate. Decisions count elements of `answers`. Successful p50/p95 use nearest

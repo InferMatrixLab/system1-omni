@@ -13,7 +13,7 @@ import unittest
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from benchmarks import serving_matrix
 
@@ -392,6 +392,57 @@ class MatrixTests(unittest.TestCase):
         self.assertEqual(summary["failures"], {"timeout": 1})
         self.assertEqual(records[0]["raw_response_text"], '{"answers":')
         self.assertLess(records[0]["latency_seconds"], 0.15)
+
+    def test_validation_or_close_over_deadline_cannot_succeed(self):
+        raw = json.dumps(EXPECTED).encode()
+        for stage in ("validation", "close"):
+            with self.subTest(stage=stage):
+                clock = {"now": 0.0}
+                response = Mock(status=200, length=0)
+                response.getheaders.return_value = []
+                response.read1.side_effect = [raw, b""]
+                connection = Mock()
+                connection.getresponse.return_value = response
+
+                def match(*args):
+                    if stage == "validation":
+                        clock["now"] = 0.08
+                    return True
+
+                def close():
+                    if stage == "close":
+                        clock["now"] = 0.08
+
+                connection.close.side_effect = close
+                with patch.object(serving_matrix.http.client, "HTTPConnection", return_value=connection), \
+                     patch.object(serving_matrix.threading, "Timer"), \
+                     patch.object(serving_matrix.time, "perf_counter", side_effect=lambda: clock["now"]), \
+                     patch.object(serving_matrix, "matches_json", side_effect=match):
+                    record = serving_matrix.exchange("http://localhost/inference", 0.02,
+                                                    {"request": {}, "expected_response": EXPECTED})
+                self.assertEqual(record["error"]["kind"] if record["error"] else None, "timeout")
+                self.assertEqual(record["successful_decisions"], 0)
+                self.assertEqual(record["status"], 200)
+                self.assertEqual(record["raw_response_text"], raw.decode())
+                self.assertEqual(record["latency_seconds"], 0.08)
+
+    def test_over_deadline_transport_error_is_timeout_without_watchdog_event(self):
+        clock = {"now": 0.0}
+        connection = Mock()
+
+        def fail():
+            clock["now"] = 0.08
+            raise OSError("connection reset after deadline")
+
+        connection.getresponse.side_effect = fail
+        with patch.object(serving_matrix.http.client, "HTTPConnection", return_value=connection), \
+             patch.object(serving_matrix.threading, "Timer"), \
+             patch.object(serving_matrix.time, "perf_counter", side_effect=lambda: clock["now"]):
+            record = serving_matrix.exchange("http://localhost/inference", 0.02,
+                                            {"request": {}, "expected_response": EXPECTED})
+        self.assertEqual(record["error"]["kind"], "timeout")
+        self.assertEqual(record["successful_decisions"], 0)
+        self.assertEqual(record["latency_seconds"], 0.08)
 
     def test_environment_proxy_is_ignored(self):
         proxies = {"HTTP_PROXY": "http://127.0.0.1:1", "http_proxy": "http://127.0.0.1:1", "ALL_PROXY": "http://127.0.0.1:1", "NO_PROXY": "", "no_proxy": ""}

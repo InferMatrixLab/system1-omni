@@ -242,6 +242,10 @@ def exchange(endpoint, timeout, case=None, request_headers=None, ignore_paths=()
             timer.cancel()
         connection.close()
     completed_at = time.perf_counter()
+    # Validation/close and a delayed watchdog can also exhaust the exchange budget.
+    if expired.is_set() or completed_at - started >= timeout:
+        error = {"kind": "timeout", "message": "exchange exceeded deadline"}
+        decisions = 0
     return {
         "endpoint": endpoint, "status": status, "headers": headers,
         "raw_response_base64": base64.b64encode(payload).decode("ascii"),
