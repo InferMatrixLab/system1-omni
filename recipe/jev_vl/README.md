@@ -107,9 +107,11 @@ assets or retained image-prefix state.
 
 Online mode accepts single-frame inline PNG/JPEG data URIs. Each image is bounded
 to 4 MiB of decoded file bytes, 2048 pixels per side, 1,048,576 source pixels,
-and 4608 vision patches. The full HTTP body is limited to 4 MiB, including base64
-and text. Remote URLs, animations and video are unsupported. Oversized inputs
-are rejected; resource limits do not change the model's resize policy.
+and 4608 vision patches. The full HTTP body is limited to 8 MiB, including base64
+and text, so at least one maximum-size image fits; requests beyond the body
+limit are rejected with status 413 in the same error envelope. Remote URLs,
+animations and video are unsupported. Oversized inputs are rejected; resource
+limits do not change the model's resize policy.
 
 No per-request image-count limit applies beyond the body and token budgets.
 A minimum-size image uses 1.5 MiB of FP32 processed pixels and produces

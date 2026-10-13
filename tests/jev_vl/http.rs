@@ -22,21 +22,18 @@ fn online_vision_startup_warmup_is_inline_image_decision() {
     assert_eq!(pixels.image_tokens(), 64);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn unknown_model_chat_probe_returns_canonical_worker_error() {
+/// Raw HTTP/1.0 POST against a bound test router; returns the full response.
+async fn post_raw(app: Router, route: &'static str, body: String) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    // This route needs no model or GPU; exercise the production fallback over HTTP.
-    let app = Router::new().fallback(fallback);
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let response = tokio::task::spawn_blocking(move || {
-        let body = r#"{"model":"no-such-model","messages":[{"role":"user","content":"hi"}],"max_tokens":1}"#;
         let mut stream = TcpStream::connect(address).unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-        stream.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(15))).unwrap();
+        stream.set_write_timeout(Some(Duration::from_secs(15))).unwrap();
         write!(
             stream,
-            "POST /v1/chat/completions HTTP/1.0\r\nHost: {address}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            "POST {route} HTTP/1.0\r\nHost: {address}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
         )
         .unwrap();
@@ -47,7 +44,21 @@ async fn unknown_model_chat_probe_returns_canonical_worker_error() {
     .await
     .unwrap();
     server.abort();
-    let (headers, body) = response.split_once("\r\n\r\n").unwrap();
+    response
+}
+
+fn split_response(response: &str) -> (&str, &str) {
+    response.split_once("\r\n\r\n").unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unknown_model_chat_probe_returns_canonical_worker_error() {
+    // This route needs no model or GPU; exercise the production fallback over HTTP.
+    let app = Router::new().fallback(fallback);
+    let body =
+        r#"{"model":"no-such-model","messages":[{"role":"user","content":"hi"}],"max_tokens":1}"#;
+    let response = post_raw(app, "/v1/chat/completions", body.to_owned()).await;
+    let (headers, body) = split_response(&response);
     assert_eq!(headers.split_whitespace().nth(1), Some("404"));
     assert!(
         headers
@@ -63,4 +74,49 @@ async fn unknown_model_chat_probe_returns_canonical_worker_error() {
             "code": 404
         }})
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn over_limit_body_returns_envelope_413() {
+    // The production body-cap layer and rejection mapping, minus the Engine:
+    // an over-limit body must surface the worker's error envelope, not axum's
+    // plain-text 413.
+    let app = Router::new()
+        .fallback(fallback)
+        .layer(DefaultBodyLimit::max(
+            omni_jev_vl_native::contract::MAX_BODY_BYTES,
+        ));
+    let body = format!(
+        r#"{{"model":"no-such-model","pad":"{}"}}"#,
+        "A".repeat(omni_jev_vl_native::contract::MAX_BODY_BYTES)
+    );
+    let response = post_raw(app, "/v1/systemone", body).await;
+    let (headers, body) = split_response(&response);
+    assert_eq!(headers.split_whitespace().nth(1), Some("413"));
+    let error = serde_json::from_str::<Value>(body).unwrap();
+    let error = error["error"].clone();
+    assert_eq!(error["type"], json!("BadRequestError"));
+    assert_eq!(error["param"], json!("body"));
+    assert_eq!(error["code"], json!(413));
+    assert!(error["message"].as_str().unwrap().contains("8 MiB"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn body_within_transport_limit_reaches_request_validation() {
+    // Bodies above the old 4 MiB layer but within the transport cap must reach
+    // the structured handlers, so the advertised inline-image caps stay usable.
+    let app = Router::new()
+        .fallback(fallback)
+        .layer(DefaultBodyLimit::max(
+            omni_jev_vl_native::contract::MAX_BODY_BYTES,
+        ));
+    let body = format!(
+        r#"{{"model":"no-such-model","pad":"{}"}}"#,
+        "A".repeat(5 << 20)
+    );
+    let response = post_raw(app, "/v1/systemone", body).await;
+    let (headers, body) = split_response(&response);
+    assert_eq!(headers.split_whitespace().nth(1), Some("404"));
+    let error = serde_json::from_str::<Value>(body).unwrap();
+    assert_eq!(error["error"]["code"], json!(404));
 }
