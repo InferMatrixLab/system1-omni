@@ -43,5 +43,8 @@ use model_fixture::fixture_model_at;
 #[path = "model_dispatch.rs"]
 mod dispatch;
 #[cfg(unix)]
+#[path = "model_grouped.rs"]
+mod grouped;
+#[cfg(unix)]
 #[path = "original_encode.rs"]
 mod original_encode;
