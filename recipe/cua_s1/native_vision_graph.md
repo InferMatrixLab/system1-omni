@@ -7,13 +7,13 @@ unset or set it to `0` for eager execution. This switch is independent of
 `CUA_S1_GRAPH`, which controls text and multimodal language execution. Enable
 each switch separately; keep both unset for eager execution.
 
-Both modes retain one scratch allocation for the latest exact `[T,H,W]` patch
-grid. Equal patch counts with different heights or widths replace the scratch
-and Graph. The worker synchronizes, destroys the old executable, and releases
-its buffers before allocating the new shape. Pixel values are uploaded on every
-request, including replay. Geometry tables remain valid only for that exact grid.
-This bounds activation storage to one grid (at most 4608 patches); it does not
-bound loaded weights or the GEMM plan cache.
+Both modes use the shared Qwen vision executor and retain at most four exact
+[T,H,W] scratch/Graph pairs in FIFO order. Equal patch counts with different
+heights or widths remain distinct. Before eviction the worker synchronizes,
+destroys the old executable, and releases its buffers. Pixel values are uploaded
+on every request, including replay; geometry tables belong to their exact grid.
+Each retained grid has at most 4608 patches. This bounds the number of retained
+activations, not their total bytes, loaded weights or the GEMM plan cache.
 
 The first ordinary forward for a grid finishes eagerly, then captures operators
 for subsequent requests and returns the completed eager result. Capture time is
@@ -64,7 +64,8 @@ export CUA_S1_DEVICE_FEATURES=1
 ```
 
 This switch is independent of `CUA_S1_VISION_GRAPH`. Vision can run eagerly or
-replay a Graph, while multimodal language execution remains eager in both modes.
+replay a Graph; the resident-feature language path remains eager in both modes.
+The host-feature language path retains the independent `CUA_S1_GRAPH` control.
 The resident path reuses one vision output across all questions in the request
 and copies contiguous image-placeholder rows directly into language scratch.
 It avoids the full feature download and per-question feature upload. It still
@@ -105,7 +106,7 @@ CUA_S1_VISION_GRAPH=0 cargo test --release --locked -p omni-cua-s1-native \
   --lib device_feature_tests -- --ignored --test-threads=1
 CUA_S1_VISION_GRAPH=1 cargo test --release --locked -p omni-cua-s1-native \
   --lib device_feature_tests -- --ignored --test-threads=1
-cargo test --release --locked -p omni-cua-s1-native --lib device_vision_graph_ \
+cargo test --release --locked -p omni-qwen3-5-native --lib device_vision_graph_ \
   -- --ignored --test-threads=1
 ```
 
@@ -117,7 +118,7 @@ build the wrapper in the next section and run in a separate process:
 
 ```sh
 CUA_S1_CUDA_LIB=/tmp/cua-fail-capture.so CUA_S1_TEST_CAPTURE_FAILURE=1 \
-  cargo test --release --locked -p omni-cua-s1-native \
+  cargo test --release --locked -p omni-qwen3-5-native \
   --lib device_vision_capture_failure_ -- --ignored --test-threads=1
 ```
 
@@ -142,7 +143,7 @@ Export the same `CUA_S1_BASE`, `CUA_S1_VISION_ADAPTER`, `CUA_S1_MODEL`, and
 `CUA_S1_CUDA_LIB` variables for these commands:
 
 ```sh
-cargo test --release --locked -p omni-cua-s1-native --lib vision_graph_ \
+cargo test --release --locked -p omni-qwen3-5-native --lib vision::model::vision_tests::vision_graph_ \
   -- --ignored --test-threads=1 --nocapture
 CUA_S1_GRAPH=0 CUA_S1_VISION_GRAPH=0 cargo run --release --locked -p omni-cua-s1-native \
   --example vision_graph_bench -- /tmp/vision-eager.json
@@ -161,11 +162,11 @@ g++ -std=c++17 -shared -fPIC -Wall -Wextra tests/cua_s1/fail_graph_capture.cpp \
   -Wl,--no-as-needed "$CUA_S1_REAL_CUDA_LIB" -ldl \
   -o /tmp/cua-fail-capture.so
 CUA_S1_CUDA_LIB=/tmp/cua-fail-capture.so CUA_S1_TEST_CAPTURE_FAILURE=1 \
-CUA_S1_GRAPH_TRACE=0 cargo test --release --locked -p omni-cua-s1-native \
-  --lib vision_capture_failure_ -- --ignored --test-threads=1 --nocapture
+CUA_S1_GRAPH_TRACE=0 cargo test --release --locked -p omni-qwen3-5-native \
+  --lib vision::model::vision_tests::vision_capture_failure_ -- --ignored --test-threads=1 --nocapture
 ```
 
-The root GPU tests cover changed pixels, full-grid replacement, retirement,
+The root GPU tests cover changed pixels, exact-grid residency and eviction, retirement,
 trace bypass, invalid input and capture-failure fallback. Ordinary CI compiles
 these tests but skips device execution. Run them explicitly on a reserved GPU.
 
