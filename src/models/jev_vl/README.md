@@ -61,7 +61,7 @@ list parts concatenate without an inserted separator. Each image part inserts
 `<|vision_start|><|image_pad|><|vision_end|>` before image-token expansion.
 
 The default exported limit is 16,384 expanded tokens. Export permits 1–32,768;
-larger limits have not been benchmarked. HTTP bodies are limited to 4 MiB.
+larger limits have not been benchmarked. HTTP bodies are limited to 8 MiB.
 `thinking=auto/on`, tournament and permutation strategies, generation, audio,
 video and dynamic batching are unsupported. Online mode accepts inline PNG/JPEG
 images; prepared mode requires exported image assets. `strategy=auto`
