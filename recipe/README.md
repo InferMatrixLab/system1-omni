@@ -25,6 +25,9 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   regenerate the CPU fixtures; the native worker is not available yet.
 - [CLM behind the frontend](clm/README.md): run CLM's own server behind the frontend on
   CPU with a stub encoder, and what the response comparison has to allow for.
+- [D3 reference worker](d3/reference.md): download the pinned vllm-sr/d3 package,
+  verify its runtime manifest, and serve `choice`/`noul`/`score` text decisions
+  through the Python worker and the Rust frontend (GPU parity pending).
 
 - [LFM2.5-350M choice worker](lfm2/README.md): score text decisions with independent
   questions, hybrid cache branching and configurable candidate batches.
