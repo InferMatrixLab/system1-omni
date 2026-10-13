@@ -161,8 +161,9 @@ worker, or a native Rust/CUDA worker on Hopper. The Cua-S1 4B 0.2 `text` adapter
 runs as a Python worker or as a native worker on CUDA. Open-Jev-27B-v1.1
 and Open-Jev-9B run on the same native Rust/CUDA worker. Cua-S1 also has a
 Python screenshot worker, Valen-Preview-0923 has a Python reference worker for
-text and one-image state, CLM has a stub-encoder contract recipe, and OmniJev-4B
-v1.1 has its checkpoint export and CPU contract, with no worker yet:
+text and one-image state, CLM has a stub-encoder contract recipe, OmniJev-4B
+v1.1 has its checkpoint export and CPU contract, and pplx-decider-v1.1-27b has its
+CPU contract, both with no worker yet:
 
 | Model | Status |
 | --- | --- |
@@ -176,6 +177,7 @@ v1.1 has its checkpoint export and CPU contract, with no worker yet:
 | CLM-v0.1-8B | [External worker with a CPU stub encoder](recipe/clm/README.md); contract checks only, real Qwen3-8B decisions unverified by this recipe |
 | LFM2.5-350M | [Transformers worker](recipe/lfm2/README.md); text state and independent choice questions |
 | OmniJev-4B v1.1 | [Checkpoint export and CPU contract](recipe/omnijev/README.md) only; the native worker is in progress ([#114](https://github.com/ThinkFlowLab/system1-omni/issues/114)) |
+| pplx-decider-v1.1-27b | [CPU contract](recipe/pplx_decider/README.md) only, checked against the checkpoint's own code; no worker yet |
 
 [Supported models and hardware](docs/supported-models.md) lists the devices
 and where each worker has been run.

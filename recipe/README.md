@@ -23,6 +23,8 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   image decisions; bounded H800 validation with explicit deployment limits.
 - [OmniJev-4B v1.1 preparation](omnijev/README.md): export the checkpoint and
   regenerate the CPU fixtures; the native worker is not available yet.
+- [pplx-decider-v1.1-27b preparation](pplx_decider/README.md): regenerate the CPU
+  fixtures from the checkpoint's own code; the native worker is not available yet.
 - [CLM behind the frontend](clm/README.md): run CLM's own server behind the frontend on
   CPU with a stub encoder, and what the response comparison has to allow for.
 

@@ -62,7 +62,8 @@ pub struct Question {
     pub user_text: String,
 }
 
-/// A request that compiles; the error message is the 422 text. Rejects what `server.EvaluationRequest` rejects.
+/// A request that compiles, or a 422 error. Accepts and rejects what `server.EvaluationRequest` accepts and rejects;
+/// the messages are this crate's own, not the checkpoint server's pydantic text.
 pub fn compile(raw: &[u8]) -> Result<Vec<Question>> {
     let body = json::parse(raw).map_err(anyhow::Error::msg)?;
     for key in body.keys() {

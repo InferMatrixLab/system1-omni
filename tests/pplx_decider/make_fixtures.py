@@ -23,6 +23,7 @@ REVISION = "14c9d90137962d300f3de95633f7b6535e80c5ce"
 PINNED = {
     "source/src/autojev/model.py": "02940963e9fba5736b8f625f860812f31de2e6658a49606fbed49fd7215c20f9",
     "tokenizer.json": "6f32ce20dc35f57a7f9ad1eac03525bd7d30f9df8cea6507e958279cc3657706",
+    "source/src/autojev/server.py": "840088936dbcd19c9c1a0503f348fdc3e5aa07b7b58c690eaccc9dda314691c1",
     "chat_template.jinja": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041",
     "decision_config.json": "68d4a4c704a0c42837f749b0287bd80f70d186ed3be4dc6a90802e78223925e8",
 }
@@ -103,7 +104,8 @@ def rejected(name: str, request: dict) -> dict:
     raise AssertionError(f"{name} was accepted")
 
 
-FLIGHTS = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8")) if len(sys.argv) > 3 else None
+# The recorded System1-Agents Flights step; regenerating without it would silently drop that case.
+FLIGHTS = json.loads(Path(sys.argv[3] if len(sys.argv) > 3 else OUT / "flights_step.json").read_text(encoding="utf-8"))
 M_ = "pplx-decider-v1.1-27b"
 CASES = [
     case(
@@ -214,10 +216,9 @@ CASES = [
         },
     ),
 ]
-if FLIGHTS:
-    CASES.append(
-        case("s1a Google Flights step", {"model": M_, "state": FLIGHTS["state"], "questions": FLIGHTS["questions"]})
-    )
+CASES.append(
+    case("s1a Google Flights step", {"model": M_, "state": FLIGHTS["state"], "questions": FLIGHTS["questions"]})
+)
 
 REJECTED = [
     rejected("unknown top-level field", {"model": M_, "state": "s", "questions": {"q": {"type": "noul"}}, "extra": 1}),

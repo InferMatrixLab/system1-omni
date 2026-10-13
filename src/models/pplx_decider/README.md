@@ -5,7 +5,8 @@ First step toward serving [perplexity-ai/pplx-decider-v1.1-27b](https://huggingf
 last position, with noncausal full attention and a fitted temperature. Its own server already speaks
 `/v1/systemone`, so System1-Agents reaches it with no client change.
 
-This crate holds the CPU half: the processor. There is no executor, worker binary or recipe yet.
+This crate holds the CPU half: the processor. There is no executor or worker binary yet; the
+[preparation recipe](../../../recipe/pplx_decider/README.md) regenerates the fixtures.
 
 - [`native/src/contract.rs`](native/src/contract.rs): request validation as the checkpoint's `server.EvaluationRequest`
   does it (unknown fields, 1 to 255 choice options, 2 to 10 score levels, `noul` criteria keyed `true`/`false`
@@ -20,8 +21,9 @@ This crate holds the CPU half: the processor. There is no executor, worker binar
 
 ## Reference
 
-Everything follows `source/src/autojev` at 14c9d901 (`model.py` sha256 `02940963...`), the code the checkpoint
-ships as its evaluated implementation.
+Everything follows `source/src/autojev` at 14c9d901 (`model.py` sha256 `02940963...`, `server.py` sha256
+`84008893...`), the code the checkpoint ships as its evaluated implementation. Requests are accepted and rejected as
+its server's request model does; the error messages are this crate's own.
 
 ## Limits (rejected with an error, not approximated)
 
