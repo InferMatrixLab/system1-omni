@@ -72,7 +72,6 @@ def number(value):
 
 
 WIRE_DECIMALS = 4  # workers round probabilities on the wire to four decimal places
-SCORE_WIRE_DECIMALS = 2
 
 
 def sum_allowance(count):
@@ -83,10 +82,10 @@ def sum_allowance(count):
     return count * 0.5 * 10**-WIRE_DECIMALS + 1e-9
 
 
-def score_allowance(count):
+def score_allowance(count, score_decimals=4):
     """Bound independent rounding of the scalar and its weighted probabilities."""
     return (
-        0.5 * 10**-SCORE_WIRE_DECIMALS
+        0.5 * 10**-score_decimals
         + 0.5 * 10**-WIRE_DECIMALS * count * (count - 1) / 2
         + 1e-9
     )
@@ -110,7 +109,7 @@ def zero_score_fit(answer, probabilities):
     )
 
 
-def read_answers(case, payload):
+def read_answers(case, payload, score_decimals=4):
     """Validate wire results and normalize probabilities by label, never by order."""
     answers = payload["answers"]
     if set(answers) != set(case["request"]["questions"]):
@@ -153,7 +152,10 @@ def read_answers(case, payload):
                 raise ValueError("score must be in the level range")
             expected = math.fsum(int(k) * p for k, p in probabilities.items())
             if not math.isclose(
-                value, expected, rel_tol=0, abs_tol=score_allowance(len(probabilities))
+                value,
+                expected,
+                rel_tol=0,
+                abs_tol=score_allowance(len(probabilities), score_decimals),
             ):
                 raise ValueError("score must equal the expected level")
         normalized[qid] = {"value": value, "probabilities": probabilities}
@@ -207,7 +209,7 @@ def summarize(cases, records, elapsed):
     }
 
 
-async def request_one(client, endpoint, case, model, timeout):
+async def request_one(client, endpoint, case, model, timeout, score_decimals=4):
     started = time.perf_counter()
     record = {
         "id": case["id"],
@@ -225,7 +227,7 @@ async def request_one(client, endpoint, case, model, timeout):
         record["status"] = response.status_code
         record["response"] = response.text
         response.raise_for_status()
-        record["answers"] = read_answers(case, response.json())
+        record["answers"] = read_answers(case, response.json(), score_decimals)
     except httpx.HTTPStatusError as exc:
         record.update(error=str(exc), error_kind=f"http_{record['status']}")
     except (TimeoutError, httpx.TimeoutException) as exc:
@@ -240,13 +242,17 @@ async def request_one(client, endpoint, case, model, timeout):
     return record
 
 
-async def replay(client, endpoint, cases, model, concurrency, timeout):
+async def replay(
+    client, endpoint, cases, model, concurrency, timeout, score_decimals=4
+):
     pending = iter(enumerate(cases))
     records = [None] * len(cases)
 
     async def worker():
         for index, case in pending:
-            records[index] = await request_one(client, endpoint, case, model, timeout)
+            records[index] = await request_one(
+                client, endpoint, case, model, timeout, score_decimals
+            )
 
     started = time.perf_counter()
     await asyncio.gather(*(worker() for _ in range(concurrency)))
@@ -275,6 +281,8 @@ async def run(args, cases):
         {
             "manifest_sha256": digest(args.manifest),
             "runner_sha256": digest(Path(__file__)),
+            "validation_protocol": "probabilities-4dp-model-score-v1",
+            "score_decimals": getattr(args, "score_decimals", 4),
             "metadata": metadata,
             "endpoint": args.endpoint,
             "model": args.model,
@@ -308,6 +316,7 @@ async def run(args, cases):
                     cases[i % len(cases)],
                     args.model,
                     args.timeout,
+                    getattr(args, "score_decimals", 4),
                 )
             )
             if warmup[-1]["error"]:
@@ -315,7 +324,13 @@ async def run(args, cases):
                 raise ValueError("readiness/warmup failed; see warmup.json")
         write_json(args.output / "warmup.json", warmup)
         records, elapsed = await replay(
-            client, args.endpoint, cases, args.model, args.concurrency, args.timeout
+            client,
+            args.endpoint,
+            cases,
+            args.model,
+            args.concurrency,
+            args.timeout,
+            getattr(args, "score_decimals", 4),
         )
     (args.output / "responses.jsonl").write_text(
         "".join(json.dumps(r, allow_nan=False) + "\n" for r in records)
@@ -409,6 +424,7 @@ def main():
         "--model", required=True, help="backend's alias for the pinned checkpoint"
     )
     runner.add_argument("--metadata", type=Path, required=True)
+    runner.add_argument("--score-decimals", type=int, choices=(2, 3, 4), default=4)
     runner.add_argument(
         "--output", type=Path, required=True, help="new directory; never overwritten"
     )
