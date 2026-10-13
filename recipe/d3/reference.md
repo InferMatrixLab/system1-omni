@@ -6,10 +6,8 @@ the existing Rust frontend. The model-side implementation is under
 [`src/frontend/d3.py`](../../src/frontend/d3.py).
 
 Run the commands from the repository root on Linux with an NVIDIA GPU and
-Python 3.12. **No GPU serving run has been recorded for this recipe yet**:
-everything under "Repository-side validation" below was executed on a
-CPU-only host; the worker launch, health check, example request and parity
-blocks describe the procedure and are waiting for an author-side GPU host.
+Python 3.12. The recipe records the procedure; measured results and verbatim
+run output live in the pull request description, not here.
 
 ## Scope
 
@@ -87,13 +85,17 @@ PY
 
 ## Install and prepare the artifacts
 
-The checkpoint carries its own dependency pins in `requirements.txt`
-(torch>=2.8, transformers==5.17.0, flash-linear-attention==0.5.2,
-torchvision). PyTorch wheels must match the host CUDA runtime.
+The environment installs from [`recipe/d3/requirements.txt`](requirements.txt),
+a verbatim copy of the pinned package's own file (SHA-256 `57a19384…be8a32`,
+matching the manifest's `runtime.files_sha256` entry; the worker's startup
+gate re-verifies the package copy against the same digest). PyTorch wheels
+must match the host CUDA runtime; the file's comment records that upstream
+validated with transformers 5.17.0 on ROCm (torch 2.13).
 
 ~~~sh
 python3.12 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r recipe/d3/requirements.txt pytest
 ~~~
 
 ~~~sh
@@ -101,7 +103,6 @@ export D3_PKG="$PWD/weights/d3"
 export D3_REV=cbff3a3cb0b074b6585fe9f747b9f9f5557a0e75
 mkdir -p weights
 .venv/bin/hf download vllm-sr/d3 --revision "$D3_REV" --local-dir "$D3_PKG"
-.venv/bin/python -m pip install -r "$D3_PKG/requirements.txt" pytest
 ~~~
 
 The package is about 52 GB (26.09B BF16 parameters plus the FP32
@@ -197,8 +198,6 @@ keeps its 200 with the failure embedded and a worker warning logged.
 
 ## Repository-side validation
 
-Executed on the integration branch (CPU-only host, Python 3.12):
-
 ~~~sh
 PYTHONPATH=src .venv/bin/python -m pytest tests/d3 -q
 PYTHONPATH=src .venv/bin/python -m compileall -q src/models/d3 src/frontend/d3.py tests/d3
@@ -209,14 +208,8 @@ cargo test --workspace --locked
 cargo build --workspace --release --locked
 ~~~
 
-Recorded results:
-
-~~~text
-pytest tests/d3: 47 passed
-compileall: passed
-compare_reference tests: ok
-cargo gates: see the pull request checks
-~~~
+Run these from the repository root. The recorded outputs of a run belong in
+the pull request description, not in this recipe.
 
 ## Reference parity (author-side, opt-in)
 
@@ -234,11 +227,13 @@ PYTHONPATH=src .venv/bin/python recipe/d3/compare_reference.py \
   --export tests/d3/fixtures/oracle.json
 ~~~
 
-**No GPU parity run is recorded yet.** Record the verbatim output here when
-it runs, with the host and package revision. The flash-linear-attention
+Run it by hand on a GPU host and record the verbatim output, host and
+package revision in the pull request description. The flash-linear-attention
 kernels and the PyTorch reference GDN implementation are not assumed to
 agree numerically; measure the delta on this fixture before freezing any
-tolerance for a native worker.
+tolerance for a native worker. The exported oracle fixture
+(`tests/d3/fixtures/oracle.json`) is the frozen comparison baseline for the
+stage-3 native worker and is committed with the integration.
 
 ## Troubleshooting and limits
 
@@ -249,9 +244,15 @@ tolerance for a native worker.
 - `images`/`videos` non-empty lists are rejected with 422 in this slice;
   the 8 MiB body cap is slice-scoped and will re-align to the upstream
   per-item budgets when media opens (stage 2).
+- `/health` reports the loaded model's modalities even while this slice
+  refuses media; the 422 marks the serving boundary, not the checkpoint's
+  capability.
 - `/health` has no `authentication` field: this worker has no API key
   (a deliberate difference from upstream, which reads `DECISION_API_KEY`).
+- Without optional `causal_conv1d`, the pinned runtime falls back to its
+  PyTorch reference implementation of that op (the runtime prints a notice);
+  correctness is unaffected, only speed.
 - The noncausal full-attention hook inside the pinned runtime is adapted
   from perplexity-ai/pplx-decider-v1.1-27b (Apache-2.0).
-- GPU validation status for the supported-models table stays "unverified"
-  until the author-side run above is recorded.
+- GPU evidence for the supported-models table is recorded in the
+  integration pull request, not in this recipe.

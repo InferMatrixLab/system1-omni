@@ -125,5 +125,6 @@ the noncausal full-attention hook inside the pinned runtime is adapted from
 The current tests are CPU-only and do not require model weights, torch or a
 GPU (`PYTHONPATH=src python -m pytest tests/d3 -q`). The real worker path
 additionally requires the pinned package and a CUDA-capable environment;
-GPU validation is recorded in [recipe/d3/reference.md](../../recipe/d3/reference.md)
-and is not yet run.
+the procedure is [recipe/d3/reference.md](../../recipe/d3/reference.md) and
+measured-run evidence is recorded in the integration pull request, not in
+the recipe.
