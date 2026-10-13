@@ -120,3 +120,46 @@ async fn body_within_transport_limit_reaches_request_validation() {
     let error = serde_json::from_str::<Value>(body).unwrap();
     assert_eq!(error["error"]["code"], json!(404));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn truncated_body_keeps_axums_400_status() {
+    // A truncated upload (declared length never delivered, then EOF) hits
+    // axum's UnknownBodyError, which is 400 — mapping it must not relabel the
+    // client's interrupted delivery as a server fault.
+    let app = Router::new()
+        .fallback(fallback)
+        .layer(DefaultBodyLimit::max(
+            omni_jev_vl_native::contract::MAX_BODY_BYTES,
+        ));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let response = tokio::task::spawn_blocking(move || {
+        let mut stream = TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(15)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(15)))
+            .unwrap();
+        write!(
+            stream,
+            "POST /v1/systemone HTTP/1.0\r\nHost: {address}\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n"
+        )
+        .unwrap();
+        stream.write_all(b"{}").unwrap();
+        stream.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    })
+    .await
+    .unwrap();
+    server.abort();
+    let (headers, body) = split_response(&response);
+    assert_eq!(headers.split_whitespace().nth(1), Some("400"));
+    let error = serde_json::from_str::<Value>(body).unwrap();
+    let error = error["error"].clone();
+    assert_eq!(error["type"], json!("BadRequestError"));
+    assert_eq!(error["code"], json!(400));
+}

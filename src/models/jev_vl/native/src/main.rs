@@ -70,16 +70,17 @@ async fn decide(engine: &Engine, raw: &[u8]) -> Response {
 
 /// Body buffering happens before routing, so transport-level rejections would
 /// bypass the worker's error envelope unless the handlers map them explicitly.
-fn body_bytes(body: Result<Bytes, BytesRejection>) -> Result<Bytes, Response> {
+/// Status codes mirror axum's: 413 over the cap, 400 for other buffer errors.
+fn body_bytes(body: Result<Bytes, BytesRejection>) -> Result<Bytes, Reject> {
     match body {
         Ok(bytes) => Ok(bytes),
         Err(rejection) if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE => {
-            Err(reject(Reject::payload_too_large()))
+            Err(Reject::payload_too_large())
         }
-        Err(rejection) => Err(reject(Reject::internal(format!(
+        Err(rejection) => Err(Reject::bad_request(format!(
             "could not buffer the request body: {}",
             rejection.body_text()
-        )))),
+        ))),
     }
 }
 
@@ -90,7 +91,7 @@ async fn systemone(
 ) -> Response {
     let body = match body_bytes(body) {
         Ok(body) => body,
-        Err(response) => return response,
+        Err(rejection) => return reject(rejection),
     };
     // Upstream pydantic validates the raw body even for a non-JSON content type;
     // mirroring it keeps the wrong-content-type probe's 400 (not 415) semantics.
@@ -117,7 +118,7 @@ async fn systemone(
 async fn fallback(uri: Uri, body: Result<Bytes, BytesRejection>) -> Response {
     let body = match body_bytes(body) {
         Ok(body) => body,
-        Err(response) => return response,
+        Err(rejection) => return reject(rejection),
     };
     let model = serde_json::from_slice::<Value>(&body)
         .ok()

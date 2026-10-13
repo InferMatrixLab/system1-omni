@@ -75,11 +75,6 @@ impl Reject {
             Some("body"),
         )
     }
-
-    /// Unexpected server-side failure (e.g. the body channel broke mid-read).
-    pub fn internal(message: impl Into<String>) -> Self {
-        Self::new(500, message.into(), "InternalServerError", None)
-    }
 }
 
 /// Transport cap for one POST body. It must hold at least one maximum-size
