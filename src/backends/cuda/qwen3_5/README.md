@@ -49,3 +49,24 @@ on this opt-in path. The shared workers' default arithmetic remains unchanged.
 
 The [JEMM numerical record](../../../../docs/benchmarks/jemm-reference-20261011/README.md)
 contains a frozen 1–4-image corpus and reproducible operator/HTTP checks.
+
+## Optional Cua-S1 no-FLA text arithmetic
+
+The unmerged Cua-S1 text export reuses the reference norm, attention and GEMM
+operations without requiring cuDNN. Norm additionally supports hidden size 2560.
+The additive `cs1_gdn_fp32_*` group owns a cuBLAS handle and 32 MiB internal
+workspace; the caller supplies shape-dependent FP32 buffers. It implements
+64-token chunked GDN, FP32 normalization, triangular solves and recurrent state,
+Torch 2.14 cumulative-decay association, and a final BF16 output cast. Each call
+starts with zero state; prefix continuation is rejected by the model adapter.
+The context drains its last stream before destruction, and is retired before
+that stream. Rebuild the library for this optional group; ABI remains 6 on this #118-based branch; the historical cumulative validation
+build used ABI 8.
+Builds now link both cuBLAS and cuBLASLt.
+
+`tests/qwen3_5/test_gdn_fp32.py` compares against the pinned Transformers 5.17
+no-FLA implementation. On the cumulative A800 sm_80/CUDA 13.0/Torch 2.14 build, all 14 cases passed
+with identical BF16 outputs, covering chunk boundaries, grouped heads,
+changed-input replay/state reset, invalid dimensions/scales and context scratch
+release. The fixed relative-L2 gate is 1e-4. This does not qualify other GPUs or
+Torch versions; the original approximate GDN entry points remain available.
