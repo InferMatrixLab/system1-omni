@@ -157,3 +157,39 @@ def test_unsafe_runtime_names_are_rejected_before_any_file_access(tmp_path):
     }
     with pytest.raises(ValueError, match="unsafe runtime file name"):
         verify_runtime_files(tmp_path, manifest)
+
+
+def test_extra_importable_files_in_the_package_root_are_refused(tmp_path):
+    # The package root goes first on sys.path, so an unlisted module there
+    # executes in place of the installed dependency it shadows.
+    build_package(tmp_path, small_files())
+    (tmp_path / "transformers.py").write_text("shadowing module\n")
+
+    with pytest.raises(ValueError, match="unexpected importable file transformers.py"):
+        verify_runtime_files(tmp_path, load_manifest(tmp_path))
+
+
+def test_extra_package_directories_in_the_package_root_are_refused(tmp_path):
+    build_package(tmp_path, small_files())
+    fla = tmp_path / "fla"
+    fla.mkdir()
+    (fla / "__init__.py").write_text("shadowing package\n")
+
+    with pytest.raises(ValueError, match="unexpected importable package fla"):
+        verify_runtime_files(tmp_path, load_manifest(tmp_path))
+
+
+def test_unimportable_package_root_entries_still_pass(tmp_path):
+    # The pinned package's own layout shape: an assets/ directory without
+    # __init__.py, plain data files, and the __pycache__ Python writes next
+    # to the imported runtime — none of it can shadow an import.
+    manifest = build_package(tmp_path, small_files())
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "banner.png").write_bytes(b"not a python package\n")
+    (tmp_path / "LICENSE").write_text("Apache-2.0\n")
+    pycache = tmp_path / "__pycache__"
+    pycache.mkdir()
+    (pycache / "d3_runtime.cpython-312.pyc").write_bytes(b"bytecode\n")
+
+    assert verify_runtime_files(tmp_path, manifest) == ["d3_runtime.py", "requirements.txt"]

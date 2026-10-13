@@ -25,7 +25,11 @@ The checkpoint ships its runtime as flat Python files next to the weights
 This worker additionally hashes every file of
 `runtime.files_sha256` (8 runtime modules plus `requirements.txt`) in full
 **before importing anything** from the package directory, and refuses to
-serve packages without a manifest. Because hash agreement with a manifest
+serve packages without a manifest. It also rejects importable entries the
+runtime table does not name — an extra `*.py` file or `__init__.py` package
+in the package root — because that root is placed first on `sys.path`, where
+such an entry would shadow a dependency of the pinned runtime. Because hash
+agreement with a manifest
 proves only internal consistency — a later snapshot ships a self-consistent
 table of its own — the gate first requires the manifest to carry exactly
 the `repo_id` and `runtime.files_sha256` table checked in for the pinned
@@ -60,12 +64,12 @@ upstream `verify` mechanism (`fast` default, `full` via CLI).
 Each answer is built by the pinned runtime from per-option probabilities
 (mirrored as pure functions in `postprocess.py` for the CPU contract tests):
 
-- `choice`: `{"type", "choice", "choice", "probabilities", "confidence"}` —
+- `choice`: `{"type", "choice", "probabilities", "confidence"}` —
   ties go to the earliest option in request order; `probabilities` are
   renormalized per option.
 - `noul`: `{"type": "noul", "noul": p_true}` — the renormalized probability
   of `true`; no probabilities or confidence.
-- `score`: `{"type", "score", "score", "probabilities", "confidence",
+- `score`: `{"type", "score", "probabilities", "confidence",
   "legend"}` — `score` is the 0-based expectation over the renormalized
   level distribution, the answer keys are the stringified level indices, and
   `legend` maps each key to its canonical level text.
@@ -113,8 +117,9 @@ after loading and warmup; the upstream `authentication` field is dropped
   slice-scoped media rejection, question-ID admission.
 - `preprocess.py` owns the mapping of the pinned runtime's per-question
   preparation errors to the two pre-execution 422 shapes.
-- `engine.py` owns the pinned runtime, the identity pin and full-hash
-  manifest gate that precede its import, device state, and warmup.
+- `engine.py` owns the pinned runtime, the identity pin and the pre-import
+  manifest gate (full runtime hashes, no unlisted importables), device
+  state, and warmup.
 - `postprocess.py` owns the pure answer formulas, response finishing, and
   the embedded-failure warning.
 - `src/frontend/d3.py` owns HTTP lifecycle and orchestration.

@@ -63,7 +63,7 @@ The ownership boundary follows
 | Package | [vllm-sr/d3](https://huggingface.co/vllm-sr/d3) |
 | Pinned revision | `cbff3a3cb0b074b6585fe9f747b9f9f5557a0e75` |
 | Manifest | `d3-package-manifest/1`, built 2026-10-11T03:30:34Z |
-| Runtime gate | `repo_id` + `runtime.files_sha256` pinned per revision in `engine.py`, 9 files, full SHA-256 before import |
+| Runtime gate | `repo_id` + `runtime.files_sha256` pinned per revision in `engine.py`, 9 files, full SHA-256 before import, no unlisted importables in the package root |
 | License | Apache-2.0 (package metadata) |
 
 The pinned revision predates later upstream commits (the repository's
@@ -110,9 +110,11 @@ The package is about 52 GB (26.09B BF16 parameters plus the FP32
 (255, 5120) readout). The worker refuses to start when
 `MODEL_MANIFEST.json` is missing, when the manifest is not the pinned
 revision's own (a self-consistent manifest from a later snapshot carries a
-different `repo_id` or runtime table), or when any of the 9 runtime files
-fails its full-hash check — that gate runs before any package code is
-imported.
+different `repo_id` or runtime table), when any of the 9 runtime files
+fails its full-hash check, or when the package root holds an importable
+entry the runtime table does not name (an extra `*.py` file or
+`__init__.py` package, which the `sys.path` setup would let shadow a
+dependency) — that gate runs before any package code is imported.
 
 ## Start the worker
 

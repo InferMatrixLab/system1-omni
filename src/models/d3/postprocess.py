@@ -67,7 +67,7 @@ def renormalized(probabilities: Sequence[float]) -> list[float]:
 
 
 def choice_answer(keys: Sequence[str], probabilities: Sequence[float]) -> dict[str, Any]:
-    """``{"type", "choice", "choice", "probabilities", "confidence"}``.
+    """``{"type", "choice", "probabilities", "confidence"}``.
 
     Ties go to the earliest option in order (upstream's max over indices).
     """
@@ -94,7 +94,7 @@ def noul_answer(probabilities: Sequence[float]) -> dict[str, Any]:
 
 
 def score_answer(levels: Sequence[Any], probabilities: Sequence[float]) -> dict[str, Any]:
-    """``{"type", "score", "score", "probabilities", "confidence", "legend"}``.
+    """``{"type", "score", "probabilities", "confidence", "legend"}``.
 
     The answer keys are the stringified level indices; ``score`` is the
     0-based expectation and ``legend`` maps each key to its canonical level.

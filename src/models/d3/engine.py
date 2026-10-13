@@ -10,10 +10,14 @@ weights. Those files are the code this process executes, so — stronger than
 the upstream default, whose ``verify_package`` walks only the 39-entry
 ``files_sha256`` table and skips hashing files over 64 MiB in fast mode — the
 executor hashes every file of the manifest's ``runtime.files_sha256`` table
-in full before importing anything from the package directory. Hash agreement
-proves only internal consistency — a later snapshot ships a self-consistent
-table of its own — so the gate first requires the manifest to carry exactly
-the repo id and runtime digests checked in for ``REFERENCE_REVISION``.
+in full before importing anything from the package directory, and refuses
+unlisted importable entries (an extra ``*.py`` file or ``__init__.py``
+package) in the package root: that root goes first on ``sys.path``, so such
+an entry would shadow a dependency the pinned runtime imports. Hash
+agreement proves only internal consistency — a later snapshot ships a
+self-consistent table of its own — so the gate first requires the manifest
+to carry exactly the repo id and runtime digests checked in for
+``REFERENCE_REVISION``.
 """
 
 from __future__ import annotations
@@ -99,7 +103,10 @@ def verify_runtime_files(root: Path, manifest: dict[str, Any]) -> list[str]:
 
     Must run before any package code is imported: the runtime table names the
     files this process is about to execute, so unlike the upstream shard
-    verification there is no size shortcut.
+    verification there is no size shortcut. It also refuses importable
+    entries the table does not name — the package root is about to go first
+    on ``sys.path``, where an extra ``*.py`` file or ``__init__.py`` package
+    would shadow one of the pinned runtime's dependencies.
     """
 
     table = (manifest.get("runtime") or {}).get("files_sha256")
@@ -115,6 +122,13 @@ def verify_runtime_files(root: Path, manifest: dict[str, Any]) -> list[str]:
             continue
         if _sha256_safe(target) != digest:
             problems.append(f"{name}: runtime SHA-256 differs from {MANIFEST_NAME}")
+    for entry in sorted(Path(root).iterdir()):
+        if entry.name in table:
+            continue
+        if entry.is_file() and entry.suffix == ".py":
+            problems.append(f"unexpected importable file {entry.name} in the package root")
+        elif entry.is_dir() and (entry / "__init__.py").is_file():
+            problems.append(f"unexpected importable package {entry.name}/ in the package root")
     if problems:
         raise ValueError("runtime verification failed: " + "; ".join(problems[:8]))
     return sorted(table)
