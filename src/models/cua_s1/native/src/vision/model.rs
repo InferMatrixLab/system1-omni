@@ -12,9 +12,8 @@ impl VisionModel {
         // Serialize the parsed struct instead of re-listing its fields: a member
         // added to VisionConfig can no longer be silently dropped from the
         // shared model configuration.
-        let config = omni_qwen3_5_native::vision::VisionConfig::from_value(
-            serde_json::to_value(c)?,
-        )?;
+        let config =
+            omni_qwen3_5_native::vision::VisionConfig::from_value(serde_json::to_value(c)?)?;
         let base = checkpoint
             .base_names()
             .map(|n| Ok((n.to_owned(), checkpoint.base_tensor(n)?)))
