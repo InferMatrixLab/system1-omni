@@ -101,7 +101,7 @@ Pillow: 12.3.0
 av: 16.1.0
 GPU capability: sm_120
 dtype: bfloat16
-system1-omni: 2fd8ce9 (GPU serving and smoke records); parity blocks re-verified verbatim at c9fb2d2; noul/score records collected on the same host from the spec-01 working tree (branch model/valen-reference-serving, uncommitted)
+system1-omni: serving and smoke records collected during the reference slice (upstream #115); all four parity blocks and the frontend byte-identity re-verified verbatim at 3afa240 on the same host
 ~~~
 
 FP32 and BF16 small-operator checks passed. Startup memory was approximately
@@ -363,8 +363,8 @@ cmp /tmp/valen-worker.json /tmp/valen-frontend.json
 The validated runs returned 200 from both endpoints with matching JSON content
 types and byte-identical response bodies, for the image fixture above and for
 the text-only example. The noul and score fixtures were re-checked the same
-way on the same host from the spec-01 working tree: byte-identical through
-the frontend for all three fixtures.
+way on the same host at 3afa240: byte-identical through the frontend for all
+three fixtures.
 
 ## Error behavior
 
