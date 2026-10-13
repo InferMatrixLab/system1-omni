@@ -4,6 +4,17 @@ Review the [README](README.md) and
 [architecture and integration contracts](docs/architecture.md) for the project's
 ownership boundaries and current implementation status before making changes.
 
+## Before implementation or a PR
+
+Complete the [human contributor-intent gate](.agents/skills/self-review/SKILL.md#human-contributor-intent-gate)
+before implementation and before submitting a PR, including a draft. It records
+the human's outcome, highest-leverage variable, why the work moves it, customer
+and actual need, then whether a PR is needed at all. Reuse explicit traceable
+answers and ask only what is missing; wait rather than filling in answers for the
+contributor. Bug fixes need linked observed failure evidence. Keep private source
+material private. This contributor gate does not block independent read-only
+reviews or change automated review selection.
+
 ## Adding a model
 
 Keep model-specific preprocessing, execution and response formatting under
@@ -76,9 +87,9 @@ The Rust checks used by [CI](.github/workflows/ci.yml) are:
 
 ```sh
 cargo fmt --all --check
-cargo clippy --workspace --locked --all-targets -- -D warnings
-cargo test --workspace --locked
-cargo build --workspace --release --locked
+cargo clippy --workspace --locked --all-targets --features omni-laya/serve -- -D warnings
+cargo test --workspace --locked --features omni-laya/serve
+cargo build --workspace --release --locked --features omni-laya/serve
 ```
 
 For an agent-assisted self-review, use the repository's
