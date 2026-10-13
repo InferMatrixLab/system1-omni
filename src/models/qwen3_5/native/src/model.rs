@@ -764,8 +764,8 @@ impl Model {
             scratch: None,
             graph_enabled: std::env::var("CUA_S1_GRAPH").as_deref() == Ok("1"),
             graphs: VecDeque::new(),
-            mm_graphs: VecDeque::new(),
             _lora_stream: stream_owner,
+            mm_graphs: VecDeque::new(),
         };
         Ok(model)
     }
@@ -1934,3 +1934,6 @@ impl Model {
         Ok(())
     }
 }
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/multimodal_graph.rs"]
+mod graph_tests;
