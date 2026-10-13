@@ -260,7 +260,7 @@ async def request_one(client, endpoint, case, model, timeout):
         )
     except httpx.RequestError as exc:
         record.update(error=str(exc), error_kind="transport")
-    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+    except (ValueError, KeyError, TypeError, AttributeError, RecursionError) as exc:
         record.update(error=str(exc), error_kind="invalid_response")
     except asyncio.CancelledError:
         record.update(
@@ -548,7 +548,7 @@ def summarize_saved(path):
         elif (
             not isinstance(status, int)
             or isinstance(status, bool)
-            or not 100 <= status <= 599
+            or not 100 <= status <= 999
         ):
             raise ValueError("invalid HTTP status")
         elif not 200 <= status < 300:
@@ -558,7 +558,7 @@ def summarize_saved(path):
                 answers = read_answers(
                     by_id[record["id"]], json.loads(record["response"])
                 )
-            except (ValueError, KeyError, TypeError, AttributeError):
+            except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
                 error_kind = "invalid_response"
         if (
             record["answers"] != answers

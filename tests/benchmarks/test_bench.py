@@ -495,6 +495,92 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
             expected["stop_reason"] = "completed"
             self.assertEqual(summary, expected)
 
+    async def test_run_saves_deep_json_and_nonstandard_http_failures(self):
+        nested = "[" * 10000 + "0" + "]" * 10000
+        with self.assertRaises(RecursionError):
+            json.loads(nested)
+        for status, body, error_kind in (
+            (200, nested, "invalid_response"),
+            (600, "busy", "http_600"),
+            (999, "busy", "http_999"),
+        ):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                args = run_args(Path(directory))
+                replies = iter([
+                    httpx.Response(200, json=response_for(CASES[0])),
+                    httpx.Response(status, text=body),
+                    *(httpx.Response(200, json=response_for(case)) for case in CASES[1:]),
+                ])
+                calls = []
+
+                def handler(request):
+                    payload = json.loads(request.content)
+                    payload.pop("model")
+                    calls.append(payload)
+                    return next(replies)
+
+                client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+                with (
+                    patch.object(bench.httpx, "AsyncClient", return_value=client),
+                    redirect_stdout(io.StringIO()),
+                ):
+                    self.assertEqual(await bench.run(args, CASES), 1)
+                self.assertEqual(calls, [CASES[0]["request"], *(c["request"] for c in CASES)])
+                warmup = json.loads((args.output / "warmup.json").read_text())
+                self.assertEqual(len(warmup), 1)
+                self.assertIsNone(warmup[0]["error"])
+                records = [
+                    json.loads(line)
+                    for line in (args.output / "responses.jsonl").read_text().splitlines()
+                ]
+                self.assertEqual([r["id"] for r in records], [c["id"] for c in CASES])
+                failed = records[0]
+                self.assertEqual(failed["status"], status)
+                self.assertEqual(failed["response"], body)
+                self.assertEqual(failed["response_sha256"], bench.response_digest(body))
+                self.assertEqual(failed["error_kind"], error_kind)
+                self.assertTrue(failed["error"])
+                self.assertEqual(failed["answers"], {})
+                self.assertEqual(failed["state"], "completed")
+                self.assertIsNotNone(failed["latency_ms"])
+                self.assertTrue(all(r["error"] is None for r in records[1:]))
+                state = json.loads((args.output / "completion.json").read_text())
+                self.assertEqual(state["active_ids"], [])
+                self.assertEqual(state["attempted_ids"], [c["id"] for c in CASES])
+                self.assertEqual(state["completed_ids"], state["attempted_ids"])
+                self.assertEqual(state["responses_sha256"], bench.digest(args.output / "responses.jsonl"))
+                summary = json.loads((args.output / "summary.json").read_text())
+                for field, count in (
+                    ("requests", 4), ("planned_requests", 4), ("attempted_requests", 4),
+                    ("completed_requests", 4), ("successful_requests", 3), ("failed_requests", 1),
+                    ("unattempted_requests", 0), ("incomplete_requests", 0),
+                    ("planned_decisions", 6), ("attempted_decisions", 6),
+                    ("completed_decisions", 6), ("successful_decisions", 5), ("failed_decisions", 1),
+                    ("unattempted_decisions", 0), ("incomplete_decisions", 0),
+                ):
+                    self.assertEqual(summary[field], count)
+                self.assertEqual(summary["errors"], {error_kind: 1})
+                self.assertEqual(summary["stop_reason"], "completed")
+                self.assertTrue(summary["evidence_complete"])
+                self.assertEqual(summary, bench.summarize_saved(args.output))
+                output = io.StringIO()
+                with (
+                    patch("sys.argv", ["bench.py", "summary", str(args.output)]),
+                    redirect_stdout(output),
+                ):
+                    self.assertEqual(bench.main(), 0)
+                self.assertEqual(json.loads(output.getvalue()), summary)
+
+    async def test_saved_invalid_http_status_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "run"
+            records, _ = await self.collect(path)
+            for status in (True, "200", 99, 1000):
+                with self.subTest(status=status):
+                    self.replace_records(path, [{**records[0], "status": status}, *records[1:]])
+                    with self.assertRaisesRegex(ValueError, "invalid HTTP status"):
+                        bench.summarize_saved(path)
+
     async def test_out_of_order_records_recompute_by_frozen_id(self):
         release = asyncio.Event()
         later_completed = asyncio.Event()
