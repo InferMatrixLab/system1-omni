@@ -72,7 +72,7 @@ def answer(
     """Match Valen's pinned decoding and confidence formulas per type."""
 
     if len(logits) != len(question.keys):
-        raise ValueError("model returned one logit per candidate")
+        raise ValueError("model must return one logit per candidate")
     probabilities = _probabilities(logits, temperature)
     if question.kind == "noul":
         return _noul_answer(question, probabilities)
