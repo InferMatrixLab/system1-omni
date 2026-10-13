@@ -76,7 +76,7 @@ fn body_bytes(body: Result<Bytes, BytesRejection>) -> Result<Bytes, Response> {
         Err(rejection) if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE => {
             Err(reject(Reject::payload_too_large()))
         }
-        Err(rejection) => Err(reject(Reject::bad_request(format!(
+        Err(rejection) => Err(reject(Reject::internal(format!(
             "could not buffer the request body: {}",
             rejection.body_text()
         )))),
