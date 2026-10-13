@@ -816,4 +816,4 @@ impl Work {
 
 #[cfg(test)]
 #[path = "../../../../../../tests/qwen3_5/vision_graph.rs"]
-mod vision_graph_tests;
+mod vision_tests;
