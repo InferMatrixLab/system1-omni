@@ -32,9 +32,6 @@ fn bytes32(v: &[f32]) -> Vec<u8> {
 fn i32bytes(v: &[i32]) -> Vec<u8> {
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
-fn i64bytes(v: &[i64]) -> Vec<u8> {
-    v.iter().flat_map(|x| x.to_le_bytes()).collect()
-}
 fn decode_bf16(v: &[u8]) -> Vec<f32> {
     v.as_chunks::<2>()
         .0
@@ -120,6 +117,7 @@ struct Workspace {
     ids: Buffer,
     lens: Buffer,
     types: Buffer,
+    staging: Vec<u8>,
     x: Buffer,
     y: Buffer,
     qkv: Buffer,
@@ -150,6 +148,7 @@ impl Workspace {
             ids: alloc(m * 8)?,
             lens: alloc(b * 4)?,
             types: alloc(b * 8)?,
+            staging: vec![0; m * 8 + b * 12],
             x: alloc(m * D * 4)?,
             y: alloc(m * D * 2)?,
             qkv: alloc(m * D * 6)?,
@@ -644,9 +643,19 @@ impl Model {
         } else {
             Workspace::new(&self.cuda, batch.b, batch.l)?
         };
-        s.ids.write(&i64bytes(&batch.input_ids))?;
-        s.lens.write(&i32bytes(&batch.lens))?;
-        s.types.write(&i64bytes(&batch.qtypes))?;
+        let (ids, rest) = s.staging.split_at_mut(batch.input_ids.len() * 8);
+        let (lens, types) = rest.split_at_mut(batch.lens.len() * 4);
+        for (bytes, value) in ids.as_chunks_mut::<8>().0.iter_mut().zip(&batch.input_ids) {
+            bytes.copy_from_slice(&value.to_le_bytes());
+        }
+        for (bytes, value) in lens.as_chunks_mut::<4>().0.iter_mut().zip(&batch.lens) {
+            bytes.copy_from_slice(&value.to_le_bytes());
+        }
+        for (bytes, value) in types.as_chunks_mut::<8>().0.iter_mut().zip(&batch.qtypes) {
+            bytes.copy_from_slice(&value.to_le_bytes());
+        }
+        self.cuda
+            .write_many(&[(&s.ids, ids), (&s.lens, lens), (&s.types, types)])?;
         if self.graphs {
             if s.graph.is_none() {
                 self.encode(&s)?;
