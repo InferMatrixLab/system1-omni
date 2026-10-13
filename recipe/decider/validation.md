@@ -1,8 +1,10 @@
 # Decider-2B v11 validation on RTX 4090
 
-Validation date: 2026-10-07. This records one BF16 CUDA device and a frozen synthetic
-contract corpus. It does not establish task quality, every supported GPU, performance
-improvement or universal bit-identical agreement with Transformers.
+Historical validation date: 2026-10-07. The original sections retain their own
+source, environment and ABI scope. The [2026-10-13 qualification](#current-qualification-on-2026-10-13)
+below covers the repaired standalone ABI 7 branch with a new frozen synthetic
+corpus. Neither campaign establishes task quality, every supported GPU or
+universal bit-identical agreement with Transformers.
 
 ## Controls and fidelity gates
 
@@ -216,8 +218,10 @@ executor implementation from Qwen PRs #98/#99 while preserving main's packed
 prefill and Decider Graph statistics. The duplicate private continuation path and
 its additional ABI8 entry points have been removed. Both workers use public
 `PrefixState` and the same `run_window` implementation. The consolidated head
-requires ABI7; current-head GPU/reference/HTTP/performance validation is unverified.
-Rebuild all current-branch consumers with ABI7. The unchanged default GEMM handle serves the
+requires ABI7. At the time of this historical consolidation, current-head
+GPU/reference/HTTP/performance validation was unverified. The dated qualification
+below records the later selected device checks; broader HTTP and performance
+coverage remains outside that campaign. Rebuild all current-branch consumers with ABI7. The unchanged default GEMM handle serves the
 normal/Graph path; fixed/shared modes use a separate no-split-K handle selected
 at reference M64. Model tests compare shared branches bit for bit with independent
 `forward_fixed` rows, including prefixes around 64-token boundaries, growth,
@@ -251,7 +255,7 @@ two repetitions per mode. This corpus is independent of the original 18-case run
 it resolves long-prefix reuse performance and does not replace broader fidelity
 checks. The fixed/shared exact-logit gate also applies to measured repetitions.
 
-## Followup measurements (diagnostic roundtrip)
+## Historical followup measurements (diagnostic roundtrip)
 
 The final bounded-row campaign measured `mixed` at 25.69 ms for single rows and
 15.75 ms for 4-row packing; `score_10` at 51.03→29.44 ms. Independent Graph4 measured
@@ -280,3 +284,89 @@ launch overhead, so all optimizations remain opt-in. Shared and Graph are tested
 as separate modes, not combined. End-of-mode whole-device memory samples for the
 long corpus were 4626 MiB eager4, 4658 MiB fixed4 and 4746 MiB shared4; peak memory
 and sustained throughput were not measured.
+
+
+## Current qualification on 2026-10-13
+
+The repaired standalone branch was executed from committed source
+`4c7d437023c47c777afc7b82e6cb95a399468785`, exported to an isolated server checkout.
+The later documentation-only qualification note does not change runtime, CUDA,
+test or build inputs. Current main and the independent Decider batching/Graph
+branches (#111/#112) use ABI **6**. This complete shared-prefix branch (#113) uses
+ABI **7**, including `cs1_gemm_create_fixed`. Combining it with #135's ABI **8**
+changes requires a separate cumulative rebuild and validation; the results here
+qualify the standalone ABI 7 implementation. Rebuild each library and all its
+consumers together rather than using a library from another ABI.
+
+The run used one NVIDIA GeForce RTX 4090 (sm_89), CUDA toolkit 13.0.88,
+Rust 1.98.0, Python 3.12.3, Torch 2.12.1+cu130 and Transformers 5.17.0.
+Checkpoint/tokenizer/calibration remained fixed at Mapika/decider-2b
+`533964dae8be954c5b5e19fa4948e48408094c1e`; the author reference was
+`50d0be0d7cb43d2066965ce5fa7f3fe4e489a60f`. All five model files and five imported
+reference files were hash-verified before execution. Optional FLA, causal-conv1d
+and flash-attention packages were absent, so the reference used the documented
+Transformers fallbacks. The existing Python environment was unchanged. This
+Torch version differs from the historical 2.14.0 campaign above.
+
+The predeclared corpus had **five requests, 20 independent rows and 18,394
+processed tokens**, with a longest reference-compared row of **3,541 tokens**:
+short mixed Choice/Score/Noul, long shared mixed, reordered short questions,
+earlier short input after long shared work, and empty questions. The original
+probability/per-level-fit gate (0.02), Score gate (0.1), Choice margin gate (0.05),
+exact prepared-row/usage/identity checks and version 2 typed-schema/formula/rounding
+checks were fixed before device execution and were not relaxed.
+
+| Mode | Requests passed | Maximum probability/per-level-fit drift | Maximum Score drift |
+| --- | ---: | ---: | ---: |
+| Independent eager | 5 | 0.0119 | 0.01 |
+| Request-local packed4 | 5 | 0.0120 | 0.01 |
+| Graph with packed4 | 5 | 0.0120 | 0.01 |
+| Independent fixed-GEMM control with packed4 | 5 | 0.0119 | 0.01 |
+| Shared prefixes with packed4 | 5 | 0.0119 | 0.01 |
+
+There were no Choice disagreements in this corpus. Fixed/shared raw logits and
+complete responses were equal for every stored parity, warmup and repeated
+record. Actual Graph capture/replay and actual request-local prefix savings were
+required and observed. Native/reference parity passed all five requests; raw
+responses were independently recomputed on both local and server CPU with the
+unchanged comparator.
+
+Four real projection-failure retirement checks passed. Each isolated worker
+completed genuine warmup, failed its second projection, returned HTTP 503,
+reported unavailable health, refused two later requests and retired its model
+allocation. The per-process residency samples were 4,192 to 394 MiB for eager
+and packed execution, 4,196 to 402 MiB for Graph, and 4,224 to 394 MiB for shared
+prefixes. These are before/after lifecycle samples, not peak-memory measurements.
+The capture-failure wrapper also passed all five requests with one failed
+capture, zero captures/replays, permanent eager fallback and preserved fidelity.
+
+Seven selected real-GPU regressions passed: two BF16 projection microtests,
+complete eager requests, packed mixed rows, forced shared-prefix request
+isolation, ordered Graph shapes/current IDs/scratch growth/cache eviction, and
+fixed-GEMM row independence. Two CPU tokenizer/response fixtures passed separately
+without tensor loading. This campaign did not run the 36,864-token limit,
+auto-prefix policy, full frontend HTTP/parity suite, task-quality datasets,
+other GPUs or the cumulative ABI 8 integration.
+
+Only **two warmed diagnostic roundtrip samples per mode** were recorded for the
+short mixed request. Their raw values are retained as descriptive diagnostics;
+they do not establish a model speedup, HTTP latency, sustained throughput or a
+performance improvement. Startup is separate from those samples.
+
+Reproduction uses the download/build commands in [README.md](README.md), the
+pinned author reference, and the maintained helpers `verify_reference.py`,
+`verify_modes.py`, `verify_retirement.py` and `verify_graph_fallback.py` under
+`tests/decider/`. The maintained workload sources are `workloads()` in
+`verify_reference.py` and the first case of `tests/decider/data/prefix-workloads.json`;
+the frozen five-case ordering, mode settings, full raw results and a 31-path
+pre-GPU inventory are preserved in the maintenance evidence archive. Generated
+run output is not committed as source. Publication of a reviewer-accessible fresh
+archive remains a separate maintenance step; historical links retain only their
+original provenance.
+
+Provenance SHA-256 values:
+
+- Committed source archive: `4835e763d824aec2eb9f6539683c86c31d2a66c20b7cb1aa01a20e869f069781`.
+- Native diagnostic binary: `936d9cd20ec5881d8d89ea7d1ce7db6d15d2f5ada885f07371a6bb5bab56f2ea`.
+- Rebuilt ABI 7 library: `2e6d15a1726314440e8547986fb7cd56a45fdc5931dcd56694d78883a20dff28`.
+- Frozen reference records: `965e57ba64275f6db5ec0d6597da73111309e812070149a79b14dd434b67ac36`.

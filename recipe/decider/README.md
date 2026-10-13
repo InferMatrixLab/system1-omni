@@ -98,6 +98,13 @@ for native JSON restrictions and the processing/execution boundary.
 
 ## Validation and diagnostics
 
+The [2026-10-13 qualification](validation.md#current-qualification-on-2026-10-13)
+records this standalone ABI 7 branch on RTX 4090: five frozen requests, 20 rows,
+all eager/packed/Graph/fixed/shared fidelity controls, real retirement and capture
+fallback, and selected GPU regressions. Its two timing samples per mode are
+only descriptive. Current main and #111/#112 require ABI 6; cumulative #135
+integration requires a separate ABI 8 rebuild and validation.
+
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --locked --all-targets --features omni-laya/serve -- -D warnings
