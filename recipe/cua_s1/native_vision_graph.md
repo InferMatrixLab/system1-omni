@@ -7,7 +7,7 @@ unset or set it to `0` for eager execution. This switch is independent of
 `CUA_S1_GRAPH`, which controls text and multimodal language execution. Enable
 each switch separately; keep both unset for eager execution.
 
-Both modes retain scratch by the exact `[T,H,W]` patch grid. The default entry
+Both modes use the shared Qwen vision executor and retain scratch by the exact `[T,H,W]` patch grid. The default entry
 limit is 1; set `CUA_S1_VISION_CACHE_ENTRIES=4` to retain four geometries across
 size changes. The entry setting is capped at 16; zero disables retention. Equal
 patch counts with different heights or widths are distinct keys. The active
@@ -25,7 +25,9 @@ The four tested grids contain 2304 patches in total and retain 147677184 bytes
 and allocator/runtime overhead. Trace messages report retained entries/bytes;
 measure actual device memory separately.
 
-Both limits are read once when the model loads. Unset values use their defaults;
+Both limits are read once by the Cua 4B wrapper when the model loads. Other shared
+vision consumers keep the existing four-grid FIFO policy unless they explicitly
+select the bounded cache constructor. Unset values use their defaults;
 an explicitly invalid unsigned integer (including trailing whitespace or a
 negative value) logs a warning to stderr and uses that limit's default. The
 warning names the setting, supplied value and effective fallback, independently
@@ -83,13 +85,13 @@ Export the same `CUA_S1_BASE`, `CUA_S1_VISION_ADAPTER`, `CUA_S1_MODEL`, and
 `CUA_S1_CUDA_LIB` variables for these commands:
 
 ```sh
-cargo test --release --locked -p omni-cua-s1-native --lib vision_graph_ \
+cargo test --release --locked -p omni-qwen3-5-native --lib vision_graph_ \
   -- --ignored --test-threads=1 --nocapture
 CUA_S1_VISION_CACHE_ENTRIES=4 cargo test --release --locked \
-  -p omni-cua-s1-native --lib vision_cache_ \
+  -p omni-qwen3-5-native --lib vision_cache_ \
   -- --ignored --test-threads=1 --nocapture
 CUA_S1_VISION_CACHE_ENTRIES=4 CUA_S1_GRAPH_TRACE=1 \
-  cargo test --release --locked -p omni-cua-s1-native --lib vision_cache_aba_probe \
+  cargo test --release --locked -p omni-qwen3-5-native --lib vision_cache_aba_probe \
   -- --ignored --test-threads=1 --nocapture > /tmp/vision-cache-aba.log 2>&1
 python3 tests/cua_s1/vision_cache_trace_probe.py /tmp/vision-cache-aba.log
 CUA_S1_GRAPH=0 CUA_S1_VISION_GRAPH=0 cargo run --release --locked -p omni-cua-s1-native \
@@ -110,7 +112,7 @@ g++ -std=c++17 -shared -fPIC -Wall -Wextra tests/cua_s1/fail_graph_capture.cpp \
   -o /tmp/cua-fail-capture.so
 CUA_S1_CUDA_LIB=/tmp/cua-fail-capture.so CUA_S1_TEST_CAPTURE_FAILURE=1 \
 CUA_S1_VISION_CACHE_ENTRIES=4 CUA_S1_GRAPH_TRACE=0 \
-  cargo test --release --locked -p omni-cua-s1-native \
+  cargo test --release --locked -p omni-qwen3-5-native \
   --lib vision_capture_failure_ -- --ignored --test-threads=1 --nocapture
 ```
 

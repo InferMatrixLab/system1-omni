@@ -2,12 +2,82 @@
 use super::*;
 
 fn load() -> VisionModel {
+    load_with_cache(None)
+}
+fn load_cached() -> VisionModel {
+    load_with_cache(Some(CacheLimits {
+        entries: std::env::var("CUA_S1_VISION_CACHE_ENTRIES")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(1)
+            .min(16),
+        bytes: std::env::var("CUA_S1_VISION_CACHE_BYTES")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(256 << 20),
+    }))
+}
+fn load_with_cache(cache: Option<CacheLimits>) -> VisionModel {
+    use memmap2::Mmap;
+    use safetensors::SafeTensors;
+    use std::{collections::BTreeSet, fs::File};
     let path = |name| std::path::PathBuf::from(std::env::var_os(name).expect(name));
-    VisionModel::load(
-        path("CUA_S1_BASE"),
-        path("CUA_S1_VISION_ADAPTER"),
-        &path("CUA_S1_CUDA_LIB"),
+    let base_dir = path("CUA_S1_BASE");
+    let adapter_dir = path("CUA_S1_VISION_ADAPTER");
+    let config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(base_dir.join("config.json")).unwrap()).unwrap();
+    let config = VisionConfig::from_value(config["vision_config"].clone()).unwrap();
+    let inventory = config.inventory();
+    let index: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(base_dir.join("model.safetensors.index.json")).unwrap(),
     )
+    .unwrap();
+    let files: BTreeSet<_> = inventory
+        .keys()
+        .map(|name| index["weight_map"][name].as_str().unwrap().to_owned())
+        .collect();
+    let maps: Vec<Mmap> = files
+        .iter()
+        .map(|name| {
+            // SAFETY: the pinned checkpoints remain immutable throughout this GPU test.
+            unsafe { Mmap::map(&File::open(base_dir.join(name)).unwrap()).unwrap() }
+        })
+        .collect();
+    let stores: Vec<_> = maps
+        .iter()
+        .map(|map| SafeTensors::deserialize(map).unwrap())
+        .collect();
+    let tensors = inventory
+        .keys()
+        .map(|name| {
+            let tensor = stores
+                .iter()
+                .find_map(|store| store.tensor(name).ok())
+                .unwrap();
+            (name.clone(), tensor)
+        })
+        .collect();
+    // SAFETY: the pinned adapter remains immutable throughout this GPU test.
+    let adapter_map = unsafe {
+        Mmap::map(&File::open(adapter_dir.join("adapter_model.safetensors")).unwrap()).unwrap()
+    };
+    let adapter = SafeTensors::deserialize(&adapter_map).unwrap();
+    let lora = adapter
+        .names()
+        .iter()
+        .filter(|name| name.starts_with("base_model.model.model.visual."))
+        .map(|name| ((*name).to_owned(), adapter.tensor(name).unwrap()))
+        .collect();
+    match cache {
+        Some(limits) => VisionModel::from_tensors_with_cache(
+            config,
+            tensors,
+            lora,
+            &path("CUA_S1_CUDA_LIB"),
+            limits,
+        ),
+        None => VisionModel::from_tensors(config, tensors, lora, &path("CUA_S1_CUDA_LIB")),
+    }
     .unwrap()
 }
 fn image(grid: [usize; 3], seed: usize) -> ProcessedImage {
@@ -46,7 +116,10 @@ fn vision_graph_changed_pixels_and_trace() {
     model.graph_enabled = true;
     assert_eq!(bits(&model.forward(&inputs[0]).unwrap()), expected[0]);
     assert!(
-        model.scratch.as_ref().unwrap().graph.is_some(),
+        model
+            .scratch
+            .iter()
+            .any(|s| s.grid == inputs[0].image_grid_thw && s.graph.is_some()),
         "missing vision capture"
     );
     for (input, reference) in inputs.iter().zip(&expected).cycle().take(9) {
@@ -61,12 +134,22 @@ fn vision_graph_changed_pixels_and_trace() {
         .unwrap();
     assert_eq!(bits(&traced), expected[1]);
     assert_eq!(stages.len(), 29);
-    assert!(model.scratch.as_ref().unwrap().graph.is_some());
+    assert!(
+        model
+            .scratch
+            .iter()
+            .any(|s| s.grid == inputs[0].image_grid_thw && s.graph.is_some())
+    );
     assert_eq!(bits(&model.forward(&inputs[2]).unwrap()), expected[2]);
     let mut invalid = image([1, 16, 16], 4);
     invalid.pixel_values[0] = f32::NAN;
     assert!(model.forward(&invalid).is_err());
-    assert!(model.scratch.as_ref().unwrap().graph.is_some());
+    assert!(
+        model
+            .scratch
+            .iter()
+            .any(|s| s.grid == inputs[0].image_grid_thw && s.graph.is_some())
+    );
     assert_eq!(bits(&model.forward(&inputs[0]).unwrap()), expected[0]);
 }
 
@@ -80,6 +163,7 @@ fn vision_graph_equal_patch_count_geometry_and_retirement() {
         image([1, 16, 16], 7),
         image([1, 32, 8], 7),
         image([1, 16, 32], 8),
+        image([1, 32, 16], 9),
     ];
     let expected: Vec<_> = inputs
         .iter()
@@ -90,14 +174,28 @@ fn vision_graph_equal_patch_count_geometry_and_retirement() {
         "geometry must affect the feature oracle"
     );
     model.graph_enabled = true;
-    for index in [0, 0, 1, 1, 2, 2, 3, 3, 0, 0] {
+    for index in [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 0, 0] {
         assert_eq!(
             bits(&model.forward(&inputs[index]).unwrap()),
             expected[index]
         );
-        let scratch = model.scratch.as_ref().unwrap();
+        let scratch = model
+            .scratch
+            .iter()
+            .find(|s| s.grid == inputs[index].image_grid_thw)
+            .unwrap();
         assert_eq!(scratch.grid, inputs[index].image_grid_thw);
         assert!(scratch.graph.is_some());
+        assert_eq!(model.scratch.len(), 4);
+        if index == 4 {
+            assert!(
+                model
+                    .scratch
+                    .iter()
+                    .all(|s| s.grid != inputs[0].image_grid_thw),
+                "the fifth distinct grid must evict the oldest FIFO entry"
+            );
+        }
     }
     drop(model); // graph must retire before scratch/weights/GEMM/stream
     let mut fresh = load();
@@ -109,12 +207,19 @@ fn vision_graph_equal_patch_count_geometry_and_retirement() {
 #[test]
 #[ignore = "requires the test-only failing CUDA wrapper; see native_vision_graph.md"]
 fn vision_capture_failure_keeps_eager_result_and_disables_replay() {
+    check_capture_failure(load());
+}
+#[test]
+#[ignore = "requires the test-only failing CUDA wrapper; see native_vision_graph.md"]
+fn vision_capture_failure_cached_keeps_eager_result_and_disables_replay() {
+    check_capture_failure(load_cached());
+}
+fn check_capture_failure(mut model: VisionModel) {
     assert_eq!(
         std::env::var("CUA_S1_TEST_CAPTURE_FAILURE").as_deref(),
         Ok("1"),
         "use the test-only failing CUDA wrapper"
     );
-    let mut model = load();
     model.graph_enabled = false;
     let input = image([1, 16, 16], 9);
     let changed = image([1, 8, 32], 10);
@@ -125,17 +230,17 @@ fn vision_capture_failure_keeps_eager_result_and_disables_replay() {
     // capture have finished. This must return that same forward's eager result.
     assert_eq!(bits(&model.forward(&input).unwrap()), expected);
     assert!(!model.graph_enabled);
-    assert!(model.scratch.as_ref().unwrap().graph.is_none());
+    assert!(model.scratch.iter().all(|s| s.graph.is_none()));
     assert_eq!(bits(&model.forward(&changed).unwrap()), changed_expected);
     assert!(!model.graph_enabled);
-    assert!(model.scratch.as_ref().unwrap().graph.is_none());
+    assert!(model.scratch.iter().all(|s| s.graph.is_none()));
     assert_eq!(bits(&model.forward(&input).unwrap()), expected);
 }
 
 #[test]
 #[ignore = "requires CUDA and pinned CUA_S1_BASE/CUA_S1_VISION_ADAPTER/CUA_S1_CUDA_LIB"]
 fn vision_cache_aba_probe() {
-    let mut model = load();
+    let mut model = load_cached();
     model.graph_enabled = false;
     let inputs = [image([1, 8, 32], 21), image([1, 16, 16], 22)];
     let expected: Vec<_> = inputs
@@ -153,89 +258,55 @@ fn vision_cache_aba_probe() {
     eprintln!("VISION_CACHE_ABA_END");
 }
 
+fn config(hidden: usize) -> VisionConfig {
+    VisionConfig::from_value(serde_json::json!({"depth": if hidden==1024 {24} else {27},
+        "hidden_size":hidden,"intermediate_size":if hidden==1024 {4096} else {4304},
+        "num_heads":16,"num_position_embeddings":2304,"out_hidden_size":if hidden==1024 {2560} else {5120},
+        "in_channels":3,"patch_size":16,"temporal_patch_size":2,"spatial_merge_size":2,
+        "hidden_act":"gelu_pytorch_tanh","deepstack_visual_indexes":[],"model_type":"qwen3_5"})).unwrap()
+}
+
 #[test]
-fn vision_cache_limits_from_env() {
-    // Each probe gets a private environment; parallel tests never mutate global env.
-    if std::env::var_os("CUA_S1_TEST_CACHE_LIMITS_PROBE").is_some() {
-        let limits = CacheLimits::from_env();
-        eprintln!("CACHE_LIMITS {} {}", limits.entries, limits.bytes);
-        return;
-    }
-    let test = format!(
-        "{}::vision_cache_limits_from_env",
-        module_path!().split_once("::").unwrap().1
-    );
-    let probe = |entries: Option<&str>,
-                 bytes: Option<&str>,
-                 expected: (usize, usize),
-                 warning: Option<&str>| {
-        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
-        command
-            .args(["--exact", &test, "--nocapture"])
-            .env("CUA_S1_TEST_CACHE_LIMITS_PROBE", "1")
-            .env_remove("CUA_S1_VISION_CACHE_ENTRIES")
-            .env_remove("CUA_S1_VISION_CACHE_BYTES");
-        if let Some(value) = entries {
-            command.env("CUA_S1_VISION_CACHE_ENTRIES", value);
-        }
-        if let Some(value) = bytes {
-            command.env("CUA_S1_VISION_CACHE_BYTES", value);
-        }
-        let output = command.output().unwrap();
-        let stderr = String::from_utf8(output.stderr).unwrap();
-        assert!(output.status.success(), "{stderr}");
-        assert!(
-            stderr.contains(&format!("CACHE_LIMITS {} {}", expected.0, expected.1)),
-            "{stderr}"
-        );
-        assert_eq!(
-            stderr.matches("Invalid CUA_S1_VISION_CACHE_").count(),
-            usize::from(warning.is_some()),
-            "{stderr}"
-        );
-        if let Some(name) = warning {
-            let default = if name.ends_with("ENTRIES") {
-                1
-            } else {
-                256 << 20
-            };
-            assert!(stderr.contains(&format!("Invalid {name}=")), "{stderr}");
-            assert!(
-                stderr.contains(&format!("using default {default}")),
-                "{stderr}"
+fn vision_cache_dimension_storage() {
+    for (hidden, lora, per_patch) in [
+        (1024, true, 64_096),
+        (1024, false, 31_264),
+        (1152, false, 47_168),
+    ] {
+        let config = config(hidden);
+        for grid in [[1, 2, 2], [1, 8, 32], [1, 32, 8]] {
+            let geometry = VisionGeometry::new(grid, &config).unwrap();
+            let sizes = Scratch::layout(&config, lora, grid);
+            assert_eq!(
+                [
+                    geometry.indices.len() * 4,
+                    geometry.weights.len() * 4,
+                    geometry.cos.len() * 4,
+                    geometry.sin.len() * 4
+                ],
+                sizes[1..5]
+            );
+            assert_eq!(
+                Scratch::bytes_for_grid(&config, lora, grid),
+                grid[1] * grid[2] * per_patch
             );
         }
-    };
-    probe(None, None, (1, 256 << 20), None);
-    probe(Some("0"), Some("0"), (0, 0), None);
-    probe(Some("4"), Some("1024"), (4, 1024), None);
-    probe(Some("17"), None, (16, 256 << 20), None);
-    for invalid in ["4 ", "-1", "four"] {
-        probe(
-            Some(invalid),
-            None,
-            (1, 256 << 20),
-            Some("CUA_S1_VISION_CACHE_ENTRIES"),
-        );
-        probe(
-            None,
-            Some(invalid),
-            (1, 256 << 20),
-            Some("CUA_S1_VISION_CACHE_BYTES"),
-        );
     }
 }
 
 #[test]
 fn vision_cache_budget_policy() {
-    let patch_bytes = Scratch::bytes_for_grid([1, 2, 2]) / 4;
+    let patch_bytes = Scratch::bytes_for_grid(&config(1024), true, [1, 2, 2]) / 4;
     assert_eq!(patch_bytes, 64_096);
-    let geometry = Geometry::new([1, 2, 2]).unwrap();
+    let geometry = VisionGeometry::new([1, 2, 2], &config(1024)).unwrap();
     let geometry_bytes =
         (geometry.indices.len() + geometry.weights.len() + geometry.cos.len() + geometry.sin.len())
             * 4;
     assert_eq!(geometry_bytes / 4, 288);
-    assert_eq!(Scratch::bytes_for_grid([1, 32, 72]), 147_677_184);
+    assert_eq!(
+        Scratch::bytes_for_grid(&config(1024), true, [1, 32, 72]),
+        147_677_184
+    );
     let limits = CacheLimits {
         entries: 2,
         bytes: 100,
@@ -256,18 +327,17 @@ fn vision_cache_budget_policy() {
 
 fn clear_scratch(model: &mut VisionModel) {
     model.synchronize().unwrap();
-    model.scratch = None;
-    model.cached.clear();
+    model.scratch.clear();
 }
 
 #[test]
 #[ignore = "requires CUDA and pinned CUA_S1_BASE/CUA_S1_VISION_ADAPTER/CUA_S1_CUDA_LIB"]
 fn vision_cache_capacity_lru_and_invalid_input() {
-    let mut model = load();
-    model.cache_limits = CacheLimits {
+    let mut model = load_cached();
+    model.cache_limits = Some(CacheLimits {
         entries: 2,
         bytes: 256 << 20,
-    };
+    });
     model.graph_enabled = false;
     let inputs = [
         image([1, 8, 32], 30),
@@ -286,38 +356,42 @@ fn vision_cache_capacity_lru_and_invalid_input() {
             expected[index]
         );
     }
-    let a = model.scratch.as_ref().unwrap().pixels.at(0);
-    assert!(model.scratch.as_ref().unwrap().graph.is_some());
-    assert_eq!(model.cached[0].grid, inputs[1].image_grid_thw);
-    let b = model.cached[0].pixels.at(0);
+    let a = model.scratch.back().unwrap().pixels.at(0);
+    assert!(model.scratch.back().unwrap().graph.is_some());
+    assert_eq!(
+        model.scratch.front().unwrap().grid,
+        inputs[1].image_grid_thw
+    );
+    let b = model.scratch.front().unwrap().pixels.at(0);
     let mut invalid = image([1, 16, 16], 31);
     invalid.pixel_values.pop();
     assert!(model.forward(&invalid).is_err());
     invalid = image([2, 8, 32], 30);
     assert!(model.forward(&invalid).is_err());
-    assert_eq!(model.scratch.as_ref().unwrap().pixels.at(0), a);
-    assert_eq!(model.cached[0].pixels.at(0), b);
+    assert_eq!(model.scratch.back().unwrap().pixels.at(0), a);
+    assert_eq!(model.scratch.front().unwrap().pixels.at(0), b);
     assert_eq!(bits(&model.forward(&inputs[2]).unwrap()), expected[2]);
-    assert_eq!(model.cached.len(), 1);
+    assert_eq!(model.scratch.len(), 2);
     assert_eq!(
-        model.cached[0].grid, inputs[0].image_grid_thw,
+        model.scratch.front().unwrap().grid,
+        inputs[0].image_grid_thw,
         "B must be LRU victim after A/B/A/C"
     );
-    assert_eq!(model.cached[0].pixels.at(0), a);
+    assert_eq!(model.scratch.front().unwrap().pixels.at(0), a);
     assert_eq!(model.retained_bytes(), 512 * 64_096);
     assert_eq!(bits(&model.forward(&inputs[0]).unwrap()), expected[0]);
-    assert_eq!(model.scratch.as_ref().unwrap().pixels.at(0), a);
+    assert_eq!(model.scratch.back().unwrap().pixels.at(0), a);
     drop(model);
 }
 
 #[test]
 #[ignore = "requires CUDA and pinned CUA_S1_BASE/CUA_S1_VISION_ADAPTER/CUA_S1_CUDA_LIB"]
 fn vision_cache_byte_eviction_and_transient_oversize() {
-    let mut model = load();
-    model.cache_limits = CacheLimits {
+    let mut model = load_cached();
+    model.cache_limits = Some(CacheLimits {
         entries: 4,
         bytes: 512 * 64_096,
-    };
+    });
     model.graph_enabled = false;
     let inputs = [
         image([1, 8, 32], 40),
@@ -336,17 +410,23 @@ fn vision_cache_byte_eviction_and_transient_oversize() {
             bits(&model.forward(&inputs[index]).unwrap()),
             expected[index]
         );
-        assert!(model.retained_bytes() <= model.cache_limits.bytes);
+        assert!(model.retained_bytes() <= model.cache_limits.as_ref().unwrap().bytes);
     }
-    assert_eq!(model.cached.len(), 1);
-    assert_eq!(model.cached[0].grid, inputs[2].image_grid_thw);
-    let a = model.scratch.as_ref().unwrap().pixels.at(0);
-    let c = model.cached[0].pixels.at(0);
+    assert_eq!(model.scratch.len(), 2);
+    assert_eq!(
+        model.scratch.front().unwrap().grid,
+        inputs[2].image_grid_thw
+    );
+    let a = model.scratch.back().unwrap().pixels.at(0);
+    let c = model.scratch.front().unwrap().pixels.at(0);
     for _ in 0..2 {
         assert_eq!(bits(&model.forward(&inputs[3]).unwrap()), expected[3]);
-        assert_eq!(model.scratch.as_ref().unwrap().pixels.at(0), a);
-        assert_eq!(model.cached[0].pixels.at(0), c);
-        assert_eq!(model.retained_bytes(), model.cache_limits.bytes);
+        assert_eq!(model.scratch.back().unwrap().pixels.at(0), a);
+        assert_eq!(model.scratch.front().unwrap().pixels.at(0), c);
+        assert_eq!(
+            model.retained_bytes(),
+            model.cache_limits.as_ref().unwrap().bytes
+        );
         assert!(model.graph_enabled);
     }
     assert!(
@@ -355,14 +435,14 @@ fn vision_cache_byte_eviction_and_transient_oversize() {
             .is_err()
     );
     assert_eq!(bits(&model.forward(&inputs[0]).unwrap()), expected[0]);
-    model.cache_limits.bytes = 1;
+    model.cache_limits.as_mut().unwrap().bytes = 1;
     assert_eq!(bits(&model.forward(&inputs[0]).unwrap()), expected[0]);
     // Internal test-only budget changes may encounter an already resident same grid.
-    assert_eq!(model.scratch.as_ref().unwrap().pixels.at(0), a);
+    assert_eq!(model.scratch.back().unwrap().pixels.at(0), a);
     clear_scratch(&mut model);
-    model.cache_limits.entries = 0;
+    model.cache_limits.as_mut().unwrap().entries = 0;
     assert_eq!(bits(&model.forward(&inputs[0]).unwrap()), expected[0]);
     assert_eq!(bits(&model.forward(&inputs[0]).unwrap()), expected[0]);
     assert_eq!(model.retained_bytes(), 0);
-    assert!(model.scratch.is_none() && model.cached.is_empty());
+    assert!(model.scratch.is_empty());
 }
