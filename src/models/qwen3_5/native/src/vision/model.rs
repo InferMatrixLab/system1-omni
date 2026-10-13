@@ -909,7 +909,7 @@ impl Work {
 
 #[cfg(test)]
 #[path = "../../../../../../tests/qwen3_5/vision_graph.rs"]
-mod graph_tests;
+mod vision_tests;
 
 #[cfg(test)]
 #[path = "../../../../../../tests/qwen3_5/vision_batch.rs"]
