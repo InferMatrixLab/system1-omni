@@ -36,6 +36,19 @@ int cs1_download(void* dst, const void* src, size_t bytes, void* stream) {
     return e != cudaSuccess ? e : cudaStreamSynchronize(st);
 }
 
+int cs1_copy_dd(void* dst, const void* src, size_t bytes, void* stream) {
+    const cudaError_t e =
+        cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDeviceToDevice, static_cast<cudaStream_t>(stream));
+    return e != cudaSuccess ? e : cudaGetLastError();
+}
+
+int cs1_copy2d(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height,
+               void* stream) {
+    const cudaError_t e = cudaMemcpy2DAsync(dst, dpitch, src, spitch, width, height,
+                                            cudaMemcpyDeviceToDevice, static_cast<cudaStream_t>(stream));
+    return e != cudaSuccess ? e : cudaGetLastError();
+}
+
 int cs1_graph_begin(void* stream) {
     const cudaError_t e = cudaStreamBeginCapture(static_cast<cudaStream_t>(stream), cudaStreamCaptureModeThreadLocal);
     if (e != cudaSuccess) (void)cudaGetLastError();
