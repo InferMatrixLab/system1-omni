@@ -17,19 +17,21 @@ The validated slice is:
 - the Python reference worker behind the Rust frontend;
 - text state (a non-empty string; objects and arrays are serialized to JSON
   text) or one inline PNG or JPEG image in `state.image`;
-- textual instructions and criteria for `choice` questions;
+- textual instructions and criteria for `choice`, `noul`, and `score`
+  questions, freely mixed in one request against one shared state;
 - BF16 CUDA inference with the pinned Preview checkpoint. Image and text
   state are serving-validated on the GPU host, with recorded reference parity
-  for both.
+  for all three question types.
 
-The current worker does not implement `noul`, `score`, video, multiple images,
-remote image URLs, or a native Rust/CUDA Valen executor.
+The current worker does not implement video, multiple images, remote image
+URLs, or a native Rust/CUDA Valen executor.
 
 The current protocol limits requests to an 8 MiB JSON body, one PNG/JPEG image
 of at most 4 MiB, 2048 pixels per side, 1,048,576 pixels total, and a 200:1
 maximum aspect ratio. Text state is limited to 16,384 characters, the same
 limit as combined instruction and criterion text. A request may contain at
-most 8 questions and 255 candidates per question.
+most 8 questions, 255 named candidates per `choice` question, and an ordered
+list of 2 to 10 level descriptions per `score` question.
 
 The first slice follows
 [issue #84](https://github.com/ThinkFlowLab/system1-omni/issues/84): establish
@@ -99,7 +101,7 @@ Pillow: 12.3.0
 av: 16.1.0
 GPU capability: sm_120
 dtype: bfloat16
-system1-omni: 2fd8ce9 (GPU serving and smoke records); parity blocks re-verified verbatim at c9fb2d2
+system1-omni: 2fd8ce9 (GPU serving and smoke records); parity blocks re-verified verbatim at c9fb2d2; noul/score records collected on the same host from the spec-01 working tree (branch model/valen-reference-serving, uncommitted)
 ~~~
 
 FP32 and BF16 small-operator checks passed. Startup memory was approximately
@@ -250,6 +252,83 @@ Observed response, same host as the image fixture:
 }
 ~~~
 
+A yes/no judgment uses `noul`, optionally replacing the reference's fixed
+true/false wording through `criteria`. The complete runnable request is in
+[`example-noul-request.json`](example-noul-request.json); it asks one
+fixed-wording and one custom-wording question against one state:
+
+~~~sh
+curl -sS http://127.0.0.1:8000/v1/systemone \
+  -H 'Content-Type: application/json' \
+  --data-binary @recipe/valen/example-noul-request.json
+~~~
+
+Observed response, same host as the fixtures above:
+
+~~~json
+{
+  "model": "valen-preview-0923",
+  "answers": {
+    "duplicate": {
+      "type": "noul",
+      "noul": 0.19441015095399058,
+      "probabilities": {"true": 0.19441015095399058, "false": 0.8055898490460095},
+      "confidence": 0.611179698092019
+    },
+    "authorized": {
+      "type": "noul",
+      "noul": 0.3848572797166159,
+      "probabilities": {"true": 0.3848572797166159, "false": 0.6151427202833842},
+      "confidence": 0.23028544056676847
+    }
+  },
+  "usage": {"input_tokens": 109, "output_tokens": 0},
+  "internal_usage": {"compute_tokens": 123}
+}
+~~~
+
+`noul` is `P(true)` — the reference's own answer field — and the full
+two-candidate pair is exposed alongside it. The custom-wording question
+compiles through the equivalent `true`/`false` choice record, so its branch
+adds its own suffix to `internal_usage.compute_tokens`.
+
+A graded assessment uses `score` with an ordered list of 2 to 10 level
+descriptions. The complete runnable request is in
+[`example-score-request.json`](example-score-request.json):
+
+~~~sh
+curl -sS http://127.0.0.1:8000/v1/systemone \
+  -H 'Content-Type: application/json' \
+  --data-binary @recipe/valen/example-score-request.json
+~~~
+
+Observed response, same host:
+
+~~~json
+{
+  "model": "valen-preview-0923",
+  "answers": {"severity": {
+    "type": "score",
+    "probabilities": {"0": 0.17458891628733877, "1": 0.6222512480902359, "2": 0.2031598356224252},
+    "score": 1.0285709193350863,
+    "legend": {
+      "0": "No billing error: every charge is correct.",
+      "1": "Minor error: a single duplicated charge.",
+      "2": "Major error: repeated duplicated charges."
+    },
+    "confidence": 0.43337687213535403
+  }},
+  "usage": {"input_tokens": 107, "output_tokens": 0},
+  "internal_usage": {"compute_tokens": 135}
+}
+~~~
+
+Each score level compiles to its own isolated branch (it never sees the other
+levels or its own level ID), the K per-level decision logits are softmaxed
+across branches, and `score` reports the expected level with the reference's
+distribution-concentration `confidence`. The three branches explain
+`compute_tokens` 135 against `input_tokens` 107.
+
 ## Start and verify the Rust frontend
 
 ~~~sh
@@ -268,7 +347,8 @@ curl -sS http://127.0.0.1:8080/v1/systemone \
 ~~~
 
 The generic `recipe/compare_with_backend.py` also sends `score`/`noul` cases,
-which this worker rejects, so compare the Valen fixture directly:
+which this worker now answers; the byte-identical comparison below uses the
+Valen fixture directly:
 
 ~~~sh
 curl -fsS http://127.0.0.1:8000/v1/systemone \
@@ -282,7 +362,9 @@ cmp /tmp/valen-worker.json /tmp/valen-frontend.json
 
 The validated runs returned 200 from both endpoints with matching JSON content
 types and byte-identical response bodies, for the image fixture above and for
-the text-only example.
+the text-only example. The noul and score fixtures were re-checked the same
+way on the same host from the spec-01 working tree: byte-identical through
+the frontend for all three fixtures.
 
 ## Error behavior
 
@@ -309,7 +391,7 @@ python recipe/valen/test_compare_reference.py
 Validated results:
 
 ~~~text
-pytest tests/valen: 29 passed in 0.67s
+pytest tests/valen: 47 passed in 1.21s
 compileall: passed
 cargo fmt --all --check: passed
 frontend integration: 12 passed; 0 failed
@@ -354,15 +436,65 @@ probability tolerance <= 1e-06: PASS
 token accounting: PASS
 ~~~
 
+The `noul` case covers both wordings in
+[`example-noul-request.json`](example-noul-request.json) — the fixed-wording
+question compiles as the reference's native noul record, the custom-wording
+question as the equivalent `true`/`false` choice record — against the pinned
+reference decoder:
+
+~~~text
+case: noul
+reference model: Valen
+worker model: valen-preview-0923
+input_tokens: 109 == 109
+output_tokens: 0 == 0
+compute_tokens: 123 == 123
+max probability delta: 4.7029371064e-08
+max answer delta: 1.2620447742e-08
+confidence delta: 2.5240895818e-08
+decision agreement: PASS
+probability tolerance <= 1e-06: PASS
+answer tolerance <= 1e-06: PASS
+token accounting: PASS
+~~~
+
+The `score` case compares the three-level fixture in
+[`example-score-request.json`](example-score-request.json): per-branch
+isolation, the cross-branch softmax, the expected level, the legend and the
+distribution-concentration confidence:
+
+~~~text
+case: score
+reference model: Valen
+worker model: valen-preview-0923
+input_tokens: 107 == 107
+output_tokens: 0 == 0
+compute_tokens: 135 == 135
+max probability delta: 2.4111302177e-08
+max answer delta: 1.4517812730e-08
+confidence delta: 5.5582444203e-09
+decision agreement: PASS
+probability tolerance <= 1e-06: PASS
+answer tolerance <= 1e-06: PASS
+legend agreement: PASS
+token accounting: PASS
+~~~
+
 The reference model field is `Valen`; the system1-omni worker deliberately
 uses `valen-preview-0923` as its stable serving identity.
 
 Reproduce with [`compare_reference.py`](compare_reference.py). The script loads
 one pinned model instance and drives each request through two paths: a
-Valen-native record compiled by the pinned `Compiler` and decoded with a plain
-softmax, and the production `frontend.valen.decide` pipeline. The decision
-criteria are exact choice agreement, equal token accounting and the declared
-probability tolerance (default `1e-6`, `--tolerance` to override):
+Valen-native record compiled by the pinned `Compiler` — built by the worker's
+own record rules so the reference input cannot drift from the served one —
+and the production `frontend.valen.decide` pipeline. `noul` and `score`
+answers are additionally decoded by the pinned reference answer module
+(`valen.evaluation.inference.answer`). The decision criteria are exact
+discrete agreement (candidate order, the chosen key, the score legend), equal
+token accounting and the declared tolerance (default `1e-6`, `--tolerance` to
+override) on probabilities and on the scalar answer fields (`noul` P(true),
+`score` expected level), which the worker's pure-Python softmax and the
+reference's torch softmax never match bit-exactly:
 
 ~~~sh
 PYTHONPATH=src .venv/bin/python recipe/valen/compare_reference.py \
@@ -372,11 +504,22 @@ PYTHONPATH=src .venv/bin/python recipe/valen/compare_reference.py \
 PYTHONPATH=src .venv/bin/python recipe/valen/compare_reference.py \
   --valen-source "$VALEN_SRC" --checkpoint "$VALEN_CKPT" \
   --base "$VALEN_BASE" --device cuda --dtype bf16 --case text
+
+PYTHONPATH=src .venv/bin/python recipe/valen/compare_reference.py \
+  --valen-source "$VALEN_SRC" --checkpoint "$VALEN_CKPT" \
+  --base "$VALEN_BASE" --device cuda --dtype bf16 --case noul
+
+PYTHONPATH=src .venv/bin/python recipe/valen/compare_reference.py \
+  --valen-source "$VALEN_SRC" --checkpoint "$VALEN_CKPT" \
+  --base "$VALEN_BASE" --device cuda --dtype bf16 --case score
 ~~~
 
 The image case uses [`example-request.json`](example-request.json); the text
 case uses the recipe's text example unless `--text-body` points elsewhere.
-Both blocks above are verbatim output of the committed tool.
+The `noul` and `score` cases use [`example-noul-request.json`](example-noul-request.json)
+and [`example-score-request.json`](example-score-request.json) unless
+`--noul-body`/`--score-body` point elsewhere; `--case all` runs all four in
+one model load. All blocks above are verbatim output of the committed tool.
 
 ## Troubleshooting and limits
 
@@ -392,4 +535,4 @@ Both blocks above are verbatim output of the committed tool.
 - `/health` is exposed only after model loading and real warmup complete.
 - The memory and smoke-response observations are host-specific; they are not
   general accuracy or performance claims.
-- Video, native execution, `noul`, and `score` remain outside this recipe.
+- Video and native execution remain outside this recipe.
