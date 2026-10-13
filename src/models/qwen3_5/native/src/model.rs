@@ -678,10 +678,11 @@ pub struct Model {
     scratch: Option<Scratch>,
     /// The request and group prefix states of `forward_shared`; grow as needed.
     shared: [Option<PrefixState>; 2],
-    /// Opt-in replay with at most 64 captures keyed by ordered sequence lengths.
+    /// Opt-in replay with at most 64 captures per mode, keyed by sequence lengths.
     graph_enabled: bool,
     graph_stats: GraphStats,
     graphs: VecDeque<(Vec<usize>, cuda::Graph)>,
+    mm_graphs: VecDeque<(Vec<usize>, cuda::Graph)>,
 }
 
 // SAFETY: the raw pointers are device addresses and cuBLASLt handles owned by the
@@ -693,6 +694,7 @@ impl Drop for Model {
         let _ = cuda::set_device(0);
         let _ = cuda::synchronize(self.stream);
         self.graphs.clear();
+        self.mm_graphs.clear();
         // SAFETY: created by cs1_gemm_create(_fixed) and not destroyed before.
         unsafe {
             (cuda::api().cs1_gemm_destroy)(self.gemm);
@@ -796,6 +798,7 @@ impl Model {
                 ..GraphStats::default()
             },
             graphs: VecDeque::new(),
+            mm_graphs: VecDeque::new(),
         };
         Ok(model)
     }
@@ -803,7 +806,7 @@ impl Model {
     pub fn graph_stats(&self) -> GraphStats {
         GraphStats {
             enabled: self.graph_enabled,
-            cached_shapes: self.graphs.len(),
+            cached_shapes: self.graphs.len() + self.mm_graphs.len(),
             ..self.graph_stats
         }
     }
@@ -870,10 +873,11 @@ impl Model {
         cuda::set_device(0)?;
         if self.scratch.as_ref().is_none_or(|s| t > s.cap) {
             cuda::synchronize(self.stream)?;
-            if !self.graphs.is_empty() {
+            if !self.graphs.is_empty() || !self.mm_graphs.is_empty() {
                 self.graph_stats.invalidations += 1;
             }
             self.graphs.clear();
+            self.mm_graphs.clear();
             self.scratch = None;
             self.scratch = Some(Scratch::new(
                 &self.cfg,
@@ -923,31 +927,21 @@ impl Model {
             if let Some((_, graph)) = self.graphs.iter().find(|(shape, _)| *shape == lengths) {
                 graph.launch(self.stream)?;
                 self.graph_stats.replays += 1;
+                if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
+                    eprintln!("CUA_S1_GRAPH mode=text event=replay tokens={t}");
+                }
             } else {
                 // Warm plans and keep the eager result: run() advances the residual
                 // in place, so replaying on this cache miss would advance it twice.
                 self.run(s, &lengths, false)?;
                 cuda::synchronize(self.stream)?;
-                match cuda::Graph::capture(self.stream, || self.run(s, &lengths, false)) {
-                    Ok(graph) => {
-                        self.graph_stats.captures += 1;
-                        if self.graphs.len() == 64 {
-                            cuda::synchronize(self.stream)?;
-                            self.graphs.pop_front();
-                        }
-                        self.graphs.push_back((lengths.clone(), graph));
-                    }
-                    Err(error) => {
-                        eprintln!("CUDA Graph capture failed; using eager execution: {error:#}");
-                        self.graph_stats.fallbacks += 1;
-                        self.graph_enabled = false;
-                        self.graphs.clear();
-                    }
-                }
+                let captured = cuda::Graph::capture(self.stream, || self.run(s, &lengths, false));
+                self.cache_graph(&lengths, false, captured)?;
             }
         } else {
             self.run(s, &lengths, false)?;
         }
+        let s = self.scratch.as_ref().unwrap();
         let mut end = 0;
         lengths
             .iter()
@@ -978,8 +972,68 @@ impl Model {
         self.upload_positions(s, input.position_ids)?;
         self.embed_tokens(s, input.token_ids)?;
         self.overwrite_image_rows(s, input, 0)?;
-        self.run(s, &[t], true)?;
-        self.last_hidden(s, t)
+        if self.graph_enabled {
+            if let Some((_, graph)) = self
+                .mm_graphs
+                .iter()
+                .find(|(shape, _)| shape.as_slice() == [t])
+            {
+                graph.launch(self.stream)?;
+                self.graph_stats.replays += 1;
+                if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
+                    eprintln!("CUA_S1_GRAPH mode=multimodal event=replay tokens={t}");
+                }
+            } else {
+                // Uploads and embedding are outside capture. Keep the warmed eager
+                // result; launching now would advance the residual a second time.
+                self.run(s, &[t], true)?;
+                cuda::synchronize(self.stream)?;
+                let captured = cuda::Graph::capture(self.stream, || self.run(s, &[t], true));
+                self.cache_graph(&[t], true, captured)?;
+            }
+        } else {
+            self.run(s, &[t], true)?;
+        }
+        self.last_hidden(self.scratch.as_ref().unwrap(), t)
+    }
+
+    /// Both modes retain the eager miss result; capture records without executing.
+    fn cache_graph(
+        &mut self,
+        lengths: &[usize],
+        multimodal: bool,
+        captured: Result<cuda::Graph>,
+    ) -> Result<()> {
+        let mode = if multimodal { "multimodal" } else { "text" };
+        match captured {
+            Ok(graph) => {
+                self.graph_stats.captures += 1;
+                let cache = if multimodal {
+                    &mut self.mm_graphs
+                } else {
+                    &mut self.graphs
+                };
+                if cache.len() == 64 {
+                    cuda::synchronize(self.stream)?;
+                    cache.pop_front();
+                }
+                cache.push_back((lengths.to_vec(), graph));
+                if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
+                    let t: usize = lengths.iter().sum();
+                    eprintln!("CUA_S1_GRAPH mode={mode} event=capture tokens={t}");
+                }
+            }
+            Err(error) => {
+                eprintln!(
+                    "CUDA Graph capture failed in {mode} mode; using eager execution: {error:#}"
+                );
+                self.graph_stats.fallbacks += 1;
+                self.graph_enabled = false;
+                self.graphs.clear();
+                self.mm_graphs.clear();
+            }
+        }
+        Ok(())
     }
 
     fn upload_positions(&self, s: &Scratch, positions: [&[i64]; 3]) -> Result<()> {
@@ -1905,6 +1959,9 @@ impl Model {
     }
 }
 
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/multimodal_graph.rs"]
+mod graph_tests;
 #[cfg(test)]
 #[path = "../../../../../tests/qwen3_5/model.rs"]
 mod tests;

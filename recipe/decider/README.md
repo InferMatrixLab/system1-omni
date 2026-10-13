@@ -100,9 +100,9 @@ for native JSON restrictions and the processing/execution boundary.
 
 ```sh
 cargo fmt --all --check
-cargo clippy --workspace --locked --all-targets -- -D warnings
-cargo test --workspace --locked
-cargo build --workspace --release --locked
+cargo clippy --workspace --locked --all-targets --features omni-laya/serve -- -D warnings
+cargo test --workspace --locked --features omni-laya/serve
+cargo build --workspace --release --locked --features omni-laya/serve
 DECIDER_MODEL=/path/to/models/decider-2b-v11 \
   cargo test --release --locked -p omni-decider-native --test contract -- --ignored
 DECIDER_MODEL=/path/to/models/decider-2b-v11 \
