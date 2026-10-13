@@ -54,11 +54,7 @@ fn sha256(path: &Path) -> Result<String> {
         }
         hash.update(&buffer[..n]);
     }
-    Ok(hash
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+    Ok(crate::contract::hex_digest(&hash.finalize()))
 }
 
 fn hash_value(value: &Value) -> Result<&str> {

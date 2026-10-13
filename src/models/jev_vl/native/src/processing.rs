@@ -74,10 +74,7 @@ impl Processor {
 
     fn url_key(url: &str) -> String {
         use sha2::Digest;
-        sha2::Sha256::digest(url.as_bytes())
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect()
+        crate::contract::hex_digest(&sha2::Sha256::digest(url.as_bytes()))
     }
 
     /// CPU image preparation checks the full prompt budget before GPU admission.
