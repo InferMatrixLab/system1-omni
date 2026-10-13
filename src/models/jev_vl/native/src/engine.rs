@@ -72,7 +72,16 @@ impl Engine {
         );
         let vision_dir = match &source {
             ImageSource::Online(vision_dir) => {
-                vision::validate_export(vision_dir, dir, &manifest)?;
+                // Pin-checking streams the full vision.safetensors through
+                // sha256; keep that GB-scale pass off the async runtime.
+                let language_dir = dir.to_owned();
+                let vision_dir_owned = vision_dir.clone();
+                let manifest_owned = manifest.clone();
+                tokio::task::spawn_blocking(move || {
+                    vision::validate_export(&vision_dir_owned, &language_dir, &manifest_owned)
+                })
+                .await
+                .context("vision export pin check failed to run")??;
                 Some(vision_dir.clone())
             }
             ImageSource::Prepared(_) => None,
