@@ -4,8 +4,8 @@ The `omni-cua-s1-vision` screenshot worker can capture the complete vision
 encoder, including all 24 blocks, unmerged FP32 LoRA branches and the merger.
 Set `CUA_S1_VISION_GRAPH=1` before loading the worker to enable it. Leave it
 unset or set it to `0` for eager execution. This switch is independent of
-`CUA_S1_GRAPH`, which controls language execution; this change does not enable
-multimodal language Graph replay.
+`CUA_S1_GRAPH`, which controls text and multimodal language execution. Enable
+each switch separately; keep both unset for eager execution.
 
 Both modes retain scratch by the exact `[T,H,W]` patch grid. The default entry
 limit is 1; set `CUA_S1_VISION_CACHE_ENTRIES=4` to retain four geometries across
@@ -92,9 +92,9 @@ CUA_S1_VISION_CACHE_ENTRIES=4 CUA_S1_GRAPH_TRACE=1 \
   cargo test --release --locked -p omni-cua-s1-native --lib vision_cache_aba_probe \
   -- --ignored --test-threads=1 --nocapture > /tmp/vision-cache-aba.log 2>&1
 python3 tests/cua_s1/vision_cache_trace_probe.py /tmp/vision-cache-aba.log
-CUA_S1_VISION_GRAPH=0 cargo run --release --locked -p omni-cua-s1-native \
+CUA_S1_GRAPH=0 CUA_S1_VISION_GRAPH=0 cargo run --release --locked -p omni-cua-s1-native \
   --example vision_graph_bench -- /tmp/vision-eager.json
-CUA_S1_VISION_GRAPH=1 cargo run --release --locked -p omni-cua-s1-native \
+CUA_S1_GRAPH=0 CUA_S1_VISION_GRAPH=1 cargo run --release --locked -p omni-cua-s1-native \
   --example vision_graph_bench -- /tmp/vision-graph.json
 ```
 
