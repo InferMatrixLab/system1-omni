@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -630,3 +631,86 @@ def test_validate_export_detects_extra_files_and_forgotten_entries(tmp_path):
     rewrite_manifest(out, drop_file_record)
     with pytest.raises(ValueError, match="head.safetensors"):
         tool.validate_export(out)
+
+
+# --- real-artifact pin helpers (CPU-only, no multi-GB reads) ---
+
+def test_base_weights_file_requires_single_shard(tmp_path):
+    import pytest
+
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": {"a": "model-00001.safetensors"}}), encoding="utf-8"
+    )
+    (base / "model-00001.safetensors").write_bytes(b"")
+    assert tool.base_weights_file(base) == base / "model-00001.safetensors"
+
+    (base / "model.safetensors.index.json").write_text(
+        json.dumps(
+            {"weight_map": {"a": "model-00001.safetensors", "b": "model-00002.safetensors"}}
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="single-shard"):
+        tool.base_weights_file(base)
+
+
+def test_checkpoint_revision_from_tree_pin(tmp_path):
+    checkpoint = tmp_path / "ckpt"
+    trees = checkpoint / ".cache" / "huggingface" / "trees"
+    trees.mkdir(parents=True)
+    assert tool.checkpoint_revision(checkpoint) is None
+    (trees / "81b9c6396ded3a45a92ae8079af85f988aa40501.json").write_text("{}", encoding="utf-8")
+    assert tool.checkpoint_revision(checkpoint) == "81b9c6396ded3a45a92ae8079af85f988aa40501"
+    (trees / "second.json").write_text("{}", encoding="utf-8")
+    assert tool.checkpoint_revision(checkpoint) is None
+
+
+# --- the full determinism check against the real pinned artifacts ---
+# Set VALEN_CKPT and VALEN_BASE (the recipe reference.md artifact exports) to
+# run; it exports twice and compares every byte, mirroring the CUA_S1_BASE
+# artifact-gating precedent.
+
+def test_real_artifact_export_is_deterministic(tmp_path):
+    import pytest
+
+    if not (os.environ.get("VALEN_CKPT") and os.environ.get("VALEN_BASE")):
+        pytest.skip("set VALEN_CKPT and VALEN_BASE to run")
+
+    runs = []
+    for index in (1, 2):
+        out = tmp_path / f"run-{index}"
+        manifest = tool.export(
+            Path(os.environ["VALEN_CKPT"]), Path(os.environ["VALEN_BASE"]), out
+        )
+        runs.append((out, manifest))
+
+    (first, manifest_one), (second, manifest_two) = runs
+    for name in (tool.BACKBONE_FILE, tool.HEAD_FILE, "config.json", tool.MANIFEST_FILE):
+        assert (first / name).read_bytes() == (second / name).read_bytes(), name
+
+    # The pinned inventory, end to end.
+    counts = {}
+    for entry in manifest_one["tensors"]:
+        counts[entry["component"]] = counts.get(entry["component"], 0) + 1
+    # 632 base tensors: 186 merged, 48 vision-top and 6 merger replaced,
+    # 392 passing through (36 of them downcast from fp32).
+    assert counts == {
+        "backbone": 392,
+        "lora-merged": 186,
+        "vision-top": 48,
+        "merger": 6,
+        "decision-head": 2,
+    }
+    assert len(manifest_one["downcasts"]) == 36
+    assert manifest_one["merge"]["scaling"] == 2.0
+    assert manifest_one["head"]["projection_dim"] == 256
+    assert manifest_one["head"]["hidden_size"] == 2048
+    assert manifest_one["sources"]["checkpoint"]["sha256"] == (
+        "836622efe78fe757e2627aa6050c223d461c424ea430a1c110c15e6f42f5a012"
+    )
+    assert manifest_one["sources"]["base"]["revision"] == (
+        "15852e8c16360a2fea060d615a32b45270f8a8fc"
+    )
+    assert manifest_one["parity"] is None

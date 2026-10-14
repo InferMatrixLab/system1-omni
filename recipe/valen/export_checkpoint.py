@@ -726,3 +726,182 @@ def validate_export(out_dir):
     if manifest["parity"] is not None and not isinstance(manifest["parity"], dict):
         raise ValueError("parity slot must be null or the parity-gate record")
     return manifest
+
+
+# --- the real-artifact path: pinned checkpoint + pinned base -> export ---
+
+CHECKPOINT_FILE = "checkpoint.pt"
+TRAINING_METADATA_FILE = "training_metadata.json"
+BASE_MANIFEST_FILE = "valen_manifest.json"
+BASE_INDEX_FILE = "model.safetensors.index.json"
+PINNED_STAGE = "vision_top"
+
+
+def sha256_file(path):
+    """Stream a file through SHA-256 without loading it."""
+
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 22), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def checkpoint_revision(checkpoint_dir):
+    """The HF revision the Preview directory was pinned to, if recorded.
+
+    ``hf download`` leaves a per-revision tree file under .cache; its file
+    name is the revision. Returns None when the directory carries no pin
+    (the sha256 remains the authoritative identity either way).
+    """
+
+    trees = Path(checkpoint_dir) / ".cache" / "huggingface" / "trees"
+    if not trees.is_dir():
+        return None
+    revisions = sorted(p.stem for p in trees.glob("*.json"))
+    if len(revisions) != 1:
+        return None
+    return revisions[0]
+
+
+def base_weights_file(base_dir):
+    """The single safetensors shard the pinned base stores its weights in."""
+
+    index_path = Path(base_dir) / BASE_INDEX_FILE
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    shards = sorted(set(index["weight_map"].values()))
+    if len(shards) != 1:
+        raise ValueError(
+            f"this recipe exports single-shard bases; {index_path} lists {shards}"
+        )
+    path = Path(base_dir) / shards[0]
+    if not path.is_file():
+        raise ValueError(f"base weights file {path} does not exist")
+    return path
+
+
+def export(checkpoint_dir, base_dir, out_dir):
+    """Export the pinned checkpoint + base into ``out_dir`` (must not exist).
+
+    Enforces the artifact-internal pins before writing anything: the
+    checkpoint digest against training_metadata.json, the base weights
+    digest against both valen_manifest.json and the checkpoint's own
+    base_manifest, and the revision agreement between them. Returns the
+    validated manifest.
+    """
+
+    checkpoint_dir = Path(checkpoint_dir)
+    base_dir = Path(base_dir)
+
+    checkpoint_path = checkpoint_dir / CHECKPOINT_FILE
+    checkpoint_sha = sha256_file(checkpoint_path)
+    metadata_path = checkpoint_dir / TRAINING_METADATA_FILE
+    if metadata_path.is_file():
+        declared = json.loads(metadata_path.read_text(encoding="utf-8"))["checkpoint_sha256"]
+        if declared != checkpoint_sha:
+            raise ValueError(
+                f"checkpoint sha256 {checkpoint_sha} != training_metadata {declared}"
+            )
+
+    payload = torch.load(
+        checkpoint_path, map_location="cpu", weights_only=False, mmap=True
+    )
+    config = payload["config"]
+    if config.get("stage") != PINNED_STAGE:
+        raise ValueError(
+            f"checkpoint stage {config.get('stage')!r} != {PINNED_STAGE!r}: this "
+            "recipe only exports the vision_top Preview layout"
+        )
+
+    weights_file = base_weights_file(base_dir)
+    shard_sums = {weights_file.name: sha256_file(weights_file)}
+    valen_manifest = json.loads(
+        (base_dir / BASE_MANIFEST_FILE).read_text(encoding="utf-8")
+    )
+    base_manifest = payload.get("base_manifest") or {}
+    for label, declared in (
+        ("valen_manifest.json", valen_manifest.get("weight_sha256")),
+        ("checkpoint base_manifest", base_manifest.get("weight_sha256")),
+    ):
+        # Both pins record a per-shard sha mapping; they must cover exactly
+        # the shards on disk and match every digest.
+        if declared is not None and dict(declared) != shard_sums:
+            raise ValueError(
+                f"base weights sha256 {shard_sums} != {label} {dict(declared)}"
+            )
+    base_revision = valen_manifest.get("revision")
+    if base_manifest.get("revision") not in (None, base_revision):
+        raise ValueError(
+            f"base revision {base_revision!r} != checkpoint base_manifest "
+            f"{base_manifest['revision']!r}"
+        )
+
+    base_config = json.loads((base_dir / "config.json").read_text(encoding="utf-8"))
+    hidden_size = base_config["text_config"]["hidden_size"]
+    import safetensors
+
+    environment = {
+        "torch": torch.__version__,
+        "safetensors": safetensors.__version__,
+    }
+    try:
+        import peft
+
+        environment["peft"] = peft.__version__
+    except ImportError:  # pragma: no cover - the pinned venv always has peft
+        pass
+
+    sources = {
+        "checkpoint": {
+            "sha256": checkpoint_sha,
+            "revision": checkpoint_revision(checkpoint_dir),
+            "stage": config["stage"],
+        },
+        "base": {
+            "weights_sha256": shard_sums,
+            "revision": base_revision,
+            "repo": valen_manifest.get("repo"),
+        },
+        "environment": environment,
+    }
+    manifest = run_export(
+        payload["weights"],
+        weights_file,
+        out_dir,
+        sources=sources,
+        merge_config={"rank": config["lora_rank"], "alpha": config["lora_alpha"]},
+        head_config={
+            "projection_dim": config["projection_dim"],
+            "hidden_size": hidden_size,
+            "bias": False,
+        },
+        expected=PINNED_INVENTORY,
+        base_config_path=base_dir / "config.json",
+    )
+    return validate_export(Path(out_dir))
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--checkpoint", required=True, help="Valen-Preview-0923 directory")
+    parser.add_argument("--base", required=True, help="Qwen3.5-2B base directory")
+    parser.add_argument("--out", required=True, type=Path, help="export output directory")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    manifest = export(args.checkpoint, args.base, args.out)
+    counts = {}
+    for entry in manifest["tensors"]:
+        counts[entry["component"]] = counts.get(entry["component"], 0) + 1
+    print(f"exported {args.out}")
+    for component in sorted(counts):
+        print(f"  {component}: {counts[component]} tensors")
+    print(f"  downcasts: {len(manifest['downcasts'])} fp32 -> bf16")
+    print(f"  manifest: {args.out / MANIFEST_FILE}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
