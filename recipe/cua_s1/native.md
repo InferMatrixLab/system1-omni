@@ -41,7 +41,11 @@ markers or altered adapter bytes fail before CUDA loading. Prefix continuation
 is unsupported in this precision mode.
 
 Existing `cua-s1-text-merged/1` exports remain loadable with the earlier merged
-execution path. Merging the adapter, TF32/BF16 GDN intermediates, and different
+backbone execution path. PR #143 changes their letter-logit readout too: it now
+rounds to BF16 instead of retaining FP32, so close or tied choices can change
+after upgrading. No merged-path corpus A/B run qualifies that behavior change;
+the A800 parity results cover the unmerged precision profile only.
+Merging the adapter, TF32/BF16 GDN intermediates, and different
 GEMM reduction policies can change decisions on close or tied options. Re-export
 with the command above to use the precision profile. Rebuild worker and library
 together: this branch retains #118's ABI 6, but the precision profile requires the new optional

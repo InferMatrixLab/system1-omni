@@ -133,7 +133,11 @@ This profile targets the pinned no-FLA reference described above. Installing
 FLA changes Transformers' GDN implementation; comparisons must record which
 implementation actually ran. A different Torch version or GPU may choose other
 reduction orders, so qualification remains tied to the recorded environment.
-The old merged export remains an approximate execution mode. The precision
+The old merged export remains an approximate execution mode. PR #143 also
+changes that mode's letter-logit readout from FP32 to BF16 rounding, which can
+change close or tied choices after upgrading. The A800 unmerged-profile parity
+results do not qualify this merged-path behavior change; no merged-path corpus
+A/B run was performed. The precision
 profile does not change the screenshot adapter's execution mode.
 
 The historical cumulative A800 investigation and frozen-corpus results are recorded in

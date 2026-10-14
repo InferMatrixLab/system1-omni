@@ -62,7 +62,10 @@ starts with zero state; prefix continuation is rejected by the model adapter.
 The context drains its last stream before destruction, and is retired before
 that stream. Rebuild the library for this optional group; ABI remains 6 on this #118-based branch; the historical cumulative validation
 build used ABI 8.
-Builds now link both cuBLAS and cuBLASLt.
+Builds now link both cuBLAS and cuBLASLt. Every consumer of the rebuilt shared
+library must provide both runtime libraries (`libcublas.so` and
+`libcublasLt.so`), even when it does not enable the optional FP32 GDN group.
+An existing cuBLASLt-only deployment must add cuBLAS before upgrading.
 
 `tests/qwen3_5/test_gdn_fp32.py` compares against the pinned Transformers 5.17
 no-FLA implementation. On the cumulative A800 sm_80/CUDA 13.0/Torch 2.14 build, all 14 cases passed
