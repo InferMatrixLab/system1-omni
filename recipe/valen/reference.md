@@ -458,6 +458,102 @@ and [`example-score-request.json`](example-score-request.json) unless
 one model load. Both blocks above are verbatim output of the committed tool;
 the `noul` and `score` blocks are recorded in the integration pull request.
 
+## Export parity (spec 02)
+
+The exported artifact set ([`export.md`](export.md)) was compared against the
+original pinned checkpoint stack with
+[`verify_export_parity.py`](verify_export_parity.py) on the same host as the
+records above. The two stacks are loaded serially, each in its own subprocess
+(the ~6.6 GiB BF16 stack does not fit twice in 8 GiB VRAM):
+
+- original: the worker's own `ValenExecutor` build — pinned base,
+  PEFT-wrapped language model with the FP32 LoRA applied unmerged, trained
+  vision-top blocks, merger and head from `checkpoint.pt`;
+- exported: the consumption path the export manifest documents —
+  `Qwen3_5ForConditionalGeneration.from_pretrained(weights/valen-export,
+  dtype=bf16, eager).model` plus the decision head rebuilt from
+  `head.safetensors` (DecisionHead 2048→256, FP32, no bias), run through the
+  pinned `Valen` class.
+
+Both stacks answer the text example and the image fixture compiled by the
+pinned `Compiler`; the declared gate is exact answer agreement with
+probability deltas ≤ 1e-6. The block below is the verbatim tool output
+(device `cuda:0`, NVIDIA GeForce RTX 5060 Laptop GPU, sm_120, 7.96 GiB,
+torch 2.11.0+cu128; recorded 2026-10-14):
+
+~~~text
+case: text
+logical tokens: 48
+compute tokens: 48
+max probability delta: 7.0580840111e-04
+answer agreement: PASS
+probability tolerance <= 1e-06: FAIL
+token accounting: PASS
+problem: probability delta 7.058084e-04 exceeds tolerance 1e-06
+
+case: image
+logical tokens: 108
+compute tokens: 108
+max probability delta: 1.7260342836e-02
+answer agreement: PASS
+probability tolerance <= 1e-06: FAIL
+token accounting: PASS
+problem: probability delta 1.726034e-02 exceeds tolerance 1e-06
+
+merge drift: 186 adapted modules (probe 256x bf16 rows, seed 0, scaling 2, cpu single thread)
+  max output delta: 3.125000e-02 (mean 2.024530e-02), worst model.language_model.layers.0.linear_attn.in_proj_a.weight
+  max relative output drift: 7.575758e-03 (mean 4.521309e-03), worst model.language_model.layers.12.linear_attn.in_proj_b.weight
+  max ulp ratio: 1, mean bit-exact fraction: 0.530288
+~~~
+
+Per-candidate probabilities (original stack → exported stack):
+
+~~~text
+text/refund: 0.5159630775 0.4840368927 -> 0.5152572991 0.4847427009  (both choose refund)
+image/color: 0.4459854066 0.5540145636 -> 0.4632457486 0.5367543097  (both choose black)
+~~~
+
+Verdict: **the parity gate fails on the declared 1e-6 tolerance**. The
+discrete answers agree exactly on both fixtures and the token accounting is
+identical, but the merged export's probabilities drift by 7.1e-4 (text) and
+1.7e-2 (image) — the merge drift accumulating through the 24 adapted layers,
+three orders of magnitude above the tolerance. The drift measurement itself
+is bounded at one BF16 ulp per adapted module (max ulp ratio exactly 1, ~53%
+of probe activations bit-exact), matching the research-001 per-layer
+estimate; the failure is the accumulation, not any single module.
+
+Control checks recorded with the run:
+
+- each stack was loaded twice in separate subprocesses and produced
+  bit-identical answers, so the cross-stack delta above is fully systematic
+  (the weight transformation), not run-to-run noise;
+- the original stack's probabilities match this recipe's committed serving
+  records (0.5159631044… / 0.5540145914…) within the 2.7e-8 worker-reference
+  tolerance recorded above, confirming the comparison's reference side is
+  the served model;
+- every exported tensor was cross-checked bit-exactly against the export
+  tool's merge math on the given base and checkpoint before the drift run.
+
+Per spec 02 user story 9, the failed gate triggers the documented fallback:
+export the FP32 LoRA separately and serve unmerged (recorded in the
+manifest's `merge.fallback`), which is the only path that meets the
+reference-serving tolerance. The merged artifact set keeps exact discrete
+answers and is recorded with `parity.status = "failed"` in
+`weights/valen-export/valen_export.json`, together with the per-case
+deltas, device, tolerances and the drift aggregate.
+
+Reproduce (the export itself per [`export.md`](export.md) first):
+
+~~~sh
+PYTHONPATH=src .venv/bin/python recipe/valen/verify_export_parity.py \
+  --valen-source "$VALEN_SRC" --checkpoint "$VALEN_CKPT" \
+  --base "$VALEN_BASE" --export weights/valen-export --device cuda
+~~~
+
+The script validates the artifact set and its recorded source pins before
+loading, refuses to overwrite an existing manifest parity record unless
+`--force` is given, and exits 0 only when the gate passes.
+
 ## Troubleshooting and limits
 
 - The source checkout must be exactly the pinned commit.
