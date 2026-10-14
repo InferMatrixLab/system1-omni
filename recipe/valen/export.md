@@ -103,9 +103,13 @@ boundaries. The pinned config's scaling is α/r = 64/32 = 2.0 over 372
 LoRA keys targeting 186 language linears.
 
 The fallback, recorded in the manifest's merge block, is to export the
-FP32 LoRA separately and serve unmerged — a mode that triggers only if
-the parity gate fails (spec 02, user story 9). It is deliberately not
-implemented while the gate passes.
+FP32 LoRA separately and serve unmerged (spec 02, user story 9). The
+parity gate has since failed on the pinned artifacts — the worst
+per-case probability delta is 1.7e-2 against the 1e-6 tolerance; the
+verdict and its numbers are recorded in
+[reference.md](reference.md) — so whether that fallback should be
+implemented is an open decision for the spec owner (tracked locally as
+decision ticket E4). This document does not presuppose its outcome.
 
 ## The FP32 downcasts
 
@@ -182,8 +186,8 @@ PYTHONPATH=src .venv/bin/python -m pytest tests/valen -q
 python recipe/valen/test_export_reference.py
 ~~~
 
-The first is the CPU-only suite (71 tests passed, 1 artifact-gated skip at
-the time of writing). The second chains that suite's export battery plus
+The first is the CPU-only suite (105 tests passed, 2 artifact-gated skips
+at the time of writing). The second chains that suite's export battery plus
 the env-gated real-artifact determinism gate — set `VALEN_CKPT` and
 `VALEN_BASE` to run it; it exports twice and compares every byte — and,
 with `VALEN_EXPORT` pointing at an exported directory (defaulting to
