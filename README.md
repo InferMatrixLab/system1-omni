@@ -162,7 +162,9 @@ runs as a Python worker or as a native worker on CUDA. Open-Jev-27B-v1.1
 and Open-Jev-9B run on the same native Rust/CUDA worker. Cua-S1 also has a
 Python screenshot worker, Valen-Preview-0923 has a Python reference worker for
 text and one-image state, CLM has a stub-encoder contract recipe, and OmniJev-4B
-v1.1 runs on a native Rust/CUDA worker:
+v1.1 runs on a native Rust/CUDA worker. D3
+(Decision 3.0) has a Python reference worker that runs the checkpoint's own
+pinned runtime for text state:
 
 | Model | Status |
 | --- | --- |
@@ -176,6 +178,7 @@ v1.1 runs on a native Rust/CUDA worker:
 | CLM-v0.1-8B | [External worker with a CPU stub encoder](recipe/clm/README.md); contract checks only, real Qwen3-8B decisions unverified by this recipe |
 | LFM2.5-350M | [Transformers worker](recipe/lfm2/README.md); text state and independent choice questions |
 | OmniJev-4B v1.1 | [Native Rust/CUDA worker](recipe/omnijev/native.md), eager: one image, Choice, Noul and Score; [reference comparison on sm_89](recipe/omnijev/native.md#comparison-with-the-reference) |
+| D3 (Decision 3.0) | [Python reference worker](recipe/d3/reference.md) on the checkpoint's pinned runtime; `choice`/`noul`/`score` text state, media refused until stage 2; author-run on A100 (evidence in the integration PR) |
 
 [Supported models and hardware](docs/supported-models.md) lists the devices
 and where each worker has been run.
