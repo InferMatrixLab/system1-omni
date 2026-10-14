@@ -441,7 +441,7 @@ def run_stage(args):
     if device.startswith("cuda"):
         index = torch.device(device).index or 0
         capability = torch.cuda.get_device_capability(index)
-        free, total = torch.cuda.mem_get_info(index)
+        _, total = torch.cuda.mem_get_info(index)
         hardware = (
             f"{torch.cuda.get_device_name(index)} "
             f"(sm_{capability[0]}{capability[1]}, {total / (1024 ** 3):.2f} GiB)"

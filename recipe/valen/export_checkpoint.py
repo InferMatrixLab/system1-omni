@@ -61,8 +61,6 @@ MANIFEST_FILE = "valen_export.json"
 PEFT_LANGUAGE_PREFIX = "backbone.language_model.base_model.model."
 PEFT_LORA_SUFFIX_A = ".lora_A.default.weight"
 PEFT_LORA_SUFFIX_B = ".lora_B.default.weight"
-BACKBONE_PREFIX = "model."
-VISUAL_PREFIX = "backbone.visual."
 HEAD_PREFIX = "head."
 
 COMPONENT_BACKBONE = "backbone"
@@ -197,7 +195,7 @@ def classify_checkpoint_weights(keys):
             merger.append(("model.visual.merger." + key[len("backbone.visual.merger."):], key))
         elif _VISION_BLOCK.match(key):
             block, tail = _VISION_BLOCK.match(key).groups()
-            if int(block) < 20:
+            if int(block) not in (20, 21, 22, 23):
                 raise ValueError(
                     f"unknown checkpoint weight {key!r}: the vision_top stage "
                     "trains only the last four blocks (20-23)"
@@ -329,12 +327,52 @@ def run_export(
     through ``safe_open``. ``sources`` is recorded verbatim in the manifest;
     ``merge_config``/``head_config``/``expected`` are validated against the
     tensors before anything is written. Returns the manifest dict.
+
+    A failed run leaves no partial output behind: every artifact this attempt
+    wrote is removed (and a directory it created is removed too), so the
+    not-empty guard never blocks a retry with the same arguments.
     """
 
     out_dir = Path(out_dir)
     if out_dir.exists() and any(out_dir.iterdir()):
         raise ValueError(f"output directory {out_dir} already exists and is not empty")
+    created = not out_dir.exists()
     out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        return _write_export(
+            checkpoint_weights,
+            base_file,
+            out_dir,
+            sources=sources,
+            merge_config=merge_config,
+            head_config=head_config,
+            expected=expected,
+            base_config_path=base_config_path,
+        )
+    except BaseException:
+        for name in (BACKBONE_FILE, HEAD_FILE, MANIFEST_FILE, "config.json"):
+            (out_dir / name).unlink(missing_ok=True)
+        if created:
+            try:
+                out_dir.rmdir()  # empty: everything this run wrote is gone
+            except OSError:  # never mask the failure being reported
+                pass
+        raise
+
+
+def _write_export(
+    checkpoint_weights,
+    base_file,
+    out_dir,
+    *,
+    sources,
+    merge_config,
+    head_config,
+    expected,
+    base_config_path=None,
+):
+    """The export body guarded by :func:`run_export`'s cleanup wrapper."""
+
     # Single-threaded CPU math keeps the FP32 merge GEMM bit-reproducible
     # regardless of the ambient thread/env configuration.
     torch.set_grad_enabled(False)
@@ -610,14 +648,15 @@ def validate_export(out_dir):
     from safetensors import safe_open
 
     out_dir = Path(out_dir)
-    present = sorted(p.name for p in out_dir.iterdir() if p.is_file())
+    # Any unexpected entry — file, directory or otherwise — fails the audit.
+    present = sorted(p.name for p in out_dir.iterdir())
     allowed = sorted([BACKBONE_FILE, HEAD_FILE, MANIFEST_FILE, "config.json"])
     if present != allowed:
         extra = sorted(set(present) - set(allowed))
         missing = sorted(set(allowed) - set(present))
         raise ValueError(
             f"export directory must hold exactly {allowed}: "
-            f"unexpected files {extra}, missing {missing}"
+            f"unexpected entries {extra}, missing {missing}"
         )
     manifest = json.loads((out_dir / MANIFEST_FILE).read_text(encoding="utf-8"))
     if manifest.get("format") != FORMAT:
