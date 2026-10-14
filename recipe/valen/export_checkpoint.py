@@ -807,12 +807,17 @@ def export(checkpoint_dir, base_dir, out_dir):
     checkpoint_path = checkpoint_dir / CHECKPOINT_FILE
     checkpoint_sha = sha256_file(checkpoint_path)
     metadata_path = checkpoint_dir / TRAINING_METADATA_FILE
-    if metadata_path.is_file():
-        declared = json.loads(metadata_path.read_text(encoding="utf-8"))["checkpoint_sha256"]
-        if declared != checkpoint_sha:
-            raise ValueError(
-                f"checkpoint sha256 {checkpoint_sha} != training_metadata {declared}"
-            )
+    if not metadata_path.is_file():
+        raise ValueError(
+            f"checkpoint directory {checkpoint_dir} is missing "
+            f"{TRAINING_METADATA_FILE}: the checkpoint digest cannot be pinned "
+            "before the pickle is unpickled (the worker pins unconditionally)"
+        )
+    declared = json.loads(metadata_path.read_text(encoding="utf-8"))["checkpoint_sha256"]
+    if declared != checkpoint_sha:
+        raise ValueError(
+            f"checkpoint sha256 {checkpoint_sha} != training_metadata {declared}"
+        )
 
     payload = torch.load(
         checkpoint_path, map_location="cpu", weights_only=False, mmap=True
@@ -834,9 +839,12 @@ def export(checkpoint_dir, base_dir, out_dir):
         ("valen_manifest.json", valen_manifest.get("weight_sha256")),
         ("checkpoint base_manifest", base_manifest.get("weight_sha256")),
     ):
-        # Both pins record a per-shard sha mapping; they must cover exactly
-        # the shards on disk and match every digest.
-        if declared is not None and dict(declared) != shard_sums:
+        # Both pins must declare a per-shard sha mapping covering exactly the
+        # shards on disk and matching every digest; a missing declaration is
+        # a pin bypass, not a pass.
+        if declared is None:
+            raise ValueError(f"{label} does not declare the base weights sha256")
+        if dict(declared) != shard_sums:
             raise ValueError(
                 f"base weights sha256 {shard_sums} != {label} {dict(declared)}"
             )
