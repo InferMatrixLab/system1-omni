@@ -72,58 +72,22 @@ A text-only request replaces the image object with plain text:
 }
 ~~~
 
-A yes/no judgment uses `noul`:
-
-~~~json
-{
-  "model": "valen-preview-0923",
-  "state": "The card was charged twice for one order.",
-  "questions": {
-    "duplicate": {
-      "type": "noul",
-      "instructions": "Was the card charged twice for one order?"
-    }
-  }
-}
-~~~
-
-A graded assessment uses `score` with an ordered level list:
-
-~~~json
-{
-  "model": "valen-preview-0923",
-  "state": "The card was charged twice for one order.",
-  "questions": {
-    "severity": {
-      "type": "score",
-      "instructions": "How severe is the billing error?",
-      "criteria": [
-        "No billing error: every charge is correct.",
-        "Minor error: a single duplicated charge.",
-        "Major error: repeated duplicated charges."
-      ]
-    }
-  }
-}
-~~~
-
 Preprocessing validates and decodes the data URL, writes it to a request-scoped
 directory, hashes the bytes, and converts it to Valen's local-media
 `messages` record. Text state skips materialization and compiles a text-only
 user message with no assets. The worker owns that directory's lifetime.
 
 The pinned compiler builds every question type from the same record family:
-`choice` and `noul` compile to one branch holding all candidates, while
-`score` compiles one isolated branch per level — each branch sees only its own
-level description, never the level ID or the other levels — and the K
-per-level decision logits are softmaxed across branches. A `noul` question
-without custom wording compiles as the reference's native noul record with
-the pinned schema's fixed candidate wording. Custom true/false wording cannot
-flow through a noul record (the pinned `candidates` ignores noul criteria), so
-it compiles as an equivalent `choice` record keyed `true`/`false` with
-unspecified sides filled from the same fixed wording: the same one-branch,
-two-candidate structure, so `P(true)` still comes from the two-candidate
-softmax.
+
+- `choice` and `noul` compile to one branch holding all candidates;
+- `score` compiles one isolated branch per level — each branch sees only its
+  own level description, never the level ID or the other levels — and the K
+  per-level decision logits are softmaxed across branches;
+- `noul` without custom wording is the reference's native noul record with
+  the schema's fixed candidate wording; custom wording cannot flow through
+  it, so it compiles as the equivalent `choice` record keyed `true`/`false`,
+  with unspecified sides filled from the same fixed wording — `P(true)` still
+  comes from the two-candidate softmax.
 
 Postprocessing keeps Valen's original formulas for this reference slice:
 
@@ -148,18 +112,15 @@ highest probability, ties go to the earliest candidate in request order, and
 `probabilities` maps every candidate key to its probability in request order.
 
 Each `noul` answer is `{"type": "noul", "noul": ...,
-"probabilities": {"true": ..., "false": ...}, "confidence": ...}`: `noul` is
-`P(true)` — the field name matches Valen's reference answer module — and the
-full two-candidate pair is exposed so clients can derive their own
-quantities. The reference's own noul answer carries only `P(true)`; the pair
-and confidence are this worker's documented extension.
+"probabilities": ..., "confidence": ...}`: `noul` is `P(true)`, the reference
+answer module's own field; the pair and confidence are this worker's
+extension (the reference answer carries only `P(true)`).
 
 Each `score` answer is `{"type": "score", "probabilities": ...,
-"score": ..., "legend": ..., "confidence": ...}` with the reference's field
-names: `probabilities` maps the level keys `"0"`… to their cross-branch
-softmax probability, `score` is the expected level `sum(i * p_i)`, and
-`legend` maps each level key back to its request-order description. Values
-are emitted unrounded, like every other answer field.
+"score": ..., "legend": ..., "confidence": ...}`: `probabilities` maps the
+level keys `"0"`… to their cross-branch softmax probability, `score` is the
+expected level `sum(i * p_i)`, and `legend` maps each level key back to its
+request-order description.
 
 The response `model` is `valen-preview-0923`, the worker's stable serving
 identity. `usage.input_tokens` counts the compiled prompt's logical tokens:

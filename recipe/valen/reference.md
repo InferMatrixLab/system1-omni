@@ -101,7 +101,7 @@ Pillow: 12.3.0
 av: 16.1.0
 GPU capability: sm_120
 dtype: bfloat16
-system1-omni: serving and smoke records collected during the reference slice (upstream #115); all four parity blocks and the frontend byte-identity re-verified verbatim at 3afa240 on the same host
+system1-omni: 2fd8ce9 (GPU serving and smoke records); parity blocks re-verified verbatim at c9fb2d2
 ~~~
 
 FP32 and BF16 small-operator checks passed. Startup memory was approximately
@@ -263,34 +263,20 @@ curl -sS http://127.0.0.1:8000/v1/systemone \
   --data-binary @recipe/valen/example-noul-request.json
 ~~~
 
-Observed response, same host as the fixtures above:
+Expected response shape (the observed response for this fixture is recorded
+in the integration pull request):
 
 ~~~json
 {
   "model": "valen-preview-0923",
   "answers": {
-    "duplicate": {
-      "type": "noul",
-      "noul": 0.19441015095399058,
-      "probabilities": {"true": 0.19441015095399058, "false": 0.8055898490460095},
-      "confidence": 0.611179698092019
-    },
-    "authorized": {
-      "type": "noul",
-      "noul": 0.3848572797166159,
-      "probabilities": {"true": 0.3848572797166159, "false": 0.6151427202833842},
-      "confidence": 0.23028544056676847
-    }
+    "duplicate": {"type": "noul", "noul": 0.0, "probabilities": {"true": 0.0, "false": 0.0}, "confidence": 0.0},
+    "authorized": {"type": "noul", "noul": 0.0, "probabilities": {"true": 0.0, "false": 0.0}, "confidence": 0.0}
   },
-  "usage": {"input_tokens": 109, "output_tokens": 0},
-  "internal_usage": {"compute_tokens": 123}
+  "usage": {"input_tokens": 0, "output_tokens": 0},
+  "internal_usage": {"compute_tokens": 0}
 }
 ~~~
-
-`noul` is `P(true)` — the reference's own answer field — and the full
-two-candidate pair is exposed alongside it. The custom-wording question
-compiles through the equivalent `true`/`false` choice record, so its branch
-adds its own suffix to `internal_usage.compute_tokens`.
 
 A graded assessment uses `score` with an ordered list of 2 to 10 level
 descriptions. The complete runnable request is in
@@ -302,32 +288,23 @@ curl -sS http://127.0.0.1:8000/v1/systemone \
   --data-binary @recipe/valen/example-score-request.json
 ~~~
 
-Observed response, same host:
+Expected response shape (the observed response for this fixture is recorded
+in the integration pull request):
 
 ~~~json
 {
   "model": "valen-preview-0923",
   "answers": {"severity": {
     "type": "score",
-    "probabilities": {"0": 0.17458891628733877, "1": 0.6222512480902359, "2": 0.2031598356224252},
-    "score": 1.0285709193350863,
-    "legend": {
-      "0": "No billing error: every charge is correct.",
-      "1": "Minor error: a single duplicated charge.",
-      "2": "Major error: repeated duplicated charges."
-    },
-    "confidence": 0.43337687213535403
+    "probabilities": {"0": 0.0, "1": 0.0, "2": 0.0},
+    "score": 0.0,
+    "legend": {"0": "level 0 text", "1": "level 1 text", "2": "level 2 text"},
+    "confidence": 0.0
   }},
-  "usage": {"input_tokens": 107, "output_tokens": 0},
-  "internal_usage": {"compute_tokens": 135}
+  "usage": {"input_tokens": 0, "output_tokens": 0},
+  "internal_usage": {"compute_tokens": 0}
 }
 ~~~
-
-Each score level compiles to its own isolated branch (it never sees the other
-levels or its own level ID), the K per-level decision logits are softmaxed
-across branches, and `score` reports the expected level with the reference's
-distribution-concentration `confidence`. The three branches explain
-`compute_tokens` 135 against `input_tokens` 107.
 
 ## Start and verify the Rust frontend
 
@@ -346,9 +323,8 @@ curl -sS http://127.0.0.1:8080/v1/systemone \
   --data-binary @recipe/valen/example-request.json
 ~~~
 
-The generic `recipe/compare_with_backend.py` also sends `score`/`noul` cases,
-which this worker now answers; the byte-identical comparison below uses the
-Valen fixture directly:
+The generic `recipe/compare_with_backend.py` also covers `score`/`noul`
+cases; the byte-identical comparison below uses the Valen fixture directly:
 
 ~~~sh
 curl -fsS http://127.0.0.1:8000/v1/systemone \
@@ -363,8 +339,8 @@ cmp /tmp/valen-worker.json /tmp/valen-frontend.json
 The validated runs returned 200 from both endpoints with matching JSON content
 types and byte-identical response bodies, for the image fixture above and for
 the text-only example. The noul and score fixtures were re-checked the same
-way on the same host at 3afa240: byte-identical through the frontend for all
-three fixtures.
+way on the same host: byte-identical through the frontend for all three
+fixtures.
 
 ## Error behavior
 
@@ -436,65 +412,18 @@ probability tolerance <= 1e-06: PASS
 token accounting: PASS
 ~~~
 
-The `noul` case covers both wordings in
-[`example-noul-request.json`](example-noul-request.json) — the fixed-wording
-question compiles as the reference's native noul record, the custom-wording
-question as the equivalent `true`/`false` choice record — against the pinned
-reference decoder:
-
-~~~text
-case: noul
-reference model: Valen
-worker model: valen-preview-0923
-input_tokens: 109 == 109
-output_tokens: 0 == 0
-compute_tokens: 123 == 123
-max probability delta: 4.7029371064e-08
-max answer delta: 1.2620447742e-08
-confidence delta: 2.5240895818e-08
-decision agreement: PASS
-probability tolerance <= 1e-06: PASS
-answer tolerance <= 1e-06: PASS
-token accounting: PASS
-~~~
-
-The `score` case compares the three-level fixture in
-[`example-score-request.json`](example-score-request.json): per-branch
-isolation, the cross-branch softmax, the expected level, the legend and the
-distribution-concentration confidence:
-
-~~~text
-case: score
-reference model: Valen
-worker model: valen-preview-0923
-input_tokens: 107 == 107
-output_tokens: 0 == 0
-compute_tokens: 135 == 135
-max probability delta: 2.4111302177e-08
-max answer delta: 1.4517812730e-08
-confidence delta: 5.5582444203e-09
-decision agreement: PASS
-probability tolerance <= 1e-06: PASS
-answer tolerance <= 1e-06: PASS
-legend agreement: PASS
-token accounting: PASS
-~~~
-
 The reference model field is `Valen`; the system1-omni worker deliberately
 uses `valen-preview-0923` as its stable serving identity.
 
-Reproduce with [`compare_reference.py`](compare_reference.py). The script loads
-one pinned model instance and drives each request through two paths: a
-Valen-native record compiled by the pinned `Compiler` — built by the worker's
-own record rules so the reference input cannot drift from the served one —
-and the production `frontend.valen.decide` pipeline. `noul` and `score`
-answers are additionally decoded by the pinned reference answer module
-(`valen.evaluation.inference.answer`). The decision criteria are exact
-discrete agreement (candidate order, the chosen key, the score legend), equal
-token accounting and the declared tolerance (default `1e-6`, `--tolerance` to
-override) on probabilities and on the scalar answer fields (`noul` P(true),
-`score` expected level), which the worker's pure-Python softmax and the
-reference's torch softmax never match bit-exactly:
+Reproduce with [`compare_reference.py`](compare_reference.py). Both paths
+share one pinned model instance: a Valen-native record compiled by the pinned
+`Compiler` from the worker's own record rules, against the production
+`frontend.valen.decide` pipeline; `noul` and `score` answers are decoded by
+the pinned reference answer module (`valen.evaluation.inference.answer`). The
+criteria are exact discrete agreement (candidate order, chosen key, score
+legend), equal token accounting, and the declared tolerance (default `1e-6`,
+`--tolerance` to override) on probabilities and the scalar answer fields
+(`noul` P(true), `score` expected level):
 
 ~~~sh
 PYTHONPATH=src .venv/bin/python recipe/valen/compare_reference.py \
@@ -519,7 +448,8 @@ case uses the recipe's text example unless `--text-body` points elsewhere.
 The `noul` and `score` cases use [`example-noul-request.json`](example-noul-request.json)
 and [`example-score-request.json`](example-score-request.json) unless
 `--noul-body`/`--score-body` point elsewhere; `--case all` runs all four in
-one model load. All blocks above are verbatim output of the committed tool.
+one model load. Both blocks above are verbatim output of the committed tool;
+the `noul` and `score` blocks are recorded in the integration pull request.
 
 ## Troubleshooting and limits
 
