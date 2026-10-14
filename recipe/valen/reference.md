@@ -176,6 +176,9 @@ print(manifest["versions"])
 PY
 ~~~
 
+The pinned checkpoint and base can also be exported to a manifest-described
+safetensors artifact set for non-Python consumers: [export.md](export.md).
+
 ## Start the worker
 
 The worker loads all model-owned state and performs a real representative
