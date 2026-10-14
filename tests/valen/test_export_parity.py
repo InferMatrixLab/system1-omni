@@ -350,6 +350,98 @@ def test_fill_parity_slot_refuses_to_silently_overwrite(tmp_path):
     ] == 1e-8
 
 
+# --- the source-pin cross-check before any model is loaded ---
+
+def pin_args(checkpoint_dir, base_dir):
+    import argparse
+
+    return argparse.Namespace(checkpoint=str(checkpoint_dir), base=str(base_dir))
+
+
+def pin_fixture(tmp_path):
+    """A tiny checkpoint dir + single-shard base and a manifest recording
+    their true digests, mirroring the real pinned layout."""
+
+    import hashlib
+
+    from export_checkpoint import sha256_file
+
+    checkpoint_dir = tmp_path / "ckpt"
+    checkpoint_dir.mkdir()
+    checkpoint_file = checkpoint_dir / "checkpoint.pt"
+    checkpoint_file.write_bytes(b"checkpoint-bytes")
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    shard = base_dir / "model.safetensors-00001-of-00001.safetensors"
+    shard.write_bytes(b"shard-bytes")
+    (base_dir / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": {"a": shard.name}}), encoding="utf-8"
+    )
+    (base_dir / "valen_manifest.json").write_text(
+        json.dumps({"revision": "badbee"}), encoding="utf-8"
+    )
+    manifest = {
+        "sources": {
+            "checkpoint": {"sha256": sha256_file(checkpoint_file)},
+            "base": {
+                "revision": "badbee",
+                "weights_sha256": {
+                    shard.name: hashlib.sha256(b"shard-bytes").hexdigest()
+                },
+            },
+        }
+    }
+    return pin_args(checkpoint_dir, base_dir), manifest
+
+
+def test_verify_sources_match_manifest_accepts_matching_pins(tmp_path):
+    args, manifest = pin_fixture(tmp_path)
+    tool.verify_sources_match_manifest(args, manifest)  # no exception
+
+
+def test_verify_sources_rejects_checkpoint_digest_drift(tmp_path):
+    import pytest
+
+    args, manifest = pin_fixture(tmp_path)
+    manifest["sources"]["checkpoint"]["sha256"] = "00" * 32
+    with pytest.raises(ValueError, match="checkpoint sha256"):
+        tool.verify_sources_match_manifest(args, manifest)
+
+
+def test_verify_sources_rejects_base_revision_drift(tmp_path):
+    import pytest
+
+    args, manifest = pin_fixture(tmp_path)
+    manifest["sources"]["base"]["revision"] = "deadbee"
+    with pytest.raises(ValueError, match="base revision"):
+        tool.verify_sources_match_manifest(args, manifest)
+
+
+def test_verify_sources_rejects_tampered_base_shard_digest(tmp_path):
+    """The base weights themselves must be re-hashed against the manifest's
+    recorded per-shard digests: 392 tensors pass through the export byte by
+    byte, so a silently swapped base would poison the parity verdict."""
+
+    import pytest
+
+    args, manifest = pin_fixture(tmp_path)
+    manifest["sources"]["base"]["weights_sha256"][
+        "model.safetensors-00001-of-00001.safetensors"
+    ] = "00" * 32
+    with pytest.raises(ValueError, match="base weights sha256"):
+        tool.verify_sources_match_manifest(args, manifest)
+
+
+def test_verify_sources_rejects_swapped_base_shard_bytes(tmp_path):
+    import pytest
+
+    args, manifest = pin_fixture(tmp_path)
+    shard = tmp_path / "base" / "model.safetensors-00001-of-00001.safetensors"
+    shard.write_bytes(b"different-shard-bytes")  # digest record stays honest
+    with pytest.raises(ValueError, match="base weights sha256"):
+        tool.verify_sources_match_manifest(args, manifest)
+
+
 # --- the full parity gate against the real pinned artifacts ---
 # Set VALEN_CKPT, VALEN_BASE and VALEN_SRC (the recipe reference.md artifact
 # exports) on a CUDA host to run: it exports a fresh artifact set, then runs
