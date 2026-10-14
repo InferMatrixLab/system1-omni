@@ -1,6 +1,6 @@
 # Cua-S1 4B 0.2 native text worker
 
-The native worker ([`src/models/cua_s1/native/`](../../src/models/cua_s1/native/)) serves the `text` adapter like the reference worker in [`text.md`](text.md), with the Qwen3.5-4B forward pass on the CUDA kernels in [`src/backends/cuda/qwen3_5/`](../../src/backends/cuda/qwen3_5/) and no Python or PyTorch. It needs an NVIDIA GPU with compute capability 8.0 or newer; the unmerged precision profile was checked on the cumulative A800 80 GB (sm_80) build with CUDA 13.0; device qualification of this independent #118-based branch remains pending. The earlier merged path was checked on an RTX 6000 Ada (sm_89) with CUDA 13.2.
+The native worker ([`src/models/cua_s1/native/`](../../src/models/cua_s1/native/)) serves the `text` adapter like the reference worker in [`text.md`](text.md), with the Qwen3.5-4B forward pass on the CUDA kernels in [`src/backends/cuda/qwen3_5/`](../../src/backends/cuda/qwen3_5/) and no Python or PyTorch. It needs an NVIDIA GPU with compute capability 8.0 or newer; the unmerged precision profile was checked on the cumulative A800 80 GB (sm_80) build with CUDA 13.0; source-pinned qualification of the independent #118-based branch is tracked in [PR #143](https://github.com/ThinkFlowLab/system1-omni/pull/143). The earlier merged path was checked on an RTX 6000 Ada (sm_89) with CUDA 13.2.
 
 Run the commands from the repository root. Pass your GPU's compute capability to `build.sh` (89 for Ada, 80 for A100, 90 for H100); the worker finds `libqwen3_5_cuda.so` next to its executable, or at `CUA_S1_CUDA_LIB`:
 

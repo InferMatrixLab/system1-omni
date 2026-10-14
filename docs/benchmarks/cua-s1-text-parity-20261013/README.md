@@ -23,9 +23,11 @@ The GPU results below were measured on cumulative candidate
 The independently rebased branch retains #118's ABI 6 and adds only optional
 FP32 GDN symbols. Rebuild the library with the worker; no cuDNN is needed for
 this text path. Results from the cumulative build are historical evidence for
-the pinned implementation, not a fresh GPU qualification of the rebased PR head.
-The GPU server was shut down after the campaign; no new device run is implied
-by packaging this PR. CPU/build/docs checks are run again on the independent head.
+the pinned implementation. Fresh independent-branch qualification, including
+exact source/library/binary hashes, repeated HTTP results and self-review, is
+recorded separately in [PR #143](https://github.com/ThinkFlowLab/system1-omni/pull/143).
+Use each run's source pin; do not substitute the historical integrated result
+for a newer branch's validation.
 
 ## Frozen inputs and environment
 
@@ -122,7 +124,7 @@ operator regressions and strict MkDocs build also passed. The checkpoint-depende
 prefix test used canonical merged text weights with the original pinned multimodal
 config for a zero-image contract fixture; it is not numerical-reference evidence.
 
-Independent-PR-head GPU execution, other GPUs, framework versions, FLA execution
-and screenshot-model numerical
-parity require separate qualification. This corpus does not establish general
+Other GPUs, framework versions, FLA execution and screenshot-model numerical
+parity require separate qualification. Independent-head evidence remains
+source-pinned in #143 rather than inferred from these historical results. This corpus does not establish general
 GUI accuracy or a performance improvement.
