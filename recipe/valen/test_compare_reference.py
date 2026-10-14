@@ -178,6 +178,7 @@ def main() -> None:
             {"move": choice_answer({"up": 0.25, "down": 0.75}, "down", 0.5)}
         ),
         REFERENCE,
+        {"move": "choice"},
     )
     report = "\n".join(lines)
     check(
@@ -185,6 +186,7 @@ def main() -> None:
         ok
         and "decision agreement: PASS" in report
         and "probability tolerance <= 1e-06: PASS" in report
+        and "confidence tolerance <= 1e-06: PASS" in report
         and "token accounting: PASS" in report
         and "input_tokens: 17 == 17" in report,
         report,
@@ -197,6 +199,7 @@ def main() -> None:
             {"move": choice_answer({"up": 0.25 + 1e-9, "down": 0.75 - 1e-9}, "down", 0.5)}
         ),
         REFERENCE,
+        {"move": "choice"},
     )
     check("delta within tolerance passes", ok, "\n".join(lines))
 
@@ -205,6 +208,7 @@ def main() -> None:
         "text",
         worker_response({"move": choice_answer({"up": 0.6, "down": 0.4}, "up", 0.2)}),
         REFERENCE,
+        {"move": "choice"},
     )
     check(
         "probability and decision mismatch fails",
@@ -216,11 +220,24 @@ def main() -> None:
 
     lines, ok = tool.compare_case(
         "text",
+        worker_response({"move": choice_answer({"up": 0.25, "down": 0.75}, "down", 0.9)}),
+        REFERENCE,
+        {"move": "choice"},
+    )
+    check(
+        "confidence drift beyond tolerance fails",
+        not ok and "confidence tolerance <= 1e-06: FAIL" in "\n".join(lines),
+        "\n".join(lines),
+    )
+
+    lines, ok = tool.compare_case(
+        "text",
         worker_response(
             {"move": choice_answer({"up": 0.25, "down": 0.75}, "down", 0.5)},
             input_tokens=18,
         ),
         REFERENCE,
+        {"move": "choice"},
     )
     check(
         "token mismatch fails",
@@ -235,6 +252,7 @@ def main() -> None:
             {"move": choice_answer({"down": 0.75, "up": 0.25}, "down", 0.5)}
         ),
         REFERENCE,
+        {"move": "choice"},
     )
     check(
         "candidate order mismatch fails",
@@ -262,7 +280,10 @@ def main() -> None:
         }
 
     lines, ok = tool.compare_case(
-        "noul", worker_response({"ask": noul_answer(0.75, 0.5)}), noul_reference
+        "noul",
+        worker_response({"ask": noul_answer(0.75, 0.5)}),
+        noul_reference,
+        {"ask": "noul"},
     )
     report = "\n".join(lines)
     check(
@@ -277,10 +298,30 @@ def main() -> None:
         "noul",
         worker_response({"ask": noul_answer(0.75 + 1e-4, 0.5)}),
         noul_reference,
+        {"ask": "noul"},
     )
     check(
         "noul answer drift beyond tolerance fails",
         not ok and "answer tolerance <= 1e-06: FAIL" in "\n".join(lines),
+        "\n".join(lines),
+    )
+
+    # A noul request answered in choice shape must fail even when the
+    # candidate probabilities, decision and tokens all match.
+    drifted = {
+        "type": "choice",
+        "choice": "true",
+        "probabilities": {"true": 0.75, "false": 0.25},
+        "confidence": 0.5,
+    }
+    lines, ok = tool.compare_case(
+        "noul", worker_response({"ask": drifted}), noul_reference, {"ask": "noul"}
+    )
+    check(
+        "noul answered as choice fails",
+        not ok
+        and "decision agreement: FAIL" in "\n".join(lines)
+        and "answer type 'choice' != requested 'noul'" in "\n".join(lines),
         "\n".join(lines),
     )
 
@@ -290,7 +331,10 @@ def main() -> None:
                 "choice": "true", "confidence": 0.5}
     }
     lines, ok = tool.compare_case(
-        "noul", worker_response({"ask": noul_answer(0.75, 0.5)}), choice_shaped
+        "noul",
+        worker_response({"ask": noul_answer(0.75, 0.5)}),
+        choice_shaped,
+        {"ask": "noul"},
     )
     check(
         "custom-wording noul compares against the choice-shaped decode",
@@ -329,6 +373,7 @@ def main() -> None:
         "score",
         worker_response({"grade": score_answer(0.4, legend, 0.4)}, compute_tokens=51),
         score_reference,
+        {"grade": "score"},
     )
     report = "\n".join(lines)
     check(
@@ -346,6 +391,7 @@ def main() -> None:
             {"grade": score_answer(0.4, wrong_legend, 0.4)}, compute_tokens=51
         ),
         score_reference,
+        {"grade": "score"},
     )
     check(
         "score legend mismatch fails",
@@ -359,10 +405,33 @@ def main() -> None:
         "score",
         worker_response({"grade": score_answer(0.5, legend, 0.4)}, compute_tokens=51),
         score_reference,
+        {"grade": "score"},
     )
     check(
         "score expected-level drift fails the answer tolerance",
         not ok and "answer tolerance <= 1e-06: FAIL" in "\n".join(lines),
+        "\n".join(lines),
+    )
+
+    # A score request answered in choice shape must fail even when the
+    # candidate probabilities, decision and tokens all match.
+    drifted_score = {
+        "type": "choice",
+        "choice": "1",
+        "probabilities": {"0": 0.7, "1": 0.2, "2": 0.1},
+        "confidence": 0.4,
+    }
+    lines, ok = tool.compare_case(
+        "score",
+        worker_response({"grade": drifted_score}, compute_tokens=51),
+        score_reference,
+        {"grade": "score"},
+    )
+    check(
+        "score answered as choice fails",
+        not ok
+        and "decision agreement: FAIL" in "\n".join(lines)
+        and "answer type 'choice' != requested 'score'" in "\n".join(lines),
         "\n".join(lines),
     )
 

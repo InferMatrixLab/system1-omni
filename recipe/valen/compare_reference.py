@@ -14,12 +14,13 @@ Runs each request through two paths with the same pinned artifacts:
 Both paths share one loaded model instance, so the comparison isolates input
 construction, candidate ordering, decision-head readout and probability
 normalization instead of checkpoint loading. The declared criteria are exact
-discrete agreement (candidate order, the chosen key, the score legend), equal
-token accounting and a tolerance of 1e-6 (``--tolerance``) on probabilities
-and on the scalar answer fields (``noul`` P(true), ``score`` expected level),
-which the two softmax implementations never match bit-exactly. Requires the
-pinned Valen source, the Preview checkpoint, the Qwen3.5-2B base and a
-working torch device; see recipe/valen/reference.md.
+discrete agreement (candidate order, the requested answer type, the chosen
+key, the score legend), equal token accounting and a tolerance of 1e-6
+(``--tolerance``) on probabilities, confidences and the scalar answer fields
+(``noul`` P(true), ``score`` expected level), which the two softmax
+implementations never match bit-exactly. Requires the pinned Valen source,
+the Preview checkpoint, the Qwen3.5-2B base and a working torch device; see
+recipe/valen/reference.md.
 """
 
 from __future__ import annotations
@@ -115,6 +116,23 @@ def reference_questions(body, special_tokens=None):
     return {question.name: question_record(question) for question in request.questions}
 
 
+def expected_answer_types(body, special_tokens=None):
+    """The requested public answer type per question, from the wire body.
+
+    The worker's public ``type`` field mirrors the request's question type,
+    so parity dispatches on the requested type: an answer that drifts to
+    another shape (for example a ``noul`` answered as a plain choice) fails
+    the comparison instead of silently skipping the noul/score checks.
+    """
+
+    from models.valen.protocol import DEFAULT_SPECIAL_TOKENS, parse_request
+
+    request = parse_request(
+        body, special_tokens=special_tokens or DEFAULT_SPECIAL_TOKENS
+    )
+    return {question.name: question.kind for question in request.questions}
+
+
 def reference_image_record(image_bytes, image_format, questions, media_dir):
     """A Valen-native image record with its own materialized media copy."""
 
@@ -158,13 +176,18 @@ def reference_confidence(probabilities):
     return max(0.0, (max(probabilities) - 1 / count) / (1 - 1 / count))
 
 
-def compare_case(name, worker_response, reference, tolerance=PROBABILITY_TOLERANCE):
+def compare_case(
+    name, worker_response, reference, expected_types, tolerance=PROBABILITY_TOLERANCE
+):
     """Compare one worker response against one reference result.
 
-    ``choice`` answers must agree on the chosen key; ``noul`` answers on
-    P(true); ``score`` answers on the expected level and the level legend.
-    All scalar comparisons use the declared tolerance because the worker and
-    the pinned reference normalize probabilities through different softmax
+    ``expected_types`` maps each question id to its requested public answer
+    type; every answer must keep that type before any per-type comparison
+    runs. ``choice`` answers must agree on the chosen key; ``noul`` answers
+    on P(true); ``score`` answers on the expected level and the level legend.
+    All scalar comparisons — probabilities, confidences and the scalar answer
+    fields — use the declared tolerance because the worker and the pinned
+    reference normalize probabilities through different softmax
     implementations. Returns (report lines, passed).
     """
 
@@ -179,6 +202,13 @@ def compare_case(name, worker_response, reference, tolerance=PROBABILITY_TOLERAN
     scalar_answers = False
     for qid, ref_keys in reference["keys"].items():
         answer = worker_response["answers"][qid]
+        expected_type = expected_types[qid]
+        if answer["type"] != expected_type:
+            problems.append(
+                f"{qid}: answer type {answer['type']!r} != requested {expected_type!r}"
+            )
+            decision_exact = False
+            continue
         worker_keys = list(answer["probabilities"])
         if worker_keys != list(ref_keys):
             problems.append(f"{qid}: candidate order {worker_keys} != {list(ref_keys)}")
@@ -191,7 +221,7 @@ def compare_case(name, worker_response, reference, tolerance=PROBABILITY_TOLERAN
         # source; synthetic references may omit it and fall back to the
         # shared probabilities and formulas.
         ref_answer = reference.get("answers", {}).get(qid)
-        if answer["type"] == "noul":
+        if expected_type == "noul":
             scalar_answers = True
             if ref_answer is not None and "noul" in ref_answer:
                 ref_p_true = ref_answer["noul"]
@@ -209,7 +239,7 @@ def compare_case(name, worker_response, reference, tolerance=PROBABILITY_TOLERAN
                 # exposes Valen's choice formula evaluated on the pair.
                 ref_confidence = reference_confidence(ref_probs)
             max_conf_delta = max(max_conf_delta, abs(answer["confidence"] - ref_confidence))
-        elif answer["type"] == "score":
+        elif expected_type == "score":
             scalar_answers = True
             ref_score = (
                 ref_answer["score"]
@@ -261,8 +291,13 @@ def compare_case(name, worker_response, reference, tolerance=PROBABILITY_TOLERAN
         + ("PASS" if decision_exact else "FAIL: " + "; ".join(problems))
     )
     prob_ok = max_prob_delta <= tolerance
+    confidence_ok = max_conf_delta <= tolerance
     lines.append(
         f"probability tolerance <= {tolerance:g}: " + ("PASS" if prob_ok else "FAIL")
+    )
+    lines.append(
+        f"confidence tolerance <= {tolerance:g}: "
+        + ("PASS" if confidence_ok else "FAIL")
     )
     if scalar_answers:
         answer_ok = max_answer_delta <= tolerance
@@ -275,7 +310,9 @@ def compare_case(name, worker_response, reference, tolerance=PROBABILITY_TOLERAN
                 + ("PASS" if legend_exact else "FAIL: " + "; ".join(legend_problems))
             )
     lines.append("token accounting: " + ("PASS" if tokens_exact else "FAIL"))
-    passed = decision_exact and legend_exact and prob_ok and tokens_exact
+    passed = (
+        decision_exact and legend_exact and prob_ok and confidence_ok and tokens_exact
+    )
     if scalar_answers:
         passed = passed and max_answer_delta <= tolerance
     return lines, passed
@@ -352,6 +389,7 @@ def main(argv=None):
         for name, body in cases:
             worker_response = decide(json.dumps(body).encode("utf-8"), processor, executor)
             questions = reference_questions(body, processor.special_tokens)
+            expected = expected_answer_types(body, processor.special_tokens)
             with TemporaryDirectory(prefix="valen-parity-") as directory:
                 media_root = Path(directory)
                 if name == "image":
@@ -362,7 +400,9 @@ def main(argv=None):
                 reference = run_reference(
                     executor.model, processor.processor, record, media_root, max_length, media_kwargs
                 )
-            lines, ok = compare_case(name, worker_response, reference, args.tolerance)
+            lines, ok = compare_case(
+                name, worker_response, reference, expected, args.tolerance
+            )
             print("\n".join(lines))
             print()
             if not ok:
