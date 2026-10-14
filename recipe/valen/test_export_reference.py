@@ -35,17 +35,24 @@ import export_checkpoint as tool  # noqa: E402
 import test_export as contract  # noqa: E402
 
 
+FIXTURE_PARAMS = ("tmp_path", "monkeypatch")
+
+
 def contract_tests():
     """The export contract battery from tests/valen/test_export.py, in module
-    order; ``tmp_path``-taking tests get a fresh directory each."""
+    order; each recognized fixture parameter gets a fresh instance per
+    test (``tmp_path`` a fresh directory, ``monkeypatch`` a pytest
+    ``MonkeyPatch`` undone right after)."""
 
     tests = []
     for name in sorted(dir(contract)):
         if not name.startswith("test_"):
             continue
         function = getattr(contract, name)
-        takes_tmp_path = "tmp_path" in function.__code__.co_varnames
-        tests.append((name, function, takes_tmp_path))
+        params = tuple(
+            param for param in FIXTURE_PARAMS if param in function.__code__.co_varnames
+        )
+        tests.append((name, function, params))
     return tests
 
 
@@ -57,13 +64,21 @@ def run_contract_battery(results):
     test's own reason, never as a failure.
     """
 
-    for name, function, takes_tmp_path in contract_tests():
+    import pytest
+
+    for name, function, params in contract_tests():
         try:
-            if takes_tmp_path:
-                with tempfile.TemporaryDirectory() as tmp:
-                    function(Path(tmp))
-            else:
-                function()
+            with tempfile.TemporaryDirectory() as tmp:
+                monkeypatch = pytest.MonkeyPatch()
+                kwargs = {}
+                if "tmp_path" in params:
+                    kwargs["tmp_path"] = Path(tmp)
+                if "monkeypatch" in params:
+                    kwargs["monkeypatch"] = monkeypatch
+                try:
+                    function(**kwargs)
+                finally:
+                    monkeypatch.undo()
         except BaseException as error:  # noqa: B036 - classified below
             if type(error).__name__ == "Skipped":
                 record(results, name, "skip", str(error))
