@@ -101,7 +101,7 @@ Pillow: 12.3.0
 av: 16.1.0
 GPU capability: sm_120
 dtype: bfloat16
-system1-omni: 2fd8ce9 (GPU serving and smoke records); parity blocks re-verified verbatim at c9fb2d2
+system1-omni: 2fd8ce9 (GPU serving and smoke records); parity blocks re-verified verbatim at 507c448
 ~~~
 
 FP32 and BF16 small-operator checks passed. Startup memory was approximately
@@ -393,6 +393,7 @@ max probability delta: 2.7810645453e-08
 confidence delta: 5.5621290906e-08
 decision agreement: PASS
 probability tolerance <= 1e-06: PASS
+confidence tolerance <= 1e-06: PASS
 token accounting: PASS
 ~~~
 
@@ -409,6 +410,7 @@ max probability delta: 2.6866340819e-08
 confidence delta: 5.3732681637e-08
 decision agreement: PASS
 probability tolerance <= 1e-06: PASS
+confidence tolerance <= 1e-06: PASS
 token accounting: PASS
 ~~~
 
@@ -420,10 +422,12 @@ share one pinned model instance: a Valen-native record compiled by the pinned
 `Compiler` from the worker's own record rules, against the production
 `frontend.valen.decide` pipeline; `noul` and `score` answers are decoded by
 the pinned reference answer module (`valen.evaluation.inference.answer`). The
-criteria are exact discrete agreement (candidate order, chosen key, score
-legend), equal token accounting, and the declared tolerance (default `1e-6`,
-`--tolerance` to override) on probabilities and the scalar answer fields
-(`noul` P(true), `score` expected level):
+criteria are exact discrete agreement (candidate order, the requested answer
+type, chosen key, score legend), equal token accounting, and the declared
+tolerance (default `1e-6`, `--tolerance` to override) on probabilities,
+confidences and the scalar answer fields (`noul` P(true), `score` expected
+level). An answer whose public `type` drifts from the requested question
+type fails the run instead of skipping the noul/score checks:
 
 ~~~sh
 PYTHONPATH=src .venv/bin/python recipe/valen/compare_reference.py \
