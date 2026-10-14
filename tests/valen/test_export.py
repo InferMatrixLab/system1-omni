@@ -559,6 +559,22 @@ def test_validate_export_accepts_a_fresh_export(tmp_path):
     assert manifest["format"] == tool.FORMAT
 
 
+def test_validate_export_streams_file_digests(tmp_path, monkeypatch):
+    """File digests must be computed streaming, never via a whole-file read:
+    the real model.safetensors is ~4.5 GiB and the contract is "headers and
+    digests only" (validate_export docstring, export.md)."""
+
+    out = tmp_path / "export"
+    run_tiny_export(out, tmp_path / "in-a")
+
+    def refuse(self):
+        raise AssertionError(f"validate_export read {self} whole into memory")
+
+    monkeypatch.setattr(Path, "read_bytes", refuse)
+    manifest = tool.validate_export(out)
+    assert manifest["format"] == tool.FORMAT
+
+
 def test_validate_export_detects_tampered_bytes(tmp_path):
     import pytest
 

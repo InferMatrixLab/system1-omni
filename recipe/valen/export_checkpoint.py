@@ -629,12 +629,15 @@ def validate_export(out_dir):
             f"{sorted(artifact_files)}"
         )
 
-    # Recorded file digests must match the bytes on disk.
+    # Recorded file digests must match the bytes on disk. Digests are
+    # streamed (sha256_file) and sizes come from stat(), so the multi-GiB
+    # model.safetensors never enters host memory.
     for name, record in sorted(manifest["files"].items()):
-        data = (out_dir / name).read_bytes()
-        if record["size"] != len(data):
-            raise ValueError(f"{name} is {len(data)} bytes, manifest says {record['size']}")
-        digest = hashlib.sha256(data).hexdigest()
+        path = out_dir / name
+        size = path.stat().st_size
+        if record["size"] != size:
+            raise ValueError(f"{name} is {size} bytes, manifest says {record['size']}")
+        digest = sha256_file(path)
         if record["sha256"] != digest:
             raise ValueError(f"{name} sha256 {digest} != manifest {record['sha256']}")
 
@@ -654,9 +657,16 @@ def validate_export(out_dir):
             raise ValueError(f"manifest lists {entry['name']!r} twice")
         listed[(entry["file"], entry["name"])] = entry
     on_disk = set()
-    for file_name in (BACKBONE_FILE, HEAD_FILE):
-        with safe_open(out_dir / file_name, framework="pt") as handle:
+    handles = {
+        file_name: safe_open(out_dir / file_name, framework="pt")
+        for file_name in (BACKBONE_FILE, HEAD_FILE)
+    }
+    try:
+        for file_name, handle in handles.items():
             on_disk.update((file_name, key) for key in handle.keys())
+    finally:
+        for handle in handles.values():
+            handle.__exit__(None, None, None)
     orphans = sorted(set(listed) - on_disk)
     if orphans:
         raise ValueError(f"manifest lists tensors absent from the files: {orphans[:4]}")
@@ -666,19 +676,20 @@ def validate_export(out_dir):
             f"{unlisted[0][0]} holds unlisted tensor {unlisted[0][1]!r}"
             f" ({len(unlisted)} total)"
         )
-    for file_name, key in sorted(on_disk):
+    for file_name in (BACKBONE_FILE, HEAD_FILE):
         with safe_open(out_dir / file_name, framework="pt") as handle:
-            slice_ = handle.get_slice(key)
-            entry = listed[(file_name, key)]
-            if entry["shape"] != list(slice_.get_shape()):
-                raise ValueError(
-                    f"{key!r} shape {entry['shape']} != file {list(slice_.get_shape())}"
-                )
-            if entry["dtype"] != _MANIFEST_DTYPES[slice_.get_dtype()]:
-                raise ValueError(
-                    f"{key!r} dtype {entry['dtype']} != file "
-                    f"{_MANIFEST_DTYPES[slice_.get_dtype()]}"
-                )
+            for key in sorted(k for f, k in on_disk if f == file_name):
+                slice_ = handle.get_slice(key)
+                entry = listed[(file_name, key)]
+                if entry["shape"] != list(slice_.get_shape()):
+                    raise ValueError(
+                        f"{key!r} shape {entry['shape']} != file {list(slice_.get_shape())}"
+                    )
+                if entry["dtype"] != _MANIFEST_DTYPES[slice_.get_dtype()]:
+                    raise ValueError(
+                        f"{key!r} dtype {entry['dtype']} != file "
+                        f"{_MANIFEST_DTYPES[slice_.get_dtype()]}"
+                    )
 
     # Downcast bookkeeping: the list and the per-tensor flags must agree.
     downcasts = set(manifest["downcasts"])
