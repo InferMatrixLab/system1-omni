@@ -683,6 +683,153 @@ def test_checkpoint_revision_from_tree_pin(tmp_path):
     assert tool.checkpoint_revision(checkpoint) is None
 
 
+# --- export()'s artifact pins (tiny synthetic checkpoint + base) ---
+
+def tiny_pin_base_dir(directory):
+    """A miniature pinned base: one shard, index, config, valen_manifest.
+
+    The manifest declares the shard's real digest, so the pin stage passes
+    unless a test tampers with it."""
+
+    import hashlib
+
+    directory = Path(directory)
+    directory.mkdir(parents=True)
+    shard = directory / "model.safetensors-00001-of-00001.safetensors"
+    shard.write_bytes(b"shard-bytes")
+    (directory / tool.BASE_INDEX_FILE).write_text(
+        json.dumps({"weight_map": {"a": shard.name}}), encoding="utf-8"
+    )
+    (directory / "config.json").write_text(
+        '{"text_config": {"hidden_size": 6}}', encoding="utf-8"
+    )
+    (directory / tool.BASE_MANIFEST_FILE).write_text(
+        json.dumps(
+            {
+                "repo": "Qwen/Qwen3.5-2B",
+                "revision": "badbee",
+                "weight_sha256": {
+                    shard.name: hashlib.sha256(b"shard-bytes").hexdigest()
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return directory
+
+
+def tiny_pin_checkpoint(directory, *, base_manifest=None, checkpoint_sha=None):
+    """Save a miniature loadable checkpoint.pt plus its training_metadata."""
+
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    import torch
+
+    payload = {
+        "config": {
+            "stage": tool.PINNED_STAGE,
+            "lora_rank": 4,
+            "lora_alpha": 8,
+            "projection_dim": 3,
+        },
+        "weights": {},
+        "base_manifest": base_manifest
+        if base_manifest is not None
+        else {
+            "repo": "Qwen/Qwen3.5-2B",
+            "revision": "badbee",
+            "weight_sha256": {},
+        },
+    }
+    checkpoint_path = directory / tool.CHECKPOINT_FILE
+    torch.save(payload, checkpoint_path)
+    real_sha = tool.sha256_file(checkpoint_path)
+    (directory / tool.TRAINING_METADATA_FILE).write_text(
+        json.dumps({"checkpoint_sha256": checkpoint_sha or real_sha}), encoding="utf-8"
+    )
+    return directory, real_sha
+
+
+def test_export_requires_training_metadata_pin(tmp_path):
+    """A checkpoint directory without training_metadata.json must be rejected:
+    the digest pin has to be verified before the pickle is ever unpickled
+    (the worker precedent: src/models/valen/engine.py pins unconditionally)."""
+
+    import pytest
+
+    checkpoint, _ = tiny_pin_checkpoint(tmp_path / "ckpt")
+    (checkpoint / tool.TRAINING_METADATA_FILE).unlink()
+    with pytest.raises(ValueError, match="training_metadata.json"):
+        tool.export(checkpoint, tiny_pin_base_dir(tmp_path / "base"), tmp_path / "out")
+
+
+def test_export_rejects_checkpoint_sha_mismatch(tmp_path):
+    import pytest
+
+    checkpoint, _ = tiny_pin_checkpoint(tmp_path / "ckpt", checkpoint_sha="00" * 32)
+    with pytest.raises(ValueError, match="training_metadata"):
+        tool.export(checkpoint, tiny_pin_base_dir(tmp_path / "base"), tmp_path / "out")
+
+
+def test_export_requires_valen_manifest_base_digest(tmp_path):
+    """valen_manifest.json must declare the base weights digest; a missing
+    declaration is a pin bypass, not a pass."""
+
+    import pytest
+
+    checkpoint, _ = tiny_pin_checkpoint(tmp_path / "ckpt")
+    base = tiny_pin_base_dir(tmp_path / "base")
+    manifest = json.loads((base / tool.BASE_MANIFEST_FILE).read_text(encoding="utf-8"))
+    del manifest["weight_sha256"]
+    (base / tool.BASE_MANIFEST_FILE).write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="valen_manifest.json"):
+        tool.export(checkpoint, base, tmp_path / "out")
+
+
+def test_export_requires_checkpoint_base_manifest_digest(tmp_path):
+    """The checkpoint's own base_manifest must declare the base weights digest
+    too; absence must fail the pin instead of skipping half of it."""
+
+    import pytest
+
+    checkpoint, _ = tiny_pin_checkpoint(
+        tmp_path / "ckpt", base_manifest={"revision": "badbee"}
+    )
+    base = tiny_pin_base_dir(tmp_path / "base")
+    with pytest.raises(ValueError, match="checkpoint base_manifest"):
+        tool.export(checkpoint, base, tmp_path / "out")
+
+
+def test_export_rejects_declared_base_digest_mismatch(tmp_path):
+    import pytest
+
+    checkpoint, _ = tiny_pin_checkpoint(
+        tmp_path / "ckpt",
+        base_manifest={"revision": "badbee", "weight_sha256": {"wrong.safetensors": "ff" * 32}},
+    )
+    with pytest.raises(ValueError, match="checkpoint base_manifest"):
+        tool.export(checkpoint, tiny_pin_base_dir(tmp_path / "base"), tmp_path / "out")
+
+
+def test_export_pin_stage_passes_on_consistent_pins(tmp_path):
+    """Sanity: with every pin present and consistent, the pin stage completes
+    and the run proceeds into the inventory check (the tiny payload cannot
+    satisfy the pinned 428-tensor inventory)."""
+
+    import pytest
+
+    base = tiny_pin_base_dir(tmp_path / "base")
+    declared = json.loads(
+        (base / tool.BASE_MANIFEST_FILE).read_text(encoding="utf-8")
+    )["weight_sha256"]
+    checkpoint, _ = tiny_pin_checkpoint(
+        tmp_path / "ckpt",
+        base_manifest={"revision": "badbee", "weight_sha256": declared},
+    )
+    with pytest.raises(ValueError, match="inventory"):
+        tool.export(checkpoint, base, tmp_path / "out")
+
+
 # --- the full determinism check against the real pinned artifacts ---
 # Set VALEN_CKPT and VALEN_BASE (the recipe reference.md artifact exports) to
 # run; it exports twice and compares every byte, mirroring the CUA_S1_BASE

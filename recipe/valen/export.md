@@ -46,8 +46,8 @@ Before writing anything, the export enforces the artifact pins — the
 checkpoint SHA-256 against `training_metadata.json`, the base weights
 digest against both `valen_manifest.json` and the checkpoint's own
 `base_manifest`, and the revision agreement between them — and rejects a
-checkpoint whose `stage` is not `vision_top`. A mismatch fails loudly
-instead of exporting the wrong weights.
+checkpoint whose `stage` is not `vision_top`. A missing pin or a mismatch
+fails loudly instead of exporting the wrong weights.
 
 ## The artifact set
 
