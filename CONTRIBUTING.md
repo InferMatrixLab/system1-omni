@@ -4,6 +4,11 @@ Review the [README](README.md) and
 [architecture and integration contracts](docs/architecture.md) for the project's
 ownership boundaries and current implementation status before making changes.
 
+Before changing or reviewing an area, read the applicable [lessons](lessons.md).
+Use the [development loop](docs/development-loop.md) to checkpoint evidence and
+resume work. Agent-assisted contributors also follow [AGENTS.md](AGENTS.md);
+these entrypoints link to the same canonical guidance.
+
 ## Before implementation or a PR
 
 Complete the [human contributor-intent gate](.agents/skills/self-review/SKILL.md#human-contributor-intent-gate)
