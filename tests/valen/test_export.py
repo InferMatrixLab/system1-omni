@@ -221,6 +221,20 @@ def test_classify_checkpoint_weights_rejects_non_visual_block_tower():
         )
 
 
+def test_classify_checkpoint_weights_rejects_block_beyond_the_top_four():
+    """Blocks at or above 24 are outside the trained 20-23 set and must be
+    rejected exactly like sub-20 blocks (the pinned inventory counts alone
+    would not catch a swapped-in block 24 replacing a missing one)."""
+
+    import pytest
+
+    keys = synthetic_checkpoint_keys()
+    keys.remove("backbone.visual.blocks.20.norm1.weight")
+    keys.append("backbone.visual.blocks.24.norm1.weight")
+    with pytest.raises(ValueError, match="vision_top"):
+        tool.classify_checkpoint_weights(keys)
+
+
 def test_validate_inventory_counts():
     classification = tool.classify_checkpoint_weights(synthetic_checkpoint_keys())
     expected = {
@@ -477,6 +491,69 @@ def test_run_export_rejects_existing_output(tmp_path):
         run_tiny_export(out, tmp_path / "in-b")
 
 
+def test_run_export_failure_leaves_no_partial_output(tmp_path, monkeypatch):
+    """A failed export must not leave a half-written output directory: the
+    not-empty guard would then block every retry with the same arguments."""
+
+    import pytest
+
+    real_write = tool.write_safetensors
+
+    def exploding_write(path, entries):
+        real_write(path, entries)
+        raise ValueError("boom after writing")
+
+    monkeypatch.setattr(tool, "write_safetensors", exploding_write)
+    base_file, config_file = materialize_input_dir(tmp_path / "in")
+    out = tmp_path / "export"
+    with pytest.raises(ValueError, match="boom"):
+        tool.run_export(
+            tiny_checkpoint_weights(),
+            base_file,
+            out,
+            sources=TINY_SOURCES,
+            merge_config=TINY_MERGE,
+            head_config=TINY_HEAD,
+            expected=TINY_INVENTORY,
+            base_config_path=config_file,
+        )
+    assert not out.exists() or not any(out.iterdir())
+
+    # The same arguments now succeed into the same directory.
+    monkeypatch.setattr(tool, "write_safetensors", real_write)
+    run_tiny_export(out, tmp_path / "in-a")
+
+
+def test_run_export_failure_cleans_preexisting_empty_output(tmp_path, monkeypatch):
+    """Same contract when --out pointed at a pre-existing empty directory:
+    the retry must find it empty again (the directory itself may survive)."""
+
+    import pytest
+
+    real_write = tool.write_safetensors
+
+    def exploding_write(path, entries):
+        real_write(path, entries)
+        raise ValueError("boom after writing")
+
+    monkeypatch.setattr(tool, "write_safetensors", exploding_write)
+    base_file, config_file = materialize_input_dir(tmp_path / "in")
+    out = tmp_path / "export"
+    out.mkdir()
+    with pytest.raises(ValueError, match="boom"):
+        tool.run_export(
+            tiny_checkpoint_weights(),
+            base_file,
+            out,
+            sources=TINY_SOURCES,
+            merge_config=TINY_MERGE,
+            head_config=TINY_HEAD,
+            expected=TINY_INVENTORY,
+            base_config_path=config_file,
+        )
+    assert not any(out.iterdir())
+
+
 def test_run_export_rejects_unexpected_fp32_base_tensor(tmp_path):
     import pytest
     import torch
@@ -637,7 +714,7 @@ def test_validate_export_detects_extra_files_and_forgotten_entries(tmp_path):
     out = tmp_path / "export"
     run_tiny_export(out, tmp_path / "in-a")
     (out / "surprise.bin").write_bytes(b"x")
-    with pytest.raises(ValueError, match="unexpected file"):
+    with pytest.raises(ValueError, match="unexpected"):
         tool.validate_export(out)
     (out / "surprise.bin").unlink()
 
@@ -646,6 +723,19 @@ def test_validate_export_detects_extra_files_and_forgotten_entries(tmp_path):
 
     rewrite_manifest(out, drop_file_record)
     with pytest.raises(ValueError, match="head.safetensors"):
+        tool.validate_export(out)
+
+
+def test_validate_export_rejects_extra_directories(tmp_path):
+    """The "exactly four files" audit must reject any unexpected entry, not
+    only unexpected regular files — otherwise a stray subdirectory passes."""
+
+    import pytest
+
+    out = tmp_path / "export"
+    run_tiny_export(out, tmp_path / "in-a")
+    (out / "scratch").mkdir()
+    with pytest.raises(ValueError, match="unexpected"):
         tool.validate_export(out)
 
 
