@@ -13,8 +13,11 @@ engine" is the older word for the second of those. A backend does not need
 identical internal structures to another backend, and no universal tensor
 abstraction is introduced here.
 
-Status: proposed. The checker is [`check_contract.py`](check_contract.py); wiring it
-into CI is a separate change, so nothing here is enforced yet.
+Status: the static Tier 1 checker, [`check_contract.py`](check_contract.py), is
+wired into the `cuda-contract` job in [CI](../../../.github/workflows/ci.yml),
+alongside checker and backend tests. The Tier 2 CUDA compile and Tier 3 GPU parity
+jobs described below are not configured there. Static enforcement does not prove
+compiled artifacts or numerical parity.
 
 ## Why this exists
 
@@ -205,7 +208,7 @@ instead of leaving it to be discovered in a parity failure:
 
 ## 4. Validation
 
-Two tiers, because they have different requirements.
+Three tiers, because they have different requirements.
 
 **Tier 1 — contract check (no GPU).** `check_contract.py` reads the manifests and
 the build scripts and checks: the schema, that every declared source exists, that
@@ -213,7 +216,7 @@ a build script declares the architectures the manifest claims and writes the
 library the manifest names, that `abi_version` matches the `<PREFIX>_ABI_VERSION`
 macro the declared sources define, and that a `validated` backend declares both a
 tolerance and a reference entrypoint. It runs on a stock runner and needs no CUDA
-toolkit. This is the tier implemented in this change.
+toolkit. This tier is implemented and runs in the current CI workflow.
 
 It does not compile CUDA and does not prove numerics.
 
@@ -240,9 +243,10 @@ wired up.
 
 The split is the point. A CPU-only workflow that claims to validate CUDA is worse
 than no workflow, which is the gap `#14`'s own validation report already records:
-today's CI checks every Rust feature and compiles no CUDA at all. Tier 1 removes
-the part of that gap which does not need hardware; Tiers 2 and 3 need hardware and
-are therefore separate.
+the current Rust CI selects `omni-laya/serve`, and the CUDA-contract job reads
+source text without compiling CUDA. Tier 1 covers the static part of that gap;
+Tier 2 needs a CUDA toolchain, and Tier 3 additionally needs a GPU and model
+artifacts. Neither is established by a passing Tier 1 job.
 
 ## Reporting
 
