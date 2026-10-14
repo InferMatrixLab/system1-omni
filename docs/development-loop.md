@@ -15,24 +15,28 @@ reviewing an area. Architecture and validation stay in their
 
 1. Complete the existing human intent gate, define the bounded change and select
    validation from the matrix. Record affected components and prerequisites.
-2. Implement with tests and contract/documentation updates. Capture revision,
+2. Implement the bounded change. Add or update tests when behavior changes and
+   update affected contracts/documentation. Capture revision,
    platform/tool versions, exact command, start/end time, result and evidence URL.
 3. Self-review the complete diff and fill the existing PR template. A green CPU
    suite does not validate GPU behavior; author evidence does not replace
    maintainer review. Keep blocked validation and its handoff owner visible.
-4. Before pausing or handing off, update a single **Handoff checkpoint** in the
-   authorized PR body or issue. Read it back to verify persistence. For work
-   without a remote item, retain the same fields in the contributor's private
-   task workspace until publication is authorized; do not commit run state.
-5. On resumption, read the checkpoint and current remote state before choosing the
+4. For multi-session work or an actual handoff, optionally keep a **Handoff
+   checkpoint** in the authorized PR body or issue. Reuse existing PR evidence
+   and record only fields needed to resume the work. If used, read it back to
+   verify persistence. Without a remote item, keep relevant state in the
+   contributor's private task workspace until publication is authorized; do not
+   commit run state.
+5. On resumption, read any checkpoint and current remote state before choosing the
    next action. Preserve past results as history, clearly separated from evidence
    applicable to the current head. A closed issue or merged PR does not complete
    every dependency automatically.
 
 ## Handoff checkpoint fields
 
-Use the existing item as the durable record; do not open a duplicate tracker.
-The following fields can be plain text in a PR body/comment or issue:
+When a checkpoint is useful, reuse the existing item rather than opening a
+duplicate tracker. The following are optional fields to select for the actual
+handoff, not a checklist required for every change:
 
 - Repository identity and item number/URL; observation time and sources.
 - Open/closed/merged state; actual PR base/head SHA. Issues have no inherent head;
@@ -73,15 +77,18 @@ record the last known result and its age without calling it current.
 
 ## Bounded execution and useful measurements
 
-Choose a time/attempt budget before expensive work. Retry only safe transient
-failures within that budget; a retry cannot expand authorization. Diagnose
-deterministic failures instead of repeatedly running them. Stop on access denial,
-exhausted budget, scope change or missing human decision, and checkpoint the
-blocker. Do not run parallel jobs against conflicting mutable resources.
+For benchmarks or resource-intensive work, follow time/attempt limits when the
+applicable recipe or agreed execution plan specifies them. Do not impose a new
+budget on ordinary contribution work. Retry only safe transient failures within
+any applicable limit; a retry cannot expand authorization. Diagnose deterministic
+failures instead of repeatedly running them. Stop on access denial, exhausted
+agreed resources, scope change or missing human decision, and report the blocker.
+Do not run parallel jobs against conflicting mutable resources.
 
-Use current CI timeouts and the [benchmark protocol](../benchmarks/README.md)
-where applicable; GPU reservations, downloads and paid runs require their own
-scope and resources. Record failures and skipped/ignored tests honestly.
+CI timeouts apply to their configured jobs, not as universal local-test budgets.
+Use the [benchmark protocol](../benchmarks/README.md) only where applicable;
+GPU reservations, downloads and paid runs require separately agreed scope and
+available resources. Record failures and skipped/ignored tests honestly.
 
 For an iteration improvement claim, define the observation window and metric
 before collecting it. Examples are elapsed time from first submitted revision to

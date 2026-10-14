@@ -32,11 +32,10 @@ The active file limit is 200 lines, including this guidance.
   duplicate lessons before archiving resolved or superseded detail.
 - Count independent failures, not retries, repeated observations or duplicate
   reports of one incident. Uncertain identity stays unresolved, not incremented.
-- Proposed recurrence threshold for maintainer review: at two independently
-  evidenced incidents with the same failure mechanism,
-  propose a regression test, invariant, tooling check or design repair, with an
-  owner and reviewable next action. This threshold is a proposal, not permission
-  to change infrastructure or policy automatically.
+- Use the observed failure mechanism and impact to propose an appropriate
+  preventive change for review. There is no default incident-count threshold or
+  automatic escalation; any new test or policy depends on repository needs and
+  available resources.
 - When there is material to archive, create `docs/lessons-archive/YYYY-MM.md`,
   retain source/incident history, and leave a short active-file reference.
   No archive is created until there is real content. Never hide an unresolved
