@@ -613,7 +613,12 @@ def parse_args(argv=None):
 
 
 def verify_sources_match_manifest(args, manifest):
-    """The parity evidence only holds for the artifacts the export recorded."""
+    """The parity evidence only holds for the artifacts the export recorded.
+
+    Verifies the checkpoint sha, the base revision and — because 392 tensors
+    pass through the export byte by byte — the base weights shard digests
+    themselves against the manifest's recorded ``sources.base.weights_sha256``.
+    """
 
     checkpoint_sha = exporter.sha256_file(Path(args.checkpoint) / exporter.CHECKPOINT_FILE)
     recorded = manifest["sources"]["checkpoint"]["sha256"]
@@ -630,6 +635,14 @@ def verify_sources_match_manifest(args, manifest):
         raise ValueError(
             f"the export was built from base revision {revision}, but --base "
             f"pins {base_manifest.get('revision')}"
+        )
+    weights_file = exporter.base_weights_file(Path(args.base))
+    shard_sums = {weights_file.name: exporter.sha256_file(weights_file)}
+    recorded_sums = manifest["sources"]["base"]["weights_sha256"]
+    if recorded_sums != shard_sums:
+        raise ValueError(
+            f"the export was built from base weights sha256 {recorded_sums}, "
+            f"but --base hashes {shard_sums}"
         )
 
 
