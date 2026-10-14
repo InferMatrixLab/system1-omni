@@ -16,13 +16,8 @@ The norm, elementwise and q/k preparation kernels round to bfloat16 where Transf
 `cs1_attention_gated` fuses the sigmoid gate into the attention epilogue, preserving
 the BF16 rounding of both attention and sigmoid before multiplication. The native
 workers use this entry point; the separate operations remain available for kernel
-comparisons. Rebuild the library and all native Rust consumers together for
-**ABI version 8**, even with resident features disabled. ABI 8 retains the vision,
-CUDA Graph, gated attention and prefix-continuation entry points and adds
-`cs1_get_device` and `cs1_bf16_finite` for device feature validation. Older
-libraries are rejected at load. See the
-[Cua-S1 resident-feature recipe](../../../../recipe/cua_s1/native_vision_graph.md#gpu-resident-vision-features)
-for the opt-in path, lifetime contract and regression commands.
+comparisons. Rebuild the library and workers together for ABI version 6, which
+includes vision, CUDA Graph, gated attention and prefix-continuation entry points.
 
 Gated DeltaNet preparation stores converted TF32 operands in three-byte component planes, preserves the original four-term TF32 accumulation, and writes U/W fragments directly as bfloat16. Dynamic shared memory is 72 KiB per block. The [H200 comparison](../../../../benchmarks/gdn/README.md) records complete GDN call latency, numerical checks, and the small end-to-end change measured with the Open-Jev worker from PR #55.
 
