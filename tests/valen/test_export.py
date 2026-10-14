@@ -12,6 +12,8 @@ PYTHONPATH=src python -m pytest tests/valen -q
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -232,3 +234,399 @@ def test_validate_inventory_counts():
 
     with pytest.raises(ValueError, match="lora_keys"):
         tool.validate_inventory(classification, dict(expected, lora_keys=23))
+
+
+# --- run_export on a tiny synthetic fixture (no real artifacts) ---
+
+TINY_INVENTORY = {
+    "checkpoint_tensors": 11,
+    "lora_keys": 6,
+    "vision_top_keys": 2,
+    "merger_keys": 1,
+    "head_keys": 2,
+    "base_tensors": 12,
+    "base_fp32_tensors": 2,
+}
+TINY_MERGE = {"rank": 4, "alpha": 8}
+TINY_HEAD = {"projection_dim": 3, "hidden_size": 6, "bias": False}
+TINY_SOURCES = {
+    "checkpoint": {"revision": "c0ffee", "sha256": "ab" * 32},
+    "base": {"revision": "badbee", "sha256": "cd" * 32},
+}
+
+
+def tiny_base_tensors():
+    import torch
+
+    return {
+        "model.language_model.embed_tokens.weight": torch.randn(12, 6).to(torch.bfloat16),
+        "model.language_model.layers.0.input_layernorm.weight": torch.randn(6).to(torch.bfloat16),
+        "model.language_model.layers.0.linear_attn.A_log": torch.randn(4, dtype=torch.float32),
+        "model.language_model.layers.0.linear_attn.norm.weight": torch.randn(4, dtype=torch.float32),
+        "model.language_model.layers.0.linear_attn.in_proj_qkv.weight": torch.randn(8, 6).to(torch.bfloat16),
+        "model.language_model.layers.0.linear_attn.in_proj_z.weight": torch.randn(4, 6).to(torch.bfloat16),
+        "model.language_model.layers.0.mlp.gate_proj.weight": torch.randn(8, 6).to(torch.bfloat16),
+        "model.visual.blocks.19.norm1.weight": torch.randn(4).to(torch.bfloat16),
+        "model.visual.blocks.20.norm1.weight": torch.randn(4).to(torch.bfloat16),
+        "model.visual.blocks.20.attn.qkv.weight": torch.randn(12, 4).to(torch.bfloat16),
+        "model.visual.merger.linear_fc1.weight": torch.randn(8, 8).to(torch.bfloat16),
+        "mtp.fc.weight": torch.randn(6, 6).to(torch.bfloat16),
+    }
+
+
+def tiny_checkpoint_weights():
+    import torch
+
+    prefix = tool.PEFT_LANGUAGE_PREFIX
+    weights = {}
+    for module, (out, inp) in (
+        ("layers.0.linear_attn.in_proj_qkv", (8, 6)),
+        ("layers.0.linear_attn.in_proj_z", (4, 6)),
+        ("layers.0.mlp.gate_proj", (8, 6)),
+    ):
+        weights[prefix + module + tool.PEFT_LORA_SUFFIX_A] = torch.randn(4, inp)
+        weights[prefix + module + tool.PEFT_LORA_SUFFIX_B] = torch.randn(out, 4) * 0.1
+    weights["backbone.visual.blocks.20.norm1.weight"] = torch.randn(4).to(torch.bfloat16)
+    weights["backbone.visual.blocks.20.attn.qkv.weight"] = torch.randn(12, 4).to(torch.bfloat16)
+    weights["backbone.visual.merger.linear_fc1.weight"] = torch.randn(8, 8).to(torch.bfloat16)
+    weights["head.decision.weight"] = torch.randn(3, 6)
+    weights["head.candidate.weight"] = torch.randn(3, 6)
+    return weights
+
+
+def materialize_input_dir(directory, tensors=None, config_text='{"text_config": {"hidden_size": 6}}\n'):
+    """Write the tiny base safetensors + config into an input directory."""
+    from safetensors.torch import save_file
+
+    directory = Path(directory)
+    directory.mkdir(parents=True)
+    if tensors is None:
+        tensors = tiny_base_tensors()
+    save_file({k: v.contiguous() for k, v in tensors.items()}, directory / "base.safetensors")
+    (directory / "config.json").write_text(config_text, encoding="utf-8")
+    return directory / "base.safetensors", directory / "config.json"
+
+
+def seeded_tiny_inputs():
+    """The tiny fixture with fixed values (seed 7): the export must be a pure
+    function of its inputs, so every run sees byte-identical content."""
+
+    import torch
+
+    torch.manual_seed(7)
+    return tiny_base_tensors(), tiny_checkpoint_weights()
+
+
+def run_tiny_export(out_dir, input_dir):
+    base, checkpoint = seeded_tiny_inputs()
+    base_file, config_file = materialize_input_dir(input_dir, base)
+    return tool.run_export(
+        checkpoint,
+        base_file,
+        Path(out_dir),
+        sources=TINY_SOURCES,
+        merge_config=TINY_MERGE,
+        head_config=TINY_HEAD,
+        expected=TINY_INVENTORY,
+        base_config_path=config_file,
+    )
+
+
+def read_manifest(out_dir):
+    return json.loads((Path(out_dir) / tool.MANIFEST_FILE).read_text(encoding="utf-8"))
+
+
+def tensor_map(manifest):
+    return {(t["file"], t["name"]): t for t in manifest["tensors"]}
+
+
+def test_run_export_tiny_fixture_contract(tmp_path):
+    import torch
+    from safetensors import safe_open
+
+    out = tmp_path / "export"
+    manifest = run_tiny_export(out, tmp_path / "in-a")
+    assert sorted(p.name for p in out.iterdir()) == [
+        "config.json", "head.safetensors", "model.safetensors", "valen_export.json",
+    ]
+
+    # Manifest header fields (the auditable contract).
+    assert manifest["format"] == tool.FORMAT
+    assert manifest["sources"] == TINY_SOURCES
+    assert manifest["merge"]["decision"] == "merged"
+    assert manifest["merge"]["scaling"] == 2.0
+    assert manifest["merge"]["lora_rank"] == 4 and manifest["merge"]["lora_alpha"] == 8
+    assert manifest["merge"]["merged_tensors"] == 3 and manifest["merge"]["lora_keys"] == 6
+    assert "fallback" in manifest["merge"]
+    assert manifest["downcasts"] == [
+        "model.language_model.layers.0.linear_attn.A_log",
+        "model.language_model.layers.0.linear_attn.norm.weight",
+    ]
+    assert manifest["head"]["projection_dim"] == 3
+    assert manifest["head"]["hidden_size"] == 6
+    assert manifest["head"]["bias"] is False
+    assert manifest["head"]["dtype"] == "float32"
+    assert manifest["head"]["tensors"] == ["head.candidate.weight", "head.decision.weight"]
+    assert manifest["parity"] is None
+    assert "parity_slot_shape" in manifest
+
+    # config.json copied verbatim.
+    assert (out / "config.json").read_text(encoding="utf-8") == '{"text_config": {"hidden_size": 6}}\n'
+
+    # Every tensor on disk appears in the manifest with matching metadata.
+    tensors = tensor_map(manifest)
+    for file_name in (tool.BACKBONE_FILE, tool.HEAD_FILE):
+        with safe_open(out / file_name, framework="pt") as f:
+            keys = sorted(f.keys())
+            for key in keys:
+                slice_ = f.get_slice(key)
+                entry = tensors[(file_name, key)]
+                assert entry["shape"] == list(slice_.get_shape())
+                assert entry["dtype"] == {
+                    "BF16": "bfloat16", "F32": "float32"
+                }[slice_.get_dtype()]
+    assert len(manifest["tensors"]) == 12 + 2
+    assert [t["name"] for t in manifest["tensors"]] == sorted(
+        t["name"] for t in manifest["tensors"]
+    )
+
+    # Component attribution covers all five components.
+    components = {}
+    for entry in manifest["tensors"]:
+        components.setdefault(entry["component"], []).append(entry["name"])
+    assert set(components) == set(tool.COMPONENTS)
+    assert len(components["lora-merged"]) == 3
+    assert components["vision-top"] == [
+        "model.visual.blocks.20.attn.qkv.weight", "model.visual.blocks.20.norm1.weight",
+    ]
+    assert components["merger"] == ["model.visual.merger.linear_fc1.weight"]
+    assert components["decision-head"] == ["head.candidate.weight", "head.decision.weight"]
+    assert "model.visual.blocks.19.norm1.weight" in components["backbone"]
+
+    # File digests recorded match the bytes on disk.
+    for file_name, record in manifest["files"].items():
+        data = (out / file_name).read_bytes()
+        assert record["size"] == len(data)
+        assert record["sha256"] == hashlib.sha256(data).hexdigest()
+    assert set(manifest["files"]) == {"model.safetensors", "head.safetensors", "config.json"}
+
+    # The transformations are the declared ones.
+    base, checkpoint = seeded_tiny_inputs()
+    with safe_open(out / tool.BACKBONE_FILE, framework="pt") as f, safe_open(
+        tmp_path / "in-a" / "base.safetensors", framework="pt"
+    ) as original:
+        merged = f.get_tensor("model.language_model.layers.0.linear_attn.in_proj_qkv.weight")
+        expected = tool.merge_lora_weight(
+            original.get_tensor("model.language_model.layers.0.linear_attn.in_proj_qkv.weight"),
+            checkpoint[tool.PEFT_LANGUAGE_PREFIX + "layers.0.linear_attn.in_proj_qkv" + tool.PEFT_LORA_SUFFIX_A],
+            checkpoint[tool.PEFT_LANGUAGE_PREFIX + "layers.0.linear_attn.in_proj_qkv" + tool.PEFT_LORA_SUFFIX_B],
+            2.0,
+        )
+        assert torch.equal(merged, expected)
+        assert not torch.equal(merged, base["model.language_model.layers.0.linear_attn.in_proj_qkv.weight"])
+        # Untouched backbone tensors pass through bit-exactly.
+        assert torch.equal(
+            f.get_tensor("mtp.fc.weight"), original.get_tensor("mtp.fc.weight")
+        )
+        assert torch.equal(
+            f.get_tensor("model.visual.blocks.19.norm1.weight"),
+            original.get_tensor("model.visual.blocks.19.norm1.weight"),
+        )
+        # Downcast semantics.
+        assert torch.equal(
+            f.get_tensor("model.language_model.layers.0.linear_attn.A_log").float(),
+            base["model.language_model.layers.0.linear_attn.A_log"].to(torch.bfloat16).float(),
+        )
+        # Vision-top and merger are the checkpoint's trained replacements.
+        assert torch.equal(
+            f.get_tensor("model.visual.blocks.20.attn.qkv.weight"),
+            checkpoint["backbone.visual.blocks.20.attn.qkv.weight"],
+        )
+        assert torch.equal(
+            f.get_tensor("model.visual.merger.linear_fc1.weight"),
+            checkpoint["backbone.visual.merger.linear_fc1.weight"],
+        )
+    with safe_open(out / tool.HEAD_FILE, framework="pt") as f:
+        assert torch.equal(f.get_tensor("head.decision.weight"), checkpoint["head.decision.weight"])
+        assert f.get_tensor("head.decision.weight").dtype == torch.float32
+
+    # The downcast entries carry their origin dtype.
+    for name in manifest["downcasts"]:
+        assert tensors[(tool.BACKBONE_FILE, name)]["downcast_from"] == "float32"
+
+
+def test_run_export_is_deterministic_and_path_independent(tmp_path):
+    first_out, second_out = tmp_path / "export-1", tmp_path / "export-2"
+    run_tiny_export(first_out, tmp_path / "in-a")
+    run_tiny_export(second_out, tmp_path / "in-b-different-name")
+    for name in ("model.safetensors", "head.safetensors", "config.json", "valen_export.json"):
+        assert (first_out / name).read_bytes() == (second_out / name).read_bytes(), name
+    # No absolute paths leak into the manifest.
+    manifest_text = (first_out / tool.MANIFEST_FILE).read_text(encoding="utf-8")
+    assert str(tmp_path) not in manifest_text
+    assert '"/' not in manifest_text
+
+
+def test_run_export_rejects_existing_output(tmp_path):
+    import pytest
+
+    out = tmp_path / "export"
+    run_tiny_export(out, tmp_path / "in-a")
+    with pytest.raises(ValueError, match="already exists"):
+        run_tiny_export(out, tmp_path / "in-b")
+
+
+def test_run_export_rejects_unexpected_fp32_base_tensor(tmp_path):
+    import pytest
+    import torch
+    from safetensors.torch import save_file
+
+    base = tiny_base_tensors()
+    # An FP32 tensor outside the A_log / linear_attn.norm.weight families is
+    # a silent dtype surprise, not a declared downcast.
+    base["model.language_model.layers.0.mlp.gate_proj.weight"] = torch.randn(8, 6)
+    directory = tmp_path / "in"
+    directory.mkdir()
+    save_file({k: v.contiguous() for k, v in base.items()}, directory / "base.safetensors")
+    (directory / "config.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="fp32"):
+        tool.run_export(
+            tiny_checkpoint_weights(),
+            directory / "base.safetensors",
+            tmp_path / "out",
+            sources=TINY_SOURCES,
+            merge_config=TINY_MERGE,
+            head_config=TINY_HEAD,
+            expected=dict(TINY_INVENTORY, base_fp32_tensors=3),
+            base_config_path=directory / "config.json",
+        )
+
+
+def test_run_export_rejects_lora_shape_mismatch(tmp_path):
+    import pytest
+    import torch
+
+    weights = tiny_checkpoint_weights()
+    weights[tool.PEFT_LANGUAGE_PREFIX + "layers.0.mlp.gate_proj" + tool.PEFT_LORA_SUFFIX_B] = (
+        torch.randn(7, 4)
+    )
+    base_file, config_file = materialize_input_dir(tmp_path / "in")
+    with pytest.raises(ValueError, match="shape"):
+        tool.run_export(
+            weights,
+            base_file,
+            tmp_path / "out",
+            sources=TINY_SOURCES,
+            merge_config=TINY_MERGE,
+            head_config=TINY_HEAD,
+            expected=TINY_INVENTORY,
+            base_config_path=config_file,
+        )
+
+
+def test_run_export_rejects_head_config_mismatch(tmp_path):
+    import pytest
+
+    base_file, config_file = materialize_input_dir(tmp_path / "in")
+    with pytest.raises(ValueError, match="head"):
+        tool.run_export(
+            tiny_checkpoint_weights(),
+            base_file,
+            tmp_path / "out",
+            sources=TINY_SOURCES,
+            merge_config=TINY_MERGE,
+            head_config=dict(TINY_HEAD, projection_dim=5),
+            expected=TINY_INVENTORY,
+            base_config_path=config_file,
+        )
+
+
+# --- validate_export: manifest/artifact consistency and tamper detection ---
+
+def rewrite_manifest(out_dir, mutate):
+    manifest = read_manifest(out_dir)
+    mutate(manifest)
+    (Path(out_dir) / tool.MANIFEST_FILE).write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
+def test_validate_export_accepts_a_fresh_export(tmp_path):
+    out = tmp_path / "export"
+    run_tiny_export(out, tmp_path / "in-a")
+    manifest = tool.validate_export(out)
+    assert manifest["format"] == tool.FORMAT
+
+
+def test_validate_export_detects_tampered_bytes(tmp_path):
+    import pytest
+
+    out = tmp_path / "export"
+    run_tiny_export(out, tmp_path / "in-a")
+    target = out / tool.BACKBONE_FILE
+    data = bytearray(target.read_bytes())
+    data[-1] ^= 0xFF
+    target.write_bytes(bytes(data))
+    with pytest.raises(ValueError, match="sha256"):
+        tool.validate_export(out)
+
+
+def test_validate_export_detects_manifest_tensor_removal(tmp_path):
+    import pytest
+
+    out = tmp_path / "export"
+    run_tiny_export(out, tmp_path / "in-a")
+
+    def drop(manifest):
+        # tensors are sorted by (file, name); mtp.fc.weight is the last entry.
+        manifest["tensors"] = manifest["tensors"][:-1]
+
+    rewrite_manifest(out, drop)
+    with pytest.raises(ValueError, match="mtp.fc.weight"):
+        tool.validate_export(out)
+
+
+def test_validate_export_detects_downcast_list_drift(tmp_path):
+    import pytest
+
+    out = tmp_path / "export"
+    run_tiny_export(out, tmp_path / "in-a")
+
+    def drop_downcast(manifest):
+        manifest["downcasts"] = manifest["downcasts"][:1]
+
+    rewrite_manifest(out, drop_downcast)
+    with pytest.raises(ValueError, match="downcast"):
+        tool.validate_export(out)
+
+
+def test_validate_export_detects_head_config_drift(tmp_path):
+    import pytest
+
+    out = tmp_path / "export"
+    run_tiny_export(out, tmp_path / "in-a")
+
+    def wrong_dim(manifest):
+        manifest["head"]["projection_dim"] = 5
+
+    rewrite_manifest(out, wrong_dim)
+    with pytest.raises(ValueError, match="head"):
+        tool.validate_export(out)
+
+
+def test_validate_export_detects_extra_files_and_forgotten_entries(tmp_path):
+    import pytest
+
+    out = tmp_path / "export"
+    run_tiny_export(out, tmp_path / "in-a")
+    (out / "surprise.bin").write_bytes(b"x")
+    with pytest.raises(ValueError, match="unexpected file"):
+        tool.validate_export(out)
+    (out / "surprise.bin").unlink()
+
+    def drop_file_record(manifest):
+        del manifest["files"][tool.HEAD_FILE]
+
+    rewrite_manifest(out, drop_file_record)
+    with pytest.raises(ValueError, match="head.safetensors"):
+        tool.validate_export(out)

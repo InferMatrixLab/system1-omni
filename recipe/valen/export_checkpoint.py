@@ -237,3 +237,492 @@ def validate_inventory(classification, expected):
             raise ValueError(
                 f"checkpoint inventory mismatch: {name} is {actual}, expected {wanted}"
             )
+
+
+# --- streaming safetensors writer ---
+# The pinned base is a single ~4.5 GiB file and host memory is a fraction of
+# that, so the export never holds the artifact set in memory: every tensor is
+# materialized once, in sorted name order, straight into the output file.
+# The byte format is the safetensors v1 spec (8-byte LE header length, JSON
+# header padded to an 8-byte boundary, then contiguous tensor data), written
+# with fixed ordering so two runs are byte-identical.
+
+_DTYPE_NAMES = {torch.bfloat16: "BF16", torch.float32: "F32"}
+_DTYPE_SIZES = {torch.bfloat16: 2, torch.float32: 4}
+_READER_DTYPES = {"BF16": torch.bfloat16, "F32": torch.float32}
+_MANIFEST_DTYPES = {"BF16": "bfloat16", "F32": "float32"}
+_FP32_TENSOR = re.compile(
+    r"^model\.language_model\.layers\.\d+\.linear_attn\.(A_log|norm\.weight)$"
+)
+
+
+def _tensor_bytes(tensor):
+    """Raw little-endian bytes of one contiguous tensor (BF16-safe).
+
+    Flattened to 1-D so the byte length is the full payload: ``len()`` of a
+    multi-dimensional memoryview only reports its first dimension.
+    """
+
+    view = tensor.contiguous().view(torch.uint8).reshape(-1)
+    return memoryview(view.numpy())
+
+
+def write_safetensors(path, entries):
+    """Stream ``(name, dtype, shape, materialize)`` entries to ``path``.
+
+    ``materialize`` is called once per entry, in order, so callers can pull
+    each tensor from an mmap'd source and release it before the next.
+    Returns ``{"size", "sha256"}`` of the bytes written.
+    """
+
+    header = {"__metadata__": {"format": "pt"}}
+    offset = 0
+    for name, dtype, shape, _ in entries:
+        nbytes = _DTYPE_SIZES[dtype]
+        for dim in shape:
+            nbytes *= dim
+        header[name] = {
+            "dtype": _DTYPE_NAMES[dtype],
+            "shape": list(shape),
+            "data_offsets": [offset, offset + nbytes],
+        }
+        offset += nbytes
+    header_bytes = json.dumps(header, separators=(",", ":")).encode("utf-8")
+    header_bytes += b" " * (-(8 + len(header_bytes)) % 8)
+    digest = hashlib.sha256()
+    with open(path, "wb") as handle:
+
+        def write(chunk):
+            digest.update(chunk)
+            handle.write(chunk)
+
+        write(struct.pack("<Q", len(header_bytes)))
+        write(header_bytes)
+        for name, dtype, shape, materialize in entries:
+            data = _tensor_bytes(materialize())
+            expected = _DTYPE_SIZES[dtype]
+            for dim in shape:
+                expected *= dim
+            if len(data) != expected:
+                raise ValueError(
+                    f"tensor {name!r} serialized as {len(data)} bytes, expected {expected}"
+                )
+            write(data)
+    return {"size": 8 + len(header_bytes) + offset, "sha256": digest.hexdigest()}
+
+
+def run_export(
+    checkpoint_weights,
+    base_file,
+    out_dir,
+    *,
+    sources,
+    merge_config,
+    head_config,
+    expected,
+    base_config_path=None,
+):
+    """Write the exported artifact set and its manifest, streaming.
+
+    ``checkpoint_weights`` is the unpickled ``payload["weights"]`` dict (mmap
+    views are fine); ``base_file`` is the base safetensors path, read lazily
+    through ``safe_open``. ``sources`` is recorded verbatim in the manifest;
+    ``merge_config``/``head_config``/``expected`` are validated against the
+    tensors before anything is written. Returns the manifest dict.
+    """
+
+    out_dir = Path(out_dir)
+    if out_dir.exists() and any(out_dir.iterdir()):
+        raise ValueError(f"output directory {out_dir} already exists and is not empty")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Single-threaded CPU math keeps the FP32 merge GEMM bit-reproducible
+    # regardless of the ambient thread/env configuration.
+    torch.set_grad_enabled(False)
+    torch.set_num_threads(1)
+
+    classification = classify_checkpoint_weights(checkpoint_weights)
+    validate_inventory(classification, expected)
+    scaling = lora_scaling(merge_config["rank"], merge_config["alpha"])
+
+    from safetensors import safe_open
+
+    with safe_open(base_file, framework="pt", device="cpu") as base:
+        base_names = sorted(base.keys())
+        if len(base_names) != expected["base_tensors"]:
+            raise ValueError(
+                f"base holds {len(base_names)} tensors, expected {expected['base_tensors']}"
+            )
+        base_dtypes = {}
+        base_shapes = {}
+        for name in base_names:
+            slice_ = base.get_slice(name)
+            base_dtypes[name] = _READER_DTYPES[slice_.get_dtype()]
+            base_shapes[name] = list(slice_.get_shape())
+
+        # Every FP32 base tensor must be a declared downcast target; anything
+        # else is a silent dtype surprise (spec 02, user story 7).
+        downcasts = [name for name in base_names if base_dtypes[name] == torch.float32]
+        for name in downcasts:
+            if not _FP32_TENSOR.match(name):
+                raise ValueError(
+                    f"unexpected fp32 base tensor {name!r}: only linear_attn "
+                    "A_log / norm.weight may be stored in fp32"
+                )
+        if len(downcasts) != expected["base_fp32_tensors"]:
+            raise ValueError(
+                f"base holds {len(downcasts)} fp32 tensors, "
+                f"expected {expected['base_fp32_tensors']}"
+            )
+
+        # Validate every checkpoint-driven replacement against the base.
+        vision_by_export = dict(classification.vision_top)
+        merger_by_export = dict(classification.merger)
+        for export_name, checkpoint_name in classification.vision_top + classification.merger:
+            if export_name not in base_dtypes:
+                raise ValueError(
+                    f"checkpoint tensor {checkpoint_name!r} has no base counterpart"
+                )
+            tensor = checkpoint_weights[checkpoint_name]
+            if tensor.dtype != torch.bfloat16:
+                raise ValueError(
+                    f"checkpoint tensor {checkpoint_name!r} is {tensor.dtype}, expected bf16"
+                )
+            if list(tensor.shape) != base_shapes[export_name]:
+                raise ValueError(
+                    f"checkpoint tensor {checkpoint_name!r} shape {list(tensor.shape)} "
+                    f"!= base shape {base_shapes[export_name]}"
+                )
+        for base_name, (a_key, b_key) in classification.lora.items():
+            if base_name not in base_dtypes:
+                raise ValueError(f"LoRA target {base_name!r} has no base tensor")
+            lora_a = checkpoint_weights[a_key]
+            lora_b = checkpoint_weights[b_key]
+            base_shape = base_shapes[base_name]
+            if lora_a.dtype != torch.float32 or lora_b.dtype != torch.float32:
+                raise ValueError(
+                    f"LoRA pair for {base_name!r} must be fp32, "
+                    f"got {lora_a.dtype}/{lora_b.dtype}"
+                )
+            if lora_a.shape[0] != merge_config["rank"]:
+                raise ValueError(
+                    f"LoRA rank for {base_name!r} is {lora_a.shape[0]}, "
+                    f"expected {merge_config['rank']}"
+                )
+            if list(lora_a.shape) != [merge_config["rank"], base_shape[1]] or list(
+                lora_b.shape
+            ) != [base_shape[0], merge_config["rank"]]:
+                raise ValueError(
+                    f"LoRA pair shape mismatch for {base_name!r}: "
+                    f"A {list(lora_a.shape)}, B {list(lora_b.shape)}, base {base_shape}"
+                )
+
+        head_entries = []
+        for export_name, checkpoint_name in sorted(classification.head.items()):
+            tensor = checkpoint_weights[checkpoint_name]
+            if tensor.dtype != torch.float32:
+                raise ValueError(f"head tensor {checkpoint_name!r} must be fp32")
+            if list(tensor.shape) != [
+                head_config["projection_dim"],
+                head_config["hidden_size"],
+            ]:
+                raise ValueError(
+                    f"head tensor {checkpoint_name!r} shape {list(tensor.shape)} "
+                    f"contradicts the head config (projection_dim="
+                    f"{head_config['projection_dim']}, hidden_size="
+                    f"{head_config['hidden_size']})"
+                )
+            head_entries.append(
+                (export_name, torch.float32, list(tensor.shape), (lambda t=tensor: t))
+            )
+
+        # Plan and stream the backbone file entry by entry.
+        tensors = []
+
+        def plan(name):
+            if name in classification.lora:
+                a_key, b_key = classification.lora[name]
+                if base_dtypes[name] != torch.bfloat16:
+                    raise ValueError(f"LoRA target {name!r} must be a bf16 base tensor")
+                tensors.append(
+                    {
+                        "name": name,
+                        "shape": base_shapes[name],
+                        "dtype": "bfloat16",
+                        "component": COMPONENT_LORA_MERGED,
+                        "source": "base+checkpoint",
+                    }
+                )
+                return (
+                    name,
+                    torch.bfloat16,
+                    base_shapes[name],
+                    (
+                        lambda n=name, a=a_key, b=b_key: merge_lora_weight(
+                            base.get_tensor(n),
+                            checkpoint_weights[a],
+                            checkpoint_weights[b],
+                            scaling,
+                        )
+                    ),
+                )
+            checkpoint_name = vision_by_export.get(name) or merger_by_export.get(name)
+            if checkpoint_name is not None:
+                tensors.append(
+                    {
+                        "name": name,
+                        "shape": base_shapes[name],
+                        "dtype": "bfloat16",
+                        "component": (
+                            COMPONENT_VISION_TOP
+                            if name in vision_by_export
+                            else COMPONENT_MERGER
+                        ),
+                        "source": "checkpoint",
+                    }
+                )
+                return (
+                    name,
+                    torch.bfloat16,
+                    base_shapes[name],
+                    (lambda c=checkpoint_name: checkpoint_weights[c]),
+                )
+            if base_dtypes[name] == torch.float32:
+                tensors.append(
+                    {
+                        "name": name,
+                        "shape": base_shapes[name],
+                        "dtype": "bfloat16",
+                        "component": COMPONENT_BACKBONE,
+                        "source": "base",
+                        "downcast_from": "float32",
+                    }
+                )
+                return (
+                    name,
+                    torch.bfloat16,
+                    base_shapes[name],
+                    (lambda n=name: downcast_bf16(base.get_tensor(n))),
+                )
+            if base_dtypes[name] != torch.bfloat16:
+                raise ValueError(
+                    f"base tensor {name!r} is {base_dtypes[name]}, expected bf16"
+                )
+            tensors.append(
+                {
+                    "name": name,
+                    "shape": base_shapes[name],
+                    "dtype": "bfloat16",
+                    "component": COMPONENT_BACKBONE,
+                    "source": "base",
+                }
+            )
+            return (
+                name,
+                torch.bfloat16,
+                base_shapes[name],
+                (lambda n=name: base.get_tensor(n)),
+            )
+
+        backbone_entries = [plan(name) for name in base_names]
+        for record in tensors:
+            record["file"] = (
+                HEAD_FILE if record["component"] == COMPONENT_HEAD else BACKBONE_FILE
+            )
+        for entry in head_entries:
+            tensors.append(
+                {
+                    "name": entry[0],
+                    "shape": entry[2],
+                    "dtype": "float32",
+                    "component": COMPONENT_HEAD,
+                    "source": "checkpoint",
+                    "file": HEAD_FILE,
+                }
+            )
+
+        # Stream both files while the base handle (the lambdas' data source)
+        # is still open.
+        files = {BACKBONE_FILE: write_safetensors(out_dir / BACKBONE_FILE, backbone_entries)}
+        files[HEAD_FILE] = write_safetensors(out_dir / HEAD_FILE, head_entries)
+
+    if base_config_path is not None:
+        config_bytes = Path(base_config_path).read_bytes()
+        (out_dir / "config.json").write_bytes(config_bytes)
+        files["config.json"] = {
+            "size": len(config_bytes),
+            "sha256": hashlib.sha256(config_bytes).hexdigest(),
+        }
+
+    tensors.sort(key=lambda record: (record["file"], record["name"]))
+    manifest = {
+        "format": FORMAT,
+        "sources": sources,
+        "merge": {
+            "decision": "merged",
+            "formula": f"bf16(fp32(W) + {scaling:g} * (B @ A))",
+            "scaling": scaling,
+            "lora_rank": merge_config["rank"],
+            "lora_alpha": merge_config["alpha"],
+            "merged_tensors": len(classification.lora),
+            "lora_keys": 2 * len(classification.lora),
+            "fallback": MERGE_FALLBACK,
+        },
+        "downcasts": downcasts,
+        "head": {
+            "file": HEAD_FILE,
+            "dtype": "float32",
+            "bias": bool(head_config.get("bias", False)),
+            "projection_dim": head_config["projection_dim"],
+            "hidden_size": head_config["hidden_size"],
+            "scale_formula": "sqrt(projection_dim)",
+            "logit_formula": "(W_cand @ h_cand) . (W_dec @ h_dec) / sqrt(projection_dim), fp32",
+            "tensors": [entry[0] for entry in head_entries],
+        },
+        "tensors": tensors,
+        "files": dict(sorted(files.items())),
+        "consumption": {
+            "backbone": (
+                "Qwen3_5ForConditionalGeneration.from_pretrained(out, dtype=bf16, "
+                "attn_implementation='eager', local_files_only=True).model"
+            ),
+            "head": (
+                f"{HEAD_FILE}: DecisionHead(hidden_size={head_config['hidden_size']}, "
+                f"projection_dim={head_config['projection_dim']}), fp32, no bias"
+            ),
+        },
+        "parity": None,
+        "parity_slot_shape": PARITY_SLOT_SHAPE,
+    }
+    (out_dir / MANIFEST_FILE).write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return manifest
+
+
+def validate_export(out_dir):
+    """Cross-check a finished export against its manifest.
+
+    Reads only headers and digests, not tensor payloads, so it also runs
+    cheaply against the multi-GiB real artifact set. Returns the manifest
+    when every recorded claim matches the bytes on disk.
+    """
+
+    from safetensors import safe_open
+
+    out_dir = Path(out_dir)
+    present = sorted(p.name for p in out_dir.iterdir() if p.is_file())
+    allowed = sorted([BACKBONE_FILE, HEAD_FILE, MANIFEST_FILE, "config.json"])
+    if present != allowed:
+        extra = sorted(set(present) - set(allowed))
+        missing = sorted(set(allowed) - set(present))
+        raise ValueError(
+            f"export directory must hold exactly {allowed}: "
+            f"unexpected files {extra}, missing {missing}"
+        )
+    manifest = json.loads((out_dir / MANIFEST_FILE).read_text(encoding="utf-8"))
+    if manifest.get("format") != FORMAT:
+        raise ValueError(f"manifest format {manifest.get('format')!r} != {FORMAT!r}")
+    artifact_files = {BACKBONE_FILE, HEAD_FILE, "config.json"}
+    if set(manifest["files"]) != artifact_files:
+        raise ValueError(
+            f"manifest files record {sorted(manifest['files'])} != "
+            f"{sorted(artifact_files)}"
+        )
+
+    # Recorded file digests must match the bytes on disk.
+    for name, record in sorted(manifest["files"].items()):
+        data = (out_dir / name).read_bytes()
+        if record["size"] != len(data):
+            raise ValueError(f"{name} is {len(data)} bytes, manifest says {record['size']}")
+        digest = hashlib.sha256(data).hexdigest()
+        if record["sha256"] != digest:
+            raise ValueError(f"{name} sha256 {digest} != manifest {record['sha256']}")
+
+    # Every safetensors tensor is listed with matching metadata, and vice versa.
+    listed = {}
+    for entry in manifest["tensors"]:
+        for field in ("name", "shape", "dtype", "component", "source", "file"):
+            if field not in entry:
+                raise ValueError(f"manifest tensor entry missing {field!r}: {entry}")
+        if entry["component"] not in COMPONENTS:
+            raise ValueError(f"unknown component {entry['component']!r} for {entry['name']}")
+        if entry["file"] not in (BACKBONE_FILE, HEAD_FILE):
+            raise ValueError(
+                f"tensor {entry['name']!r} points at unknown file {entry['file']!r}"
+            )
+        if (entry["file"], entry["name"]) in listed:
+            raise ValueError(f"manifest lists {entry['name']!r} twice")
+        listed[(entry["file"], entry["name"])] = entry
+    on_disk = set()
+    for file_name in (BACKBONE_FILE, HEAD_FILE):
+        with safe_open(out_dir / file_name, framework="pt") as handle:
+            on_disk.update((file_name, key) for key in handle.keys())
+    orphans = sorted(set(listed) - on_disk)
+    if orphans:
+        raise ValueError(f"manifest lists tensors absent from the files: {orphans[:4]}")
+    unlisted = sorted(on_disk - set(listed))
+    if unlisted:
+        raise ValueError(
+            f"{unlisted[0][0]} holds unlisted tensor {unlisted[0][1]!r}"
+            f" ({len(unlisted)} total)"
+        )
+    for file_name, key in sorted(on_disk):
+        with safe_open(out_dir / file_name, framework="pt") as handle:
+            slice_ = handle.get_slice(key)
+            entry = listed[(file_name, key)]
+            if entry["shape"] != list(slice_.get_shape()):
+                raise ValueError(
+                    f"{key!r} shape {entry['shape']} != file {list(slice_.get_shape())}"
+                )
+            if entry["dtype"] != _MANIFEST_DTYPES[slice_.get_dtype()]:
+                raise ValueError(
+                    f"{key!r} dtype {entry['dtype']} != file "
+                    f"{_MANIFEST_DTYPES[slice_.get_dtype()]}"
+                )
+
+    # Downcast bookkeeping: the list and the per-tensor flags must agree.
+    downcasts = set(manifest["downcasts"])
+    flagged = {
+        entry["name"]
+        for entry in manifest["tensors"]
+        if entry.get("downcast_from") is not None
+    }
+    if downcasts != flagged:
+        raise ValueError(
+            "downcast list and tensor flags disagree: "
+            f"list-only {sorted(downcasts - flagged)}, flag-only {sorted(flagged - downcasts)}"
+        )
+    for name in sorted(downcasts):
+        entry = listed.get((BACKBONE_FILE, name))
+        if (
+            entry is None
+            or entry.get("downcast_from") != "float32"
+            or entry["dtype"] != "bfloat16"
+        ):
+            raise ValueError(f"downcast entry {name!r} is not a bf16 tensor from fp32")
+
+    # Head config must match the exported head tensors.
+    head = manifest["head"]
+    projection = (head["projection_dim"], head["hidden_size"])
+    for name in head["tensors"]:
+        entry = listed.get((HEAD_FILE, name))
+        if entry is None:
+            raise ValueError(f"head config lists unknown tensor {name!r}")
+        if tuple(entry["shape"]) != projection:
+            raise ValueError(
+                f"head tensor {name!r} shape {entry['shape']} contradicts the head config "
+                f"(projection_dim, hidden_size)={projection}"
+            )
+        if entry["dtype"] != "float32" or entry["component"] != COMPONENT_HEAD:
+            raise ValueError(f"head tensor {name!r} must be an fp32 decision-head tensor")
+
+    # The merge decision must match the merged-tensor inventory.
+    merged = [e for e in manifest["tensors"] if e["component"] == COMPONENT_LORA_MERGED]
+    if manifest["merge"]["merged_tensors"] != len(merged):
+        raise ValueError(
+            f"merge block records {manifest['merge']['merged_tensors']} merged tensors, "
+            f"manifest lists {len(merged)}"
+        )
+    if manifest["parity"] is not None and not isinstance(manifest["parity"], dict):
+        raise ValueError("parity slot must be null or the parity-gate record")
+    return manifest
