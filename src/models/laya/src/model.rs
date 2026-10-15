@@ -134,37 +134,81 @@ struct Workspace {
     actions: Buffer,
 }
 impl Workspace {
-    fn new(c: &Cuda, b: usize, l: usize) -> Result<Self> {
+    fn sizes(b: usize, l: usize) -> Result<[usize; 17]> {
+        ensure!(
+            b.is_power_of_two() && b <= 16 && (16..=512).contains(&l) && l.is_multiple_of(16),
+            "invalid workspace shape"
+        );
         let m = b * l;
-        let mut bytes = 0;
-        let mut alloc = |n| {
-            bytes += n;
-            c.alloc(n)
-        };
+        Ok([
+            m * 8,
+            b * 4,
+            b * 8,
+            m * D * 4,
+            m * D * 2,
+            m * D * 6,
+            m * D * 2,
+            m * 2624 * 2,
+            m * 4096 * 2,
+            2048 * 4,
+            17 * 4,
+            2048 * D * 2,
+            2048 * D * 2,
+            2048 * 2,
+            16 * 1028 * 2,
+            16 * 256 * 2,
+            16 * 2 * 2,
+        ])
+    }
+    fn required_bytes(b: usize, l: usize) -> Result<usize> {
+        Ok(Self::sizes(b, l)?.iter().sum())
+    }
+    fn new(c: &Cuda, b: usize, l: usize) -> Result<Self> {
+        let sizes = Self::sizes(b, l)?;
+        let bytes = sizes.iter().sum();
+        let mut sizes = sizes.into_iter();
+        let mut alloc = || c.alloc(sizes.next().expect("workspace buffer layout"));
         Ok(Self {
             graph: None,
             b,
             l,
-            ids: alloc(m * 8)?,
-            lens: alloc(b * 4)?,
-            types: alloc(b * 8)?,
-            staging: vec![0; m * 8 + b * 12],
-            x: alloc(m * D * 4)?,
-            y: alloc(m * D * 2)?,
-            qkv: alloc(m * D * 6)?,
-            o: alloc(m * D * 2)?,
-            g: alloc(m * 2624 * 2)?,
-            ff: alloc(m * 4096 * 2)?,
-            indices: alloc(2048 * 4)?,
-            offsets: alloc(17 * 4)?,
-            markers: alloc(2048 * D * 2)?,
-            scored: alloc(2048 * D * 2)?,
-            logits: alloc(2048 * 2)?,
-            features: alloc(16 * 1028 * 2)?,
-            action_hidden: alloc(16 * 256 * 2)?,
-            actions: alloc(16 * 2 * 2)?,
+            ids: alloc()?,
+            lens: alloc()?,
+            types: alloc()?,
+            staging: vec![0; b * l * 8 + b * 12],
+            x: alloc()?,
+            y: alloc()?,
+            qkv: alloc()?,
+            o: alloc()?,
+            g: alloc()?,
+            ff: alloc()?,
+            indices: alloc()?,
+            offsets: alloc()?,
+            markers: alloc()?,
+            scored: alloc()?,
+            logits: alloc()?,
+            features: alloc()?,
+            action_hidden: alloc()?,
+            actions: alloc()?,
             bytes,
         })
+    }
+}
+
+/// Limits retained workspaces. Either zero limit disables graph caching.
+/// Bytes exclude weights, graph/driver overhead, host staging and one eager
+/// fallback workspace used by oversized or disabled requests.
+#[derive(Clone, Copy, Debug)]
+pub struct CacheConfig {
+    pub max_shapes: usize,
+    pub max_bytes: usize,
+}
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            max_shapes: 4,
+            max_bytes: 512 * 1024 * 1024,
+        }
     }
 }
 
@@ -475,20 +519,46 @@ pub struct Model {
     weights: HashMap<String, Buffer>,
     plan: Vec<Step>,
     cache: VecDeque<Workspace>,
+    cached_bytes: usize,
+    cache_config: CacheConfig,
+    eager: Option<Workspace>,
     graphs: bool,
 }
 impl Drop for Model {
     fn drop(&mut self) {
         let _ = self.cuda.sync();
-        self.cache.clear();
+        self.clear_cache();
     }
 }
 impl Model {
+    /// Release retained graph and eager workspaces while keeping this model loaded.
+    pub fn clear_cache(&mut self) {
+        self.cache.clear();
+        self.cached_bytes = 0;
+        self.eager = None;
+    }
+
     pub fn load(
         checkpoint: &Path,
         bundle: &Path,
         graphs: bool,
         original_rope: bool,
+    ) -> Result<Self> {
+        Self::load_with_cache(
+            checkpoint,
+            bundle,
+            graphs,
+            original_rope,
+            CacheConfig::default(),
+        )
+    }
+
+    pub fn load_with_cache(
+        checkpoint: &Path,
+        bundle: &Path,
+        graphs: bool,
+        original_rope: bool,
+        cache_config: CacheConfig,
     ) -> Result<Self> {
         let config = Config::load(checkpoint)?;
         crate::artifacts::validate_bundle(checkpoint, bundle)?;
@@ -553,6 +623,9 @@ impl Model {
             weights,
             plan,
             cache: VecDeque::new(),
+            cached_bytes: 0,
+            cache_config,
+            eager: None,
             graphs,
         })
     }
@@ -634,14 +707,40 @@ impl Model {
             batch.markers.iter().map(Vec::len).sum::<usize>() <= 2048,
             "too many markers"
         );
-        let found = self
-            .cache
-            .iter()
-            .position(|s| s.b == batch.b && s.l == batch.l);
-        let mut s = if let Some(i) = found {
-            self.cache.remove(i).unwrap()
+        let bytes = Workspace::required_bytes(batch.b, batch.l)?;
+        let cacheable = self.cache_config.max_shapes > 0 && bytes <= self.cache_config.max_bytes;
+        let mut s = if cacheable {
+            self.eager = None;
+            if let Some(i) = self
+                .cache
+                .iter()
+                .position(|s| s.b == batch.b && s.l == batch.l)
+            {
+                let workspace = self.cache.remove(i).unwrap();
+                self.cached_bytes -= workspace.bytes;
+                workspace
+            } else {
+                // Budget the same layout used by the allocator and release LRU entries
+                // before allocating a miss, keeping retained admission within both limits.
+                while self.cache.len() >= self.cache_config.max_shapes
+                    || self.cached_bytes > self.cache_config.max_bytes - bytes
+                {
+                    let evicted = self.cache.pop_front().unwrap();
+                    self.cached_bytes -= evicted.bytes;
+                    drop(evicted);
+                }
+                Workspace::new(&self.cuda, batch.b, batch.l)?
+            }
         } else {
-            Workspace::new(&self.cuda, batch.b, batch.l)?
+            let eager = self
+                .eager
+                .take()
+                .filter(|s| s.b == batch.b && s.l == batch.l);
+            // A different fallback shape is dropped before replacement allocation.
+            match eager {
+                Some(workspace) => workspace,
+                None => Workspace::new(&self.cuda, batch.b, batch.l)?,
+            }
         };
         let (ids, rest) = s.staging.split_at_mut(batch.input_ids.len() * 8);
         let (lens, types) = rest.split_at_mut(batch.lens.len() * 4);
@@ -656,7 +755,7 @@ impl Model {
         }
         self.cuda
             .write_many(&[(&s.ids, ids), (&s.lens, lens), (&s.types, types)])?;
-        if self.graphs {
+        if self.graphs && cacheable {
             if s.graph.is_none() {
                 self.encode(&s)?;
                 self.encode(&s)?;
@@ -761,14 +860,12 @@ impl Model {
             .iter()
             .map(|x| [x[0], x[1]])
             .collect();
-        while self.cache.len() >= 4
-            || self.cache.iter().map(|s| s.bytes).sum::<usize>() + s.bytes > 512 * 1024 * 1024
-        {
-            if self.cache.pop_front().is_none() {
-                break;
-            }
+        if cacheable {
+            self.cached_bytes += s.bytes;
+            self.cache.push_back(s);
+        } else {
+            self.eager = Some(s);
         }
-        self.cache.push_back(s);
         Ok((logits, actions))
     }
 }

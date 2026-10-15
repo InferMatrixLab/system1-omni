@@ -77,4 +77,5 @@ nav:
       - OmniJev preparation: recipe/omnijev/README.md
       - CLM stub-encoder contract: recipe/clm/README.md
       - LFM2.5-350M choice worker: recipe/lfm2/README.md
+      - D3 reference worker: recipe/d3/reference.md
   - Contributing: CONTRIBUTING.md

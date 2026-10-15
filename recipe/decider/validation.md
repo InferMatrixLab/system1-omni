@@ -286,6 +286,46 @@ long corpus were 4626 MiB eager4, 4658 MiB fixed4 and 4746 MiB shared4; peak mem
 and sustained throughput were not measured.
 
 
+## Deploying fixed and shared modes
+
+Before enabling `DECIDER_FIXED=1`, `DECIDER_PREFIX=1`, or automatic shared
+selection on a new GPU/toolchain, build the worker and library from the same
+source and run the independent, weight-free fixed-algorithm operator check on
+that device:
+
+```sh
+CUA_S1_CUDA_LIB="$PWD/target/release/libqwen3_5_cuda.so" \
+  cargo test --release --locked -p omni-qwen3-5-native --test kernels \
+  fixed_gemm_rows_do_not_depend_on_m -- --ignored --exact --test-threads=1
+```
+
+Require one executed test and one pass, not an empty filtered run. Record the
+source/library identity, GPU, driver, CUDA/cuBLAS toolchain and complete output.
+This checks the listed projection shapes and row-count controls; it does not
+prove support for every possible length or replace the model fidelity checks
+above. The recorded RTX 4090 result is not qualification of another device.
+
+The fixed algorithm is checked against each requested shape. If the backend
+rejects that shape, execution returns an error instead of changing algorithms.
+The admitted request returns HTTP 503 without partial answers, retires the
+loaded executor, and leaves `/health` at HTTP 503 with `status: unavailable`.
+Use the HTTP status and health fields as the alert condition; retain the
+operation context/error code and effective prefix mode for diagnosis.
+
+Automatic selection avoids fixed execution only for requests that its host
+policy sends to the normal independent/packed path. When it selects a shared
+plan, the same backend-failure and retirement rules apply; it is not a retry
+with a different algorithm after an execution failure.
+
+For recovery, remove the failed worker from traffic, preserve its failure
+record, and restart using the existing launch command with
+`DECIDER_PREFIX=0 DECIDER_FIXED=0 DECIDER_GRAPH=0`. If replacing the library,
+rebuild it and all consuming binaries together at the same ABI. Restore traffic
+only after real warmup, ready health and a representative request succeed.
+Keep the fixed/shared modes disabled on that device until their operator and
+model checks pass under the original gates. A process whose executor retired
+cannot recover merely by retrying a request or changing the caller's environment.
+
 ## Current qualification on 2026-10-13
 
 The repaired standalone branch was executed from committed source

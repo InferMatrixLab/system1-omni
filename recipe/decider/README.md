@@ -187,6 +187,11 @@ together rejects startup. All new switches default off. Health reports effective
 The diagnostic outer record includes the same counters; decision output and usage
 do not count execution savings differently.
 
+Before enabling fixed/shared execution on another GPU, follow the
+[device check, failure alert and restart procedure](validation.md#deploying-fixed-and-shared-modes).
+Execution failures retire the worker and return 503; automatic selection has the
+same failure contract whenever it actually selects a shared plan.
+
 ## Conservative automatic prefix selection
 
 `DECIDER_PREFIX=auto` is a default-off alternative to forced `DECIDER_PREFIX=1`.
