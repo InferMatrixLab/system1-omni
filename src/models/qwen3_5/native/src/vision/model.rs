@@ -116,7 +116,7 @@ impl VisionModel {
             );
         }
         cuda::load(library)?;
-        // ABI6 is required; head-64 Cua layouts use the original vision entry points.
+        // ABI8 is required; head-64 Cua layouts use the original vision entry points.
         if config.hidden_size != 1024 {
             api().vision_v2()?;
         }
