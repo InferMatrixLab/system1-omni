@@ -336,6 +336,38 @@ def run_fixtures(model, processor, max_length, media_kwargs):
     return cases
 
 
+def _verify_clean_checkout(source):
+    """Reject a dirty pinned checkout before it can produce evidence.
+
+    Both stacks import the valen package from this tree, so a local
+    modification would make the two agree while neither ran the pinned
+    code; a clean tracked tree with no importable strays is therefore part
+    of what a parity record certifies.
+    """
+
+    status = subprocess.run(
+        ["git", "-C", str(source), "status", "--porcelain", "--untracked-files=all"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    problems = []
+    for line in status.stdout.splitlines():
+        entry = line[3:]
+        if line.startswith("??"):
+            # Untracked non-code cannot change what gets imported; a stray
+            # .py on the package path can.
+            if entry.endswith(".py"):
+                problems.append(f"untracked python file {entry}")
+        else:
+            problems.append(f"locally changed {entry}")
+    if problems:
+        raise SystemExit(
+            "--valen-source must be a clean checkout of the pinned revision "
+            "(commit or restore):\n  " + "\n  ".join(problems)
+        )
+
+
 def stage_environment(args):
     """Verify the pinned source and build the shared compile-side state."""
 
@@ -344,6 +376,7 @@ def stage_environment(args):
 
     source = Path(args.valen_source).resolve()
     _verify_source_revision(source)
+    _verify_clean_checkout(source)
     sys.path.insert(0, str(source))
 
     from models.valen.preprocess import ValenProcessor

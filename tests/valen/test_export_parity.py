@@ -284,6 +284,53 @@ def test_verify_sources_rejects_swapped_base_shard_bytes(tmp_path):
         tool.verify_sources_match_manifest(args, manifest)
 
 
+# --- the pinned-source checkout must be clean before evidence is produced ---
+
+def fresh_checkout(path):
+    """An empty git repository standing in for the pinned source tree."""
+
+    import subprocess
+
+    path.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    return path
+
+
+def test_clean_checkout_passes(tmp_path):
+    repo = fresh_checkout(tmp_path / "valen-src")
+    # Untracked non-code cannot change what gets imported, so it is allowed.
+    (repo / "notes.txt").write_text("editor droppings\n", encoding="utf-8")
+    tool._verify_clean_checkout(repo)
+
+
+def test_untracked_python_file_is_rejected(tmp_path):
+    """A stray .py on the package path can shadow or extend the pinned code
+    both stacks import, so it must fail the gate before evidence exists."""
+
+    import pytest
+
+    repo = fresh_checkout(tmp_path / "valen-src")
+    (repo / "stray.py").write_text("# not pinned\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="stray.py"):
+        tool._verify_clean_checkout(repo)
+
+
+def test_tracked_modification_is_rejected(tmp_path):
+    """Both stacks import from the same tree, so a local modification would
+    make the two agree while neither ran the pinned code."""
+
+    import pytest
+    import subprocess
+
+    repo = fresh_checkout(tmp_path / "valen-src")
+    model = repo / "model.py"
+    model.write_text("original\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "model.py"], check=True)
+    model.write_text("locally modified\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="model.py"):
+        tool._verify_clean_checkout(repo)
+
+
 # --- the full parity gate against the real pinned artifacts ---
 # Set VALEN_CKPT, VALEN_BASE and VALEN_SRC (the recipe reference.md artifact
 # exports) on a CUDA host to run: it exports a fresh artifact set, then runs
