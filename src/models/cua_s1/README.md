@@ -139,8 +139,10 @@ The old merged export remains an approximate execution mode. Its legacy
 FP64-accumulated, FP32 letter-logit readout is preserved; BF16 rounding is selected
 only by `cua-s1-text-unmerged/1`. Applying that rounding to merged exports at
 `7293c71c` created four ordered-tie decision changes in a same-artifact A800
-upgrade comparison. The compatibility fix is covered by CPU red/green projection
-and response tests; a frozen four-request GPU regression is also provided.
+upgrade comparison. The compatibility fix has CPU red/green projection and
+response coverage. At source `f212c56f`, the four-request device regression passed
+in eager/Graph, and both modes matched every legacy parent response byte in two
+139-request passes. Unmerged/reference parity remained within its original gates.
 See the [numerical report](../../../docs/benchmarks/cua-s1-text-parity-20261013/README.md#legacy-merged-upgrade-regression)
 for the four cases, source pins and device-validation limits. Restoring merged
 compatibility does not make merged weights equivalent to the unmerged reference.

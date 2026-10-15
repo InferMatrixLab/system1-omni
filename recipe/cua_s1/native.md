@@ -5,8 +5,9 @@ The unmerged precision profile has source-pinned A800 80 GB (sm_80), CUDA 13.0
 evidence at ABI-8 source `7293c71cfb738504a30ff033ae3567f3368333c1`, plus earlier
 cumulative ABI-8 and independent ABI-6 campaigns linked in
 [PR #143](https://github.com/ThinkFlowLab/system1-omni/pull/143).
-The current branch uses ABI 8. The later legacy-readout compatibility fix has
-CPU regression coverage; fresh GPU validation of that follow-up is pending.
+The current branch uses ABI 8. The legacy-readout compatibility fix was separately
+GPU-tested at `f212c56f23ac750ebfa38f4c72e9fcdc914bf1cd` on the same pinned A800.
+See the [source-pinned repair evidence](https://github.com/Levius-Fubuki/system1-omni/releases/tag/cua143-merged-readout-f212c56f-20261015).
 The earlier merged path was checked on an RTX 6000 Ada (sm_89) with CUDA 13.2.
 
 Run the commands from the repository root. Pass your GPU's compute capability to `build.sh` (89 for Ada, 80 for A100, 90 for H100); the worker finds `libqwen3_5_cuda.so` next to its executable, or at `CUA_S1_CUDA_LIB`:
@@ -52,9 +53,10 @@ backbone execution path and retain FP32 letter logits after FP64 accumulation.
 The BF16 readout boundary is restricted to the validated unmerged export profile,
 not a request flag or process-global setting. An earlier #143 build applied it to
 merged exports too, creating four decision changes and reducing frozen-corpus
-correctness from 97/139 to 96/139. The follow-up restores legacy readout policy;
-that restoration still needs fresh device validation. The A800 unmerged parity
-results are scoped to their recorded source and artifact.
+correctness from 97/139 to 96/139. At repaired source `f212c56f`, merged eager and
+Graph each matched every parent response byte in two 139-request passes, with
+zero upgrade flips and 97/139 correct. Unmerged eager/Graph retained zero flips
+against the pinned reference. Results remain scoped to that source and artifact.
 Merging the adapter, TF32/BF16 GDN intermediates, and different
 GEMM reduction policies can change decisions on close or tied options. Re-export
 with the command above to use the precision profile. Rebuild worker and library

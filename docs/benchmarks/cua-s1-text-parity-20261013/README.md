@@ -17,12 +17,12 @@ The 2026-10-15 parent synchronization used #118 at
 `3be46fa270cb74c33d4db4ffd761405d0522018a`, which inherits
 [#117](https://github.com/ThinkFlowLab/system1-omni/pull/117) and its merged
 resident-feature increment #135. Rebuild the library and all consumers together
-for ABI 8. This parent synchronization has CPU/CI coverage; current integrated
-GPU qualification remains unverified. Decider modes and the separate #127 cache
+for ABI 8. The later ABI-8 source `7293c71c` and legacy-readout repair `f212c56f`
+have separate source-pinned A800 campaigns described below. Decider modes and the separate #127 cache
 increment are not included. The frozen corpus comes from #141; merging #141 is
 not a runtime dependency.
 
-The GPU results below were measured on cumulative candidate
+The historical cumulative results in the Results section were measured on candidate
 `76af07996f60905082b8d48199d4a7003f33f4f6`, whose parent is
 `18e1a5a6f68b9d11d3e11c7ea7b939af87272f53`. That integrated build used ABI 8.
 The separate independent qualification at `27f77e49` used ABI 6 with additive
@@ -118,16 +118,40 @@ vectors are not captured checkpoint activations. The maintained four-request
 device test uses the actual frozen inputs and parent responses; run it as in the
 [native recipe](../../../recipe/cua_s1/native.md).
 
-Fresh GPU execution of the compatibility fix is **pending**: the earlier server
-was shut down after preserving the published evidence. In particular, restored
-97/139 correctness and zero upgrade flips have not been measured for this new
-source. Requalify the full corpus on pinned A800: two passes each for legacy
-parent and repaired merged eager/Graph, requiring zero parent/candidate decision
-changes and probability error at most 0.02; retain exact-byte differences too.
-Repeat unmerged eager/Graph/reference checks at the original 0.02/zero-flip gates.
-The previous candidate's unmerged results were 97/139 in all three modes, maximum
-probability difference 5.960464477539063e-8 and zero flips. They remain tied to
-`7293c71c`; they are not a new-device pass for this follow-up.
+The [repair GPU campaign](https://github.com/Levius-Fubuki/system1-omni/releases/tag/cua143-merged-readout-f212c56f-20261015)
+tested source `f212c56f23ac750ebfa38f4c72e9fcdc914bf1cd` on pinned A800/ABI 8.
+First, two four-request passes on rejected source `7293c71c` reproduced all four
+changes. The repaired four-request Engine regression then passed twice per
+Graph setting, with zero probability error. Graph 1 logged 6 captures, 2 replays
+and no fallback; the test verified the nine artifact files' SHA-256 before loading.
+
+| Fresh full-corpus mode | Passes × requests | Comparator | Maximum probability difference | Decision changes | Correct |
+| --- | --- | --- | --- | --- | --- |
+| Legacy parent | 2 × 139 | Parent | 0 | 0 | 97/139 |
+| Repaired merged eager | 2 × 139 | Parent | 0 | 0 | 97/139 |
+| Repaired merged Graph | 2 × 139 | Parent | 0 | 0 | 97/139 |
+| Repaired unmerged eager | 2 × 139 | Python reference | 5.960464477539063e-8 | 0 | 97/139 |
+| Repaired unmerged Graph | 2 × 139 | Python reference | 5.960464477539063e-8 | 0 | 97/139 |
+| Python reference | 2 × 139 | Reference | 0 | 0 | 97/139 |
+
+Every repaired merged response body and content type matched the parent byte
+for byte. All modes repeated identical response bytes; unmerged eager/Graph
+bodies also matched each other. Each full-corpus Graph worker logged 207
+captures and 73 replays, with no fallback. The original 0.02/zero-flip gates
+were retained and legacy compatibility additionally required byte identity.
+Counts are 1,668 full-corpus HTTP measurements, 8 rejected-source reproductions,
+7 excluded feasibility requests and 16 separate direct Engine predictions.
+Initial bootstrap rejected a packaging-version mismatch before any GPU request:
+Torch metadata is `2.14.0` while runtime is `2.14.0+cu130`; both fields and CUDA
+runtime `13.0` were then checked explicitly. The failure is preserved. No source
+or tolerance changed during the campaign. Raw evidence was verified locally
+before the server was shut down. Later documentation-only updates preserve all
+non-Markdown source and fixture bytes from the tested repair commit.
+
+Legacy compatibility remains distinct from reference parity: restoring the
+original merged behavior does not remove its known approximation relative to
+unmerged FP32 LoRA. These results do not establish full 27B, L20X/Hopper,
+FLA-enabled, performance or general GUI task-quality qualification.
 
 ## Results
 
