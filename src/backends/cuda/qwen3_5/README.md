@@ -65,8 +65,10 @@ workspace; the caller supplies shape-dependent FP32 buffers. It implements
 Torch 2.14 cumulative-decay association, and a final BF16 output cast. Each call
 starts with zero state; prefix continuation is rejected by the model adapter.
 The context drains its last stream before destruction, and is retired before
-that stream. Rebuild the library for this optional group; ABI remains 6 on this #118-based branch; the historical cumulative validation
-build used ABI 8.
+that stream. Rebuild the library and all consuming workers together for the
+current ABI 8, including this optional group. The independent A800 qualification
+at `27f77e49868d84b091aa804f02ccb4d3474a9a00` used ABI 6; the earlier cumulative
+campaign used ABI 8. Neither campaign qualifies the current integrated source.
 Builds now link both cuBLAS and cuBLASLt. Every consumer of the rebuilt shared
 library must provide both runtime libraries (`libcublas.so` and
 `libcublasLt.so`), even when it does not enable the optional FP32 GDN group.

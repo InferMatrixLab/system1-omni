@@ -9,25 +9,29 @@ it does not establish that all five original L20X cases have been reproduced.
 
 ## PR dependencies and evidence provenance
 
-This independent change is stacked on [#118](https://github.com/ThinkFlowLab/system1-omni/pull/118)
-(`codex/jemm-native`, `ed9f9d6eb566d226e2441c5e9d84187abe1e4d63`) for the
-unmerged FP32 language adapter loader and optional reference norm/GEMM/attention
-operations. #118 is itself stacked on [#117](https://github.com/ThinkFlowLab/system1-omni/pull/117).
-The frozen corpus comes from #141; merging #141 is not a runtime dependency.
-Decider execution modes and Cua screenshot cache/resident-feature PRs are outside
-this change's dependency chain and diff.
+The independently qualified source `27f77e49868d84b091aa804f02ccb4d3474a9a00`
+was stacked on [#118](https://github.com/ThinkFlowLab/system1-omni/pull/118)
+at `ed9f9d6eb566d226e2441c5e9d84187abe1e4d63` for the unmerged FP32 language
+adapter loader and optional reference norm/GEMM/attention operations.
+The 2026-10-15 parent synchronization used #118 at
+`3be46fa270cb74c33d4db4ffd761405d0522018a`, which inherits
+[#117](https://github.com/ThinkFlowLab/system1-omni/pull/117) and its merged
+resident-feature increment #135. Rebuild the library and all consumers together
+for ABI 8. This parent synchronization has CPU/CI coverage; current integrated
+GPU qualification remains unverified. Decider modes and the separate #127 cache
+increment are not included. The frozen corpus comes from #141; merging #141 is
+not a runtime dependency.
 
 The GPU results below were measured on cumulative candidate
 `76af07996f60905082b8d48199d4a7003f33f4f6`, whose parent is
 `18e1a5a6f68b9d11d3e11c7ea7b939af87272f53`. That integrated build used ABI 8.
-The independently rebased branch retains #118's ABI 6 and adds only optional
-FP32 GDN symbols. Rebuild the library with the worker; no cuDNN is needed for
-this text path. Results from the cumulative build are historical evidence for
-the pinned implementation. Fresh independent-branch qualification, including
-exact source/library/binary hashes, repeated HTTP results and self-review, is
-recorded separately in [PR #143](https://github.com/ThinkFlowLab/system1-omni/pull/143).
-Use each run's source pin; do not substitute the historical integrated result
-for a newer branch's validation.
+The separate independent qualification at `27f77e49` used ABI 6 with additive
+optional FP32 GDN symbols. No cuDNN is needed for this text path. Its exact
+source/library/binary hashes, repeated HTTP results and self-review are recorded
+in [PR #143](https://github.com/ThinkFlowLab/system1-omni/pull/143).
+Both campaigns remain historical, source-pinned evidence. ABI 8 in the cumulative
+campaign does not establish qualification of the current ABI-8 branch; use each
+run's source pin rather than substituting either result for a newer build.
 
 ## Frozen inputs and environment
 
