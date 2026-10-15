@@ -49,6 +49,7 @@ fn cpu_batch_uses_aggregate_gemms_and_image_local_attention() {
     let mut code = include_str!("vision_batch_fake.c").to_owned();
     let implemented = [
         "cs1_abi_version",
+        "cs1_get_device",
         "cs1_error_string",
         "cs1_set_device",
         "cs1_malloc",
