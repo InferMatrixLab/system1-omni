@@ -471,76 +471,63 @@ records above. The two stacks are loaded serially, each in its own subprocess
   vision-top blocks, merger and head from `checkpoint.pt`;
 - exported: the consumption path the export manifest documents —
   `Qwen3_5ForConditionalGeneration.from_pretrained(weights/valen-export,
-  dtype=bf16, eager).model` plus the decision head rebuilt from
-  `head.safetensors` (DecisionHead 2048→256, FP32, no bias), run through the
-  pinned `Valen` class.
+  dtype=bf16, eager).model`, the language LoRA re-applied through the same
+  peft build the pinned reference uses (every language Linear wrapped at the
+  manifest-declared rank 32 / alpha 64, the 372 FP32 tensors of
+  `lora.safetensors` loaded by key, adapters kept FP32), plus the decision
+  head rebuilt from `head.safetensors` (DecisionHead 2048→256, FP32, no
+  bias), run through the pinned `Valen` class.
 
 Both stacks answer the text example and the image fixture compiled by the
 pinned `Compiler`; the declared gate is exact answer agreement with
 probability deltas ≤ 1e-6. The block below is the verbatim tool output
 (device `cuda:0`, NVIDIA GeForce RTX 5060 Laptop GPU, sm_120, 7.96 GiB,
-torch 2.11.0+cu128; recorded 2026-10-14):
+torch 2.11.0+cu128; recorded 2026-10-15):
 
 ~~~text
 case: text
 logical tokens: 48
 compute tokens: 48
-max probability delta: 7.0580840111e-04
+max probability delta: 0.0000000000e+00
 answer agreement: PASS
-probability tolerance <= 1e-06: FAIL
+probability tolerance <= 1e-06: PASS
 token accounting: PASS
-problem: probability delta 7.058084e-04 exceeds tolerance 1e-06
 
 case: image
 logical tokens: 108
 compute tokens: 108
-max probability delta: 1.7260342836e-02
+max probability delta: 0.0000000000e+00
 answer agreement: PASS
-probability tolerance <= 1e-06: FAIL
+probability tolerance <= 1e-06: PASS
 token accounting: PASS
-problem: probability delta 1.726034e-02 exceeds tolerance 1e-06
 
-merge drift: 186 adapted modules (probe 256x bf16 rows, seed 0, scaling 2, cpu single thread)
-  max output delta: 3.125000e-02 (mean 2.024530e-02), worst model.language_model.layers.0.linear_attn.in_proj_a.weight
-  max relative output drift: 7.575758e-03 (mean 4.521309e-03), worst model.language_model.layers.12.linear_attn.in_proj_b.weight
-  max ulp ratio: 1, mean bit-exact fraction: 0.530288
+device: cuda:0 (NVIDIA GeForce RTX 5060 Laptop GPU (sm_120, 7.96 GiB))
+parity slot filled: weights/valen-export/valen_export.json
+verify_export_parity: ok
 ~~~
 
-Per-candidate probabilities (original stack → exported stack):
+Per-candidate probabilities (original stack → exported stack, printed by the
+tool's own stage runner):
 
 ~~~text
-text/refund: 0.5159630775 0.4840368927 -> 0.5152572991 0.4847427009  (both choose refund)
-image/color: 0.4459854066 0.5540145636 -> 0.4632457486 0.5367543097  (both choose black)
+text/refund: 0.5159630775 0.4840368927 -> 0.5159630775 0.4840368927  (both choose refund)
+image/color: 0.4459854066 0.5540145636 -> 0.4459854066 0.5540145636  (both choose black)
 ~~~
 
-Verdict: **the parity gate fails on the declared 1e-6 tolerance**. The
-discrete answers agree exactly on both fixtures and the token accounting is
-identical, but the merged export's probabilities drift by 7.1e-4 (text) and
-1.7e-2 (image) — the merge drift accumulating through the 24 adapted layers,
-three orders of magnitude above the tolerance. The drift measurement itself
-is bounded at one BF16 ulp per adapted module (max ulp ratio exactly 1, ~53%
-of probe activations bit-exact); the failure is the accumulation, not any
-single module.
-
-Control checks recorded with the run:
-
-- each stack was loaded twice in separate subprocesses and produced
-  bit-identical answers, so the cross-stack delta above is fully systematic
-  (the weight transformation), not run-to-run noise;
-- the original stack's probabilities match this recipe's committed serving
-  records (0.5159631044… / 0.5540145914…) within the 2.7e-8 worker-reference
-  tolerance recorded above, confirming the comparison's reference side is
-  the served model;
-- every exported tensor was cross-checked bit-exactly against the export
-  tool's merge math on the given base and checkpoint before the drift run.
-
-The failed gate triggers the documented fallback:
-export the FP32 LoRA separately and serve unmerged (recorded in the
-manifest's `merge.fallback`), which is the only path that meets the
-reference-serving tolerance. The merged artifact set keeps exact discrete
-answers and is recorded with `parity.status = "failed"` in
-`weights/valen-export/valen_export.json`, together with the per-case
-deltas, device, tolerances and the drift aggregate.
+Verdict: **the parity gate passes at bit level**. The unmerged export
+answers both fixtures with probabilities identical to the original stack's
+(max delta exactly 0.0 on every candidate), the discrete answers and token
+accounting agree exactly, and the original side matches the committed
+serving records above (0.5159631044… / 0.5540145914…) within the ~3e-8
+worker-vs-reference spread. Both stacks apply the LoRA through
+the same peft 0.18.1 unmerged `Linear.forward` with FP32 adapters, and the
+exported backbone differs from the reference's `from_pretrained` state only
+in tensors that are bit-equal by construction (the trained vision-top and
+merger replacements, and the 36 FP32→BF16 downcasts the reference's own
+BF16 runtime performs at load), so the two forward graphs are numerically
+identical. The verdict — per-case deltas, device, tolerance — is recorded
+with `parity.status = "passed"` in
+`weights/valen-export/valen_export.json`.
 
 Reproduce (the export itself per [`export.md`](export.md) first):
 
