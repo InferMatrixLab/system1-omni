@@ -446,3 +446,122 @@ fn vision_cache_byte_eviction_and_transient_oversize() {
     assert_eq!(model.retained_bytes(), 0);
     assert!(model.scratch.is_empty());
 }
+
+#[test]
+#[ignore = "requires CUDA and pinned CUA_S1_BASE/CUA_S1_VISION_ADAPTER/CUA_S1_CUDA_LIB"]
+fn device_vision_graph_replays_changed_pixels_and_replaces_geometry() {
+    let mut model = load();
+    let inputs = [
+        image([1, 16, 16], 1),
+        image([1, 16, 16], 2),
+        image([1, 8, 32], 2),
+        image([1, 16, 32], 3),
+        image([1, 16, 16], 1),
+    ];
+    model.graph_enabled = false;
+    let expected: Vec<_> = inputs
+        .iter()
+        .map(|i| bits(&model.forward(i).unwrap()))
+        .collect();
+    model.graph_enabled = true;
+    for (input, expected) in inputs.iter().zip(&expected) {
+        for _ in 0..2 {
+            let features = model.forward_device(input).unwrap();
+            assert_eq!(bits(&features.download().unwrap()), *expected);
+        }
+        let scratch = model
+            .scratch
+            .iter()
+            .find(|s| s.grid == input.image_grid_thw)
+            .unwrap();
+        assert_eq!(scratch.grid, input.image_grid_thw);
+        assert!(
+            scratch.graph.is_some(),
+            "resident path must capture/replay vision"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires the test-only failing CUDA wrapper; see native_vision_graph.md"]
+fn device_vision_capture_failure_preserves_resident_eager_result_and_recovery() {
+    assert_eq!(
+        std::env::var("CUA_S1_TEST_CAPTURE_FAILURE").as_deref(),
+        Ok("1")
+    );
+    let mut model = load();
+    model.graph_enabled = false;
+    let input = image([1, 16, 16], 9);
+    let changed = image([1, 8, 32], 10);
+    let expected = bits(&model.forward(&input).unwrap());
+    let expected_changed = bits(&model.forward(&changed).unwrap());
+    model.graph_enabled = true;
+    assert_eq!(
+        bits(&model.forward_device(&input).unwrap().download().unwrap()),
+        expected
+    );
+    assert!(!model.graph_enabled);
+    assert!(model.scratch.iter().all(|s| s.graph.is_none()));
+    assert_eq!(
+        bits(&model.forward_device(&changed).unwrap().download().unwrap()),
+        expected_changed
+    );
+    assert_eq!(
+        bits(&model.forward_device(&input).unwrap().download().unwrap()),
+        expected
+    );
+}
+
+#[test]
+#[ignore = "requires CUDA and pinned CUA_S1_BASE/CUA_S1_VISION_ADAPTER/CUA_S1_CUDA_LIB"]
+fn device_cache_transient_output_keeps_retained_entries_and_releases_after_consumption() {
+    let mut model = load_cached();
+    model.cache_limits = Some(CacheLimits {
+        entries: 1,
+        bytes: 256 * 64_096,
+    });
+    model.graph_enabled = false;
+    let small = image([1, 16, 16], 61);
+    let large = image([1, 16, 32], 62);
+    let expected_small = bits(&model.forward(&small).unwrap());
+    let expected_large = bits(&model.forward(&large).unwrap());
+    assert!(
+        model.transient.is_none(),
+        "host transient must be released before return"
+    );
+    let retained = model.scratch[0].pixels.at(0);
+    model.graph_enabled = true;
+    for input in [&small, &large, &large, &small] {
+        let observed = {
+            let output = model.forward_device(input).unwrap();
+            bits(&output.download().unwrap())
+        };
+        assert_eq!(
+            observed,
+            if input.image_grid_thw == small.image_grid_thw {
+                &expected_small
+            } else {
+                &expected_large
+            }
+            .clone()
+        );
+        assert_eq!(model.scratch[0].pixels.at(0), retained);
+        assert_eq!(model.retained_bytes(), 256 * 64_096);
+        if input.image_grid_thw == large.image_grid_thw {
+            assert!(model.transient.as_ref().unwrap().graph.is_none());
+        }
+        model.release_transient().unwrap();
+        assert!(model.transient.is_none());
+    }
+    clear_scratch(&mut model);
+    model.cache_limits.as_mut().unwrap().entries = 0;
+    let observed = {
+        let output = model.forward_device(&small).unwrap();
+        bits(&output.download().unwrap())
+    };
+    assert_eq!(observed, expected_small);
+    assert!(model.scratch.is_empty());
+    assert!(model.transient.is_some());
+    model.release_transient().unwrap();
+    assert!(model.transient.is_none());
+}

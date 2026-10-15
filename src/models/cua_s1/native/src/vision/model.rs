@@ -1,6 +1,6 @@
 //! Cua checkpoint/provenance validation with the shared Qwen execution.
 use super::VisionCheckpoint;
-use crate::image_preprocess::ProcessedImage;
+use crate::{cuda::DeviceBf16Matrix, image_preprocess::ProcessedImage};
 use anyhow::Result;
 use half::bf16;
 use omni_qwen3_5_native::vision::CacheLimits;
@@ -40,6 +40,13 @@ impl VisionModel {
     }
     pub fn forward(&mut self, image: &ProcessedImage) -> Result<Vec<bf16>> {
         self.0.forward(image)
+    }
+    /// Borrow synchronized shared-executor output until the language consumer drains.
+    pub fn forward_device(&mut self, image: &ProcessedImage) -> Result<DeviceBf16Matrix<'_>> {
+        self.0.forward_device(image)
+    }
+    pub fn release_transient(&mut self) -> Result<()> {
+        self.0.release_transient()
     }
     pub fn forward_with_trace(
         &mut self,

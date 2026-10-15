@@ -1,7 +1,7 @@
 //! GPU vision forward for the structurally validated, unmerged checkpoint.
 use super::{VisionCheckpoint, VisionConfig, geometry::VisionGeometry};
 use crate::{
-    cuda::{self, DeviceBuffer, Stream, api, check},
+    cuda::{self, DeviceBf16Matrix, DeviceBuffer, Stream, api, check},
     image_preprocess::ProcessedImage,
 };
 use anyhow::{Result, ensure};
@@ -36,6 +36,8 @@ pub struct VisionModel {
     config: VisionConfig,
     // Captures and their buffers retire before weights, GEMM workspace and stream.
     scratch: VecDeque<Scratch>,
+    // Uncached device output remains owned until its borrow is consumed.
+    transient: Option<Scratch>,
     // None preserves the legacy four-grid FIFO policy for generic consumers.
     cache_limits: Option<CacheLimits>,
     graph_enabled: bool,
@@ -43,6 +45,11 @@ pub struct VisionModel {
     lora: BTreeMap<String, DeviceBuffer>,
     gemm: Gemm,
     stream: OwnedStream,
+}
+#[derive(Clone, Copy)]
+enum ScratchLocation {
+    Retained(usize),
+    Transient,
 }
 impl VisionModel {
     pub fn load(dir: impl AsRef<Path>, library: &Path) -> Result<Self> {
@@ -137,7 +144,7 @@ impl VisionModel {
             );
         }
         cuda::load(library)?;
-        // ABI6 is required; head-64 Cua layouts use the original vision entry points.
+        // ABI8 is required; head-64 Cua layouts use the original vision entry points.
         if config.hidden_size != 1024 {
             api().vision_v2()?;
         }
@@ -148,6 +155,7 @@ impl VisionModel {
         let mut model = Self {
             config,
             scratch: VecDeque::new(),
+            transient: None,
             cache_limits,
             graph_enabled: std::env::var("CUA_S1_VISION_GRAPH").as_deref() == Ok("1"),
             base: BTreeMap::new(),
@@ -337,7 +345,94 @@ impl VisionModel {
     ) -> Result<Vec<bf16>> {
         self.run(image, Some(&mut callback))
     }
+    /// Synchronized resident merger output; the borrow prevents cache mutation/retirement.
+    pub fn forward_device(&mut self, image: &ProcessedImage) -> Result<DeviceBf16Matrix<'_>> {
+        let result: Result<(usize, ScratchLocation)> = (|| {
+            let (n, index, capture) = self.enqueue_image(image, &mut None)?;
+            self.synchronize()?;
+            if let (true, ScratchLocation::Retained(index)) = (capture, index) {
+                self.capture_current(index);
+            }
+            Ok((n, index))
+        })();
+        if result.is_err() {
+            // Drain while every referenced allocation and Graph is still owned.
+            self.synchronize()?;
+            self.release_transient()?;
+        }
+        let (n, index) = result?;
+        self.scratch_at(index)
+            .out
+            .bf16_matrix(n / 4, self.config.out_hidden_size)
+    }
     fn run(&mut self, image: &ProcessedImage, mut callback: Trace<'_>) -> Result<Vec<bf16>> {
+        let result = (|| {
+            let (n, index, capture) = self.enqueue_image(image, &mut callback)?;
+            let output = self.read(
+                &self.scratch_at(index).out,
+                n / 4 * self.config.out_hidden_size,
+            )?;
+            if let Some(callback) = callback.as_mut() {
+                callback("merger.output", &output)?;
+            } else if let (true, ScratchLocation::Retained(index)) = (capture, index) {
+                self.capture_current(index);
+            }
+            Ok(output)
+        })();
+        if result.is_err() {
+            self.synchronize()?;
+        }
+        self.release_transient()?;
+        result
+    }
+    /// Release uncached output after every consuming stream has completed.
+    /// A live DeviceBf16Matrix borrow prevents calling this method.
+    /// ```compile_fail
+    /// use omni_qwen3_5_native::{vision::VisionModel, image_preprocess::ProcessedImage};
+    /// fn retire_live_output(model: &mut VisionModel, image: &ProcessedImage) {
+    ///     let output = model.forward_device(image).unwrap();
+    ///     model.release_transient().unwrap();
+    ///     let _ = output.download();
+    /// }
+    /// ```
+    pub fn release_transient(&mut self) -> Result<()> {
+        if self.transient.is_some() {
+            self.synchronize()?;
+            self.transient = None;
+        }
+        Ok(())
+    }
+    fn scratch_at(&self, location: ScratchLocation) -> &Scratch {
+        match location {
+            ScratchLocation::Retained(index) => &self.scratch[index],
+            ScratchLocation::Transient => self.transient.as_ref().unwrap(),
+        }
+    }
+    fn capture_current(&mut self, index: usize) {
+        let scratch = &self.scratch[index];
+        // The caller completes warmup before recording; capture never reruns math.
+        let captured = cuda::Graph::capture(self.stream.0, || self.enqueue(scratch, &mut None));
+        match captured {
+            Ok(graph) => {
+                let scratch = &mut self.scratch[index];
+                scratch.graph = Some(graph);
+                graph_trace("captured", scratch.grid);
+            }
+            Err(error) => {
+                eprintln!("Vision CUDA Graph capture failed; using eager execution: {error:#}");
+                self.graph_enabled = false;
+                for scratch in &mut self.scratch {
+                    scratch.graph = None;
+                }
+            }
+        }
+    }
+
+    fn enqueue_image(
+        &mut self,
+        image: &ProcessedImage,
+        callback: &mut Trace<'_>,
+    ) -> Result<(usize, ScratchLocation, bool)> {
         cuda::set_device(0)?;
         let cached = self
             .scratch
@@ -367,74 +462,73 @@ impl VisionModel {
             .iter()
             .flat_map(|v| bf16::from_f32(*v).to_bits().to_le_bytes())
             .collect();
+        self.release_transient()?;
         let bytes =
             Scratch::bytes_for_grid(&self.config, !self.lora.is_empty(), image.image_grid_thw);
-        if self
+        let index = if self
             .cache_limits
             .is_some_and(|limits| !limits.retains(bytes))
         {
-            // Transient eager work never mutates retained entries; drain before dropping buffers.
             self.synchronize()?;
             let geometry = match geometry {
                 Some(geometry) => geometry,
                 None => VisionGeometry::new(image.image_grid_thw, &self.config)?,
             };
-            let scratch = Scratch::new(self, image.image_grid_thw, geometry)?;
+            self.transient = Some(Scratch::new(self, image.image_grid_thw, geometry)?);
             self.cache_trace("transient", image.image_grid_thw);
-            let result = self.run_scratch(&scratch, &pixels, &mut callback, false);
-            let drained = self.synchronize();
-            drop(scratch);
-            return result.and_then(|(values, _)| drained.map(|()| values));
-        }
-        let index = if let Some(index) = cached {
-            if self.cache_limits.is_some() {
-                // Restore the exact grid as MRU, keeping inactive entries oldest first.
-                let scratch = self.scratch.remove(index).unwrap();
-                self.scratch.push_back(scratch);
-                self.cache_trace("hit", image.image_grid_thw);
-                self.scratch.len() - 1
-            } else {
-                index
-            }
+            ScratchLocation::Transient
         } else {
-            self.synchronize()?;
-            if let Some(limits) = self.cache_limits {
-                while limits.needs_eviction(self.scratch.len(), self.retained_bytes(), bytes) {
-                    let retired = self.scratch.pop_front().unwrap();
-                    let grid = retired.grid;
-                    drop(retired); // Graph field retires before every captured buffer.
-                    self.cache_trace("evicted", grid);
+            let index = if let Some(index) = cached {
+                if self.cache_limits.is_some() {
+                    // Restore the exact grid as MRU, keeping inactive entries oldest first.
+                    let scratch = self.scratch.remove(index).unwrap();
+                    self.scratch.push_back(scratch);
+                    self.cache_trace("hit", image.image_grid_thw);
+                    self.scratch.len() - 1
+                } else {
+                    index
                 }
-            } else if self.scratch.len() == 4 {
-                self.scratch.pop_front();
-            }
-            let scratch = Scratch::new(self, image.image_grid_thw, geometry.unwrap())?;
-            self.scratch.push_back(scratch);
-            self.cache_trace("miss", image.image_grid_thw);
-            self.scratch.len() - 1
-        };
-        let (result, captured) = self.run_scratch(
-            &self.scratch[index],
-            &pixels,
-            &mut callback,
-            self.graph_enabled,
-        )?;
-        if let Some(captured) = captured {
-            match captured {
-                Ok(graph) => {
-                    self.scratch[index].graph = Some(graph);
-                    graph_trace("captured", image.image_grid_thw);
-                }
-                Err(error) => {
-                    eprintln!("Vision CUDA Graph capture failed; using eager execution: {error:#}");
-                    self.graph_enabled = false;
-                    for scratch in &mut self.scratch {
-                        scratch.graph = None;
+            } else {
+                self.synchronize()?;
+                if let Some(limits) = self.cache_limits {
+                    while limits.needs_eviction(self.scratch.len(), self.retained_bytes(), bytes) {
+                        let retired = self.scratch.pop_front().unwrap();
+                        let grid = retired.grid;
+                        drop(retired); // Graph field retires before every captured buffer.
+                        self.cache_trace("evicted", grid);
                     }
+                } else if self.scratch.len() == 4 {
+                    self.scratch.pop_front();
                 }
-            }
+                let scratch = Scratch::new(self, image.image_grid_thw, geometry.unwrap())?;
+                self.scratch.push_back(scratch);
+                self.cache_trace("miss", image.image_grid_thw);
+                self.scratch.len() - 1
+            };
+            ScratchLocation::Retained(index)
+        };
+        let scratch = self.scratch_at(index);
+        // SAFETY: the current image has the validated exact resident buffer size.
+        unsafe {
+            cuda::upload(scratch.pixels.at(0), &pixels, self.stream.0)?;
         }
-        Ok(result)
+        if callback.is_none()
+            && matches!(index, ScratchLocation::Retained(_))
+            && self.graph_enabled
+            && let Some(graph) = &scratch.graph
+        {
+            graph.launch(self.stream.0)?;
+            graph_trace("replayed", scratch.grid);
+            return Ok((n, index, false));
+        }
+        self.enqueue(scratch, callback)?;
+        Ok((
+            n,
+            index,
+            callback.is_none()
+                && self.graph_enabled
+                && matches!(index, ScratchLocation::Retained(_)),
+        ))
     }
     fn retained_bytes(&self) -> usize {
         self.scratch
@@ -454,43 +548,6 @@ impl VisionModel {
                 limits.bytes
             );
         }
-    }
-    fn run_scratch(
-        &self,
-        scratch: &Scratch,
-        pixels: &[u8],
-        callback: &mut Trace<'_>,
-        graph_enabled: bool,
-    ) -> Result<(Vec<bf16>, Option<Result<cuda::Graph>>)> {
-        let n = scratch.grid[1] * scratch.grid[2];
-        // SAFETY: pixels have the validated exact size of the resident allocation.
-        unsafe {
-            cuda::upload(scratch.pixels.at(0), pixels, self.stream.0)?;
-        }
-        if callback.is_none()
-            && graph_enabled
-            && let Some(graph) = &scratch.graph
-        {
-            graph.launch(self.stream.0)?;
-            graph_trace("replayed", scratch.grid);
-            return Ok((
-                self.read(&scratch.out, n / 4 * self.config.out_hidden_size)?,
-                None,
-            ));
-        }
-        self.enqueue(scratch, callback)?;
-        let result = self.read(&scratch.out, n / 4 * self.config.out_hidden_size)?;
-        let mut captured = None;
-        if let Some(callback) = callback.as_mut() {
-            callback("merger.output", &result)?;
-        } else if graph_enabled {
-            // The eager read completed warmup. Capture does not execute the operators;
-            // return the already completed result even if recording fails.
-            captured = Some(cuda::Graph::capture(self.stream.0, || {
-                self.enqueue(scratch, &mut None)
-            }));
-        }
-        Ok((result, captured))
     }
     fn enqueue(&self, scratch: &Scratch, callback: &mut Trace<'_>) -> Result<()> {
         let n = scratch.grid[1] * scratch.grid[2];
