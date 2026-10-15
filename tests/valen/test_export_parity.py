@@ -21,6 +21,7 @@ HERE = Path(__file__).resolve().parent
 RECIPE_VALEN = HERE.parents[1] / "recipe" / "valen"
 sys.path.insert(0, str(RECIPE_VALEN))
 
+import compare_reference as reference  # noqa: E402
 import verify_export_parity as tool  # noqa: E402
 
 
@@ -300,7 +301,7 @@ def test_clean_checkout_passes(tmp_path):
     repo = fresh_checkout(tmp_path / "valen-src")
     # Untracked non-code cannot change what gets imported, so it is allowed.
     (repo / "notes.txt").write_text("editor droppings\n", encoding="utf-8")
-    tool._verify_clean_checkout(repo)
+    reference._verify_clean_checkout(repo)
 
 
 def test_untracked_python_file_is_rejected(tmp_path):
@@ -312,7 +313,7 @@ def test_untracked_python_file_is_rejected(tmp_path):
     repo = fresh_checkout(tmp_path / "valen-src")
     (repo / "stray.py").write_text("# not pinned\n", encoding="utf-8")
     with pytest.raises(SystemExit, match="stray.py"):
-        tool._verify_clean_checkout(repo)
+        reference._verify_clean_checkout(repo)
 
 
 def test_tracked_modification_is_rejected(tmp_path):
@@ -328,7 +329,7 @@ def test_tracked_modification_is_rejected(tmp_path):
     subprocess.run(["git", "-C", str(repo), "add", "model.py"], check=True)
     model.write_text("locally modified\n", encoding="utf-8")
     with pytest.raises(SystemExit, match="model.py"):
-        tool._verify_clean_checkout(repo)
+        reference._verify_clean_checkout(repo)
 
 
 # --- the full parity gate against the real pinned artifacts ---

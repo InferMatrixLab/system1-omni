@@ -29,6 +29,7 @@ import argparse
 import base64
 import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -353,6 +354,38 @@ def run_reference(model, base_processor, record, media_root, max_length, media_k
     }
 
 
+def _verify_clean_checkout(source):
+    """Reject a dirty pinned checkout before it can produce evidence.
+
+    Every evidence-producing harness in this recipe imports the pinned
+    valen package from this tree, so a local modification would make the
+    records certify agreement with code nobody pinned; a clean tracked
+    tree with no importable strays is part of what a record claims.
+    """
+
+    status = subprocess.run(
+        ["git", "-C", str(source), "status", "--porcelain", "--untracked-files=all"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    problems = []
+    for line in status.stdout.splitlines():
+        entry = line[3:]
+        if line.startswith("??"):
+            # Untracked non-code cannot change what gets imported; a stray
+            # .py on the package path can.
+            if entry.endswith(".py"):
+                problems.append(f"untracked python file {entry}")
+        else:
+            problems.append(f"locally changed {entry}")
+    if problems:
+        raise SystemExit(
+            "--valen-source must be a clean checkout of the pinned revision "
+            "(commit or restore):\n  " + "\n  ".join(problems)
+        )
+
+
 def main(argv=None):
     args = parse_args(argv)
     sys.path.insert(0, str(HERE.parents[1] / "src"))
@@ -362,6 +395,7 @@ def main(argv=None):
 
     source = Path(args.valen_source).resolve()
     _verify_source_revision(source)
+    _verify_clean_checkout(source)
     sys.path.insert(0, str(source))
 
     checkpoint = Path(args.checkpoint).resolve()

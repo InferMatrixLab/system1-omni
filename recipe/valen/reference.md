@@ -158,6 +158,8 @@ writes `valen_manifest.json`. Verify the final identity before serving:
 
 ~~~sh
 test "$(git -C "$VALEN_SRC" rev-parse HEAD)" = "$VALEN_SOURCE_REV"
+test -z "$(git -C "$VALEN_SRC" status --porcelain --untracked-files=no)"
+test -z "$(git -C "$VALEN_SRC" ls-files --others --exclude-standard | grep '\.py$')"
 test "$(sha256sum "$VALEN_CKPT/checkpoint.pt" | cut -d' ' -f1)" = "$VALEN_CHECKPOINT_SHA"
 .venv/bin/python - <<'PY'
 import json, os
