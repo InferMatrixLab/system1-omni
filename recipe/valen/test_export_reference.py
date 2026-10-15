@@ -30,6 +30,7 @@ HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(REPO_ROOT / "tests" / "valen"))
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
 import export_checkpoint as tool  # noqa: E402
 import test_export as contract  # noqa: E402
