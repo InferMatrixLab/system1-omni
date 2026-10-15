@@ -275,11 +275,11 @@ in the integration pull request):
 {
   "model": "valen-preview-0923",
   "answers": {
-    "duplicate": {"type": "noul", "noul": 0.0, "probabilities": {"true": 0.0, "false": 0.0}, "confidence": 0.0},
-    "authorized": {"type": "noul", "noul": 0.0, "probabilities": {"true": 0.0, "false": 0.0}, "confidence": 0.0}
+    "duplicate": {"type": "noul", "noul": "<p(true)>", "probabilities": {"true": "<p(true)>", "false": "<p(false)>"}, "confidence": "<confidence>"},
+    "authorized": {"type": "noul", "noul": "<p(true)>", "probabilities": {"true": "<p(true)>", "false": "<p(false)>"}, "confidence": "<confidence>"}
   },
-  "usage": {"input_tokens": 0, "output_tokens": 0},
-  "internal_usage": {"compute_tokens": 0}
+  "usage": {"input_tokens": "<count>", "output_tokens": 0},
+  "internal_usage": {"compute_tokens": "<count>"}
 }
 ~~~
 
@@ -301,13 +301,13 @@ in the integration pull request):
   "model": "valen-preview-0923",
   "answers": {"severity": {
     "type": "score",
-    "probabilities": {"0": 0.0, "1": 0.0, "2": 0.0},
-    "score": 0.0,
-    "legend": {"0": "level 0 text", "1": "level 1 text", "2": "level 2 text"},
-    "confidence": 0.0
+    "probabilities": {"0": "<p(0)>", "1": "<p(1)>", "2": "<p(2)>"},
+    "score": "<expected level>",
+    "legend": {"0": "<level 0 text>", "1": "<level 1 text>", "2": "<level 2 text>"},
+    "confidence": "<confidence>"
   }},
-  "usage": {"input_tokens": 0, "output_tokens": 0},
-  "internal_usage": {"compute_tokens": 0}
+  "usage": {"input_tokens": "<count>", "output_tokens": 0},
+  "internal_usage": {"compute_tokens": "<count>"}
 }
 ~~~
 
@@ -372,7 +372,7 @@ python recipe/valen/test_compare_reference.py
 Validated results:
 
 ~~~text
-pytest tests/valen: 47 passed in 1.21s
+pytest tests/valen: 47 passed in 1.21s (at 2192c27, before the export battery)
 compileall: passed
 cargo fmt --all --check: passed
 frontend integration: 12 passed; 0 failed
