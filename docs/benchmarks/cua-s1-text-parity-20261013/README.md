@@ -77,9 +77,57 @@ Token IDs matched on all 139 requests. The differences begin in execution:
    for tied options and removes the remaining readout differences.
 
 The fix selects the precision path using `cua-s1-text-unmerged/1`. Legacy merged
-exports remain loadable. Other model adapters retain their existing numerical
+exports remain loadable with their original FP32 readout; BF16 letter-logit
+rounding is restricted to the unmerged text profile. Other model adapters retain their existing numerical
 mode. Prefix continuation is rejected in the new mode; eager is the default.
 The probability gate of 0.02 was not relaxed.
+
+## Legacy merged upgrade regression
+
+The [2026-10-15 A800 ABI-8 evidence](https://github.com/Levius-Fubuki/system1-omni/releases/tag/cua-a800-abi8-20261015)
+compares parent `5bdd625b4c27efb02f43a1f71150e1a7d7c0f071` with candidate
+`7293c71cfb738504a30ff033ae3567f3368333c1`, using the same legacy merged artifact
+and frozen 139-request corpus for two passes each. The candidate changed four
+decisions, with maximum probability change 0.02441754937171936; correctness fell
+from 97/139 to 96/139. Each changed decision collapsed the two leading options
+into equal probabilities, then selected the earlier option in request order:
+
+| Request | Legacy choice | Rounded merged choice | Frozen task label |
+| --- | --- | --- | --- |
+| `original-routing-06-1` | `tools` | `general` | `general` |
+| `hard-opus-a-temporal_numeric-07` | `sep_28` | `sep_24` | `sep_26` |
+| `hard-sol-b-long_policy-05` | `delete_profile_omar_april_and_table` | `delete_everything` | `delete_profile_omar_april_and_table` |
+| `hard-sol-b-temporal_numeric-03` | `9_credits` | `12_credits` | `9_credits` |
+
+The cause is the text executor's unconditional BF16 conversion of its FP32 dot
+products. The model's merged loader still selects the old backbone arithmetic;
+the unmerged reference-profile operations are opt-in. The compatibility fix
+keeps the validated `TextExport` on each executor and applies BF16 readout only
+to `Unmerged`. `Merged` retains the parent's FP64 accumulation followed by FP32
+readout. Softmax, option order, tie handling and screenshot execution are unchanged.
+Restoring parent behavior reverses the candidate's one task-label improvement
+and two regressions; the fourth case is wrong under both choices. Compatibility
+is measured against the parent, independently of task labels.
+
+A CPU regression first failed with `[20.0, 20.0]` instead of
+`[20.03125, 20.046875]`, then passed with the profile-specific readout. Tests also
+cover both profiles' FP64 accumulation, nonfinite rejection, finite FP32 values
+outside BF16 range, and the four requests' option order through real response
+finishing with explicitly synthetic BF16 projection inputs. These synthetic
+vectors are not captured checkpoint activations. The maintained four-request
+device test uses the actual frozen inputs and parent responses; run it as in the
+[native recipe](../../../recipe/cua_s1/native.md).
+
+Fresh GPU execution of the compatibility fix is **pending**: the earlier server
+was shut down after preserving the published evidence. In particular, restored
+97/139 correctness and zero upgrade flips have not been measured for this new
+source. Requalify the full corpus on pinned A800: two passes each for legacy
+parent and repaired merged eager/Graph, requiring zero parent/candidate decision
+changes and probability error at most 0.02; retain exact-byte differences too.
+Repeat unmerged eager/Graph/reference checks at the original 0.02/zero-flip gates.
+The previous candidate's unmerged results were 97/139 in all three modes, maximum
+probability difference 5.960464477539063e-8 and zero flips. They remain tied to
+`7293c71c`; they are not a new-device pass for this follow-up.
 
 ## Results
 

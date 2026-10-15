@@ -1,12 +1,12 @@
 # Cua-S1 4B 0.2 native text worker
 
 The native worker ([`src/models/cua_s1/native/`](../../src/models/cua_s1/native/)) serves the `text` adapter like the reference worker in [`text.md`](text.md), with the Qwen3.5-4B forward pass on the CUDA kernels in [`src/backends/cuda/qwen3_5/`](../../src/backends/cuda/qwen3_5/) and no Python or PyTorch. It needs an NVIDIA GPU with compute capability 8.0 or newer.
-The unmerged precision profile has historical A800 80 GB (sm_80), CUDA 13.0
-evidence for a cumulative ABI-8 build and the independent ABI-6 source
-`27f77e49868d84b091aa804f02ccb4d3474a9a00`, linked in
+The unmerged precision profile has source-pinned A800 80 GB (sm_80), CUDA 13.0
+evidence at ABI-8 source `7293c71cfb738504a30ff033ae3567f3368333c1`, plus earlier
+cumulative ABI-8 and independent ABI-6 campaigns linked in
 [PR #143](https://github.com/ThinkFlowLab/system1-omni/pull/143).
-The current branch uses ABI 8 after synchronizing with its updated parent;
-neither historical campaign qualifies this integrated source.
+The current branch uses ABI 8. The later legacy-readout compatibility fix has
+CPU regression coverage; fresh GPU validation of that follow-up is pending.
 The earlier merged path was checked on an RTX 6000 Ada (sm_89) with CUDA 13.2.
 
 Run the commands from the repository root. Pass your GPU's compute capability to `build.sh` (89 for Ada, 80 for A100, 90 for H100); the worker finds `libqwen3_5_cuda.so` next to its executable, or at `CUA_S1_CUDA_LIB`:
@@ -48,10 +48,13 @@ markers or altered adapter bytes fail before CUDA loading. Prefix continuation
 is unsupported in this precision mode.
 
 Existing `cua-s1-text-merged/1` exports remain loadable with the earlier merged
-backbone execution path. PR #143 changes their letter-logit readout too: it now
-rounds to BF16 instead of retaining FP32, so close or tied choices can change
-after upgrading. No merged-path corpus A/B run qualifies that behavior change;
-the A800 parity results cover the unmerged precision profile only.
+backbone execution path and retain FP32 letter logits after FP64 accumulation.
+The BF16 readout boundary is restricted to the validated unmerged export profile,
+not a request flag or process-global setting. An earlier #143 build applied it to
+merged exports too, creating four decision changes and reducing frozen-corpus
+correctness from 97/139 to 96/139. The follow-up restores legacy readout policy;
+that restoration still needs fresh device validation. The A800 unmerged parity
+results are scoped to their recorded source and artifact.
 Merging the adapter, TF32/BF16 GDN intermediates, and different
 GEMM reduction policies can change decisions on close or tied options. Re-export
 with the command above to use the precision profile. Rebuild worker and library
@@ -74,14 +77,36 @@ CUA_S1_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
   cargo test --release -p omni-qwen3-5-native --test kernels -- --ignored
 ```
 
+The maintained legacy-upgrade regression uses the four frozen requests and
+parent-baseline responses in `tests/cua_s1/fixtures/legacy_merged_readout.json`.
+Those responses are compatibility oracles, not task ground truth. With the same
+pinned A800 merged artifact, run each Graph setting in a separate process:
+
+```sh
+for graph in 0 1; do
+  CUA_S1_GRAPH=$graph NVIDIA_TF32_OVERRIDE=0 \
+    CUA_S1_MERGED_TEST_MODEL=$PWD/weights/cua-s1-4b-0.2-text-merged \
+    CUA_S1_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
+    cargo test --release --locked -p omni-cua-s1-native --lib \
+      engine::legacy_merged_tests::legacy_merged_upgrade_preserves_four_decisions \
+      -- --ignored --exact --test-threads=1 --nocapture
+done
+```
+
+This selects one device test per process, running all four requests twice through
+prepare/execute/finish. It requires unchanged baseline decisions, probability
+error at most 0.02, identity/usage/option order and exact repeat bytes. It does
+not substitute for the full 139-request legacy upgrade and unmerged-reference
+comparisons. See the [four-case diagnosis and retest scope](../../docs/benchmarks/cua-s1-text-parity-20261013/README.md#legacy-merged-upgrade-regression).
+
 For the screenshot worker, [the vision Graph recipe](native_vision_graph.md)
 documents `CUA_S1_VISION_GRAPH`, retained four-grid FIFO scratch, memory/lifetime
 limits and the real CUDA capture-failure wrapper build and test commands.
 
 The ABI-8 parent synchronization preserves the unmerged precision profile.
-The historical independent-head GPU campaign is linked in
+The source-pinned GPU campaigns are linked in
 [PR #143](https://github.com/ThinkFlowLab/system1-omni/pull/143); the
 [numerical investigation](../../docs/benchmarks/cua-s1-text-parity-20261013/README.md)
-records the separate cumulative campaign. Rebuild consumers together and rerun
+records their scopes and the legacy-readout follow-up. Rebuild consumers together and rerun
 the pinned device checks before extending qualification to this build or
 another device.

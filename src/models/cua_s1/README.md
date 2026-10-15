@@ -10,8 +10,10 @@ The native worker follows the [architecture contracts](../../../docs/architectur
 with independent [processing](native/src/processing.rs) and
 [executor](native/src/executor.rs) modules. Preparation returns token IDs and an
 option count per question, plus a response context for identity/order and usage.
-The executor projects the letter rows, rounds to the BF16 `lm_head` output dtype,
-then returns FP32 letter logits; response finishing owns per-question
+The executor projects the letter rows with FP64 accumulation and returns FP32
+letter logits. Only the unmerged text profile first rounds to the BF16 `lm_head`
+output dtype; legacy merged text and screenshot readouts retain FP32. The text
+export policy is validated once and owned by each executor. Response finishing owns per-question
 softmax and the choice/confidence interpretation. The engine owns a
 [shared serial scheduler](../../runtime/README.md) that admits each question's
 forward before blocking dispatch. Execution remains one prompt per question
@@ -133,12 +135,16 @@ This profile targets the pinned no-FLA reference described above. Installing
 FLA changes Transformers' GDN implementation; comparisons must record which
 implementation actually ran. A different Torch version or GPU may choose other
 reduction orders, so qualification remains tied to the recorded environment.
-The old merged export remains an approximate execution mode. PR #143 also
-changes that mode's letter-logit readout from FP32 to BF16 rounding, which can
-change close or tied choices after upgrading. The A800 unmerged-profile parity
-results do not qualify this merged-path behavior change; no merged-path corpus
-A/B run was performed. The precision
-profile does not change the screenshot adapter's execution mode.
+The old merged export remains an approximate execution mode. Its legacy
+FP64-accumulated, FP32 letter-logit readout is preserved; BF16 rounding is selected
+only by `cua-s1-text-unmerged/1`. Applying that rounding to merged exports at
+`7293c71c` created four ordered-tie decision changes in a same-artifact A800
+upgrade comparison. The compatibility fix is covered by CPU red/green projection
+and response tests; a frozen four-request GPU regression is also provided.
+See the [numerical report](../../../docs/benchmarks/cua-s1-text-parity-20261013/README.md#legacy-merged-upgrade-regression)
+for the four cases, source pins and device-validation limits. Restoring merged
+compatibility does not make merged weights equivalent to the unmerged reference.
+The precision profile does not change the screenshot adapter's execution mode.
 
 The historical cumulative A800 investigation and frozen-corpus results are recorded in
 [the numerical report](../../../docs/benchmarks/cua-s1-text-parity-20261013/README.md).

@@ -40,3 +40,7 @@ impl Engine {
 #[cfg(test)]
 #[path = "../../../../../tests/cua_s1/text_export.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../../../../../tests/cua_s1/legacy_merged_gpu.rs"]
+mod legacy_merged_tests;
