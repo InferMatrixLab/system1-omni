@@ -27,7 +27,7 @@ For the local CUDA Graph experiment, also set `CUA_S1_GRAPH=1`. The first use of
 each exact ordered prompt-length vector warms the GEMM plans and captures the forward pass;
 later requests replay it with freshly uploaded token ids. Each language mode keeps a separate 64-entry FIFO cache. Growing the scratch allocation clears the captures before freeing
 their buffers. Capture adds first-use latency; leave the variable unset to use
-the eager control. Rebuild both the worker and CUDA library together (ABI 6).
+the eager control. Rebuild both the worker and CUDA library together (ABI 8).
 If capture fails, the worker returns the completed eager result and disables
 Graph capture/replay for its remaining lifetime, logging the failure to stderr.
 
@@ -48,7 +48,7 @@ the A800 parity results cover the unmerged precision profile only.
 Merging the adapter, TF32/BF16 GDN intermediates, and different
 GEMM reduction policies can change decisions on close or tied options. Re-export
 with the command above to use the precision profile. Rebuild worker and library
-together: this branch retains #118's ABI 6, but the precision profile requires the new optional
+together: this branch now uses ABI 8, and the precision profile also requires the new optional
 FP32 GDN symbols. No cuDNN or Python is needed at serving time.
 
 The validation scope and tolerances are in
@@ -68,5 +68,11 @@ CUA_S1_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
 ```
 
 For the screenshot worker, [the vision Graph recipe](native_vision_graph.md)
-documents `CUA_S1_VISION_GRAPH`, retained single-grid scratch, memory/lifetime
+documents `CUA_S1_VISION_GRAPH`, retained four-grid FIFO scratch, memory/lifetime
 limits and the real CUDA capture-failure wrapper build and test commands.
+
+The ABI-8 parent synchronization preserves the unmerged precision profile, but
+the recorded independent-head GPU campaign below belongs to its pinned earlier
+source. It is historical evidence, not a fresh GPU qualification of this
+integrated head. Rebuild consumers together and rerun the pinned device checks
+before extending qualification to this build or another device.
