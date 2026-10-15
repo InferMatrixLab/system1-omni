@@ -1,12 +1,11 @@
-"""Parity-gate tests for recipe/valen/verify_export_parity.py (spec 02, E2).
+"""Parity-gate tests for recipe/valen/verify_export_parity.py.
 
 CPU-only checks of the export-parity tool's observable contract: the
-merge-drift measurement (PEFT unmerged vs merged BF16 semantics, the
-research-001 method) on hand-computed tensors, the drift aggregation, the
-original-vs-exported case comparison verdicts, and the manifest parity-slot
-filling. The full parity gate against the real pinned artifacts is env-gated
-on VALEN_CKPT / VALEN_BASE / VALEN_SRC plus CUDA, following the test_export.py
-precedent.
+merge-drift measurement (PEFT unmerged vs merged BF16 semantics) on
+hand-computed tensors, the drift aggregation, the original-vs-exported
+case comparison verdicts, and the manifest parity-slot filling. The full
+parity gate against the real pinned artifacts is env-gated on
+VALEN_CKPT / VALEN_BASE / VALEN_SRC plus CUDA.
 
 PYTHONPATH=src python -m pytest tests/valen -q
 """
@@ -27,7 +26,7 @@ sys.path.insert(0, str(RECIPE_VALEN))
 import verify_export_parity as tool  # noqa: E402
 
 
-# --- the BF16 ulp ruler (research 001 reports spacing at max |y|) ---
+# --- the BF16 ulp ruler ---
 
 def test_bf16_ulp_at_known_magnitudes():
     # bf16 keeps 8 significant bits, so values in [2^e, 2^(e+1)) sit on a
@@ -76,7 +75,7 @@ def test_module_output_drift_hand_computed_one_ulp():
     lora_a = torch.tensor([[0.0019]], dtype=torch.float32)
     lora_b = torch.tensor([[1.0]], dtype=torch.float32)
     merged = tool.merge_lora_weight(base, lora_a, lora_b, 2.0)
-    assert merged.item() == 1.0  # the weight rounds back to the base
+    assert merged.item() == 1.0
 
     probe = torch.tensor([[3.0]], dtype=torch.bfloat16)
     metrics = tool.module_output_drift(base, lora_a, lora_b, merged, 2.0, probe)
@@ -129,10 +128,9 @@ def test_module_output_drift_matches_peft_layer_forward():
         peft_unmerged = model(probe).detach()
 
     metrics = tool.module_output_drift(base_weight, lora_a, lora_b, merged, scaling, probe)
-    assert metrics["max_abs_diff"] > 0.0  # the merge really does drift
+    assert metrics["max_abs_diff"] > 0.0
     assert metrics["bitexact_fraction"] < 1.0
-    # Recomputing the unmerged arm by hand must agree with peft bit-exactly:
-    # the drift tool's semantics are the reference's, not a re-invention.
+    # The hand-computed unmerged arm must match peft bit-exactly.
     y_base = torch.matmul(probe, base_weight.t())
     delta = scaling * ((probe.float() @ lora_a.t()) @ lora_b.t())
     y_unmerged = (y_base.float() + delta).to(torch.bfloat16)
@@ -212,7 +210,7 @@ def test_compare_case_delta_beyond_tolerance_fails():
     original = case_side([0.5159631, 0.4840369])
     drifted = case_side([0.5159631 + 2e-6, 0.4840369 - 2e-6])
     verdict = tool.compare_case("text", original, drifted)
-    assert verdict["exact_answer_agreement"] is True  # argmax still agrees
+    assert verdict["exact_answer_agreement"] is True
     assert verdict["probability_tolerance_pass"] is False
     assert verdict["passed"] is False
     assert any("tolerance" in problem for problem in verdict["problems"])
@@ -396,7 +394,7 @@ def pin_fixture(tmp_path):
 
 def test_verify_sources_match_manifest_accepts_matching_pins(tmp_path):
     args, manifest = pin_fixture(tmp_path)
-    tool.verify_sources_match_manifest(args, manifest)  # no exception
+    tool.verify_sources_match_manifest(args, manifest)
 
 
 def test_verify_sources_rejects_checkpoint_digest_drift(tmp_path):
@@ -437,7 +435,7 @@ def test_verify_sources_rejects_swapped_base_shard_bytes(tmp_path):
 
     args, manifest = pin_fixture(tmp_path)
     shard = tmp_path / "base" / "model.safetensors-00001-of-00001.safetensors"
-    shard.write_bytes(b"different-shard-bytes")  # digest record stays honest
+    shard.write_bytes(b"different-shard-bytes")
     with pytest.raises(ValueError, match="base weights sha256"):
         tool.verify_sources_match_manifest(args, manifest)
 

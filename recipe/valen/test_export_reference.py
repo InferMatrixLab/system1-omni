@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression wiring for the Valen checkpoint export (spec 02, E3).
+"""Regression wiring for the Valen checkpoint export.
 
 Chains the export contract tests in ``tests/valen/test_export.py`` — the
 CPU-only battery plus the env-gated real-artifact determinism gate — and
@@ -105,7 +105,7 @@ def validate_artifact_set(results, export_dir):
         + ", ".join(f"{counts[c]} {c}" for c in sorted(counts))
         + f", {len(manifest['downcasts'])} fp32->bf16 downcasts"
         + f", merge {manifest['merge']['decision']}"
-        + f", parity slot {'filled' if parity is not None else 'not yet recorded (E2)'}"
+        + f", parity slot {'filled' if parity is not None else 'not recorded'}"
     )
     record(results, f"validate {export_dir}", True, summary)
 
