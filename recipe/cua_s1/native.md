@@ -43,7 +43,9 @@ Each question runs one forward pass over its prompt. The `cua-s1-text-unmerged/1
 marker selects framework-compatible BF16 normalization and cuBLASLt GEMM,
 FP32 LoRA branches, and FP32 chunked Gated DeltaNet. The GDN cumulative decay
 uses the pinned Torch scan order; state is reset for every prompt. The letter
-projection rounds its result to BF16 before FP32 softmax, matching `lm_head`.
+projection rounds its result to the BF16 `lm_head` output dtype before the existing
+per-question softmax. Native finishing normalizes in FP64 and returns FP32
+probabilities.
 The marker records scale 2 and the SHA-256 of the unchanged adapter; incompatible
 markers or altered adapter bytes fail before CUDA loading. Prefix continuation
 is unsupported in this precision mode.

@@ -13,8 +13,9 @@ option count per question, plus a response context for identity/order and usage.
 The executor projects the letter rows with FP64 accumulation and returns FP32
 letter logits. Only the unmerged text profile first rounds to the BF16 `lm_head`
 output dtype; legacy merged text and screenshot readouts retain FP32. The text
-export policy is validated once and owned by each executor. Response finishing owns per-question
-softmax and the choice/confidence interpretation. The engine owns a
+export policy is validated once and owned by each executor. Response finishing
+owns per-question softmax (FP64 normalization returning FP32 probabilities) and
+the choice/confidence interpretation. The engine owns a
 [shared serial scheduler](../../runtime/README.md) that admits each question's
 forward before blocking dispatch. Execution remains one prompt per question
 with a model-state mutex and CPU answer-letter projection after CUDA prefill,
