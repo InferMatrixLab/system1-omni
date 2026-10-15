@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Prove the exported Valen artifact set answers like the original checkpoint.
 
-Two model stacks are loaded serially —
-only one lives on the GPU at a time, each in its own subprocess so the
-~6.6 GiB of VRAM is fully released between loads:
+Two model stacks are loaded serially — only one lives on the GPU at a time,
+each in its own subprocess so the ~6.6 GiB of VRAM is fully released between
+loads:
 
 - original: the pinned reference stack exactly as the worker builds it
   (``ValenExecutor`` -> ``valen.modeling.model.build_model`` +
@@ -12,10 +12,14 @@ only one lives on the GPU at a time, each in its own subprocess so the
   from ``checkpoint.pt``);
 - exported: the consumption path the export manifest documents —
   ``Qwen3_5ForConditionalGeneration.from_pretrained(weights/valen-export,
-  dtype=bf16, eager).model`` for the merged backbone plus the decision head
-  rebuilt from ``head.safetensors`` as the pinned ``DecisionHead`` (2048 ->
-  256, FP32, no bias), loaded through the pinned ``Valen`` class so the
-  forward path is the reference's, not a second invention.
+  dtype=bf16, eager).model`` for the backbone, the language LoRA re-applied
+  through the same peft build the pinned reference uses (every language
+  Linear wrapped at the manifest-declared rank and alpha, the 372 FP32
+  tensors of ``lora.safetensors`` loaded by key, adapters kept FP32), and
+  the decision head rebuilt from ``head.safetensors`` as the pinned
+  ``DecisionHead`` (2048 -> 256, FP32, no bias), all through the pinned
+  ``Valen`` class so the forward path is the reference's, not a second
+  invention.
 
 Both stacks answer the recipe's existing text and image ``choice`` fixtures
 (``compare_reference.py``'s text example and ``example-request.json``,
@@ -23,18 +27,10 @@ compiled by the pinned ``Compiler`` through the worker's own record rules).
 The gate requires exact answer agreement and a probability delta <= 1e-6
 (the tolerance the reference serving already declared).
 
-The script also measures the merge drift on the real tensors: for each of
-the 186 merged keys it compares the unmerged PEFT application (base W plus
-the FP32 ``2*(B@A)`` delta on the activations, one final BF16 rounding —
-the reference's semantics) against the exported merged BF16 weight's GEMM,
-with a fixed probe (256 BF16 standard-normal rows, seed 0, single-threaded
-CPU), and aggregates max/mean.
-
 Finally it fills the manifest's ``parity`` slot in
 ``weights/valen-export/valen_export.json`` with the verdict (status, device,
-cases, agreement, max probability delta, merge drift aggregate, evidence
-pointer) — a reproducible command output, never a hand edit — and
-re-validates the artifact set.
+cases, agreement, max probability delta, evidence pointer) — a reproducible
+command output, never a hand edit — and re-validates the artifact set.
 
 Usage (from the repository root, on the GPU host):
 
@@ -42,15 +38,13 @@ Usage (from the repository root, on the GPU host):
       --valen-source weights/Valen --checkpoint weights/Valen-Preview-0923 \
       --base weights/Qwen3.5-2B --export weights/valen-export --device cuda
 
-Exit status 0 means the gate passed; 1 means it failed (the documented
-fallback — export the FP32 LoRA separately and serve unmerged — applies).
+Exit status 0 means the gate passed; 1 means it failed.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import math
 import subprocess
 import sys
 from pathlib import Path
@@ -63,98 +57,8 @@ import compare_reference as reference  # noqa: E402  (the recipe's fixture helpe
 import export_checkpoint as exporter  # noqa: E402
 
 PROBABILITY_TOLERANCE = 1e-6
-DRIFT_ROWS = 256
-DRIFT_SEED = 0
 STAGE_SENTINEL = "VERIFY-PARITY-STAGE-RESULT "
 PARITY_CASES = ("text", "image")
-
-
-def merge_lora_weight(base_weight, lora_a, lora_b, scaling):
-    """The export tool's merge math (bit-equal to peft 0.18.1's ``Linear.merge``)."""
-
-    return exporter.merge_lora_weight(base_weight, lora_a, lora_b, scaling)
-
-
-# --- the drift ruler: bf16 spacing at a magnitude ---
-
-
-def bf16_ulp_at(magnitude):
-    """The BF16 grid spacing covering ``magnitude``.
-
-    bf16 keeps 8 significant bits, so values in ``[m * 2^e)`` with
-    ``m in [0.5, 1)`` (``math.frexp``) sit on a ``2^(e-8)`` grid: spacing
-    2^-7 around 1.0, 2^-6 on [2, 4), 2^-5 on [4, 8).
-    """
-
-    if magnitude <= 0.0:
-        return 0.0
-    _, exponent = math.frexp(magnitude)
-    return 2.0 ** (exponent - 8)
-
-
-def module_output_drift(base_weight, lora_a, lora_b, merged_weight, scaling, probe):
-    """Output drift of one adapted module: unmerged (PEFT, the reference)
-    vs merged (the exported BF16 weight).
-
-    Unmerged arm — peft 0.18.1 ``Linear.forward`` semantics: a BF16 base
-    GEMM, the ``scaling * (B(A(x)))`` delta computed and added in FP32, one
-    final rounding back to BF16. Merged arm: the BF16 GEMM against
-    ``bf16(W + scaling * B @ A)``. ``probe`` is a BF16 activation batch of
-    shape ``(rows, in_features)``.
-    """
-
-    import torch
-
-    if base_weight.dtype != torch.bfloat16 or merged_weight.dtype != torch.bfloat16:
-        raise ValueError("base and merged weights must be bf16")
-    y_base = torch.matmul(probe, base_weight.t())
-    delta = scaling * ((probe.float() @ lora_a.t()) @ lora_b.t())
-    y_unmerged = (y_base.float() + delta).to(torch.bfloat16)
-    y_merged = torch.matmul(probe, merged_weight.t())
-
-    diff = (y_merged.float() - y_unmerged.float()).abs()
-    max_abs = float(diff.max())
-    max_output = float(y_unmerged.float().abs().max())
-    ulp = bf16_ulp_at(max_output)
-    return {
-        "max_abs_diff": max_abs,
-        "max_output_abs": max_output,
-        "max_rel_diff": (max_abs / max_output) if max_output > 0.0 else 0.0,
-        "bf16_ulp": ulp,
-        "ulp_ratio": (max_abs / ulp) if ulp > 0.0 else 0.0,
-        "bitexact_fraction": float((y_merged == y_unmerged).float().mean()),
-    }
-
-
-def aggregate_drift(records):
-    """Max/mean drift across the adapted modules, worst offenders named.
-
-    ``records`` is a list of ``(tensor name, metrics)`` pairs from
-    :func:`module_output_drift`; ties break deterministically by name.
-    """
-
-    if not records:
-        raise ValueError("no drift records to aggregate")
-    ordered = sorted(records, key=lambda record: record[0])
-    count = len(ordered)
-    worst_abs = ordered[0]
-    worst_rel = ordered[0]
-    for record in ordered[1:]:
-        if record[1]["max_abs_diff"] > worst_abs[1]["max_abs_diff"]:
-            worst_abs = record
-        if record[1]["max_rel_diff"] > worst_rel[1]["max_rel_diff"]:
-            worst_rel = record
-    return {
-        "modules": count,
-        "max_abs_diff": max(metrics["max_abs_diff"] for _, metrics in ordered),
-        "mean_abs_diff": sum(m["max_abs_diff"] for _, m in ordered) / count,
-        "max_rel_diff": max(m["max_rel_diff"] for _, m in ordered),
-        "mean_rel_diff": sum(m["max_rel_diff"] for _, m in ordered) / count,
-        "max_ulp_ratio": max(m["ulp_ratio"] for _, m in ordered),
-        "mean_bitexact_fraction": sum(m["bitexact_fraction"] for _, m in ordered) / count,
-        "worst_abs_module": worst_abs[0],
-        "worst_rel_module": worst_rel[0],
-    }
 
 
 # --- the gate's verdict: one case answered by both stacks ---
@@ -242,7 +146,6 @@ def build_parity_record(
     exact_answer_agreement,
     max_probability_delta,
     tolerance,
-    drift,
     evidence,
 ):
     """Assemble the record written into the manifest's ``parity`` slot."""
@@ -257,7 +160,6 @@ def build_parity_record(
         "cases": cases,
         "exact_answer_agreement": bool(exact_answer_agreement),
         "max_probability_delta": max_probability_delta,
-        "merge_drift": drift,
         "evidence": evidence,
     }
 
@@ -297,12 +199,15 @@ def load_original_stack(checkpoint, base, device):
     return executor
 
 
-def load_exported_stack(export_dir, projection_dim, device):
+def load_exported_stack(export_dir, manifest, device):
     """The exported artifact set loaded through its documented consumption
-    path: ``from_pretrained`` backbone + the head rebuilt from
-    ``head.safetensors`` into the pinned ``Valen`` class."""
+    path: the ``from_pretrained`` backbone, the language LoRA re-applied
+    through the same peft build the pinned reference uses, and the head
+    rebuilt from ``head.safetensors`` into the pinned ``Valen`` class."""
 
     import torch
+    import torch.nn as nn
+    from peft import LoraConfig, get_peft_model
     from safetensors import safe_open
     from transformers import Qwen3_5ForConditionalGeneration
 
@@ -324,7 +229,41 @@ def load_exported_stack(export_dir, projection_dim, device):
     # Only container.model is served; drop the vocabulary/generation wrapper.
     del container
     backbone.requires_grad_(False)
-    model = Valen(backbone, projection_dim)
+
+    # The pinned build path's own adaptation: every language Linear wrapped
+    # at the manifest-declared rank and alpha, adapters kept fp32 at runtime.
+    lora = manifest["lora"]
+    targets = [
+        name
+        for name, module in backbone.language_model.named_modules()
+        if isinstance(module, nn.Linear)
+    ]
+    if len(targets) != lora["targets"]:
+        raise ValueError(
+            f"backbone enumerates {len(targets)} language linears, the manifest "
+            f"declares {lora['targets']}"
+        )
+    backbone.language_model = get_peft_model(
+        backbone.language_model,
+        LoraConfig(
+            r=lora["rank"],
+            lora_alpha=lora["alpha"],
+            lora_dropout=0.0,
+            target_modules=targets,
+            bias="none",
+        ),
+    )
+    model = Valen(backbone, manifest["head"]["projection_dim"])
+    with safe_open(Path(export_dir) / lora["file"], framework="pt") as handle:
+        adapters = {key: handle.get_tensor(key) for key in sorted(handle.keys())}
+    expected = {name for name, _ in model.named_parameters() if "lora_" in name}
+    if set(adapters) != expected:
+        raise ValueError(
+            "lora.safetensors keys do not match the wrapped model's adapters: "
+            f"file-only {sorted(set(adapters) - expected)[:2]}, "
+            f"model-only {sorted(expected - set(adapters))[:2]}"
+        )
+    model.load_state_dict(adapters, strict=False)
     with safe_open(Path(export_dir) / exporter.HEAD_FILE, framework="pt") as handle:
         head_state = {
             key[len(exporter.HEAD_PREFIX):]: handle.get_tensor(key)
@@ -433,9 +372,7 @@ def run_stage(args):
         manifest = json.loads(
             (Path(args.export) / exporter.MANIFEST_FILE).read_text(encoding="utf-8")
         )
-        model = load_exported_stack(
-            Path(args.export), manifest["head"]["projection_dim"], args.device
-        )
+        model = load_exported_stack(Path(args.export), manifest, args.device)
 
     device = str(next(model.parameters()).device)
     hardware = None
@@ -498,63 +435,6 @@ def run_stage_subprocess(args, stage):
     return payload
 
 
-# --- the merge-drift measurement on the real tensors ---
-
-
-def measure_merge_drift(checkpoint_dir, base_dir, export_dir, *, rows=DRIFT_ROWS, seed=DRIFT_SEED):
-    """Per-module drift of the 186 merged keys on the real tensors.
-
-    The unmerged arm uses the base file's BF16 weight plus the checkpoint's
-    FP32 LoRA (reference semantics); the merged arm uses the tensor actually
-    sitting in the exported ``model.safetensors``, cross-checked bit-exactly
-    against the export tool's merge math so the measurement can never run
-    against a silently different weight. Probe protocol: ``rows`` BF16
-    standard-normal activations per module, one generator seeded once,
-    modules in sorted name order, CPU single thread.
-    """
-
-    import torch
-    from safetensors import safe_open
-
-    torch.set_grad_enabled(False)
-    torch.set_num_threads(1)
-
-    payload = torch.load(
-        Path(checkpoint_dir) / exporter.CHECKPOINT_FILE,
-        map_location="cpu",
-        weights_only=False,
-        mmap=True,
-    )
-    config = payload["config"]
-    scaling = exporter.lora_scaling(config["lora_rank"], config["lora_alpha"])
-    classification = exporter.classify_checkpoint_weights(payload["weights"])
-    exporter.validate_inventory(classification, exporter.PINNED_INVENTORY)
-
-    base_file = exporter.base_weights_file(base_dir)
-    records = []
-    torch.manual_seed(seed)
-    with (
-        safe_open(base_file, framework="pt", device="cpu") as base,
-        safe_open(Path(export_dir) / exporter.BACKBONE_FILE, framework="pt", device="cpu") as exported,
-    ):
-        for name, (a_key, b_key) in sorted(classification.lora.items()):
-            base_weight = base.get_tensor(name)
-            lora_a = payload["weights"][a_key]
-            lora_b = payload["weights"][b_key]
-            merged = exported.get_tensor(name)
-            expected = merge_lora_weight(base_weight, lora_a, lora_b, scaling)
-            if not torch.equal(merged, expected):
-                raise ValueError(
-                    f"exported tensor {name!r} is not bf16(W + {scaling:g}*(B@A)) of "
-                    "the given base and checkpoint"
-                )
-            probe = torch.randn(rows, base_weight.shape[1]).to(torch.bfloat16)
-            records.append(
-                (name, module_output_drift(base_weight, lora_a, lora_b, merged, scaling, probe))
-            )
-    return records, scaling
-
-
 # --- reporting ---
 
 
@@ -576,20 +456,6 @@ def format_case_report(verdict, tolerance):
     return lines
 
 
-def format_drift_report(aggregate, *, rows, seed, scaling):
-    lines = [
-        f"merge drift: {aggregate['modules']} adapted modules "
-        f"(probe {rows}x bf16 rows, seed {seed}, scaling {scaling:g}, cpu single thread)",
-        f"  max output delta: {aggregate['max_abs_diff']:.6e} "
-        f"(mean {aggregate['mean_abs_diff']:.6e}), worst {aggregate['worst_abs_module']}",
-        f"  max relative output drift: {aggregate['max_rel_diff']:.6e} "
-        f"(mean {aggregate['mean_rel_diff']:.6e}), worst {aggregate['worst_rel_module']}",
-        f"  max ulp ratio: {aggregate['max_ulp_ratio']:.6g}, "
-        f"mean bit-exact fraction: {aggregate['mean_bitexact_fraction']:.6f}",
-    ]
-    return lines
-
-
 def evidence_pointer():
     return (
         "recipe/valen/reference.md (export parity block); reproduce with "
@@ -606,8 +472,6 @@ def parse_args(argv=None):
     parser.add_argument("--export", required=True, type=Path, help="exported artifact directory")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--tolerance", type=float, default=PROBABILITY_TOLERANCE)
-    parser.add_argument("--rows", type=int, default=DRIFT_ROWS, help="drift probe rows per module")
-    parser.add_argument("--seed", type=int, default=DRIFT_SEED, help="drift probe seed")
     parser.add_argument("--stage", choices=("original", "export"), default=None, help=argparse.SUPPRESS)
     parser.add_argument("--force", action="store_true", help="replace an existing parity record")
     return parser.parse_args(argv)
@@ -616,7 +480,7 @@ def parse_args(argv=None):
 def verify_sources_match_manifest(args, manifest):
     """The parity evidence only holds for the artifacts the export recorded.
 
-    Verifies the checkpoint sha, the base revision and — because 392 tensors
+    Verifies the checkpoint sha, the base revision and — because 578 tensors
     pass through the export byte by byte — the base weights shard digests
     themselves against the manifest's recorded ``sources.base.weights_sha256``.
     """
@@ -663,11 +527,6 @@ def main(argv=None):
         for name in PARITY_CASES
     ]
 
-    records, scaling = measure_merge_drift(
-        args.checkpoint, args.base, export_dir, rows=args.rows, seed=args.seed
-    )
-    aggregate = aggregate_drift(records)
-
     status = "passed" if all(verdict["passed"] for verdict in verdicts) else "failed"
     record = build_parity_record(
         status=status,
@@ -689,17 +548,6 @@ def main(argv=None):
         exact_answer_agreement=all(v["exact_answer_agreement"] for v in verdicts),
         max_probability_delta=max(v["max_probability_delta"] for v in verdicts),
         tolerance=args.tolerance,
-        drift={
-            "method": (
-                "per adapted module on real tensors: unmerged = bf16 GEMM(W) plus "
-                "fp32 2*(B@A) delta on activations with one final bf16 rounding "
-                "(peft 0.18.1 Linear.forward); merged = bf16 GEMM(bf16(W + 2*(B@A))) "
-                "from the export; probe {rows}x bf16 standard-normal rows, seed {seed}, "
-                "cpu single thread"
-            ).format(rows=args.rows, seed=args.seed),
-            "modules": aggregate["modules"],
-            "aggregate": aggregate,
-        },
         evidence=evidence_pointer(),
     )
     fill_parity_slot(export_dir / exporter.MANIFEST_FILE, record, force=args.force)
@@ -708,12 +556,8 @@ def main(argv=None):
     for verdict in verdicts:
         print("\n".join(format_case_report(verdict, args.tolerance)))
         print()
-    print("\n".join(format_drift_report(aggregate, rows=args.rows, seed=args.seed, scaling=scaling)))
-    print()
     print(f"device: {record['device']} ({record['hardware']})")
     print(f"parity slot filled: {export_dir / exporter.MANIFEST_FILE}")
-    if status == "failed":
-        print(f"merge fallback: {manifest['merge']['fallback']}")
     print("verify_export_parity: ok" if status == "passed" else "verify_export_parity: FAILED")
     return 0 if status == "passed" else 1
 

@@ -100,11 +100,13 @@ def validate_artifact_set(results, export_dir):
     for entry in manifest["tensors"]:
         counts[entry["component"]] = counts.get(entry["component"], 0) + 1
     parity = manifest["parity"]
+    lora = manifest["lora"]
     summary = (
         f"{manifest['format']}, {len(manifest['tensors'])} tensors "
         + ", ".join(f"{counts[c]} {c}" for c in sorted(counts))
         + f", {len(manifest['downcasts'])} fp32->bf16 downcasts"
-        + f", merge {manifest['merge']['decision']}"
+        + f", lora unmerged r={lora['rank']} alpha={lora['alpha']}"
+        + f" ({lora['keys']} fp32 keys / {lora['targets']} targets)"
         + f", parity slot {'filled' if parity is not None else 'not recorded'}"
     )
     record(results, f"validate {export_dir}", True, summary)
