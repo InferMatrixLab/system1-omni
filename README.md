@@ -162,7 +162,9 @@ runs as a Python worker or as a native worker on CUDA. Open-Jev-27B-v1.1
 and Open-Jev-9B run on the same native Rust/CUDA worker. Cua-S1 also has a
 Python screenshot worker, Valen-Preview-0923 has a Python reference worker for
 text and one-image state, CLM has a stub-encoder contract recipe, and OmniJev-4B
-v1.1 has its checkpoint export and CPU contract, with no worker yet:
+v1.1 has its checkpoint export and CPU contract, with no worker yet. D3
+(Decision 3.0) has a Python reference worker that runs the checkpoint's own
+pinned runtime for text state:
 
 | Model | Status |
 | --- | --- |
@@ -176,6 +178,7 @@ v1.1 has its checkpoint export and CPU contract, with no worker yet:
 | CLM-v0.1-8B | [External worker with a CPU stub encoder](recipe/clm/README.md); contract checks only, real Qwen3-8B decisions unverified by this recipe |
 | LFM2.5-350M | [Transformers worker](recipe/lfm2/README.md); text state and independent choice questions |
 | OmniJev-4B v1.1 | [Checkpoint export and CPU contract](recipe/omnijev/README.md) only; the native worker is in progress ([#114](https://github.com/ThinkFlowLab/system1-omni/issues/114)) |
+| D3 (Decision 3.0) | [Python reference worker](recipe/d3/reference.md) on the checkpoint's pinned runtime; `choice`/`noul`/`score` text state, media refused until stage 2; author-run on A100 (evidence in the integration PR) |
 
 [Supported models and hardware](docs/supported-models.md) lists the devices
 and where each worker has been run.

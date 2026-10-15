@@ -65,6 +65,9 @@ pub(super) fn fixture_model_at(original_rope: bool, path: &Path) -> Model {
         weights,
         plan,
         cache: VecDeque::new(),
+        cached_bytes: 0,
+        cache_config: CacheConfig::default(),
+        eager: None,
         graphs: false,
     }
 }
