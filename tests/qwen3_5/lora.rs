@@ -282,6 +282,7 @@ fn cpu_cuda_boundary_checks_fp32_sums_fused_offsets_sequences_and_retirement() {
     let mut code = include_str!("lora_fake.c").to_owned();
     let implemented = [
         "cs1_abi_version",
+        "cs1_get_device",
         "cs1_error_string",
         "cs1_malloc",
         "cs1_free",

@@ -11,6 +11,7 @@ int lora_fake_height(int i) { return heights[i]; }
 void lora_fake_reset(void) { gemms=0; copies=0; base_calls=0; }
 uint32_t cs1_abi_version(void) { return LORA_FAKE_ABI; }
 const char* cs1_error_string(int code) { (void)code; return "unexpected fake CUDA call"; }
+int cs1_get_device(int* device) { if (!device) return 1; *device=0; return 0; }
 int cs1_malloc(void** p, size_t n) { *p=malloc(n); if (!*p) return 1; ++live; return 0; }
 int cs1_free(void* p) { --live; free(p); return 0; }
 int cs1_stream_create(void** stream) { *stream=(void*)1; return 0; }
