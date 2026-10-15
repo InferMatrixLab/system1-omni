@@ -1,11 +1,9 @@
 """Parity-gate tests for recipe/valen/verify_export_parity.py.
 
 CPU-only checks of the export-parity tool's observable contract: the
-merge-drift measurement (PEFT unmerged vs merged BF16 semantics) on
-hand-computed tensors, the drift aggregation, the original-vs-exported
-case comparison verdicts, and the manifest parity-slot filling. The full
-parity gate against the real pinned artifacts is env-gated on
-VALEN_CKPT / VALEN_BASE / VALEN_SRC plus CUDA.
+original-vs-exported case comparison verdicts and the manifest parity-slot
+filling. The full parity gate against the real pinned artifacts is
+env-gated on VALEN_CKPT / VALEN_BASE / VALEN_SRC plus CUDA.
 
 PYTHONPATH=src python -m pytest tests/valen -q
 """
@@ -24,156 +22,6 @@ RECIPE_VALEN = HERE.parents[1] / "recipe" / "valen"
 sys.path.insert(0, str(RECIPE_VALEN))
 
 import verify_export_parity as tool  # noqa: E402
-
-
-# --- the BF16 ulp ruler ---
-
-def test_bf16_ulp_at_known_magnitudes():
-    # bf16 keeps 8 significant bits, so values in [2^e, 2^(e+1)) sit on a
-    # 2^(e-7) grid: spacing 2^-7 at 1.0, 2^-6 on [2, 4), 2^-5 on [4, 8).
-    assert tool.bf16_ulp_at(1.0) == 2.0**-7
-    assert tool.bf16_ulp_at(1.0078125) == 2.0**-7
-    assert tool.bf16_ulp_at(3.015625) == 2.0**-6
-    assert tool.bf16_ulp_at(6.0) == 2.0**-5
-    assert tool.bf16_ulp_at(0.25) == 2.0**-9
-    assert tool.bf16_ulp_at(16.0) == 2.0**-3
-
-
-# --- per-module output drift: unmerged (PEFT) vs merged BF16 GEMM ---
-
-def test_module_output_drift_zero_b_adapter_is_bit_exact():
-    """An untrained LoRA (zero B) leaves both outputs bit-identical."""
-    import torch
-
-    torch.manual_seed(0)
-    base = torch.randn(6, 8).to(torch.bfloat16)
-    merged = tool.merge_lora_weight(base, torch.randn(4, 8), torch.zeros(6, 4), 2.0)
-    probe = torch.randn(16, 8).to(torch.bfloat16)
-    metrics = tool.module_output_drift(
-        base, torch.randn(4, 8), torch.zeros(6, 4), merged, 2.0, probe
-    )
-    assert metrics["max_abs_diff"] == 0.0
-    assert metrics["bitexact_fraction"] == 1.0
-    assert metrics["max_rel_diff"] == 0.0
-
-
-def test_module_output_drift_hand_computed_one_ulp():
-    """The rounding-order split, hand-computed on a 1x1 module.
-
-    base W = 1.0, probe x = 3.0 (both bf16), delta weight 2*(B@A) = 0.0038:
-
-    - merged: W' = bf16(1.0038) = 1.0 (below the 1.00390625 midpoint), so
-      y_merged = 3.0 exactly;
-    - unmerged (PEFT): y = bf16(3.0 + 3*0.0038) = bf16(3.0114) = 3.015625
-      (above the 3.0078125 midpoint of the [2, 4) grid).
-
-    So the outputs differ by exactly one bf16 ulp of the output.
-    """
-    import torch
-
-    base = torch.tensor([[1.0]], dtype=torch.bfloat16)
-    lora_a = torch.tensor([[0.0019]], dtype=torch.float32)
-    lora_b = torch.tensor([[1.0]], dtype=torch.float32)
-    merged = tool.merge_lora_weight(base, lora_a, lora_b, 2.0)
-    assert merged.item() == 1.0
-
-    probe = torch.tensor([[3.0]], dtype=torch.bfloat16)
-    metrics = tool.module_output_drift(base, lora_a, lora_b, merged, 2.0, probe)
-    assert metrics["max_abs_diff"] == pytest.approx(0.015625)
-    assert metrics["max_output_abs"] == pytest.approx(3.015625)
-    assert metrics["bf16_ulp"] == pytest.approx(0.015625)
-    assert metrics["ulp_ratio"] == pytest.approx(1.0)
-    assert metrics["max_rel_diff"] == pytest.approx(0.015625 / 3.015625)
-    assert metrics["bitexact_fraction"] == 0.0
-
-
-def test_module_output_drift_matches_peft_layer_forward():
-    """The unmerged arm must reproduce peft 0.18.1's Linear.forward on the
-    same tensors: bf16 base GEMM, FP32 LoRA path, one final rounding."""
-
-    import torch
-    import torch.nn as nn
-    from peft import LoraConfig, get_peft_model
-
-    torch.manual_seed(3)
-    linear = nn.Linear(8, 6, bias=False).to(torch.bfloat16)
-    with torch.no_grad():
-        linear.weight.copy_(torch.randn(6, 8).to(torch.bfloat16))
-
-    class Wrapped(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.lin = linear
-
-        def forward(self, x):
-            return self.lin(x)
-
-    model = get_peft_model(
-        Wrapped(),
-        LoraConfig(r=4, lora_alpha=8, lora_dropout=0.0, target_modules=["lin"], bias="none"),
-    )
-    lora_linear = model.base_model.model.lin
-    with torch.no_grad():
-        lora_linear.lora_A["default"].weight.copy_(torch.randn(4, 8))
-        lora_linear.lora_B["default"].weight.copy_(torch.randn(6, 4) * 0.05)
-    scaling = lora_linear.scaling["default"]
-    base_weight = linear.weight.detach().clone()
-    lora_a = lora_linear.lora_A["default"].weight.detach().clone()
-    lora_b = lora_linear.lora_B["default"].weight.detach().clone()
-    merged = tool.merge_lora_weight(base_weight, lora_a, lora_b, scaling)
-    probe = torch.randn(32, 8).to(torch.bfloat16)
-
-    model.eval()
-    with torch.no_grad():
-        peft_unmerged = model(probe).detach()
-
-    metrics = tool.module_output_drift(base_weight, lora_a, lora_b, merged, scaling, probe)
-    assert metrics["max_abs_diff"] > 0.0
-    assert metrics["bitexact_fraction"] < 1.0
-    # The hand-computed unmerged arm must match peft bit-exactly.
-    y_base = torch.matmul(probe, base_weight.t())
-    delta = scaling * ((probe.float() @ lora_a.t()) @ lora_b.t())
-    y_unmerged = (y_base.float() + delta).to(torch.bfloat16)
-    assert torch.equal(y_unmerged, peft_unmerged.to(torch.bfloat16))
-
-
-# --- drift aggregation across the adapted modules ---
-
-def drift_metrics(max_abs, max_out, ulp, bitexact):
-    return {
-        "max_abs_diff": max_abs,
-        "max_output_abs": max_out,
-        "max_rel_diff": max_abs / max_out,
-        "bf16_ulp": ulp,
-        "ulp_ratio": max_abs / ulp,
-        "bitexact_fraction": bitexact,
-    }
-
-
-def test_aggregate_drift_reports_max_mean_and_worst_modules():
-    records = [
-        ("layers.0.mlp.down_proj.weight", drift_metrics(0.03125, 6.0, 0.03125, 0.5)),
-        ("layers.0.mlp.gate_proj.weight", drift_metrics(0.015625, 3.0, 0.015625, 0.6)),
-        ("layers.3.self_attn.q_proj.weight", drift_metrics(0.03125, 8.0, 0.0625, 0.4)),
-    ]
-    aggregate = tool.aggregate_drift(records)
-    assert aggregate["modules"] == 3
-    assert aggregate["max_abs_diff"] == pytest.approx(0.03125)
-    assert aggregate["mean_abs_diff"] == pytest.approx((0.03125 + 0.015625 + 0.03125) / 3)
-    assert aggregate["max_rel_diff"] == pytest.approx(0.03125 / 6.0)
-    assert aggregate["mean_rel_diff"] == pytest.approx(
-        (0.03125 / 6.0 + 0.015625 / 3.0 + 0.03125 / 8.0) / 3
-    )
-    assert aggregate["max_ulp_ratio"] == pytest.approx(1.0)
-    assert aggregate["mean_bitexact_fraction"] == pytest.approx(0.5)
-    # Ties break deterministically by module name.
-    assert aggregate["worst_abs_module"] == "layers.0.mlp.down_proj.weight"
-    assert aggregate["worst_rel_module"] == "layers.0.mlp.down_proj.weight"
-
-
-def test_aggregate_drift_requires_records():
-    with pytest.raises(ValueError, match="no drift records"):
-        tool.aggregate_drift([])
 
 
 # --- the original-vs-exported case comparison (the gate's verdict) ---
@@ -257,20 +105,18 @@ def test_build_parity_record_covers_the_documented_slot_shape():
         hardware="NVIDIA GeForce RTX 5060 Laptop GPU (sm_120)",
         cases=[{"case": "text", "passed": True}],
         exact_answer_agreement=True,
-        max_probability_delta=2.7e-08,
+        max_probability_delta=0.0,
         tolerance=1e-6,
-        drift={"modules": 186, "max_abs_diff": 0.03125},
         evidence="recipe/valen/reference.md export-parity block",
     )
     # Every key the manifest's parity_slot_shape documents must be present.
-    assert set(record) >= {
-        "status", "device", "cases", "exact_answer_agreement",
-        "max_probability_delta", "merge_drift", "evidence",
+    assert set(record) == {
+        "status", "device", "hardware", "tolerance", "cases",
+        "exact_answer_agreement", "max_probability_delta", "evidence",
     }
     assert record["status"] == "passed"
-    assert record["max_probability_delta"] == 2.7e-08
+    assert record["max_probability_delta"] == 0.0
     assert record["tolerance"] == 1e-6
-    assert record["merge_drift"] == {"modules": 186, "max_abs_diff": 0.03125}
 
 
 def test_build_parity_record_rejects_unknown_status():
@@ -283,14 +129,13 @@ def test_build_parity_record_rejects_unknown_status():
             exact_answer_agreement=True,
             max_probability_delta=0.0,
             tolerance=1e-6,
-            drift={},
             evidence="",
         )
 
 
 def minimal_manifest(path, parity=None):
     manifest = {
-        "format": "valen-checkpoint-export/1",
+        "format": "valen-checkpoint-export/2",
         "parity": parity,
         "parity_slot_shape": {"status": "passed | failed"},
     }
@@ -309,7 +154,6 @@ def parity_record(status="passed", delta=1e-8):
         exact_answer_agreement=status == "passed",
         max_probability_delta=delta,
         tolerance=1e-6,
-        drift={"modules": 186},
         evidence="recipe/valen/reference.md",
     )
 
@@ -417,7 +261,7 @@ def test_verify_sources_rejects_base_revision_drift(tmp_path):
 
 def test_verify_sources_rejects_tampered_base_shard_digest(tmp_path):
     """The base weights themselves must be re-hashed against the manifest's
-    recorded per-shard digests: 392 tensors pass through the export byte by
+    recorded per-shard digests: 578 tensors pass through the export byte by
     byte, so a silently swapped base would poison the parity verdict."""
 
     import pytest
@@ -443,15 +287,9 @@ def test_verify_sources_rejects_swapped_base_shard_bytes(tmp_path):
 # --- the full parity gate against the real pinned artifacts ---
 # Set VALEN_CKPT, VALEN_BASE and VALEN_SRC (the recipe reference.md artifact
 # exports) on a CUDA host to run: it exports a fresh artifact set, then runs
-# the two serial model loads (original checkpoint stack, exported stack),
-# the 186-module merge-drift measurement and the manifest parity fill.
-#
-# The gate's exit status is evidence, not a regression invariant: on the
-# pinned artifacts the declared 1e-6 tolerance is exceeded by the measured
-# merge drift (recorded honestly in recipe/valen/reference.md), so the test
-# asserts the verdict's internal consistency — the recorded status, deltas,
-# agreement and drift must match what the tool actually measured, and the
-# exact-answer agreement of the pinned artifacts must hold.
+# the two serial model loads (original checkpoint stack, exported stack) and
+# fills the manifest parity slot. The unmerged export is expected to pass the
+# declared gate; the test asserts the verdict and its internal consistency.
 
 def test_real_artifact_export_parity_gate(tmp_path):
     import subprocess
@@ -484,36 +322,20 @@ def test_real_artifact_export_parity_gate(tmp_path):
         text=True,
         timeout=3600,
     )
-    assert result.returncode in (0, 1), result.stdout[-4000:] + result.stderr[-4000:]
+    assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-4000:]
 
     manifest = exporter.validate_export(export_dir)
     parity = manifest["parity"]
+    assert parity["status"] == "passed"
     assert parity["device"].startswith("cuda")
     assert parity["tolerance"] == 1e-6
     assert {case["case"] for case in parity["cases"]} == {"text", "image"}
-    # The pinned artifacts keep agreeing on the discrete answers.
     assert parity["exact_answer_agreement"] is True
     assert all(case["exact_answer_agreement"] for case in parity["cases"])
-    # The recorded verdict is internally consistent with the measurements.
     assert parity["max_probability_delta"] == max(
         case["max_probability_delta"] for case in parity["cases"]
     )
-    expected_status = (
-        "passed"
-        if all(case["passed"] for case in parity["cases"])
-        else "failed"
-    )
-    assert parity["status"] == expected_status
+    assert parity["max_probability_delta"] <= parity["tolerance"]
     for case in parity["cases"]:
-        case_passes = (
-            case["exact_answer_agreement"]
-            and case["max_probability_delta"] <= parity["tolerance"]
-        )
-        assert case["passed"] is case_passes
-        if not case_passes:
-            assert any("tolerance" in problem for problem in case["problems"])
-    assert parity["merge_drift"]["modules"] == 186
-    aggregate = parity["merge_drift"]["aggregate"]
-    assert aggregate["modules"] == 186
-    assert 0.0 < aggregate["max_abs_diff"]
-    assert 0.0 < aggregate["max_ulp_ratio"] <= 1.0
+        assert case["passed"] is True
+        assert case["problems"] == []
