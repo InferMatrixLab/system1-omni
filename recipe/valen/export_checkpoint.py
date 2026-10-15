@@ -7,22 +7,26 @@ native worker can load, plus a JSON manifest recording every transformation
 performed:
 
 - ``model.safetensors`` — the backbone in the base's own key layout
-  (``model.language_model.*`` / ``model.visual.*``, BF16 only): the language
-  LoRA merged at BF16 (``bf16(fp32(W) + 2*(B@A))``, bit-equal to peft
-  0.18.1's ``Linear.merge``), the trained vision-top blocks 20-23 and the
-  merger substituted as plain BF16 replacements, and the base's 36 FP32
-  tensors (``linear_attn.A_log`` / ``linear_attn.norm.weight``) downcast to
-  BF16 — the same cast transformers' own BF16 runtime performs.
+  (``model.language_model.*`` / ``model.visual.*``, BF16 only): the base
+  weights verbatim except the trained vision-top blocks 20-23 and the
+  merger substituted as plain BF16 replacements and the base's 36 FP32
+  tensors (``linear_attn.A_log`` / ``linear_attn.norm.weight``) downcast
+  to BF16 — the same cast transformers' own BF16 runtime performs. The
+  186 language LoRA targets are base tensors here, untouched.
+- ``lora.safetensors`` — the language LoRA served unmerged: the 372 FP32
+  adapter tensors under their PEFT key names, verbatim from the
+  checkpoint.
 - ``head.safetensors`` — the decision head's two FP32 projection matrices
   (``head.decision.weight``, ``head.candidate.weight``), no bias.
 - ``config.json`` — the base config copied verbatim so the reference builder
   (``Qwen3_5ForConditionalGeneration.from_pretrained(out, dtype=bf16,
   attn_implementation="eager").model``) loads the export unchanged.
 - ``valen_export.json`` — the manifest: per-tensor name/shape/dtype and
-  component attribution (backbone / lora-merged / vision-top / merger /
-  decision-head), source revisions and SHA-256s, the merge decision and
-  scaling, the downcast list, the head configuration, and a ``parity`` slot
-  filled by ``verify_export_parity.py``.
+  component attribution (backbone / lora / vision-top / merger /
+  decision-head), source revisions and SHA-256s, the LoRA configuration
+  and its declared application semantics, the downcast list, the head
+  configuration, and a ``parity`` slot filled by
+  ``verify_export_parity.py``.
 
 Determinism: no timestamps, no absolute paths, tensors and JSON written in
 sorted key order, single-threaded CPU math — two runs on the same inputs
@@ -50,8 +54,9 @@ from typing import NamedTuple
 
 import torch
 
-FORMAT = "valen-checkpoint-export/1"
+FORMAT = "valen-checkpoint-export/2"
 BACKBONE_FILE = "model.safetensors"
+LORA_FILE = "lora.safetensors"
 HEAD_FILE = "head.safetensors"
 MANIFEST_FILE = "valen_export.json"
 
@@ -63,13 +68,13 @@ PEFT_LORA_SUFFIX_B = ".lora_B.default.weight"
 HEAD_PREFIX = "head."
 
 COMPONENT_BACKBONE = "backbone"
-COMPONENT_LORA_MERGED = "lora-merged"
+COMPONENT_LORA = "lora"
 COMPONENT_VISION_TOP = "vision-top"
 COMPONENT_MERGER = "merger"
 COMPONENT_HEAD = "decision-head"
 COMPONENTS = (
     COMPONENT_BACKBONE,
-    COMPONENT_LORA_MERGED,
+    COMPONENT_LORA,
     COMPONENT_VISION_TOP,
     COMPONENT_MERGER,
     COMPONENT_HEAD,
@@ -88,23 +93,26 @@ PINNED_INVENTORY = {
     "base_fp32_tensors": 36,
 }
 
-# The fallback the manifest records for a failed parity gate.
-MERGE_FALLBACK = (
-    "export the FP32 LoRA separately and serve unmerged "
-    "(applies when the parity gate fails)"
+# How the exported LoRA is applied at serving time; the manifest records
+# this verbatim in its lora block and unmerged_lora_output() is its
+# executable form.
+LORA_APPLICATION = (
+    "per targeted linear, y = bf16(fp32(bf16(x @ W.t())) + scaling * "
+    "((x.float() @ A.t()) @ B.t())): the base GEMM runs in BF16, the LoRA "
+    "delta is computed in FP32 on the activations and added to the upcast "
+    "base output, and the sum is rounded to BF16 exactly once — the unmerged "
+    "peft 0.18.1 Linear.forward with the adapters kept FP32 at runtime"
 )
 
 # The parity record's shape; the manifest ships it null until measured.
 PARITY_SLOT_SHAPE = {
     "status": "passed | failed",
     "device": "torch device string",
+    "hardware": "GPU name and memory when the device is cuda",
+    "tolerance": "the probability-delta gate",
     "cases": "text and image choice fixtures compared",
     "exact_answer_agreement": True,
-    "max_probability_delta": "<= 1e-6",
-    "merge_drift": {
-        "per_layer_max_output_delta": "max |merged - unmerged| per adapted layer",
-        "aggregate": "worst-case relative drift across layers",
-    },
+    "max_probability_delta": "<= tolerance (1e-6)",
     "evidence": "pointer to the recorded parity run",
 }
 
@@ -115,21 +123,20 @@ def lora_scaling(rank, alpha):
     return alpha / rank
 
 
-def merge_lora_weight(base_weight, lora_a, lora_b, scaling):
-    """Merge one LoRA pair into a base weight at the reference's cast
-    boundaries.
+def unmerged_lora_output(base_weight, lora_a, lora_b, activations, scaling):
+    """Apply one LoRA pair the way the manifest declares it is served.
 
-    The delta ``scaling * (B @ A)`` is computed in FP32, added to the
-    FP32-upcast base weight, and the sum is rounded to the base dtype
-    (BF16) exactly once — bit-equal to peft 0.18.1's ``Linear.merge``
-    (``get_delta_weight`` computes the transpose-free delta in FP32 and the
-    in-place add rounds once per weight element). Zero-B adapters merge
-    back to the base tensor bit-exactly.
+    The base GEMM runs in the base dtype (BF16), the delta
+    ``scaling * ((x @ A.t()) @ B.t())`` is computed in FP32 on the
+    activations and added to the FP32-upcast base output, and the sum is
+    rounded to the base dtype exactly once — bit-equal to peft 0.18.1's
+    unmerged ``Linear.forward`` with FP32 adapters. A zero-B adapter
+    reproduces the plain base GEMM bit-exactly.
     """
 
-    base_fp32 = base_weight.to(torch.float32)
-    delta = lora_b.to(torch.float32) @ lora_a.to(torch.float32)
-    return (base_fp32 + scaling * delta).to(base_weight.dtype)
+    y_base = torch.matmul(activations, base_weight.t())
+    delta = scaling * ((activations.float() @ lora_a.t()) @ lora_b.t())
+    return (y_base.float() + delta).to(base_weight.dtype)
 
 
 def downcast_bf16(tensor):
@@ -158,6 +165,19 @@ class Classification(NamedTuple):
 
 _VISION_BLOCK = re.compile(r"^backbone\.visual\.blocks\.(\d+)\.(.+)$")
 _HEAD_TENSORS = ("head.decision.weight", "head.candidate.weight")
+
+
+def lora_key_target(key):
+    """The ``model.safetensors`` tensor a PEFT LoRA key adapts."""
+
+    for suffix in (PEFT_LORA_SUFFIX_A, PEFT_LORA_SUFFIX_B):
+        if key.startswith(PEFT_LANGUAGE_PREFIX) and key.endswith(suffix):
+            return (
+                "model.language_model."
+                + key[len(PEFT_LANGUAGE_PREFIX): -len(suffix)]
+                + ".weight"
+            )
+    raise ValueError(f"not a language LoRA key: {key!r}")
 
 
 def classify_checkpoint_weights(keys):
@@ -313,7 +333,7 @@ def run_export(
     out_dir,
     *,
     sources,
-    merge_config,
+    lora_config,
     head_config,
     expected,
     base_config_path=None,
@@ -323,7 +343,7 @@ def run_export(
     ``checkpoint_weights`` is the unpickled ``payload["weights"]`` dict (mmap
     views are fine); ``base_file`` is the base safetensors path, read lazily
     through ``safe_open``. ``sources`` is recorded verbatim in the manifest;
-    ``merge_config``/``head_config``/``expected`` are validated against the
+    ``lora_config``/``head_config``/``expected`` are validated against the
     tensors before anything is written. Returns the manifest dict.
 
     A failed run leaves no partial output behind: every artifact this attempt
@@ -342,13 +362,19 @@ def run_export(
             base_file,
             out_dir,
             sources=sources,
-            merge_config=merge_config,
+            lora_config=lora_config,
             head_config=head_config,
             expected=expected,
             base_config_path=base_config_path,
         )
     except BaseException:
-        for name in (BACKBONE_FILE, HEAD_FILE, MANIFEST_FILE, "config.json"):
+        for name in (
+            BACKBONE_FILE,
+            LORA_FILE,
+            HEAD_FILE,
+            MANIFEST_FILE,
+            "config.json",
+        ):
             (out_dir / name).unlink(missing_ok=True)
         if created:
             try:
@@ -364,21 +390,21 @@ def _write_export(
     out_dir,
     *,
     sources,
-    merge_config,
+    lora_config,
     head_config,
     expected,
     base_config_path=None,
 ):
     """The export body guarded by :func:`run_export`'s cleanup wrapper."""
 
-    # Single-threaded CPU math keeps the FP32 merge GEMM bit-reproducible
-    # regardless of the ambient thread/env configuration.
+    # Single-threaded CPU math keeps the downcast elementwise casts
+    # bit-reproducible regardless of the ambient thread/env configuration.
     torch.set_grad_enabled(False)
     torch.set_num_threads(1)
 
     classification = classify_checkpoint_weights(checkpoint_weights)
     validate_inventory(classification, expected)
-    scaling = lora_scaling(merge_config["rank"], merge_config["alpha"])
+    scaling = lora_scaling(lora_config["rank"], lora_config["alpha"])
 
     from safetensors import safe_open
 
@@ -438,18 +464,20 @@ def _write_export(
                     f"LoRA pair for {base_name!r} must be fp32, "
                     f"got {lora_a.dtype}/{lora_b.dtype}"
                 )
-            if lora_a.shape[0] != merge_config["rank"]:
+            if lora_a.shape[0] != lora_config["rank"]:
                 raise ValueError(
                     f"LoRA rank for {base_name!r} is {lora_a.shape[0]}, "
-                    f"expected {merge_config['rank']}"
+                    f"expected {lora_config['rank']}"
                 )
-            if list(lora_a.shape) != [merge_config["rank"], base_shape[1]] or list(
+            if list(lora_a.shape) != [lora_config["rank"], base_shape[1]] or list(
                 lora_b.shape
-            ) != [base_shape[0], merge_config["rank"]]:
+            ) != [base_shape[0], lora_config["rank"]]:
                 raise ValueError(
                     f"LoRA pair shape mismatch for {base_name!r}: "
                     f"A {list(lora_a.shape)}, B {list(lora_b.shape)}, base {base_shape}"
                 )
+            if base_dtypes[base_name] != torch.bfloat16:
+                raise ValueError(f"LoRA target {base_name!r} must be a bf16 base tensor")
 
         head_entries = []
         for export_name, checkpoint_name in sorted(classification.head.items()):
@@ -470,36 +498,12 @@ def _write_export(
                 (export_name, torch.float32, list(tensor.shape), (lambda t=tensor: t))
             )
 
-        # Plan and stream the backbone file entry by entry.
+        # Plan and stream the backbone file entry by entry: base tensors
+        # verbatim except the trained vision replacements and the declared
+        # downcasts. The LoRA targets are ordinary base tensors here.
         tensors = []
 
         def plan(name):
-            if name in classification.lora:
-                a_key, b_key = classification.lora[name]
-                if base_dtypes[name] != torch.bfloat16:
-                    raise ValueError(f"LoRA target {name!r} must be a bf16 base tensor")
-                tensors.append(
-                    {
-                        "name": name,
-                        "shape": base_shapes[name],
-                        "dtype": "bfloat16",
-                        "component": COMPONENT_LORA_MERGED,
-                        "source": "base+checkpoint",
-                    }
-                )
-                return (
-                    name,
-                    torch.bfloat16,
-                    base_shapes[name],
-                    (
-                        lambda n=name, a=a_key, b=b_key: merge_lora_weight(
-                            base.get_tensor(n),
-                            checkpoint_weights[a],
-                            checkpoint_weights[b],
-                            scaling,
-                        )
-                    ),
-                )
             checkpoint_name = vision_by_export.get(name) or merger_by_export.get(name)
             if checkpoint_name is not None:
                 tensors.append(
@@ -559,9 +563,38 @@ def _write_export(
             )
 
         backbone_entries = [plan(name) for name in base_names]
+
+        # The adapter tensors ride in their own file under the checkpoint's
+        # PEFT key names, FP32 and unmerged.
+        lora_keys = sorted(
+            key
+            for pair in classification.lora.values()
+            for key in pair
+        )
+        lora_entries = [
+            (
+                key,
+                torch.float32,
+                list(checkpoint_weights[key].shape),
+                (lambda k=key: checkpoint_weights[k]),
+            )
+            for key in lora_keys
+        ]
+        for key in lora_keys:
+            tensors.append(
+                {
+                    "name": key,
+                    "shape": list(checkpoint_weights[key].shape),
+                    "dtype": "float32",
+                    "component": COMPONENT_LORA,
+                    "source": "checkpoint",
+                    "file": LORA_FILE,
+                }
+            )
         for record in tensors:
-            record["file"] = (
-                HEAD_FILE if record["component"] == COMPONENT_HEAD else BACKBONE_FILE
+            record.setdefault(
+                "file",
+                HEAD_FILE if record["component"] == COMPONENT_HEAD else BACKBONE_FILE,
             )
         for entry in head_entries:
             tensors.append(
@@ -575,9 +608,10 @@ def _write_export(
                 }
             )
 
-        # Stream both files while the base handle (the lambdas' data source)
+        # Stream the files while the base handle (the lambdas' data source)
         # is still open.
         files = {BACKBONE_FILE: write_safetensors(out_dir / BACKBONE_FILE, backbone_entries)}
+        files[LORA_FILE] = write_safetensors(out_dir / LORA_FILE, lora_entries)
         files[HEAD_FILE] = write_safetensors(out_dir / HEAD_FILE, head_entries)
 
     if base_config_path is not None:
@@ -592,15 +626,15 @@ def _write_export(
     manifest = {
         "format": FORMAT,
         "sources": sources,
-        "merge": {
-            "decision": "merged",
-            "formula": f"bf16(fp32(W) + {scaling:g} * (B @ A))",
+        "lora": {
+            "file": LORA_FILE,
+            "dtype": "float32",
+            "rank": lora_config["rank"],
+            "alpha": lora_config["alpha"],
             "scaling": scaling,
-            "lora_rank": merge_config["rank"],
-            "lora_alpha": merge_config["alpha"],
-            "merged_tensors": len(classification.lora),
-            "lora_keys": 2 * len(classification.lora),
-            "fallback": MERGE_FALLBACK,
+            "targets": len(classification.lora),
+            "keys": 2 * len(classification.lora),
+            "application": LORA_APPLICATION,
         },
         "downcasts": downcasts,
         "head": {
@@ -619,6 +653,13 @@ def _write_export(
             "backbone": (
                 "Qwen3_5ForConditionalGeneration.from_pretrained(out, dtype=bf16, "
                 "attn_implementation='eager', local_files_only=True).model"
+            ),
+            "lora": (
+                "wrap backbone.language_model in peft get_peft_model(LoraConfig(r="
+                f"{lora_config['rank']}, lora_alpha={lora_config['alpha']}, lora_dropout=0, "
+                "target_modules=<every language Linear>, bias='none')), load "
+                f"{LORA_FILE}'s tensors by key and keep the adapters fp32 at runtime "
+                "(the application semantics recorded in the lora block)"
             ),
             "head": (
                 f"{HEAD_FILE}: DecisionHead(hidden_size={head_config['hidden_size']}, "
@@ -647,7 +688,9 @@ def validate_export(out_dir):
     out_dir = Path(out_dir)
     # Any unexpected entry — file, directory or otherwise — fails the audit.
     present = sorted(p.name for p in out_dir.iterdir())
-    allowed = sorted([BACKBONE_FILE, HEAD_FILE, MANIFEST_FILE, "config.json"])
+    allowed = sorted(
+        [BACKBONE_FILE, LORA_FILE, HEAD_FILE, MANIFEST_FILE, "config.json"]
+    )
     if present != allowed:
         extra = sorted(set(present) - set(allowed))
         missing = sorted(set(allowed) - set(present))
@@ -658,7 +701,7 @@ def validate_export(out_dir):
     manifest = json.loads((out_dir / MANIFEST_FILE).read_text(encoding="utf-8"))
     if manifest.get("format") != FORMAT:
         raise ValueError(f"manifest format {manifest.get('format')!r} != {FORMAT!r}")
-    artifact_files = {BACKBONE_FILE, HEAD_FILE, "config.json"}
+    artifact_files = {BACKBONE_FILE, LORA_FILE, HEAD_FILE, "config.json"}
     if set(manifest["files"]) != artifact_files:
         raise ValueError(
             f"manifest files record {sorted(manifest['files'])} != "
@@ -685,7 +728,7 @@ def validate_export(out_dir):
                 raise ValueError(f"manifest tensor entry missing {field!r}: {entry}")
         if entry["component"] not in COMPONENTS:
             raise ValueError(f"unknown component {entry['component']!r} for {entry['name']}")
-        if entry["file"] not in (BACKBONE_FILE, HEAD_FILE):
+        if entry["file"] not in (BACKBONE_FILE, LORA_FILE, HEAD_FILE):
             raise ValueError(
                 f"tensor {entry['name']!r} points at unknown file {entry['file']!r}"
             )
@@ -695,7 +738,7 @@ def validate_export(out_dir):
     on_disk = set()
     handles = {
         file_name: safe_open(out_dir / file_name, framework="pt")
-        for file_name in (BACKBONE_FILE, HEAD_FILE)
+        for file_name in (BACKBONE_FILE, LORA_FILE, HEAD_FILE)
     }
     try:
         for file_name, handle in handles.items():
@@ -712,7 +755,7 @@ def validate_export(out_dir):
             f"{unlisted[0][0]} holds unlisted tensor {unlisted[0][1]!r}"
             f" ({len(unlisted)} total)"
         )
-    for file_name in (BACKBONE_FILE, HEAD_FILE):
+    for file_name in (BACKBONE_FILE, LORA_FILE, HEAD_FILE):
         with safe_open(out_dir / file_name, framework="pt") as handle:
             for key in sorted(k for f, k in on_disk if f == file_name):
                 slice_ = handle.get_slice(key)
@@ -763,12 +806,46 @@ def validate_export(out_dir):
         if entry["dtype"] != "float32" or entry["component"] != COMPONENT_HEAD:
             raise ValueError(f"head tensor {name!r} must be an fp32 decision-head tensor")
 
-    # The merge decision must match the merged-tensor inventory.
-    merged = [e for e in manifest["tensors"] if e["component"] == COMPONENT_LORA_MERGED]
-    if manifest["merge"]["merged_tensors"] != len(merged):
+    # The LoRA block must match the adapter inventory: every adapter key is
+    # a listed fp32 tensor in the adapter file that maps onto a listed
+    # backbone tensor, one A and one B per target, at the declared rank.
+    lora = manifest["lora"]
+    if lora["file"] != LORA_FILE:
+        raise ValueError(f"lora block points at {lora['file']!r}, expected {LORA_FILE!r}")
+    if lora["scaling"] != lora["alpha"] / lora["rank"]:
+        raise ValueError("lora scaling is not alpha / rank")
+    adapters = [e for e in manifest["tensors"] if e["component"] == COMPONENT_LORA]
+    if lora["keys"] != len(adapters):
         raise ValueError(
-            f"merge block records {manifest['merge']['merged_tensors']} merged tensors, "
-            f"manifest lists {len(merged)}"
+            f"lora block records {lora['keys']} keys, manifest lists {len(adapters)}"
+        )
+    if lora["targets"] * 2 != lora["keys"]:
+        raise ValueError(
+            f"lora block records {lora['targets']} targets for {lora['keys']} keys"
+        )
+    by_target = {}
+    for entry in adapters:
+        name = entry["name"]
+        if entry["file"] != LORA_FILE or entry["dtype"] != "float32":
+            raise ValueError(f"adapter {name!r} must be an fp32 tensor in {LORA_FILE}")
+        target = lora_key_target(name)
+        if (BACKBONE_FILE, target) not in listed:
+            raise ValueError(f"adapter {name!r} targets absent backbone tensor {target!r}")
+        by_target.setdefault(target, []).append(name)
+        rank_dim = 0 if name.endswith(PEFT_LORA_SUFFIX_A) else 1
+        if entry["shape"][rank_dim] != lora["rank"]:
+            raise ValueError(
+                f"adapter {name!r} shape {entry['shape']} contradicts the declared "
+                f"rank {lora['rank']}"
+            )
+    for target, keys in sorted(by_target.items()):
+        if len(keys) != 2 or not (
+            keys[0].endswith(PEFT_LORA_SUFFIX_A) ^ keys[1].endswith(PEFT_LORA_SUFFIX_A)
+        ):
+            raise ValueError(f"target {target!r} does not carry exactly one A and one B")
+    if len(by_target) != lora["targets"]:
+        raise ValueError(
+            f"lora block records {lora['targets']} targets, adapters cover {len(by_target)}"
         )
     if manifest["parity"] is not None and not isinstance(manifest["parity"], dict):
         raise ValueError("parity slot must be null or the parity-gate record")
@@ -924,7 +1001,7 @@ def export(checkpoint_dir, base_dir, out_dir):
         weights_file,
         out_dir,
         sources=sources,
-        merge_config={"rank": config["lora_rank"], "alpha": config["lora_alpha"]},
+        lora_config={"rank": config["lora_rank"], "alpha": config["lora_alpha"]},
         head_config={
             "projection_dim": config["projection_dim"],
             "hidden_size": hidden_size,
@@ -954,6 +1031,10 @@ def main(argv=None):
     for component in sorted(counts):
         print(f"  {component}: {counts[component]} tensors")
     print(f"  downcasts: {len(manifest['downcasts'])} fp32 -> bf16")
+    print(
+        f"  lora: {manifest['lora']['keys']} unmerged fp32 keys over "
+        f"{manifest['lora']['targets']} targets"
+    )
     print(f"  manifest: {args.out / MANIFEST_FILE}")
     return 0
 

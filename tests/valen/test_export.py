@@ -1,11 +1,11 @@
 """Export-tool tests for recipe/valen/export_checkpoint.py.
 
-CPU-only checks of the export's observable contract: the LoRA merge and
-FP32->BF16 downcast semantics on synthetic tensors (against the installed
-PEFT as the independent reference), checkpoint-key classification, and the
-manifest/artifact consistency on a tiny synthetic fixture. The full
-determinism run against the real pinned artifacts is env-gated on
-VALEN_CKPT / VALEN_BASE.
+CPU-only checks of the export's observable contract: the FP32->BF16
+downcast and the unmerged-LoRA application semantics on synthetic tensors
+(against the installed PEFT as the independent reference), checkpoint-key
+classification, and the manifest/artifact consistency on a tiny synthetic
+fixture. The full determinism run against the real pinned artifacts is
+env-gated on VALEN_CKPT / VALEN_BASE.
 
 PYTHONPATH=src python -m pytest tests/valen -q
 """
@@ -31,13 +31,16 @@ def test_lora_scaling_is_alpha_over_rank():
     assert tool.lora_scaling(rank=8, alpha=4) == 0.5
 
 
-def test_merge_matches_peft_merge_bit_exactly():
-    """The pinned peft 0.18.1 Linear.merge is the independent source of truth."""
+def test_unmerged_output_matches_peft_layer_forward_bit_exactly():
+    """The declared application semantics must reproduce peft 0.18.1's
+    unmerged Linear.forward on the same tensors: BF16 base GEMM, FP32 LoRA
+    path, one final rounding."""
+
     import torch
     import torch.nn as nn
     from peft import LoraConfig, get_peft_model
 
-    torch.manual_seed(0)
+    torch.manual_seed(3)
     linear = nn.Linear(8, 6, bias=False).to(torch.bfloat16)
     with torch.no_grad():
         linear.weight.copy_(torch.randn(6, 8).to(torch.bfloat16))
@@ -57,44 +60,52 @@ def test_merge_matches_peft_merge_bit_exactly():
     lora_linear = model.base_model.model.lin
     with torch.no_grad():
         lora_linear.lora_A["default"].weight.copy_(torch.randn(4, 8))
-        lora_linear.lora_B["default"].weight.copy_(torch.randn(6, 4) * 0.1)
+        lora_linear.lora_B["default"].weight.copy_(torch.randn(6, 4) * 0.05)
+    scaling = lora_linear.scaling["default"]
     base_weight = linear.weight.detach().clone()
     lora_a = lora_linear.lora_A["default"].weight.detach().clone()
     lora_b = lora_linear.lora_B["default"].weight.detach().clone()
-    scaling = lora_linear.scaling["default"]
+    probe = torch.randn(32, 8).to(torch.bfloat16)
 
-    lora_linear.merge(safe_merge=False)
-    peft_merged = linear.weight.detach().clone()
-    mine = tool.merge_lora_weight(base_weight, lora_a, lora_b, scaling)
+    model.eval()
+    with torch.no_grad():
+        peft_unmerged = model(probe).detach()
+
+    mine = tool.unmerged_lora_output(base_weight, lora_a, lora_b, probe, scaling)
     assert mine.dtype == torch.bfloat16
-    assert torch.equal(mine, peft_merged)
+    assert torch.equal(mine, peft_unmerged.to(torch.bfloat16))
 
 
-def test_merge_hand_computed_rounding():
-    """bf16(fp32(W) + 2*(B@A)) with one rounding of the sum, hand-computed."""
+def test_unmerged_output_hand_computed_rounding():
+    """bf16(fp32(base GEMM) + fp32 delta) with one rounding of the sum,
+    hand-computed: base W = 1.0, probe x = 3.0, delta 2*(3*0.0019) = 0.0114
+    sits above the 3.0078125 midpoint of the [2, 4) bf16 grid, so the
+    output rounds to 3.015625."""
+
     import torch
 
-    # bf16 neighbors around 1.0: 1.0 and 1.0078125 (ulp 2^-7); the rounding
-    # boundary sits at the midpoint 1.00390625.
-    base = torch.full((1, 1), 1.0, dtype=torch.bfloat16)
-    # delta = 2 * B@A = 2 * 0.0015 -> sum 1.003 < midpoint -> rounds to 1.0
-    small = tool.merge_lora_weight(base, torch.tensor([[0.0015]]), torch.tensor([[1.0]]), 2.0)
-    assert small.item() == 1.0
-    # delta = 2 * B@A = 2 * 0.002 -> sum 1.004 > midpoint -> rounds to 1.0078125
-    large = tool.merge_lora_weight(base, torch.tensor([[0.002]]), torch.tensor([[1.0]]), 2.0)
-    assert large.item() == 1.0078125
+    base = torch.tensor([[1.0]], dtype=torch.bfloat16)
+    lora_a = torch.tensor([[0.0019]], dtype=torch.float32)
+    lora_b = torch.tensor([[1.0]], dtype=torch.float32)
+    probe = torch.tensor([[3.0]], dtype=torch.bfloat16)
+    output = tool.unmerged_lora_output(base, lora_a, lora_b, probe, 2.0)
+    assert output.dtype == torch.bfloat16
+    assert output.item() == 3.015625
 
 
-def test_merge_with_zero_lora_b_is_bit_exact_base():
-    """Untrained LoRA (zero B, PEFT init) must merge back to the base tensor."""
+def test_unmerged_output_with_zero_lora_b_is_base_gemm():
+    """An untrained LoRA (zero B, PEFT init) must reduce to the plain base
+    GEMM bit-exactly."""
+
     import torch
 
     torch.manual_seed(1)
     base = torch.randn(6, 8).to(torch.bfloat16)
-    lora_a = torch.randn(4, 8)
-    lora_b = torch.zeros(6, 4)
-    merged = tool.merge_lora_weight(base, lora_a, lora_b, 2.0)
-    assert torch.equal(merged, base)
+    probe = torch.randn(16, 8).to(torch.bfloat16)
+    output = tool.unmerged_lora_output(
+        base, torch.randn(4, 8), torch.zeros(6, 4), probe, 2.0
+    )
+    assert torch.equal(output, torch.matmul(probe, base.t()))
 
 
 def test_downcast_rounds_to_nearest_bf16():
@@ -188,6 +199,24 @@ def test_classify_checkpoint_weights_layout():
     }
 
 
+def test_lora_key_target_maps_peft_names_onto_base_tensors():
+    for key, target in (
+        (
+            tool.PEFT_LANGUAGE_PREFIX + "layers.0.mlp.down_proj" + tool.PEFT_LORA_SUFFIX_A,
+            "model.language_model.layers.0.mlp.down_proj.weight",
+        ),
+        (
+            tool.PEFT_LANGUAGE_PREFIX + "layers.3.self_attn.q_proj" + tool.PEFT_LORA_SUFFIX_B,
+            "model.language_model.layers.3.self_attn.q_proj.weight",
+        ),
+    ):
+        assert tool.lora_key_target(key) == target
+    import pytest
+
+    with pytest.raises(ValueError, match="not a language LoRA key"):
+        tool.lora_key_target("backbone.visual.merger.norm.weight")
+
+
 def test_classify_checkpoint_weights_rejects_unknown_keys():
     import pytest
 
@@ -262,7 +291,7 @@ TINY_INVENTORY = {
     "base_tensors": 12,
     "base_fp32_tensors": 2,
 }
-TINY_MERGE = {"rank": 4, "alpha": 8}
+TINY_LORA = {"rank": 4, "alpha": 8}
 TINY_HEAD = {"projection_dim": 3, "hidden_size": 6, "bias": False}
 TINY_SOURCES = {
     "checkpoint": {"revision": "c0ffee", "sha256": "ab" * 32},
@@ -340,7 +369,7 @@ def run_tiny_export(out_dir, input_dir):
         base_file,
         Path(out_dir),
         sources=TINY_SOURCES,
-        merge_config=TINY_MERGE,
+        lora_config=TINY_LORA,
         head_config=TINY_HEAD,
         expected=TINY_INVENTORY,
         base_config_path=config_file,
@@ -362,17 +391,23 @@ def test_run_export_tiny_fixture_contract(tmp_path):
     out = tmp_path / "export"
     manifest = run_tiny_export(out, tmp_path / "in-a")
     assert sorted(p.name for p in out.iterdir()) == [
-        "config.json", "head.safetensors", "model.safetensors", "valen_export.json",
+        "config.json",
+        "head.safetensors",
+        "lora.safetensors",
+        "model.safetensors",
+        "valen_export.json",
     ]
 
     # Manifest header fields (the auditable contract).
     assert manifest["format"] == tool.FORMAT
     assert manifest["sources"] == TINY_SOURCES
-    assert manifest["merge"]["decision"] == "merged"
-    assert manifest["merge"]["scaling"] == 2.0
-    assert manifest["merge"]["lora_rank"] == 4 and manifest["merge"]["lora_alpha"] == 8
-    assert manifest["merge"]["merged_tensors"] == 3 and manifest["merge"]["lora_keys"] == 6
-    assert "fallback" in manifest["merge"]
+    assert "merge" not in manifest
+    assert manifest["lora"]["file"] == "lora.safetensors"
+    assert manifest["lora"]["dtype"] == "float32"
+    assert manifest["lora"]["rank"] == 4 and manifest["lora"]["alpha"] == 8
+    assert manifest["lora"]["scaling"] == 2.0
+    assert manifest["lora"]["targets"] == 3 and manifest["lora"]["keys"] == 6
+    assert "peft 0.18.1" in manifest["lora"]["application"]
     assert manifest["downcasts"] == [
         "model.language_model.layers.0.linear_attn.A_log",
         "model.language_model.layers.0.linear_attn.norm.weight",
@@ -390,7 +425,7 @@ def test_run_export_tiny_fixture_contract(tmp_path):
 
     # Every tensor on disk appears in the manifest with matching metadata.
     tensors = tensor_map(manifest)
-    for file_name in (tool.BACKBONE_FILE, tool.HEAD_FILE):
+    for file_name in (tool.BACKBONE_FILE, tool.LORA_FILE, tool.HEAD_FILE):
         with safe_open(out / file_name, framework="pt") as f:
             keys = sorted(f.keys())
             for key in keys:
@@ -400,9 +435,9 @@ def test_run_export_tiny_fixture_contract(tmp_path):
                 assert entry["dtype"] == {
                     "BF16": "bfloat16", "F32": "float32"
                 }[slice_.get_dtype()]
-    assert len(manifest["tensors"]) == 12 + 2
-    assert [t["name"] for t in manifest["tensors"]] == sorted(
-        t["name"] for t in manifest["tensors"]
+    assert len(manifest["tensors"]) == 12 + 6 + 2
+    assert [(t["file"], t["name"]) for t in manifest["tensors"]] == sorted(
+        (t["file"], t["name"]) for t in manifest["tensors"]
     )
 
     # Component attribution covers all five components.
@@ -410,7 +445,8 @@ def test_run_export_tiny_fixture_contract(tmp_path):
     for entry in manifest["tensors"]:
         components.setdefault(entry["component"], []).append(entry["name"])
     assert set(components) == set(tool.COMPONENTS)
-    assert len(components["lora-merged"]) == 3
+    assert len(components["lora"]) == 6
+    assert len(components["backbone"]) == 9
     assert components["vision-top"] == [
         "model.visual.blocks.20.attn.qkv.weight", "model.visual.blocks.20.norm1.weight",
     ]
@@ -423,22 +459,21 @@ def test_run_export_tiny_fixture_contract(tmp_path):
         data = (out / file_name).read_bytes()
         assert record["size"] == len(data)
         assert record["sha256"] == hashlib.sha256(data).hexdigest()
-    assert set(manifest["files"]) == {"model.safetensors", "head.safetensors", "config.json"}
+    assert set(manifest["files"]) == {
+        "model.safetensors", "lora.safetensors", "head.safetensors", "config.json"
+    }
 
     # The transformations are the declared ones.
     base, checkpoint = seeded_tiny_inputs()
     with safe_open(out / tool.BACKBONE_FILE, framework="pt") as f, safe_open(
         tmp_path / "in-a" / "base.safetensors", framework="pt"
     ) as original:
-        merged = f.get_tensor("model.language_model.layers.0.linear_attn.in_proj_qkv.weight")
-        expected = tool.merge_lora_weight(
-            original.get_tensor("model.language_model.layers.0.linear_attn.in_proj_qkv.weight"),
-            checkpoint[tool.PEFT_LANGUAGE_PREFIX + "layers.0.linear_attn.in_proj_qkv" + tool.PEFT_LORA_SUFFIX_A],
-            checkpoint[tool.PEFT_LANGUAGE_PREFIX + "layers.0.linear_attn.in_proj_qkv" + tool.PEFT_LORA_SUFFIX_B],
-            2.0,
+        # LoRA targets pass through as base tensors, bit-exact and untouched.
+        target = "model.language_model.layers.0.linear_attn.in_proj_qkv.weight"
+        assert torch.equal(f.get_tensor(target), original.get_tensor(target))
+        assert (
+            tensor_map(manifest)[(tool.BACKBONE_FILE, target)]["component"] == "backbone"
         )
-        assert torch.equal(merged, expected)
-        assert not torch.equal(merged, base["model.language_model.layers.0.linear_attn.in_proj_qkv.weight"])
         # Untouched backbone tensors pass through bit-exactly.
         assert torch.equal(
             f.get_tensor("mtp.fc.weight"), original.get_tensor("mtp.fc.weight")
@@ -461,6 +496,20 @@ def test_run_export_tiny_fixture_contract(tmp_path):
             f.get_tensor("model.visual.merger.linear_fc1.weight"),
             checkpoint["backbone.visual.merger.linear_fc1.weight"],
         )
+    # The adapters ride in their own file, FP32 under their PEFT key names.
+    with safe_open(out / tool.LORA_FILE, framework="pt") as f:
+        keys = sorted(f.keys())
+        assert keys == sorted(
+            key
+            for pair in tool.classify_checkpoint_weights(
+                sorted(checkpoint)
+            ).lora.values()
+            for key in pair
+        )
+        for key in keys:
+            tensor = f.get_tensor(key)
+            assert tensor.dtype == torch.float32
+            assert torch.equal(tensor, checkpoint[key])
     with safe_open(out / tool.HEAD_FILE, framework="pt") as f:
         assert torch.equal(f.get_tensor("head.decision.weight"), checkpoint["head.decision.weight"])
         assert f.get_tensor("head.decision.weight").dtype == torch.float32
@@ -474,7 +523,10 @@ def test_run_export_is_deterministic_and_path_independent(tmp_path):
     first_out, second_out = tmp_path / "export-1", tmp_path / "export-2"
     run_tiny_export(first_out, tmp_path / "in-a")
     run_tiny_export(second_out, tmp_path / "in-b-different-name")
-    for name in ("model.safetensors", "head.safetensors", "config.json", "valen_export.json"):
+    for name in (
+        "model.safetensors", "lora.safetensors", "head.safetensors", "config.json",
+        "valen_export.json",
+    ):
         assert (first_out / name).read_bytes() == (second_out / name).read_bytes(), name
     # No absolute paths leak into the manifest.
     manifest_text = (first_out / tool.MANIFEST_FILE).read_text(encoding="utf-8")
@@ -512,7 +564,7 @@ def test_run_export_failure_leaves_no_partial_output(tmp_path, monkeypatch):
             base_file,
             out,
             sources=TINY_SOURCES,
-            merge_config=TINY_MERGE,
+            lora_config=TINY_LORA,
             head_config=TINY_HEAD,
             expected=TINY_INVENTORY,
             base_config_path=config_file,
@@ -546,7 +598,7 @@ def test_run_export_failure_cleans_preexisting_empty_output(tmp_path, monkeypatc
             base_file,
             out,
             sources=TINY_SOURCES,
-            merge_config=TINY_MERGE,
+            lora_config=TINY_LORA,
             head_config=TINY_HEAD,
             expected=TINY_INVENTORY,
             base_config_path=config_file,
@@ -573,7 +625,7 @@ def test_run_export_rejects_unexpected_fp32_base_tensor(tmp_path):
             directory / "base.safetensors",
             tmp_path / "out",
             sources=TINY_SOURCES,
-            merge_config=TINY_MERGE,
+            lora_config=TINY_LORA,
             head_config=TINY_HEAD,
             expected=dict(TINY_INVENTORY, base_fp32_tensors=3),
             base_config_path=directory / "config.json",
@@ -595,7 +647,7 @@ def test_run_export_rejects_lora_shape_mismatch(tmp_path):
             base_file,
             tmp_path / "out",
             sources=TINY_SOURCES,
-            merge_config=TINY_MERGE,
+            lora_config=TINY_LORA,
             head_config=TINY_HEAD,
             expected=TINY_INVENTORY,
             base_config_path=config_file,
@@ -612,7 +664,7 @@ def test_run_export_rejects_head_config_mismatch(tmp_path):
             base_file,
             tmp_path / "out",
             sources=TINY_SOURCES,
-            merge_config=TINY_MERGE,
+            lora_config=TINY_LORA,
             head_config=dict(TINY_HEAD, projection_dim=5),
             expected=TINY_INVENTORY,
             base_config_path=config_file,
@@ -657,12 +709,15 @@ def test_validate_export_detects_tampered_bytes(tmp_path):
 
     out = tmp_path / "export"
     run_tiny_export(out, tmp_path / "in-a")
-    target = out / tool.BACKBONE_FILE
-    data = bytearray(target.read_bytes())
-    data[-1] ^= 0xFF
-    target.write_bytes(bytes(data))
-    with pytest.raises(ValueError, match="sha256"):
-        tool.validate_export(out)
+    for target_name in (tool.BACKBONE_FILE, tool.LORA_FILE):
+        target = out / target_name
+        data = bytearray(target.read_bytes())
+        data[-1] ^= 0xFF
+        target.write_bytes(bytes(data))
+        with pytest.raises(ValueError, match="sha256"):
+            tool.validate_export(out)
+        data[-1] ^= 0xFF
+        target.write_bytes(bytes(data))
 
 
 def test_validate_export_detects_manifest_tensor_removal(tmp_path):
@@ -671,12 +726,17 @@ def test_validate_export_detects_manifest_tensor_removal(tmp_path):
     out = tmp_path / "export"
     run_tiny_export(out, tmp_path / "in-a")
 
-    def drop(manifest):
-        # tensors are sorted by (file, name); mtp.fc.weight is the last entry.
-        manifest["tensors"] = manifest["tensors"][:-1]
+    # Removing a lora.safetensors entry leaves an unlisted tensor on disk.
+    def drop_one(manifest):
+        manifest["tensors"] = [
+            entry
+            for entry in manifest["tensors"]
+            if entry["name"]
+            != tool.PEFT_LANGUAGE_PREFIX + "layers.0.mlp.gate_proj" + tool.PEFT_LORA_SUFFIX_A
+        ]
 
-    rewrite_manifest(out, drop)
-    with pytest.raises(ValueError, match="mtp.fc.weight"):
+    rewrite_manifest(out, drop_one)
+    with pytest.raises(ValueError, match="unlisted tensor"):
         tool.validate_export(out)
 
 
@@ -708,6 +768,35 @@ def test_validate_export_detects_head_config_drift(tmp_path):
         tool.validate_export(out)
 
 
+def test_validate_export_detects_lora_block_drift(tmp_path):
+    import pytest
+
+    rounds = iter((1, 2, 3))
+
+    def check(mutation, pattern):
+        out = tmp_path / f"export-{next(rounds)}"
+        run_tiny_export(out, tmp_path / f"in-{out.name}")
+        rewrite_manifest(out, mutation)
+        with pytest.raises(ValueError, match=pattern):
+            tool.validate_export(out)
+
+    def wrong_keys(manifest):
+        manifest["lora"]["keys"] = 5
+
+    check(wrong_keys, "lora block records")
+
+    def wrong_scaling(manifest):
+        manifest["lora"]["scaling"] = 3.0
+
+    check(wrong_scaling, "lora scaling is not alpha / rank")
+
+    def wrong_rank(manifest):
+        manifest["lora"]["rank"] = 2
+        manifest["lora"]["alpha"] = 4
+
+    check(wrong_rank, "contradicts the declared rank")
+
+
 def test_validate_export_detects_extra_files_and_forgotten_entries(tmp_path):
     import pytest
 
@@ -719,15 +808,15 @@ def test_validate_export_detects_extra_files_and_forgotten_entries(tmp_path):
     (out / "surprise.bin").unlink()
 
     def drop_file_record(manifest):
-        del manifest["files"][tool.HEAD_FILE]
+        del manifest["files"][tool.LORA_FILE]
 
     rewrite_manifest(out, drop_file_record)
-    with pytest.raises(ValueError, match="head.safetensors"):
+    with pytest.raises(ValueError, match="lora.safetensors"):
         tool.validate_export(out)
 
 
 def test_validate_export_rejects_extra_directories(tmp_path):
-    """The "exactly four files" audit must reject any unexpected entry, not
+    """The "exactly five files" audit must reject any unexpected entry, not
     only unexpected regular files — otherwise a stray subdirectory passes."""
 
     import pytest
@@ -940,24 +1029,32 @@ def test_real_artifact_export_is_deterministic(tmp_path):
         runs.append((out, manifest))
 
     (first, manifest_one), (second, manifest_two) = runs
-    for name in (tool.BACKBONE_FILE, tool.HEAD_FILE, "config.json", tool.MANIFEST_FILE):
+    for name in (
+        tool.BACKBONE_FILE, tool.LORA_FILE, tool.HEAD_FILE, "config.json",
+        tool.MANIFEST_FILE,
+    ):
         assert (first / name).read_bytes() == (second / name).read_bytes(), name
 
     # The pinned inventory, end to end.
     counts = {}
     for entry in manifest_one["tensors"]:
         counts[entry["component"]] = counts.get(entry["component"], 0) + 1
-    # 632 base tensors: 186 merged, 48 vision-top and 6 merger replaced,
-    # 392 passing through (36 of them downcast from fp32).
+    # 632 base tensors: 48 vision-top and 6 merger replaced, the remaining
+    # 578 passing through verbatim (36 of them downcast from fp32) — the
+    # 186 LoRA targets among them, untouched.
     assert counts == {
-        "backbone": 392,
-        "lora-merged": 186,
+        "backbone": 578,
+        "lora": 372,
         "vision-top": 48,
         "merger": 6,
         "decision-head": 2,
     }
     assert len(manifest_one["downcasts"]) == 36
-    assert manifest_one["merge"]["scaling"] == 2.0
+    lora = manifest_one["lora"]
+    assert lora["rank"] == 32 and lora["alpha"] == 64
+    assert lora["scaling"] == 2.0
+    assert lora["targets"] == 186 and lora["keys"] == 372
+    assert lora["dtype"] == "float32"
     assert manifest_one["head"]["projection_dim"] == 256
     assert manifest_one["head"]["hidden_size"] == 2048
     assert manifest_one["sources"]["checkpoint"]["sha256"] == (
