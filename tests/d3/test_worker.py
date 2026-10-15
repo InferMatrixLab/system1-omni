@@ -435,6 +435,8 @@ def test_decide_refuses_media_a_text_only_checkpoint_cannot_read():
     with pytest.raises(RequestError) as excinfo:
         decide(json.dumps(value).encode("utf-8"), executor)
     assert str(excinfo.value) == "This model does not read videos."
+    assert executor.loaded_images == [list(value["images"])]
+    assert executor.loaded_videos == []
     assert executor.prepare_calls == []
 
 
