@@ -85,7 +85,6 @@ def main() -> None:
             pass
         else:
             check(f"rejects {bad!r}", False)
-            bad = None
     check("rejects non-PNG/JPEG data URLs", True)
 
     # 3. Reference record builders.
@@ -432,6 +431,28 @@ def main() -> None:
         not ok
         and "decision agreement: FAIL" in "\n".join(lines)
         and "answer type 'choice' != requested 'score'" in "\n".join(lines),
+        "\n".join(lines),
+    )
+
+    # A synthetic score reference without a reference confidence falls back
+    # to the worker's score concentration formula (0.4 here), not the choice
+    # formula (0.55) that would fail the confidence tolerance.
+    synthetic_score = {
+        "keys": {"grade": ["0", "1", "2"]},
+        "probabilities": {"grade": [0.7, 0.2, 0.1]},
+        "answers": {"grade": {"type": "score", "score": 0.4, "legend": legend}},
+        "logical_tokens": 17,
+        "compute_tokens": 51,
+    }
+    lines, ok = tool.compare_case(
+        "score",
+        worker_response({"grade": score_answer(0.4, legend, 0.4)}, compute_tokens=51),
+        synthetic_score,
+        {"grade": "score"},
+    )
+    check(
+        "synthetic score without confidence uses the score formula",
+        ok and "confidence tolerance <= 1e-06: PASS" in "\n".join(lines),
         "\n".join(lines),
     )
 

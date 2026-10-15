@@ -177,6 +177,16 @@ def reference_confidence(probabilities):
     return max(0.0, (max(probabilities) - 1 / count) / (1 - 1 / count))
 
 
+def reference_score_confidence(probabilities):
+    """Mirror the worker's score concentration formula (see postprocess.py)."""
+
+    mode = max(range(len(probabilities)), key=probabilities.__getitem__)
+    count = len(probabilities)
+    distance = sum(p * abs(i - mode) for i, p in enumerate(probabilities))
+    uniform_mad = sum(abs(i - (count - 1) / 2) for i in range(count)) / count
+    return max(0.0, 1.0 - distance / uniform_mad)
+
+
 def compare_case(
     name, worker_response, reference, expected_types, tolerance=PROBABILITY_TOLERANCE
 ):
@@ -255,7 +265,9 @@ def compare_case(
             if ref_answer is not None and "confidence" in ref_answer:
                 ref_confidence = ref_answer["confidence"]
             else:
-                ref_confidence = reference_confidence(ref_probs)
+                # The reference score answer carries no confidence; the worker
+                # exposes Valen's score concentration formula.
+                ref_confidence = reference_score_confidence(ref_probs)
             max_conf_delta = max(max_conf_delta, abs(answer["confidence"] - ref_confidence))
         else:
             decision = ref_keys[max(range(len(ref_probs)), key=ref_probs.__getitem__)]
