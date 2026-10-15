@@ -871,6 +871,19 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
+def _pinned_checkpoint_sha256():
+    """The worker's unconditional checkpoint pin — the load's trust anchor.
+
+    training_metadata.json ships inside the directory it describes, so it
+    is a consistency record, not a trust anchor; the exporter therefore
+    enforces the worker's own pinned digest before the pickle is loaded,
+    exactly as the worker does."""
+
+    from models.valen.engine import CHECKPOINT_SHA256
+
+    return CHECKPOINT_SHA256
+
+
 def checkpoint_revision(checkpoint_dir):
     """The HF revision the Preview directory was pinned to, if recorded.
 
@@ -907,11 +920,12 @@ def base_weights_file(base_dir):
 def export(checkpoint_dir, base_dir, out_dir):
     """Export the pinned checkpoint + base into ``out_dir`` (must not exist).
 
-    Enforces the artifact-internal pins before writing anything: the
-    checkpoint digest against training_metadata.json, the base weights
-    digest against both valen_manifest.json and the checkpoint's own
-    base_manifest, and the revision agreement between them. Returns the
-    validated manifest.
+    Enforces the pins before writing anything: the checkpoint digest
+    against the worker's pinned CHECKPOINT_SHA256 (the trust anchor) and
+    the training pipeline's training_metadata.json record, the base
+    weights digest against both valen_manifest.json and the checkpoint's
+    own base_manifest, and the revision agreement between them. Returns
+    the validated manifest.
     """
 
     checkpoint_dir = Path(checkpoint_dir)
@@ -919,12 +933,18 @@ def export(checkpoint_dir, base_dir, out_dir):
 
     checkpoint_path = checkpoint_dir / CHECKPOINT_FILE
     checkpoint_sha = sha256_file(checkpoint_path)
+    pinned_sha = _pinned_checkpoint_sha256()
+    if checkpoint_sha != pinned_sha:
+        raise ValueError(
+            f"checkpoint sha256 {checkpoint_sha} != the pinned "
+            f"Valen-Preview-0923 digest {pinned_sha}"
+        )
     metadata_path = checkpoint_dir / TRAINING_METADATA_FILE
     if not metadata_path.is_file():
         raise ValueError(
             f"checkpoint directory {checkpoint_dir} is missing "
-            f"{TRAINING_METADATA_FILE}: the checkpoint digest cannot be pinned "
-            "before the pickle is unpickled (the worker pins unconditionally)"
+            f"{TRAINING_METADATA_FILE}: the training pipeline's digest record "
+            "must also agree before the pickle is loaded"
         )
     declared = json.loads(metadata_path.read_text(encoding="utf-8"))["checkpoint_sha256"]
     if declared != checkpoint_sha:

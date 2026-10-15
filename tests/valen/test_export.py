@@ -897,8 +897,14 @@ def tiny_pin_base_dir(directory):
     return directory
 
 
-def tiny_pin_checkpoint(directory, *, base_manifest=None, checkpoint_sha=None):
-    """Save a miniature loadable checkpoint.pt plus its training_metadata."""
+def tiny_pin_checkpoint(
+    directory, *, base_manifest=None, checkpoint_sha=None, monkeypatch=None
+):
+    """Save a miniature loadable checkpoint.pt plus its training_metadata.
+
+    With a monkeypatch handle the fixture also points the exporter's
+    worker-pin seam at the tiny file's real digest, so the synthetic bytes
+    pass the pinned-digest gate and the remaining pin checks stay testable."""
 
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -926,37 +932,60 @@ def tiny_pin_checkpoint(directory, *, base_manifest=None, checkpoint_sha=None):
     (directory / tool.TRAINING_METADATA_FILE).write_text(
         json.dumps({"checkpoint_sha256": checkpoint_sha or real_sha}), encoding="utf-8"
     )
+    if monkeypatch is not None:
+        monkeypatch.setattr(tool, "_pinned_checkpoint_sha256", lambda: real_sha)
     return directory, real_sha
 
 
-def test_export_requires_training_metadata_pin(tmp_path):
+def test_export_rejects_checkpoint_below_the_worker_pin(tmp_path):
+    """The exporter must enforce the worker's pinned digest before the
+    pickle is ever loaded: training_metadata.json lives beside the file it
+    describes, so a directory that controls one controls both — only the
+    hard-coded worker pin is a trust anchor (the P1 the review bot raised)."""
+
+    import pytest
+
+    checkpoint = tmp_path / "ckpt"
+    checkpoint.mkdir()
+    (checkpoint / tool.CHECKPOINT_FILE).write_bytes(b"not the pinned checkpoint")
+    with pytest.raises(ValueError, match="pinned Valen-Preview-0923 digest"):
+        tool.export(checkpoint, tiny_pin_base_dir(tmp_path / "base"), tmp_path / "out")
+
+
+def test_export_requires_training_metadata_pin(tmp_path, monkeypatch):
     """A checkpoint directory without training_metadata.json must be rejected:
     the digest pin has to be verified before the pickle is ever unpickled
     (the worker precedent: src/models/valen/engine.py pins unconditionally)."""
 
     import pytest
 
-    checkpoint, _ = tiny_pin_checkpoint(tmp_path / "ckpt")
+    checkpoint, _ = tiny_pin_checkpoint(
+        tmp_path / "ckpt", monkeypatch=monkeypatch
+    )
     (checkpoint / tool.TRAINING_METADATA_FILE).unlink()
     with pytest.raises(ValueError, match="training_metadata.json"):
         tool.export(checkpoint, tiny_pin_base_dir(tmp_path / "base"), tmp_path / "out")
 
 
-def test_export_rejects_checkpoint_sha_mismatch(tmp_path):
+def test_export_rejects_checkpoint_sha_mismatch(tmp_path, monkeypatch):
     import pytest
 
-    checkpoint, _ = tiny_pin_checkpoint(tmp_path / "ckpt", checkpoint_sha="00" * 32)
+    checkpoint, _ = tiny_pin_checkpoint(
+        tmp_path / "ckpt", checkpoint_sha="00" * 32, monkeypatch=monkeypatch
+    )
     with pytest.raises(ValueError, match="training_metadata"):
         tool.export(checkpoint, tiny_pin_base_dir(tmp_path / "base"), tmp_path / "out")
 
 
-def test_export_requires_valen_manifest_base_digest(tmp_path):
+def test_export_requires_valen_manifest_base_digest(tmp_path, monkeypatch):
     """valen_manifest.json must declare the base weights digest; a missing
     declaration is a pin bypass, not a pass."""
 
     import pytest
 
-    checkpoint, _ = tiny_pin_checkpoint(tmp_path / "ckpt")
+    checkpoint, _ = tiny_pin_checkpoint(
+        tmp_path / "ckpt", monkeypatch=monkeypatch
+    )
     base = tiny_pin_base_dir(tmp_path / "base")
     manifest = json.loads((base / tool.BASE_MANIFEST_FILE).read_text(encoding="utf-8"))
     del manifest["weight_sha256"]
@@ -965,32 +994,35 @@ def test_export_requires_valen_manifest_base_digest(tmp_path):
         tool.export(checkpoint, base, tmp_path / "out")
 
 
-def test_export_requires_checkpoint_base_manifest_digest(tmp_path):
+def test_export_requires_checkpoint_base_manifest_digest(tmp_path, monkeypatch):
     """The checkpoint's own base_manifest must declare the base weights digest
     too; absence must fail the pin instead of skipping half of it."""
 
     import pytest
 
     checkpoint, _ = tiny_pin_checkpoint(
-        tmp_path / "ckpt", base_manifest={"revision": "badbee"}
+        tmp_path / "ckpt",
+        base_manifest={"revision": "badbee"},
+        monkeypatch=monkeypatch,
     )
     base = tiny_pin_base_dir(tmp_path / "base")
     with pytest.raises(ValueError, match="checkpoint base_manifest"):
         tool.export(checkpoint, base, tmp_path / "out")
 
 
-def test_export_rejects_declared_base_digest_mismatch(tmp_path):
+def test_export_rejects_declared_base_digest_mismatch(tmp_path, monkeypatch):
     import pytest
 
     checkpoint, _ = tiny_pin_checkpoint(
         tmp_path / "ckpt",
         base_manifest={"revision": "badbee", "weight_sha256": {"wrong.safetensors": "ff" * 32}},
+        monkeypatch=monkeypatch,
     )
     with pytest.raises(ValueError, match="checkpoint base_manifest"):
         tool.export(checkpoint, tiny_pin_base_dir(tmp_path / "base"), tmp_path / "out")
 
 
-def test_export_pin_stage_passes_on_consistent_pins(tmp_path):
+def test_export_pin_stage_passes_on_consistent_pins(tmp_path, monkeypatch):
     """Sanity: with every pin present and consistent, the pin stage completes
     and the run proceeds into the inventory check (the tiny payload cannot
     satisfy the pinned 428-tensor inventory)."""
@@ -1004,6 +1036,7 @@ def test_export_pin_stage_passes_on_consistent_pins(tmp_path):
     checkpoint, _ = tiny_pin_checkpoint(
         tmp_path / "ckpt",
         base_manifest={"revision": "badbee", "weight_sha256": declared},
+        monkeypatch=monkeypatch,
     )
     with pytest.raises(ValueError, match="inventory"):
         tool.export(checkpoint, base, tmp_path / "out")
