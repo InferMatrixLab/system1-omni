@@ -172,8 +172,9 @@ the log (the exception type only).
 ## Checkpoint export
 
 The pinned checkpoint and base also export to a native-loadable
-safetensors artifact set — LoRA merged, vision-top and merger replaced,
-FP32 decision head — with every transformation recorded in a JSON
+safetensors artifact set — the language LoRA served separately as unmerged
+FP32 adapters, vision-top and merger replaced, FP32 decision head — with
+every transformation recorded in a JSON
 manifest: see [recipe/valen/export.md](../../../recipe/valen/export.md).
 Consuming that export does not change this worker.
 

@@ -33,12 +33,13 @@ below the ~4.5 GiB artifact size. Expected console output:
 
 ~~~text
 exported weights/valen-export
-  backbone: 392 tensors
+  backbone: 578 tensors
   decision-head: 2 tensors
-  lora-merged: 186 tensors
+  lora: 372 tensors
   merger: 6 tensors
   vision-top: 48 tensors
   downcasts: 36 fp32 -> bf16
+  lora: 372 unmerged fp32 keys over 186 targets
   manifest: weights/valen-export/valen_export.json
 ~~~
 
@@ -51,31 +52,33 @@ fails loudly instead of exporting the wrong weights.
 
 ## The artifact set
 
-Four files, nothing else:
+Five files, nothing else:
 
 | File | Contents |
 | --- | --- |
-| `model.safetensors` | The backbone in the base's own key layout (`model.language_model.*` / `model.visual.*`), BF16 only: 632 base tensors with the language LoRA merged (186), the trained vision-top blocks 20–23 and the merger substituted as plain replacements (48 + 6), the remaining 392 passing through (36 of them downcast from FP32). |
+| `model.safetensors` | The backbone in the base's own key layout (`model.language_model.*` / `model.visual.*`), BF16 only: the base's 632 tensors with the trained vision-top blocks 20–23 and the merger substituted as plain replacements (48 + 6), the remaining 578 passing through verbatim (36 of them downcast from FP32). The 186 language LoRA targets are base tensors here, untouched. |
+| `lora.safetensors` | The language LoRA, served unmerged: 372 FP32 tensors under their PEFT key names, verbatim from the checkpoint. |
 | `head.safetensors` | The decision head: two FP32 matrices `head.decision.weight` and `head.candidate.weight`, no bias. |
 | `config.json` | The base config copied verbatim, so the reference builder loads the export unchanged. |
 | `valen_export.json` | The manifest (below). |
 
-Inventory, totaling 634 manifest tensor records: 392 `backbone`, 186
-`lora-merged`, 48 `vision-top`, 6 `merger`, 2 `decision-head`. The
-vision-top blocks and merger land in the base's own `model.visual.*`
-layout — same key tails and shapes as the base snapshot — so they are
-drop-in replacements.
+Inventory, totaling 1006 manifest tensor records: 578 `backbone`, 372
+`lora`, 48 `vision-top`, 6 `merger`, 2 `decision-head`. The vision-top
+blocks and merger land in the base's own `model.visual.*` layout — same
+key tails and shapes as the base snapshot — so they are drop-in
+replacements.
 
 ## The manifest
 
-`valen_export.json` is format `valen-checkpoint-export/1` and is the
+`valen_export.json` is format `valen-checkpoint-export/2` and is the
 contract for auditing the export without the reference code. Its
 top-level structure:
 
 ~~~text
-format            "valen-checkpoint-export/1"
+format            "valen-checkpoint-export/2"
 sources           pinned checkpoint and base revisions + SHA-256s, tool versions
-merge             the merge decision, formula, scaling, counts, fallback clause
+lora              the adapter file, dtype, rank/alpha/scaling, target and key
+                  counts, and the declared application semantics
 downcasts         the names of every FP32 -> BF16 downcast tensor
 head              head file, dtype, projection_dim, hidden_size, formulas
 tensors           per-tensor name/shape/dtype/component/source/file records
@@ -87,27 +90,35 @@ parity_slot_shape the documented shape of the parity record
 
 `export_checkpoint.validate_export` cross-checks a finished export
 against its manifest — file digests, tensor inventory against the
-safetensors headers, downcast bookkeeping, head config — reading headers
-and digests only, so it also runs cheaply against the multi-GiB real
-artifact set.
+safetensors headers, downcast bookkeeping, head config, and the adapter
+inventory (every `lora.safetensors` key an FP32 tensor that maps onto a
+listed backbone tensor, one A and one B per target, at the declared rank)
+— reading headers and digests only, so it also runs cheaply against the
+multi-GiB real artifact set.
 
-## The merge decision
+## The LoRA adapters
 
-The export merges the language LoRA into the backbone rather than
-carrying adapters separately, because the native text path loads merged
-weights only. The merge is `bf16(fp32(W) + 2·(B@A))` per targeted weight:
-the delta `scaling · (B @ A)` is computed in FP32, added to the
-FP32-upcast base weight, and the sum is rounded to BF16 exactly once —
-bit-equal to peft 0.18.1's `Linear.merge` at the reference's cast
-boundaries. The pinned config's scaling is α/r = 64/32 = 2.0 over 372
-LoRA keys targeting 186 language linears.
+The export serves the language LoRA separately and unmerged: the 372 FP32
+adapter tensors ride in `lora.safetensors` under their PEFT key names
+(`backbone.language_model.base_model.model.<module>.lora_A.default.weight`
+and the `lora_B` twins), verbatim from the checkpoint, and
+`model.safetensors` carries the base weights of the 186 targeted linears
+untouched. The pinned config is rank 32, alpha 64, scaling α/r = 64/32 =
+2.0.
 
-The fallback, recorded in the manifest's merge block, is to export the
-FP32 LoRA separately and serve unmerged — the only path that meets the
-reference-serving tolerance. It is not implemented; the merged artifact
-set keeps exact discrete answers and carries `parity.status = "failed"`
-in `valen_export.json` (per-case deltas, device, tolerances and the drift
-aggregate are recorded there and in [reference.md](reference.md)).
+The application semantics a consumer must implement, recorded verbatim in
+the manifest's `lora` block: per targeted linear,
+`y = bf16(fp32(bf16(x @ W.t())) + scaling * ((x.float() @ A.t()) @ B.t()))`
+— the base GEMM runs in BF16, the LoRA delta is computed in FP32 on the
+activations and added to the upcast base output, and the sum is rounded
+to BF16 exactly once. These are the unmerged peft 0.18.1 `Linear.forward`
+semantics with the adapters kept FP32 at runtime — the same boundaries
+the pinned reference serves with, and what
+`export_checkpoint.unmerged_lora_output` computes (tested bit-equal
+against the installed peft). Merging the adapters into the base weights
+instead — `bf16(fp32(W) + 2·(B@A))` — changes the computed outputs
+relative to the trained artifact's unmerged semantics, which is why the
+export does not do it.
 
 ## The FP32 downcasts
 
@@ -139,12 +150,19 @@ full:
 ~~~text
 backbone: Qwen3_5ForConditionalGeneration.from_pretrained(out, dtype=bf16,
           attn_implementation='eager', local_files_only=True).model
+lora:     wrap backbone.language_model in peft get_peft_model(LoraConfig(r=32,
+          lora_alpha=64, lora_dropout=0, target_modules=<every language
+          Linear>, bias='none')), load lora.safetensors' tensors by key and
+          keep the adapters fp32 at runtime (the application semantics
+          recorded in the lora block)
 head:     head.safetensors: DecisionHead(hidden_size=2048,
           projection_dim=256), fp32, no bias
 ~~~
 
 The copied `config.json` makes the `from_pretrained` call work against
-the export directory directly; the head is rebuilt from its two matrices
+the export directory directly; the LoRA is re-applied exactly the way the
+pinned reference builds it (the same peft wrap at the recorded rank and
+alpha, adapters kept FP32), and the head is rebuilt from its two matrices
 and recorded dimensions. Nothing else is needed to reconstruct the model.
 
 ## Pins and licenses
@@ -165,7 +183,7 @@ set inherits those terms.
 
 Whether the exported stack reproduces the original checkpoint's answers
 is the parity gate's question, not this document's claim: the verdict —
-numbers, device, tolerances, merge drift — lives in the manifest's
+numbers, device, tolerances — lives in the manifest's
 `parity` slot (left `null` by the export, shaped by
 `parity_slot_shape`) and in the evidence blocks of
 [reference.md](reference.md), where the parity run is recorded. Consult
@@ -184,7 +202,7 @@ PYTHONPATH=src .venv/bin/python -m pytest tests/valen -q
 python recipe/valen/test_export_reference.py
 ~~~
 
-The first is the CPU-only suite (105 tests passed, 2 artifact-gated skips
+The first is the CPU-only suite (101 tests passed, 2 artifact-gated skips
 at the time of writing). The second chains that suite's export battery plus
 the env-gated real-artifact determinism gate — set `VALEN_CKPT` and
 `VALEN_BASE` to run it; it exports twice and compares every byte — and,
