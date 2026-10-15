@@ -178,7 +178,7 @@ pinned runtime for text, image and video state:
 | CLM-v0.1-8B | [External worker with a CPU stub encoder](recipe/clm/README.md); contract checks only, real Qwen3-8B decisions unverified by this recipe |
 | LFM2.5-350M | [Transformers worker](recipe/lfm2/README.md); text state and independent choice questions |
 | OmniJev-4B v1.1 | [Checkpoint export and CPU contract](recipe/omnijev/README.md) only; the native worker is in progress ([#114](https://github.com/ThinkFlowLab/system1-omni/issues/114)) |
-| D3 (Decision 3.0) | [Python reference worker](recipe/d3/reference.md) on the checkpoint's pinned runtime; `choice`/`noul`/`score` over text, image and video state; author-run on A100 for text serving (media evidence pending, see the integration PR) |
+| D3 (Decision 3.0) | [Python reference worker](recipe/d3/reference.md) on the checkpoint's pinned runtime; `choice`/`noul`/`score` over text, image and video state; author-run on A100 for text and media serving (see the integration and media PRs) |
 
 [Supported models and hardware](docs/supported-models.md) lists the devices
 and where each worker has been run.
