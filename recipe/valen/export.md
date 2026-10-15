@@ -5,8 +5,8 @@ base into a safetensors artifact set that any consumer — native or
 otherwise — can load without the training-framework pickle or the reference
 Python code. One deterministic command performs every transformation and
 records each one in a JSON manifest, so the artifact set can be audited on
-its own. It implements spec 02 (checkpoint export with parity evidence);
-serving the export is spec 03 and out of scope here.
+its own. Building, validating and parity-checking the artifact set is this
+recipe's scope; serving from it is the consumer's side.
 
 The export complements the
 [reference worker recipe](reference.md): the worker serves through the
@@ -103,13 +103,11 @@ boundaries. The pinned config's scaling is α/r = 64/32 = 2.0 over 372
 LoRA keys targeting 186 language linears.
 
 The fallback, recorded in the manifest's merge block, is to export the
-FP32 LoRA separately and serve unmerged (spec 02, user story 9). The
-parity gate has since failed on the pinned artifacts — the worst
-per-case probability delta is 1.7e-2 against the 1e-6 tolerance; the
-verdict and its numbers are recorded in
-[reference.md](reference.md) — so whether that fallback should be
-implemented is an open decision for the spec owner (tracked locally as
-decision ticket E4). This document does not presuppose its outcome.
+FP32 LoRA separately and serve unmerged — the only path that meets the
+reference-serving tolerance. It is not implemented; the merged artifact
+set keeps exact discrete answers and carries `parity.status = "failed"`
+in `valen_export.json` (per-case deltas, device, tolerances and the drift
+aggregate are recorded there and in [reference.md](reference.md)).
 
 ## The FP32 downcasts
 

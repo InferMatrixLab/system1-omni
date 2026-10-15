@@ -1,11 +1,11 @@
-"""Export-tool tests for recipe/valen/export_checkpoint.py (spec 02, E1).
+"""Export-tool tests for recipe/valen/export_checkpoint.py.
 
 CPU-only checks of the export's observable contract: the LoRA merge and
 FP32->BF16 downcast semantics on synthetic tensors (against the installed
 PEFT as the independent reference), checkpoint-key classification, and the
 manifest/artifact consistency on a tiny synthetic fixture. The full
 determinism run against the real pinned artifacts is env-gated on
-VALEN_CKPT / VALEN_BASE, following the CUA_S1_BASE precedent.
+VALEN_CKPT / VALEN_BASE.
 
 PYTHONPATH=src python -m pytest tests/valen -q
 """
@@ -192,9 +192,9 @@ def test_classify_checkpoint_weights_rejects_unknown_keys():
     import pytest
 
     for key in (
-        "backbone.visual.patch_embed.proj.weight",  # frozen, never in checkpoint
-        "backbone.language_model.layers.0.mlp.down_proj.weight",  # base weight, not PEFT
-        "head.decision.bias",  # the head is bias-free
+        "backbone.visual.patch_embed.proj.weight",
+        "backbone.language_model.layers.0.mlp.down_proj.weight",
+        "head.decision.bias",
         "optimizer.steps",
     ):
         with pytest.raises(ValueError, match="unknown checkpoint weight"):

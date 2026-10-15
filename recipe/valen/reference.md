@@ -458,7 +458,7 @@ and [`example-score-request.json`](example-score-request.json) unless
 one model load. Both blocks above are verbatim output of the committed tool;
 the `noul` and `score` blocks are recorded in the integration pull request.
 
-## Export parity (spec 02)
+## Export parity
 
 The exported artifact set ([`export.md`](export.md)) was compared against the
 original pinned checkpoint stack with
@@ -519,8 +519,8 @@ identical, but the merged export's probabilities drift by 7.1e-4 (text) and
 1.7e-2 (image) — the merge drift accumulating through the 24 adapted layers,
 three orders of magnitude above the tolerance. The drift measurement itself
 is bounded at one BF16 ulp per adapted module (max ulp ratio exactly 1, ~53%
-of probe activations bit-exact), matching the research-001 per-layer
-estimate; the failure is the accumulation, not any single module.
+of probe activations bit-exact); the failure is the accumulation, not any
+single module.
 
 Control checks recorded with the run:
 
@@ -534,7 +534,7 @@ Control checks recorded with the run:
 - every exported tensor was cross-checked bit-exactly against the export
   tool's merge math on the given base and checkpoint before the drift run.
 
-Per spec 02 user story 9, the failed gate triggers the documented fallback:
+The failed gate triggers the documented fallback:
 export the FP32 LoRA separately and serve unmerged (recorded in the
 manifest's `merge.fallback`), which is the only path that meets the
 reference-serving tolerance. The merged artifact set keeps exact discrete

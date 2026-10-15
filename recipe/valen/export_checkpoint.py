@@ -4,7 +4,7 @@
 One deterministic command turns the training-framework pickle
 (``checkpoint.pt`` + the pinned Qwen3.5-2B base) into the artifact set a
 native worker can load, plus a JSON manifest recording every transformation
-performed (spec 02):
+performed:
 
 - ``model.safetensors`` — the backbone in the base's own key layout
   (``model.language_model.*`` / ``model.visual.*``, BF16 only): the language
@@ -22,7 +22,7 @@ performed (spec 02):
   component attribution (backbone / lora-merged / vision-top / merger /
   decision-head), source revisions and SHA-256s, the merge decision and
   scaling, the downcast list, the head configuration, and a ``parity`` slot
-  left ``null`` for the E2 parity gate to fill.
+  filled by ``verify_export_parity.py``.
 
 Determinism: no timestamps, no absolute paths, tensors and JSON written in
 sorted key order, single-threaded CPU math — two runs on the same inputs
@@ -55,9 +55,8 @@ BACKBONE_FILE = "model.safetensors"
 HEAD_FILE = "head.safetensors"
 MANIFEST_FILE = "valen_export.json"
 
-# Checkpoint key layout, verified in wayfinder/research/001: PEFT wraps
-# backbone.language_model, vision-top/merger tensors ride under
-# backbone.visual.*, and the decision head is head.*.
+# Checkpoint key layout: PEFT wraps backbone.language_model, vision-top and
+# merger tensors ride under backbone.visual.*, and the decision head is head.*.
 PEFT_LANGUAGE_PREFIX = "backbone.language_model.base_model.model."
 PEFT_LORA_SUFFIX_A = ".lora_A.default.weight"
 PEFT_LORA_SUFFIX_B = ".lora_B.default.weight"
@@ -76,10 +75,9 @@ COMPONENTS = (
     COMPONENT_HEAD,
 )
 
-# The pinned Preview inventory (research 001, Part 1a): 428 trainable
-# tensors decomposing as 372 LoRA keys over the 186 targeted language
-# linears, 48 vision-top block tensors, 6 merger tensors and 2 head
-# projections; the base file holds 632 tensors of which 36 are FP32.
+# The pinned Preview inventory: 428 trainable tensors (372 LoRA keys over
+# 186 targeted linears, 48 vision-top, 6 merger, 2 head); the base holds 632
+# tensors, 36 of them FP32.
 PINNED_INVENTORY = {
     "checkpoint_tensors": 428,
     "lora_keys": 372,
@@ -90,13 +88,13 @@ PINNED_INVENTORY = {
     "base_fp32_tensors": 36,
 }
 
-# Documented fallback if the E2 parity gate fails (spec 02, user story 9).
+# The fallback the manifest records for a failed parity gate.
 MERGE_FALLBACK = (
     "export the FP32 LoRA separately and serve unmerged "
-    "(spec 02 user story 9; triggered only by a failed parity gate)"
+    "(applies when the parity gate fails)"
 )
 
-# The shape of the parity slot E2 fills into the manifest (left null here).
+# The parity record's shape; the manifest ships it null until measured.
 PARITY_SLOT_SHAPE = {
     "status": "passed | failed",
     "device": "torch device string",
@@ -152,10 +150,10 @@ class Classification(NamedTuple):
     sorted key order so downstream output is deterministic.
     """
 
-    lora: dict  # base tensor name -> (a_key, b_key)
-    vision_top: list  # sorted (export_key, checkpoint_key)
-    merger: list  # sorted (export_key, checkpoint_key)
-    head: dict  # export key -> checkpoint key
+    lora: dict
+    vision_top: list
+    merger: list
+    head: dict
 
 
 _VISION_BLOCK = re.compile(r"^backbone\.visual\.blocks\.(\d+)\.(.+)$")
@@ -167,8 +165,8 @@ def classify_checkpoint_weights(keys):
 
     Rejects anything outside the pinned ``vision_top`` layout: frozen
     backbone tensors, non-PEFT language keys, head biases and unpaired or
-    non-top-4 vision adapters are all errors, because the export recipe is
-    only valid for the component inventory research 001 verified.
+    non-top-4 vision adapters are all errors — the recipe is only valid
+    for this checkpoint's verified component layout.
     """
 
     lora_a = {}
@@ -354,8 +352,8 @@ def run_export(
             (out_dir / name).unlink(missing_ok=True)
         if created:
             try:
-                out_dir.rmdir()  # empty: everything this run wrote is gone
-            except OSError:  # never mask the failure being reported
+                out_dir.rmdir()
+            except OSError:
                 pass
         raise
 
@@ -397,8 +395,7 @@ def _write_export(
             base_dtypes[name] = _READER_DTYPES[slice_.get_dtype()]
             base_shapes[name] = list(slice_.get_shape())
 
-        # Every FP32 base tensor must be a declared downcast target; anything
-        # else is a silent dtype surprise (spec 02, user story 7).
+        # Every FP32 base tensor must be a declared downcast target.
         downcasts = [name for name in base_names if base_dtypes[name] == torch.float32]
         for name in downcasts:
             if not _FP32_TENSOR.match(name):

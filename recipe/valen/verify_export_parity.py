@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prove the exported Valen artifact set answers like the original checkpoint.
 
-Spec 02's parity gate (ticket E2). Two model stacks are loaded serially —
+Two model stacks are loaded serially —
 only one lives on the GPU at a time, each in its own subprocess so the
 ~6.6 GiB of VRAM is fully released between loads:
 
@@ -27,8 +27,8 @@ The script also measures the merge drift on the real tensors: for each of
 the 186 merged keys it compares the unmerged PEFT application (base W plus
 the FP32 ``2*(B@A)`` delta on the activations, one final BF16 rounding —
 the reference's semantics) against the exported merged BF16 weight's GEMM,
-using the research-001 probe protocol (256 bf16 standard-normal rows, seed
-0, CPU single thread), and aggregates max/mean.
+with a fixed probe (256 BF16 standard-normal rows, seed 0, single-threaded
+CPU), and aggregates max/mean.
 
 Finally it fills the manifest's ``parity`` slot in
 ``weights/valen-export/valen_export.json`` with the verdict (status, device,
@@ -42,8 +42,8 @@ Usage (from the repository root, on the GPU host):
       --valen-source weights/Valen --checkpoint weights/Valen-Preview-0923 \
       --base weights/Qwen3.5-2B --export weights/valen-export --device cuda
 
-Exit status 0 means the gate passed; 1 means it failed (the spec-02
-fallback — export the FP32 LoRA separately, serve unmerged — then applies).
+Exit status 0 means the gate passed; 1 means it failed (the documented
+fallback — export the FP32 LoRA separately and serve unmerged — applies).
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import compare_reference as reference  # noqa: E402  (the recipe's fixture helpers)
-import export_checkpoint as exporter  # noqa: E402  (E1's export + validation tool)
+import export_checkpoint as exporter  # noqa: E402
 
 PROBABILITY_TOLERANCE = 1e-6
 DRIFT_ROWS = 256
@@ -70,12 +70,12 @@ PARITY_CASES = ("text", "image")
 
 
 def merge_lora_weight(base_weight, lora_a, lora_b, scaling):
-    """E1's merge math (bit-equal to peft 0.18.1's ``Linear.merge``)."""
+    """The export tool's merge math (bit-equal to peft 0.18.1's ``Linear.merge``)."""
 
     return exporter.merge_lora_weight(base_weight, lora_a, lora_b, scaling)
 
 
-# --- the drift ruler: bf16 spacing at a magnitude (research 001's ulp column) ---
+# --- the drift ruler: bf16 spacing at a magnitude ---
 
 
 def bf16_ulp_at(magnitude):
@@ -94,7 +94,7 @@ def bf16_ulp_at(magnitude):
 
 def module_output_drift(base_weight, lora_a, lora_b, merged_weight, scaling, probe):
     """Output drift of one adapted module: unmerged (PEFT, the reference)
-    vs merged (the exported BF16 weight), following research 001.
+    vs merged (the exported BF16 weight).
 
     Unmerged arm — peft 0.18.1 ``Linear.forward`` semantics: a BF16 base
     GEMM, the ``scaling * (B(A(x)))`` delta computed and added in FP32, one
@@ -107,9 +107,9 @@ def module_output_drift(base_weight, lora_a, lora_b, merged_weight, scaling, pro
 
     if base_weight.dtype != torch.bfloat16 or merged_weight.dtype != torch.bfloat16:
         raise ValueError("base and merged weights must be bf16")
-    y_base = torch.matmul(probe, base_weight.t())  # base_layer(x), BF16 GEMM
-    delta = scaling * ((probe.float() @ lora_a.t()) @ lora_b.t())  # FP32 LoRA path
-    y_unmerged = (y_base.float() + delta).to(torch.bfloat16)  # one final rounding
+    y_base = torch.matmul(probe, base_weight.t())
+    delta = scaling * ((probe.float() @ lora_a.t()) @ lora_b.t())
+    y_unmerged = (y_base.float() + delta).to(torch.bfloat16)
     y_merged = torch.matmul(probe, merged_weight.t())
 
     diff = (y_merged.float() - y_unmerged.float()).abs()
@@ -321,7 +321,8 @@ def load_exported_stack(export_dir, projection_dim, device):
     ):
         raise ValueError(f"Incomplete exported model load: {loading_info}")
     backbone = container.model
-    del container  # the generation/vocabulary layer is never executed
+    # Only container.model is served; drop the vocabulary/generation wrapper.
+    del container
     backbone.requires_grad_(False)
     model = Valen(backbone, projection_dim)
     with safe_open(Path(export_dir) / exporter.HEAD_FILE, framework="pt") as handle:
@@ -506,10 +507,10 @@ def measure_merge_drift(checkpoint_dir, base_dir, export_dir, *, rows=DRIFT_ROWS
     The unmerged arm uses the base file's BF16 weight plus the checkpoint's
     FP32 LoRA (reference semantics); the merged arm uses the tensor actually
     sitting in the exported ``model.safetensors``, cross-checked bit-exactly
-    against E1's merge math so the measurement can never run against a
-    silently different weight. Probe protocol: ``rows`` BF16 standard-normal
-    activations per module, one generator seeded once, modules in sorted
-    name order, CPU single thread (the research-001 method).
+    against the export tool's merge math so the measurement can never run
+    against a silently different weight. Probe protocol: ``rows`` BF16
+    standard-normal activations per module, one generator seeded once,
+    modules in sorted name order, CPU single thread.
     """
 
     import torch
@@ -694,7 +695,7 @@ def main(argv=None):
                 "fp32 2*(B@A) delta on activations with one final bf16 rounding "
                 "(peft 0.18.1 Linear.forward); merged = bf16 GEMM(bf16(W + 2*(B@A))) "
                 "from the export; probe {rows}x bf16 standard-normal rows, seed {seed}, "
-                "cpu single thread (wayfinder/research/001 method)"
+                "cpu single thread"
             ).format(rows=args.rows, seed=args.seed),
             "modules": aggregate["modules"],
             "aggregate": aggregate,
