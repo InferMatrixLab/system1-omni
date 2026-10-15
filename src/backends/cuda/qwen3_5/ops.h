@@ -13,7 +13,7 @@
 #include <stdint.h>
 
 // Bumped whenever the required interface below changes.
-#define CS1_ABI_VERSION 6
+#define CS1_ABI_VERSION 8
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,6 +24,9 @@ extern "C" {
 uint32_t cs1_abi_version(void);
 const char* cs1_error_string(int code);
 int cs1_set_device(int device);
+int cs1_get_device(int* device);
+// Set flag to zero, then atomically set to one if any BF16 value is non-finite.
+int cs1_bf16_finite(const void* x, size_t n, uint32_t* flag, void* stream);
 int cs1_malloc(void** ptr, size_t bytes);
 int cs1_free(void* ptr);
 int cs1_stream_create(void** stream);
