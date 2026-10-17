@@ -43,6 +43,8 @@ jobs:
       - run: python benchmarks/bench.py validate benchmarks/smoke.jsonl
       - run: python -m unittest discover -s tests/benchmarks -p 'test_*.py' -v
       - run: python -m unittest discover -s tests/jev_vl -p 'test_export_vision.py' -v
+      - name: Decider validation helpers
+        run: python -m unittest discover -s tests/decider -p 'test_*.py' -v
 
   cuda-contract:
     # The CUDA backend contract and its checker. No CUDA toolkit and no GPU: both
