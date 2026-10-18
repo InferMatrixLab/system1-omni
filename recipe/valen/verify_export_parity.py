@@ -69,9 +69,9 @@ def compare_case(case, original, exported, tolerance=PROBABILITY_TOLERANCE):
 
     Each side carries ``questions`` (per qid: candidate ``keys`` in order and
     ``probabilities``), the compiler's ``logical_tokens`` and
-    ``compute_tokens``. The gate requires the same candidate order, exact
-    answer (argmax) agreement, equal token accounting and probability deltas
-    within ``tolerance``.
+    ``compute_tokens``. The gate requires the same candidate order, one
+    probability per candidate on both sides, exact answer (argmax) agreement,
+    equal token accounting and probability deltas within ``tolerance``.
     """
 
     problems = []
@@ -89,6 +89,17 @@ def compare_case(case, original, exported, tolerance=PROBABILITY_TOLERANCE):
         if list(other["keys"]) != keys:
             problems.append(
                 f"{qid}: candidate order {list(other['keys'])} != {list(keys)}"
+            )
+            exact = False
+            continue
+        if (
+            len(record["probabilities"]) != len(keys)
+            or len(other["probabilities"]) != len(keys)
+        ):
+            problems.append(
+                f"{qid}: {len(record['probabilities'])} original and "
+                f"{len(other['probabilities'])} exported probabilities "
+                f"for {len(keys)} candidates"
             )
             exact = False
             continue

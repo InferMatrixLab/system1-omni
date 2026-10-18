@@ -68,6 +68,10 @@ blocks and merger land in the base's own `model.visual.*` layout — same
 key tails and shapes as the base snapshot — so they are drop-in
 replacements.
 
+The set deliberately carries no tokenizer or processor files: nothing
+trained depends on them, and reconstructing the full serving stack still
+reads those from the pinned base snapshot alongside the export.
+
 ## The manifest
 
 `valen_export.json` is format `valen-checkpoint-export/2` and is the
@@ -202,7 +206,7 @@ PYTHONPATH=src .venv/bin/python -m pytest tests/valen -q
 python recipe/valen/test_export_reference.py
 ~~~
 
-The first is the CPU-only suite (105 tests passed, 2 artifact-gated skips
+The first is the CPU-only suite (108 tests passed, 2 artifact-gated skips
 at the time of writing). The second chains that suite's export battery plus
 the env-gated real-artifact determinism gate — set `VALEN_CKPT` and
 `VALEN_BASE` to run it; it exports twice and compares every byte — and,
