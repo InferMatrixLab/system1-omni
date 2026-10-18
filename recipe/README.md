@@ -15,6 +15,9 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   Preview checkpoint and Qwen base, start the text-or-image `choice` worker and verify the frontend.
 - [Cua-S1 4B 0.2 native text worker](cua_s1/native.md): build the CUDA library and
   the Rust worker, export the merged weights and start the worker.
+- [Decider-2B v11 native text worker](decider/README.md): load verified pinned
+  weights, build the Rust/CUDA worker and configure optional request/token
+  capacity and HTTP deadlines.
 - [Open-Jev native text worker](open_jev/native.md): export the merged text
   backbone and trained decision head of Open-Jev-27B-v1.1 or Open-Jev-9B, then
   serve with Rust and CUDA. [Open-Jev-9B validation](open_jev/validation-9b.md)

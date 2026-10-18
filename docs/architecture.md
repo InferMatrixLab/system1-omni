@@ -18,11 +18,14 @@ uses a separate Hopper CUDA backend for one complete padded request. All three
 coordinate independent processors and executors through
 `prepare` → `execute` → `finish` and use the
 [native runtime](../src/runtime/README.md) for FIFO admission and blocking dispatch
-per loaded executor. Shared processing orchestration, batch budgets,
-compatibility grouping and dynamic batching are planned.
+per loaded executor. The [Decider native worker](../recipe/decider/README.md)
+also uses this runtime and can opt into outstanding-request and processed-token
+budgets plus HTTP request deadlines. Shared processing orchestration,
+cross-request batch assembly, compatibility grouping and dynamic batching are planned.
 
-Qwen workers compute their decision heads on the CPU after downloading the final
-hidden state. Laya computes its scorer and action head on CUDA. Its fixed-shape
+Cua-S1 and Open-Jev compute their decision heads on the CPU after downloading
+the final hidden state. Decider projects its selected LM-head rows on CUDA.
+Laya computes its scorer and action head on CUDA. Its fixed-shape
 Graph captures Encoder/Decision; gather, scorer/action head and synchronized
 readback remain outside capture. Native Metal remains planned; Python workers
 retain their documented reference/serving roles.
@@ -118,7 +121,14 @@ executor, with FIFO waiting. Engines own scheduler instances; model-specific
 execution adapters declare the unit and submit owned closures. Waiting is async,
 so queued requests do not occupy blocking threads waiting for a model lock.
 Schedulers are local to each worker/executor; this does not coordinate separate
-processes. Queue-length limits and token budgets are not implemented yet.
+processes. Workers can separately opt into the runtime's `BoundedAdmission` for
+outstanding-request and caller-defined cost budgets. Decider's HTTP adapter
+reserves requests before upload/preparation and complete prepared-row tokens
+before execution, then carries those reservations in `ExecutionContext` through
+blocking work. The worker selects configuration and the processor defines token
+cost; shared runtime primitives own capacity accounting, cancellation/deadline
+checks and FIFO execution admission. These request budgets do not add
+cross-request batching or replace the scheduler's single execution permit.
 
 - Batch only work accepted by the same loaded executor, with compatible
   checkpoint/adapter identity, device, dtype, and input layout. Models declare
