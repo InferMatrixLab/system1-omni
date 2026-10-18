@@ -46,7 +46,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import shutil
 import struct
 import sys
 from pathlib import Path
@@ -346,41 +348,44 @@ def run_export(
     ``lora_config``/``head_config``/``expected`` are validated against the
     tensors before anything is written. Returns the manifest dict.
 
-    A failed run leaves no partial output behind: every artifact this attempt
-    wrote is removed (and a directory it created is removed too), so the
-    not-empty guard never blocks a retry with the same arguments.
+    ``base_config_path`` is required: the allowed set includes ``config.json``,
+    so an export without it is one its own ``validate_export`` rejects. The
+    set is staged in a sibling directory and moved into place with a single
+    rename, so ``out_dir`` only ever holds a complete export: a failed run
+    leaves no partial output, and a run killed mid-write leaves at most the
+    staging directory behind, which the next run with the same target removes.
     """
 
+    if base_config_path is None:
+        raise ValueError(
+            "base_config_path is required: the artifact set includes config.json"
+        )
     out_dir = Path(out_dir)
     if out_dir.exists() and any(out_dir.iterdir()):
         raise ValueError(f"output directory {out_dir} already exists and is not empty")
-    created = not out_dir.exists()
-    out_dir.mkdir(parents=True, exist_ok=True)
+    staging = out_dir.with_name(out_dir.name + ".export-partial")
+    if staging.is_dir():
+        # Remains of a run killed mid-write with the same target directory.
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
     try:
-        return _write_export(
+        manifest = _write_export(
             checkpoint_weights,
             base_file,
-            out_dir,
+            staging,
             sources=sources,
             lora_config=lora_config,
             head_config=head_config,
             expected=expected,
             base_config_path=base_config_path,
         )
+        if out_dir.exists():
+            # Empty (checked above); rename replaces the directory whole.
+            out_dir.rmdir()
+        os.replace(staging, out_dir)
+        return manifest
     except BaseException:
-        for name in (
-            BACKBONE_FILE,
-            LORA_FILE,
-            HEAD_FILE,
-            MANIFEST_FILE,
-            "config.json",
-        ):
-            (out_dir / name).unlink(missing_ok=True)
-        if created:
-            try:
-                out_dir.rmdir()
-            except OSError:
-                pass
+        shutil.rmtree(staging, ignore_errors=True)
         raise
 
 

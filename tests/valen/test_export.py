@@ -570,6 +570,7 @@ def test_run_export_failure_leaves_no_partial_output(tmp_path, monkeypatch):
             base_config_path=config_file,
         )
     assert not out.exists() or not any(out.iterdir())
+    assert not (tmp_path / "export.export-partial").exists()
 
     # The same arguments now succeed into the same directory.
     monkeypatch.setattr(tool, "write_safetensors", real_write)
@@ -604,6 +605,43 @@ def test_run_export_failure_cleans_preexisting_empty_output(tmp_path, monkeypatc
             base_config_path=config_file,
         )
     assert not any(out.iterdir())
+    assert not (tmp_path / "export.export-partial").exists()
+
+
+def test_run_export_requires_base_config_path(tmp_path):
+    """run_export without the base config would write a set its own
+    validate_export rejects (the allowed set includes config.json)."""
+
+    import pytest
+
+    base_file, _ = materialize_input_dir(tmp_path / "in")
+    out = tmp_path / "export"
+    with pytest.raises(ValueError, match="base_config_path"):
+        tool.run_export(
+            tiny_checkpoint_weights(),
+            base_file,
+            out,
+            sources=TINY_SOURCES,
+            lora_config=TINY_LORA,
+            head_config=TINY_HEAD,
+            expected=TINY_INVENTORY,
+            base_config_path=None,
+        )
+    assert not out.exists()
+
+
+def test_run_export_clears_stale_staging_directory(tmp_path):
+    """A run killed mid-write (SIGKILL/OOM) can leave the staging directory
+    behind; out_dir itself is never partial, and the next run with the same
+    target clears the staging remains instead of failing."""
+
+    out = tmp_path / "export"
+    stale = tmp_path / "export.export-partial"
+    stale.mkdir()
+    (stale / "model.safetensors").write_bytes(b"partial junk")
+    run_tiny_export(out, tmp_path / "in-a")
+    assert not stale.exists()
+    assert (out / tool.MANIFEST_FILE).is_file()
 
 
 def test_run_export_rejects_unexpected_fp32_base_tensor(tmp_path):

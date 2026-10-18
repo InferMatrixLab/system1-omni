@@ -81,6 +81,19 @@ def test_compare_case_candidate_order_mismatch_fails():
     assert any("candidate order" in problem for problem in verdict["problems"])
 
 
+def test_compare_case_probability_length_mismatch_fails():
+    """A malformed stage payload with fewer probabilities than candidates
+    must fail the case, not silently truncate the delta scan."""
+
+    original = case_side([0.5159631, 0.4840369])
+    truncated = case_side([0.5159631, 0.4840369])
+    truncated["questions"]["refund"]["probabilities"] = [0.5159631]
+    verdict = tool.compare_case("text", original, truncated)
+    assert verdict["passed"] is False
+    assert verdict["exact_answer_agreement"] is False
+    assert any("probabilities" in problem for problem in verdict["problems"])
+
+
 def test_compare_case_missing_question_fails():
     original = case_side([0.5159631, 0.4840369])
     emptied = case_side([0.5159631, 0.4840369])
