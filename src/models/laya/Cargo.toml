@@ -48,3 +48,7 @@ path = "../../../tests/laya/decision.rs"
 [[test]]
 name = "batch"
 path = "../../../tests/laya/batch.rs"
+
+[[test]]
+name = "plan"
+path = "../../../tests/laya/plan.rs"
