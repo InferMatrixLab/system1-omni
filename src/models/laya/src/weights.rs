@@ -1,6 +1,7 @@
 use anyhow::{Result, ensure};
 use half::{bf16, f16};
 use memmap2::Mmap;
+use omni_modernbert::geometry;
 use safetensors::{Dtype, SafeTensors};
 use std::{fs::File, path::Path};
 
@@ -93,37 +94,21 @@ pub struct TensorSpec {
     pub shape: Vec<usize>,
 }
 pub fn checkpoint_tensors() -> Vec<TensorSpec> {
-    const D: usize = 1024;
-    let mut tensors = Vec::new();
-    let mut add = |name: &str, shape: &[usize]| {
-        tensors.push(TensorSpec {
-            name: name.into(),
-            shape: shape.into(),
-        });
+    // Encoder tensors come from the family structure; the task head keeps
+    // its own inventory.
+    let structure = omni_modernbert::gate::laya_0_3_20().structure;
+    let mut tensors: Vec<_> = geometry::encoder_tensors(&structure)
+        .into_iter()
+        .map(|(name, shape)| TensorSpec { name, shape })
+        .collect();
+    let mut add = |name: String, shape: Vec<usize>| {
+        tensors.push(TensorSpec { name, shape });
     };
-    add("encoder.embeddings.tok_embeddings.weight", &[50368, D]);
-    add("encoder.embeddings.norm.weight", &[D]);
-    add("encoder.final_norm.weight", &[D]);
-    for i in 0..28 {
-        let p = format!("encoder.layers.{i}");
-        if i > 0 {
-            add(&format!("{p}.attn_norm.weight"), &[D]);
-        }
-        add(&format!("{p}.mlp_norm.weight"), &[D]);
-        for (name, shape) in [
-            ("attn.Wqkv.weight", vec![3 * D, D]),
-            ("attn.Wo.weight", vec![D, D]),
-            ("mlp.Wi.weight", vec![5248, D]),
-            ("mlp.Wo.weight", vec![D, 2624]),
-        ] {
-            add(&format!("{p}.{name}"), &shape);
-        }
-    }
-    add("type_emb.weight", &[3, D]);
+    const D: usize = 1024;
     for i in 0..2 {
         let p = format!("head.layers.{i}");
         for n in ["norm1.weight", "norm1.bias", "norm2.weight", "norm2.bias"] {
-            add(&format!("{p}.{n}"), &[D]);
+            add(format!("{p}.{n}"), vec![D]);
         }
         for (n, rows, cols) in [
             ("self_attn.in_proj_weight", 3 * D, D),
@@ -131,7 +116,7 @@ pub fn checkpoint_tensors() -> Vec<TensorSpec> {
             ("linear1.weight", 4 * D, D),
             ("linear2.weight", D, 4 * D),
         ] {
-            add(&format!("{p}.{n}"), &[rows, cols]);
+            add(format!("{p}.{n}"), vec![rows, cols]);
         }
         for (n, len) in [
             ("self_attn.in_proj_bias", 3 * D),
@@ -139,11 +124,11 @@ pub fn checkpoint_tensors() -> Vec<TensorSpec> {
             ("linear1.bias", 4 * D),
             ("linear2.bias", D),
         ] {
-            add(&format!("{p}.{n}"), &[len]);
+            add(format!("{p}.{n}"), vec![len]);
         }
     }
     for n in ["scorer.0.weight", "scorer.0.bias"] {
-        add(n, &[D]);
+        add(n.into(), vec![D]);
     }
     for (p, n, k) in [
         ("scorer.1", D, D),
@@ -151,13 +136,13 @@ pub fn checkpoint_tensors() -> Vec<TensorSpec> {
         ("act_head.0", 256, 1028),
         ("act_head.2", 2, 256),
     ] {
-        add(&format!("{p}.weight"), &[n, k]);
-        add(&format!("{p}.bias"), &[n]);
+        add(format!("{p}.weight"), vec![n, k]);
+        add(format!("{p}.bias"), vec![n]);
     }
 
     // Laya 0.3.20 common.py registers this legacy buffer but forward does not
     // consume it. Agent decoding uses fitted config temperatures instead.
     // Keep it in the inventory for complete checkpoint accounting.
-    add("temperature", &[3]);
+    add("temperature".into(), vec![3]);
     tensors
 }

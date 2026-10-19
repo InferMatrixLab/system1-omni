@@ -1231,6 +1231,7 @@ dependencies = [
  "half",
  "memmap2",
  "omni-cuda",
+ "omni-modernbert",
  "omni-runtime",
  "safetensors 0.6.2",
  "serde",

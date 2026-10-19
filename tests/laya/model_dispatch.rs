@@ -1,5 +1,9 @@
 use super::*;
 
+fn structure() -> omni_modernbert::structure::ModernBertStructure {
+    omni_modernbert::gate::laya_0_3_20().structure
+}
+
 #[test]
 fn prepared_plan_preserves_original_launch_trace_for_all_shape_selectors() {
     let fixture = fixture::Fixture::new(&[]);
@@ -16,7 +20,7 @@ fn prepared_plan_preserves_original_launch_trace_for_all_shape_selectors() {
         let model = fixture_model_at(original_rope, fixture.path());
         for b in [1, 2, 4, 8, 16] {
             for l in [16, 512] {
-                let s = Workspace::new(&model.cuda, b, l).unwrap();
+                let s = Workspace::new(&model.cuda, b, l, &structure()).unwrap();
                 unsafe { reset() };
                 model.encode_original(&s, original_rope).unwrap();
                 let expected = unsafe { std::ffi::CStr::from_ptr(trace()) }
@@ -41,12 +45,12 @@ fn prepared_plan_preserves_original_launch_trace_for_all_shape_selectors() {
 fn missing_specialized_attention_only_rejects_its_shape() {
     let fixture = fixture::Fixture::new(&["OMIT_SPECIALIZED_ATTN"]);
     let model = fixture_model_at(false, fixture.path());
-    let short = Workspace::new(&model.cuda, 1, 16).unwrap();
+    let short = Workspace::new(&model.cuda, 1, 16, &structure()).unwrap();
     model.encode(&short).unwrap();
-    let generic_long = Workspace::new(&model.cuda, 2, 512).unwrap();
+    let generic_long = Workspace::new(&model.cuda, 2, 512, &structure()).unwrap();
     model.encode(&generic_long).unwrap();
     for b in [1, 4] {
-        let specialized = Workspace::new(&model.cuda, b, 512).unwrap();
+        let specialized = Workspace::new(&model.cuda, b, 512, &structure()).unwrap();
         assert!(
             model
                 .encode(&specialized)

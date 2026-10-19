@@ -1,20 +1,24 @@
 use omni_laya::plan::{plan_encoder, render_plan};
 
+fn laya_structure() -> omni_modernbert::structure::ModernBertStructure {
+    omni_modernbert::gate::laya_0_3_20().structure
+}
+
 #[test]
 fn encoder_plan_matches_the_recorded_sequence() {
     assert_eq!(
-        render_plan(&plan_encoder(false)),
+        render_plan(&plan_encoder(&laya_structure(), false)),
         include_str!("data/encoder-plan.txt")
     );
     assert_eq!(
-        render_plan(&plan_encoder(true)),
+        render_plan(&plan_encoder(&laya_structure(), true)),
         include_str!("data/encoder-plan-original-rope.txt")
     );
 }
 
 #[test]
 fn encoder_plan_shape_is_the_supported_profile() {
-    let plan = plan_encoder(false);
+    let plan = plan_encoder(&laya_structure(), false);
     let launches = plan
         .iter()
         .filter(|s| matches!(s, omni_laya::plan::PlannedStep::Launch { .. }))
@@ -27,7 +31,7 @@ fn encoder_plan_shape_is_the_supported_profile() {
     assert!(rendered.contains("addln x y encoder.final_norm.weight zeros.1024 y"));
     assert!(rendered.ends_with("residual x y\n"));
     // The two rope variants differ in exactly the 28 rope kernel names.
-    let original = render_plan(&plan_encoder(true));
+    let original = render_plan(&plan_encoder(&laya_structure(), true));
     let differences = rendered
         .lines()
         .zip(original.lines())

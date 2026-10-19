@@ -51,3 +51,39 @@ mod grouped;
 #[cfg(unix)]
 #[path = "original_encode.rs"]
 mod original_encode;
+
+#[test]
+fn workspace_sizes_match_the_recorded_profile_layout() {
+    let structure = gate_structure();
+    for (b, l) in [(1usize, 16usize), (1, 512), (16, 512), (4, 128)] {
+        let m = b * l;
+        let sizes = Workspace::sizes(b, l, &structure).unwrap();
+        assert_eq!(
+            sizes,
+            [
+                m * 8,
+                b * 4,
+                b * 8,
+                m * 1024 * 4,
+                m * 1024 * 2,
+                m * 1024 * 6,
+                m * 1024 * 2,
+                m * 2624 * 2,
+                m * 4096 * 2,
+                2048 * 4,
+                17 * 4,
+                2048 * 1024 * 2,
+                2048 * 1024 * 2,
+                2048 * 2,
+                16 * 1028 * 2,
+                16 * 256 * 2,
+                16 * 2 * 2,
+            ],
+            "b={b} l={l}"
+        );
+    }
+}
+
+fn gate_structure() -> omni_modernbert::structure::ModernBertStructure {
+    omni_modernbert::gate::laya_0_3_20().structure
+}
