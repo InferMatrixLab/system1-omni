@@ -1242,6 +1242,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "omni-modernbert"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+]
+
+[[package]]
 name = "omni-omnijev-native"
 version = "0.1.0"
 dependencies = [
