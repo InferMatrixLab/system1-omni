@@ -14,7 +14,7 @@ use std::ffi::c_void;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use serde_json::Value as Json;
 
 use crate::cuda::{self, DeviceBuffer, Stream, check};
@@ -48,135 +48,38 @@ pub struct Config {
 
 impl Config {
     pub fn load(dir: &Path) -> Result<Self> {
-        let path = dir.join("config.json");
-        let root: Json = serde_json::from_str(
-            &std::fs::read_to_string(&path).with_context(|| format!("{}", path.display()))?,
-        )?;
-        let c = root.get("text_config").unwrap_or(&root);
-        let int = |k: &str| {
-            c[k].as_u64()
-                .map(|v| v as usize)
-                .with_context(|| format!("config.json: `{k}` is missing"))
-        };
-        let rope = &c["rope_parameters"];
-        let partial = rope["partial_rotary_factor"]
-            .as_f64()
-            .or(c["partial_rotary_factor"].as_f64())
-            .unwrap_or(1.0);
-        let head_dim = int("head_dim")?;
-        let full_attention = c["layer_types"]
-            .as_array()
-            .context("config.json: `layer_types` is missing")?
-            .iter()
-            .map(|t| match t.as_str() {
-                Some("full_attention") => Ok(true),
-                Some("linear_attention") => Ok(false),
-                other => bail!("unknown layer type {other:?}"),
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let sections = rope
-            .get("mrope_section")
-            .cloned()
-            .unwrap_or(serde_json::json!([11, 11, 10]));
-        let sections = sections
-            .as_array()
-            .context("mrope_section must be an array")?
-            .iter()
-            .map(|v| {
-                v.as_u64()
-                    .and_then(|n| usize::try_from(n).ok())
-                    .context("mrope_section must contain integers")
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let mrope_section: [usize; 3] = sections
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("mrope_section must have three entries"))?;
-        let image_token_id = root
-            .get("image_token_id")
-            .map(|v| {
-                v.as_u64()
-                    .and_then(|id| u32::try_from(id).ok())
-                    .context("image_token_id must be a u32")
-            })
-            .transpose()?;
-        let cfg = Config {
-            hidden: int("hidden_size")?,
-            intermediate: int("intermediate_size")?,
-            eps: c["rms_norm_eps"].as_f64().context("rms_norm_eps")? as f32,
-            heads: int("num_attention_heads")?,
-            kv_heads: int("num_key_value_heads")?,
-            head_dim,
-            rotary_half: (head_dim as f64 * partial) as usize / 2,
-            rope_theta: rope["rope_theta"]
-                .as_f64()
-                .or(c["rope_theta"].as_f64())
-                .context("rope_theta")?,
-            mrope_section,
-            max_positions: int("max_position_embeddings")?,
-            image_token_id,
-            lin_k_heads: int("linear_num_key_heads")?,
-            lin_v_heads: int("linear_num_value_heads")?,
-            lin_k_dim: int("linear_key_head_dim")?,
-            lin_v_dim: int("linear_value_head_dim")?,
-            full_attention,
-        };
-        // What the kernels implement.
-        ensure!(
-            cfg.full_attention.len() == int("num_hidden_layers")?,
-            "layer_types does not match num_hidden_layers"
-        );
-        ensure!(c["hidden_act"] == "silu", "hidden_act is not silu");
-        ensure!(
-            c["attn_output_gate"].as_bool().unwrap_or(true),
-            "attention without the output gate"
-        );
-        ensure!(
-            c["attention_bias"].as_bool() != Some(true),
-            "attention with bias"
-        );
-        ensure!(
-            rope["rope_type"].as_str().unwrap_or("default") == "default",
-            "rope type {}",
-            rope["rope_type"]
-        );
-        ensure!(int("linear_conv_kernel_dim")? == 4, "conv kernel is not 4");
-        ensure!(
-            cfg.head_dim == 256 && cfg.lin_k_dim == 128 && cfg.lin_v_dim == 128,
-            "head dims {} / {} / {}",
-            cfg.head_dim,
-            cfg.lin_k_dim,
-            cfg.lin_v_dim
-        );
-        ensure!(cfg.rotary_half == 32, "{} rotary dims", 2 * cfg.rotary_half);
-        ensure!(
-            cfg.rope_theta.is_finite() && cfg.rope_theta > 0.0,
-            "invalid rope_theta"
-        );
-        ensure!(
-            rope["mrope_interleaved"].as_bool() != Some(false),
-            "non-interleaved mrope is unsupported"
-        );
-        ensure!(
-            cfg.mrope_section
+        let structure = crate::structure::read_structure(dir)?;
+        crate::structure::check_abi6(&structure)?;
+        Ok(Self::from_structure(structure))
+    }
+
+    /// Build the runtime config from an already-validated structure; the
+    /// seam a consumer with its own bundle layout (for example a Vela
+    /// hybrid member whose Qwen fields live at `backbone_config`) uses
+    /// instead of reading a checkpoint directory.
+    pub fn from_structure(s: crate::structure::QwenHybridStructure) -> Self {
+        Self {
+            hidden: s.hidden,
+            intermediate: s.intermediate,
+            eps: s.eps,
+            full_attention: s
+                .layer_kinds
                 .iter()
-                .try_fold(0usize, |sum, &x| sum.checked_add(x))
-                == Some(cfg.rotary_half),
-            "mrope sections must sum to rotary_half"
-        );
-        ensure!(
-            cfg.max_positions > 0 && cfg.max_positions <= (1 << 24),
-            "unsupported max_position_embeddings"
-        );
-        ensure!(
-            cfg.kv_heads > 0 && cfg.heads.is_multiple_of(cfg.kv_heads),
-            "attention heads"
-        );
-        ensure!(
-            cfg.lin_k_heads > 0 && cfg.lin_v_heads.is_multiple_of(cfg.lin_k_heads),
-            "linear attention heads"
-        );
-        ensure!(cfg.hidden.is_multiple_of(8), "hidden size");
-        Ok(cfg)
+                .map(|k| *k == crate::structure::LayerKind::FullAttention)
+                .collect(),
+            heads: s.heads,
+            kv_heads: s.kv_heads,
+            head_dim: s.head_dim,
+            rotary_half: s.rotary_half,
+            rope_theta: s.rope_theta,
+            mrope_section: s.mrope_section,
+            max_positions: s.max_positions,
+            image_token_id: s.image_token_id,
+            lin_k_heads: s.lin_k_heads,
+            lin_v_heads: s.lin_v_heads,
+            lin_k_dim: s.lin_k_dim,
+            lin_v_dim: s.lin_v_dim,
+        }
     }
 
     fn key_dim(&self) -> usize {
