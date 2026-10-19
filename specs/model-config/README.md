@@ -28,6 +28,15 @@ RFC Phase 6 (unified facade sweep + release evidence) is a follow-on
 after the Vela slices consume these outputs; it is deliberately not
 spec'd here.
 
+Implementation status on this branch: 01 and 02 complete (`705c23a`,
+`d5d9373`, `df5b8e1`); 05's structure/gate/layout/identity core
+complete with the loader seams deferred to the consumer slice
+(`0f30094`); 03's CPU half complete — census fixture, profile
+registration, weight accounting, YaRN tables fixture-grounded against
+the pinned transformers — with the CUDA bundle regeneration (and the
+laya ABI 1→2 bump) fenced until a TileLang toolchain is available; 04
+remains boundary-only until the encoder executes.
+
 ## What this series does NOT do
 
 Frozen-boundary fence (RFC §11, charter §8) — no spec below may:
