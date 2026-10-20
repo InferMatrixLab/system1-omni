@@ -127,6 +127,12 @@ fn parse_hf_config(config: &Json, source: &str) -> Result<(ModernBertStructure, 
     } else {
         let every = uint(config, "global_attn_every_n_layers")
             .context("neither layer_types nor global_attn_every_n_layers is present")?;
+        // The schedule below tests i % every; a checkpoint config is an
+        // external startup input, so refuse the zero before it panics.
+        ensure!(
+            every > 0,
+            "global_attn_every_n_layers must be positive, got 0"
+        );
         provenance.insert(
             "schedule".into(),
             FieldOrigin::Derived(format!(

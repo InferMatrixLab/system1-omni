@@ -144,6 +144,13 @@ fn hf_adapter_rejects_unknown_variants() {
                 .remove("global_attn_every_n_layers");
             c
         }),
+        ("zero interval", {
+            // The derived schedule tests i % every; zero must be an
+            // error, not a division-by-zero panic.
+            let mut c = vela_encoder_config();
+            c["global_attn_every_n_layers"] = json!(0);
+            c
+        }),
         ("scaling type", {
             let mut c = vela_encoder_config();
             c["rope_scaling"]["rope_type"] = json!("linear");
