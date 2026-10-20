@@ -57,7 +57,7 @@ fn workspace_sizes_match_the_recorded_profile_layout() {
     let structure = gate_structure();
     for (b, l) in [(1usize, 16usize), (1, 512), (16, 512), (4, 128)] {
         let m = b * l;
-        let sizes = Workspace::sizes(b, l, &structure).unwrap();
+        let sizes = Workspace::sizes(b, l, &structure, &limits()).unwrap();
         assert_eq!(
             sizes,
             [
@@ -85,5 +85,8 @@ fn workspace_sizes_match_the_recorded_profile_layout() {
 }
 
 fn gate_structure() -> omni_modernbert::structure::ModernBertStructure {
-    omni_modernbert::gate::laya_0_3_20().structure
+    crate::profile::laya_0_3_20().structure
+}
+fn limits() -> omni_modernbert::gate::BackendLimits {
+    crate::profile::laya_0_3_20().limits
 }

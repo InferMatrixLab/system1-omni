@@ -1,4 +1,4 @@
-use omni_vela_native::{cos_sin_tables, yarn, profile};
+use omni_vela_native::{cos_sin_tables, profile, yarn};
 use serde_json::Value;
 
 /// Reference tables dumped from the pinned runtime itself:
@@ -75,6 +75,42 @@ fn cos_sin_tables_reproduce_the_reference_rows() {
     // range a documented looser one.
     assert!(worst_served < 1e-4, "served-window delta {worst_served}");
     assert!(worst_full < 5e-4, "full-range delta {worst_full}");
+}
+
+#[test]
+fn the_ramp_upper_bound_clamps_to_the_head_dimension_like_the_reference() {
+    // theta=1000, original_max=8192, beta_slow=1 puts the unclamped
+    // correction range above the ramp array (high = 34 > 31): the
+    // reference clamps to head_dim - 1 = 63 and lets the mask saturate
+    // beyond the array, so the in-band blend denominator stays
+    // 34 - low. Clamping to rotary_half - 1 would rescale every
+    // in-band blend.
+    let spec = omni_modernbert::structure::RopeSpec {
+        theta: 1000.0,
+        scaling: Some(omni_modernbert::structure::YarnScaling {
+            factor: 4.0,
+            original_max_positions: 8192,
+            beta_fast: 32.0,
+            beta_slow: 1.0,
+        }),
+    };
+    let tables = yarn(&spec, 32).unwrap();
+    let correction = |rotations: f64| {
+        (2.0 * 32.0 * (8192.0f64 / (rotations * std::f64::consts::TAU)).ln()) / (2.0 * 1000f64.ln())
+    };
+    let low = correction(32.0).floor().max(0.0);
+    let high = correction(1.0).ceil().min(2.0 * 32.0 - 1.0);
+    assert!(high > 31.0, "the case must exceed the ramp array ({high})");
+    for (j, actual) in tables.inv_freq.iter().enumerate() {
+        let j = j as f64;
+        let pos_freq = 1000.0f64.powf(j / 32.0);
+        let ramp = ((j - low) / (high - low)).clamp(0.0, 1.0);
+        let expected = 1.0 / (4.0 * pos_freq) * ramp + 1.0 / pos_freq * (1.0 - ramp);
+        assert!(
+            (*actual as f64 - expected).abs() < 1e-6,
+            "inv_freq[{j}] = {actual}, expected {expected}"
+        );
+    }
 }
 
 #[test]

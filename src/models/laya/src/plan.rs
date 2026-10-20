@@ -103,12 +103,7 @@ fn map_arg(arg: PlanArg) -> PlannedArg {
 /// stays with eager launches at inference time.
 pub fn plan_encoder(structure: &ModernBertStructure, original_rope: bool) -> Vec<PlannedStep> {
     let mut steps = Vec::new();
-    for step in family_encoder_plan(
-        structure,
-        &EncoderPlanOptions {
-            original_rope,
-        },
-    ) {
+    for step in family_encoder_plan(structure, &EncoderPlanOptions { original_rope }) {
         match step {
             PlanStep::Launch { kernel, args } => steps.push(PlannedStep::Launch {
                 kernel,
@@ -218,10 +213,7 @@ fn head_plan() -> Vec<PlannedStep> {
                 scratch(Scratch::Y),
             ],
         );
-        call(
-            "residual",
-            &[scratch(Scratch::X), scratch(Scratch::Y)],
-        );
+        call("residual", &[scratch(Scratch::X), scratch(Scratch::Y)]);
     }
     steps.into_inner()
 }

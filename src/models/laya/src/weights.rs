@@ -96,7 +96,7 @@ pub struct TensorSpec {
 pub fn checkpoint_tensors() -> Vec<TensorSpec> {
     // Encoder tensors come from the family structure; the task head keeps
     // its own inventory.
-    let structure = omni_modernbert::gate::laya_0_3_20().structure;
+    let structure = crate::profile::laya_0_3_20().structure;
     let mut tensors: Vec<_> = geometry::encoder_tensors(&structure)
         .into_iter()
         .map(|(name, shape)| TensorSpec { name, shape })

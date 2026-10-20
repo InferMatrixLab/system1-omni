@@ -4,7 +4,6 @@ use crate::structure::{
 use anyhow::{Context, Result, ensure};
 use serde_json::Value as Json;
 use std::collections::BTreeMap;
-use std::path::Path;
 
 /// Marker and file evidence for one parsed source.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,29 +16,17 @@ pub struct SourceMeta {
     pub unrecognized_keys: Vec<String>,
 }
 
-/// Reads the two-file Laya bundle layout: the encoder half of
-/// `rl_agent_config.json` + `encoder/config.json`. Agent fields are task
-/// bundle and stay with the Laya crate; this adapter reads
-/// `encoder/config.json` only.
-pub struct LayaBundleAdapter;
-
-impl LayaBundleAdapter {
-    pub fn read(dir: &Path) -> Result<(ModernBertStructure, SourceMeta)> {
-        let path = dir.join("encoder/config.json");
-        let bytes = std::fs::read(&path).with_context(|| format!("{}", path.display()))?;
-        let config: Json = serde_json::from_slice(&bytes)
-            .with_context(|| format!("parse {}", path.display()))?;
-        parse_laya_bundle(&config, "encoder/config.json")
-    }
-}
-
 /// Reads any single-object ModernBERT config: a stock HF
 /// `config.json` or a member object such as the Vela bundle's
-/// `encoder_config`.
+/// `encoder_config`. Dialect bundle layouts (for example the Laya
+/// two-file recipe) are parsed by the model crates that ship them.
 pub struct ModernBertConfigAdapter;
 
 impl ModernBertConfigAdapter {
-    pub fn from_value(config: &Json, source_name: &str) -> Result<(ModernBertStructure, SourceMeta)> {
+    pub fn from_value(
+        config: &Json,
+        source_name: &str,
+    ) -> Result<(ModernBertStructure, SourceMeta)> {
         parse_hf_config(config, source_name)
     }
 }
@@ -106,136 +93,6 @@ fn derive_head_dim(
     Ok(head_dim)
 }
 
-fn parse_laya_bundle(config: &Json, source: &str) -> Result<(ModernBertStructure, SourceMeta)> {
-    require_modernbert(config)?;
-    for key in ["attention_bias", "mlp_bias", "norm_bias"] {
-        ensure!(
-            config[key] == Json::Bool(false),
-            "{key} must be stated and false"
-        );
-    }
-    let layer_types = config["layer_types"]
-        .as_array()
-        .context("layer_types is missing or not an array")?;
-    let schedule = layer_types
-        .iter()
-        .map(|t| {
-            t.as_str()
-                .map(AttentionKind::parse)
-                .unwrap_or_else(|| Err(anyhow::anyhow!("layer_types entry {t:?} is not a string")))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let rope = |kind: &str, provenance: &mut BTreeMap<String, FieldOrigin>| {
-        let entry = &config["rope_parameters"][kind];
-        ensure!(
-            entry["rope_type"].as_str() == Some("default"),
-            "rope_parameters.{kind} rope_type {:?} is not default",
-            entry["rope_type"]
-        );
-        provenance.insert(
-            format!("rope_{kind}"),
-            FieldOrigin::Source(format!("{source}#rope_parameters.{kind}")),
-        );
-        Ok(RopeSpec {
-            theta: entry["rope_theta"].as_f64().with_context(|| {
-                format!("rope_parameters.{kind}.rope_theta is missing or not a number")
-            })?,
-            scaling: None,
-        })
-    };
-    let mut provenance = BTreeMap::new();
-    let rope_full = rope("full_attention", &mut provenance)?;
-    let rope_sliding = rope("sliding_attention", &mut provenance)?;
-    let hidden = uint(config, "hidden_size")?;
-    let heads = uint(config, "num_attention_heads")?;
-    let max_positions = match config.get("max_position_embeddings") {
-        Some(_) => {
-            let value = uint(config, "max_position_embeddings")?;
-            provenance.insert(
-                "max_positions".into(),
-                FieldOrigin::Source(format!("{source}#max_position_embeddings")),
-            );
-            value
-        }
-        None => {
-            provenance.insert(
-                "max_positions".into(),
-                FieldOrigin::Default("Laya bundle rotary tables exercise 512 positions"),
-            );
-            512
-        }
-    };
-    let head_dim = derive_head_dim(hidden, heads, config, &mut provenance)?;
-    for key in [
-        "hidden_size",
-        "intermediate_size",
-        "num_hidden_layers",
-        "norm_eps",
-        "num_attention_heads",
-        "schedule",
-        "local_window",
-        "vocab_size",
-    ] {
-        let json_key = match key {
-            "schedule" => "layer_types",
-            "local_window" => "local_attention",
-            _ => key,
-        };
-        provenance.insert(
-            key.into(),
-            FieldOrigin::Source(format!("{source}#{json_key}")),
-        );
-    }
-    provenance.insert(
-        "type_embedding_rows".into(),
-        FieldOrigin::Default("the Laya bundle checkpoint carries a [3, hidden] type embedding"),
-    );
-    let structure = ModernBertStructure {
-        hidden_size: hidden,
-        intermediate_size: uint(config, "intermediate_size")?,
-        num_hidden_layers: uint(config, "num_hidden_layers")?,
-        activation: Activation::Gelu,
-        norm_eps: float(config, "norm_eps")? as f32,
-        num_attention_heads: heads,
-        head_dim,
-        schedule,
-        local_window: uint(config, "local_attention")?,
-        rope_full,
-        rope_sliding,
-        vocab_size: uint(config, "vocab_size")?,
-        type_embedding_rows: Some(3),
-        max_positions,
-        provenance,
-    };
-    structure.validate()?;
-    let meta = SourceMeta {
-        config_files: vec![source.into()],
-        model_type: "modernbert".into(),
-        unrecognized_keys: unrecognized(
-            config,
-            &[
-                "model_type",
-                "hidden_activation",
-                "attention_bias",
-                "mlp_bias",
-                "norm_bias",
-                "hidden_size",
-                "intermediate_size",
-                "num_attention_heads",
-                "num_hidden_layers",
-                "vocab_size",
-                "norm_eps",
-                "local_attention",
-                "layer_types",
-                "rope_parameters",
-                "max_position_embeddings",
-                "head_dim",
-            ],
-        ),
-    };
-    Ok((structure, meta))
-}
-
 fn parse_hf_config(config: &Json, source: &str) -> Result<(ModernBertStructure, SourceMeta)> {
     require_modernbert(config)?;
     let mut provenance = BTreeMap::new();
@@ -257,11 +114,9 @@ fn parse_hf_config(config: &Json, source: &str) -> Result<(ModernBertStructure, 
         let parsed = layer_types
             .iter()
             .map(|t| {
-                t.as_str()
-                    .map(AttentionKind::parse)
-                    .unwrap_or_else(|| {
-                        Err(anyhow::anyhow!("layer_types entry {t:?} is not a string"))
-                    })
+                t.as_str().map(AttentionKind::parse).unwrap_or_else(|| {
+                    Err(anyhow::anyhow!("layer_types entry {t:?} is not a string"))
+                })
             })
             .collect::<Result<Vec<_>>>()?;
         provenance.insert(
@@ -288,8 +143,10 @@ fn parse_hf_config(config: &Json, source: &str) -> Result<(ModernBertStructure, 
             })
             .collect()
     };
-    let theta = |field: &str, json_key: &str, provenance: &mut BTreeMap<String, FieldOrigin>| {
-        match config.get(json_key) {
+    let theta =
+        |field: &str, json_key: &str, provenance: &mut BTreeMap<String, FieldOrigin>| match config
+            .get(json_key)
+        {
             None => {
                 provenance.insert(
                     field.into(),
@@ -304,8 +161,7 @@ fn parse_hf_config(config: &Json, source: &str) -> Result<(ModernBertStructure, 
                 );
                 float(config, json_key)
             }
-        }
-    };
+        };
     let theta_full = theta("rope_full", "global_rope_theta", &mut provenance)?;
     let theta_sliding = theta("rope_sliding", "local_rope_theta", &mut provenance)?;
     let scaling = match config.get("rope_scaling") {
@@ -317,7 +173,10 @@ fn parse_hf_config(config: &Json, source: &str) -> Result<(ModernBertStructure, 
                 entry["rope_type"]
             );
             ensure!(
-                entry.get("truncate").map(|v| v == &Json::Bool(true)).unwrap_or(true),
+                entry
+                    .get("truncate")
+                    .map(|v| v == &Json::Bool(true))
+                    .unwrap_or(true),
                 "rope_scaling truncate must be true"
             );
             let yarn = YarnScaling {
@@ -343,7 +202,10 @@ fn parse_hf_config(config: &Json, source: &str) -> Result<(ModernBertStructure, 
             Some(yarn)
         }
     };
-    if let Some(position_type) = config.get("position_embedding_type").and_then(|v| v.as_str()) {
+    if let Some(position_type) = config
+        .get("position_embedding_type")
+        .and_then(|v| v.as_str())
+    {
         ensure!(
             position_type == "sans_pos" || position_type == "rope",
             "position_embedding_type {position_type:?} is not rotary-only"

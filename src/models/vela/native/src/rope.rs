@@ -26,10 +26,7 @@ pub fn yarn(rope: &RopeSpec, rotary_half: usize) -> Result<YarnTables> {
         original_max_positions,
         beta_fast,
         beta_slow,
-    } = rope
-        .scaling
-        .as_ref()
-        .context("rope has no yarn scaling")?;
+    } = rope.scaling.as_ref().context("rope has no yarn scaling")?;
     let base = rope.theta;
     let half = rotary_half as f64;
     let correction_dim = |rotations: f64| {
@@ -37,7 +34,14 @@ pub fn yarn(rope: &RopeSpec, rotary_half: usize) -> Result<YarnTables> {
             / (2.0 * base.ln())
     };
     let low = correction_dim(*beta_fast).floor().max(0.0);
-    let high = correction_dim(*beta_slow).ceil().min(rotary_half as f64 - 1.0);
+    // The reference clamps the ramp's upper bound to the head dimension
+    // (2 * rotary_half) - 1, not to the ramp array's last index: with
+    // `truncate`, a bound above the array saturates the mask instead of
+    // rescaling the in-band ramp. Clamping to rotary_half - 1 would
+    // shrink (high - low) and change every in-band blend.
+    let high = correction_dim(*beta_slow)
+        .ceil()
+        .min(2.0 * rotary_half as f64 - 1.0);
     ensure!(high > low, "degenerate yarn ramp bounds {low}..{high}");
     let ramp = |j: f64| ((j - low) / (high - low)).clamp(0.0, 1.0);
     let inv_freq = (0..rotary_half)
@@ -65,7 +69,10 @@ pub fn cos_sin_tables(
     structure: &ModernBertStructure,
     len: usize,
 ) -> Result<(Vec<f32>, Vec<f32>, YarnTables)> {
-    ensure!(len > 0 && len <= structure.max_positions, "table length {len}");
+    ensure!(
+        len > 0 && len <= structure.max_positions,
+        "table length {len}"
+    );
     let rope = &structure.rope_full;
     ensure!(
         structure.rope_full == structure.rope_sliding,
@@ -73,8 +80,18 @@ pub fn cos_sin_tables(
     );
     let tables = yarn(rope, omni_modernbert::geometry::rotary_half(structure))?;
     let half = tables.inv_freq.len();
-    let mut cos = Vec::with_capacity(len * half);
-    let mut sin = Vec::with_capacity(len * half);
+    // Fail closed on a corrupt structure instead of attempting an
+    // oversized allocation: `max_positions` is untrusted input until a
+    // profile admits it.
+    let elements = len
+        .checked_mul(half)
+        .with_context(|| format!("table length {len} overflows the table size"))?;
+    let mut cos = Vec::new();
+    let mut sin = Vec::new();
+    cos.try_reserve(elements)
+        .with_context(|| format!("cannot allocate a {len}x{half} cosine table"))?;
+    sin.try_reserve(elements)
+        .with_context(|| format!("cannot allocate a {len}x{half} sine table"))?;
     let scaling = tables.attention_scaling as f32;
     for pos in 0..len {
         for &f in &tables.inv_freq {

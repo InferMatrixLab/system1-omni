@@ -1,7 +1,13 @@
 use omni_laya::plan::{plan_encoder, render_plan};
 
+// The golden fixtures are the rendered encoder plans of the registered
+// Laya 0.3.20 profile: `encoder-plan.txt` drives the rope-table kernel,
+// `encoder-plan-original-rope.txt` its `rope_original` reference
+// variant. The dispatch trace test in model_dispatch.rs cross-checks
+// the same plans against the frozen CUDA-ABI launch sequence.
+
 fn laya_structure() -> omni_modernbert::structure::ModernBertStructure {
-    omni_modernbert::gate::laya_0_3_20().structure
+    omni_laya::profile::laya_0_3_20().structure
 }
 
 #[test]

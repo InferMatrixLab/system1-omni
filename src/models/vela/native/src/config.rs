@@ -11,8 +11,8 @@ use std::path::Path;
 pub fn read_structure(dir: &Path) -> Result<(ModernBertStructure, SourceMeta)> {
     let path = dir.join("config.json");
     let bytes = std::fs::read(&path).with_context(|| format!("{}", path.display()))?;
-    let root: Json = serde_json::from_slice(&bytes)
-        .with_context(|| format!("parse {}", path.display()))?;
+    let root: Json =
+        serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
     ensure!(
         root["model_type"].as_str() == Some("vela2-unified"),
         "model_type {:?} is not the vela2-unified 0.3B bundle",

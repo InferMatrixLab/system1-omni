@@ -53,3 +53,7 @@ path = "../../../tests/laya/batch.rs"
 [[test]]
 name = "plan"
 path = "../../../tests/laya/plan.rs"
+
+[[test]]
+name = "profile"
+path = "../../../tests/laya/profile.rs"

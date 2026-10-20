@@ -1,34 +1,26 @@
-use omni_modernbert::adapter::{LayaBundleAdapter, ModernBertConfigAdapter};
-use omni_modernbert::plan::{
-    self, EncoderPlanOptions, PlanAnchor, PlanArg, PlanStep, ScratchSlot,
-};
+use omni_modernbert::adapter::ModernBertConfigAdapter;
+use omni_modernbert::plan::{self, EncoderPlanOptions, PlanAnchor, PlanArg, PlanStep, ScratchSlot};
 use omni_modernbert::structure::ModernBertStructure;
 use serde_json::json;
-use std::fs;
-use tempfile::tempdir;
 
+/// A 1024-hidden member with a type embedding and plain rotary tables,
+/// parsed as a stock HF config (the same geometry the Laya bundle
+/// dialect produces), so the family plan tests stay model-agnostic.
 fn laya_structure() -> ModernBertStructure {
-    let dir = tempdir().unwrap();
-    fs::create_dir(dir.path().join("encoder")).unwrap();
-    fs::write(
-        dir.path().join("encoder/config.json"),
-        json!({
-            "model_type": "modernbert", "hidden_activation": "gelu",
-            "attention_bias": false, "mlp_bias": false, "norm_bias": false,
-            "hidden_size": 1024, "intermediate_size": 2624,
-            "num_attention_heads": 16, "num_hidden_layers": 28,
-            "vocab_size": 50368, "norm_eps": 0.00001, "local_attention": 128,
-            "layer_types": (["full_attention", "sliding_attention", "sliding_attention"]
-                .repeat(10))[..28],
-            "rope_parameters": {
-                "full_attention": {"rope_type": "default", "rope_theta": 160000.0},
-                "sliding_attention": {"rope_type": "default", "rope_theta": 10000.0}
-            }
-        })
-        .to_string(),
-    )
-    .unwrap();
-    LayaBundleAdapter::read(dir.path()).unwrap().0
+    let config = json!({
+        "model_type": "modernbert", "hidden_activation": "gelu",
+        "attention_bias": false, "mlp_bias": false, "norm_bias": false,
+        "hidden_size": 1024, "intermediate_size": 2624,
+        "num_attention_heads": 16, "num_hidden_layers": 28,
+        "vocab_size": 50368, "norm_eps": 0.00001, "local_attention": 128,
+        "type_vocab_size": 3, "max_position_embeddings": 512,
+        "layer_types": (["full_attention", "sliding_attention", "sliding_attention"]
+            .repeat(10))[..28],
+        "global_rope_theta": 160000.0, "local_rope_theta": 10000.0
+    });
+    ModernBertConfigAdapter::from_value(&config, "config.json")
+        .unwrap()
+        .0
 }
 
 fn vela_structure() -> ModernBertStructure {
@@ -63,7 +55,10 @@ fn laya_plan_reproduces_the_encoder_step_sequence() {
     let steps = plan::encoder_plan(&laya_structure(), &EncoderPlanOptions::default());
     // embed + 28 layers x 8 kernels + the type add.
     assert_eq!(launches(&steps).len(), 1 + 28 * 8 + 1);
-    assert_eq!(steps[0].render(), "embed ids encoder.embeddings.tok_embeddings.weight encoder.embeddings.norm.weight x y");
+    assert_eq!(
+        steps[0].render(),
+        "embed ids encoder.embeddings.tok_embeddings.weight encoder.embeddings.norm.weight x y"
+    );
     assert_eq!(steps[1], PlanStep::Anchor(PlanAnchor::AfterEmbed));
 
     // Layer 0 runs full attention on the full-kind tables.
@@ -71,10 +66,7 @@ fn laya_plan_reproduces_the_encoder_step_sequence() {
         steps[2].render(),
         "qkv y encoder.layers.0.attn.Wqkv.weight zeros.3072 qkv"
     );
-    assert_eq!(
-        steps[3].render(),
-        "rope qkv rope_full_cos rope_full_sin"
-    );
+    assert_eq!(steps[3].render(), "rope qkv rope_full_cos rope_full_sin");
     assert_eq!(steps[4].render(), "attn_full qkv lens o");
     assert_eq!(
         steps[5].render(),
@@ -135,16 +127,25 @@ fn vela_plan_runs_its_own_schedule_without_a_type_add() {
     assert_eq!(launches(&steps).len(), 1 + 22 * 8);
     assert!(!steps.iter().any(|s| s.render().contains("type_emb")));
     // Layer 21 is the last full-attention layer; zeros follow its width.
-    assert!(steps.iter().any(|s| s.render()
-        == "qkv y encoder.layers.21.attn.Wqkv.weight zeros.2304 qkv"));
+    assert!(
+        steps
+            .iter()
+            .any(|s| s.render() == "qkv y encoder.layers.21.attn.Wqkv.weight zeros.2304 qkv")
+    );
     assert!(steps.iter().any(|s| s.render() == "attn_full qkv lens o"));
     assert_eq!(
-        steps.iter().filter(|s| s.render() == "attn_local qkv lens o").count(),
+        steps
+            .iter()
+            .filter(|s| s.render() == "attn_local qkv lens o")
+            .count(),
         14
     );
     assert!(steps.contains(&PlanStep::Anchor(PlanAnchor::LayerEnd(21))));
     assert_eq!(
-        steps.iter().filter(|s| matches!(s, PlanStep::Anchor(PlanAnchor::LayerEnd(_)))).count(),
+        steps
+            .iter()
+            .filter(|s| matches!(s, PlanStep::Anchor(PlanAnchor::LayerEnd(_))))
+            .count(),
         22
     );
 }
@@ -157,17 +158,18 @@ fn original_rope_option_selects_the_reference_variant() {
             original_rope: true,
         },
     );
-    assert!(steps.iter().any(|s| s.render()
-        == "rope_original qkv rope_full_cos rope_full_sin"));
+    assert!(
+        steps
+            .iter()
+            .any(|s| s.render() == "rope_original qkv rope_full_cos rope_full_sin")
+    );
 }
 
 #[test]
 fn plan_rendering_is_deterministic() {
     let once = plan::encoder_plan(&laya_structure(), &EncoderPlanOptions::default());
     let twice = plan::encoder_plan(&laya_structure(), &EncoderPlanOptions::default());
-    let render = |steps: &[PlanStep]| {
-        steps.iter().map(PlanStep::render).collect::<Vec<_>>()
-    };
+    let render = |steps: &[PlanStep]| steps.iter().map(PlanStep::render).collect::<Vec<_>>();
     assert_eq!(render(&once), render(&twice));
     assert_eq!(render(&once).len(), once.len());
 }

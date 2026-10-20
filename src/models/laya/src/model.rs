@@ -2,12 +2,13 @@
 use crate::config::Config;
 use crate::packing::Batch;
 use crate::plan::{PlannedArg, PlannedStep, Scratch, plan_encoder};
-use omni_modernbert::geometry::EncoderScratch;
-use omni_modernbert::structure::ModernBertStructure;
 use crate::weights::Weights;
 use anyhow::{Context, Result, ensure};
 use half::bf16;
 use omni_cuda::{Buffer, Cuda, Graph, Kernel, Ptr};
+use omni_modernbert::gate::BackendLimits;
+use omni_modernbert::geometry::EncoderScratch;
+use omni_modernbert::structure::ModernBertStructure;
 use std::{
     collections::{HashMap, VecDeque},
     fs,
@@ -139,11 +140,13 @@ struct Workspace {
     actions: Buffer,
 }
 impl Workspace {
-    fn sizes(b: usize, l: usize, structure: &ModernBertStructure) -> Result<[usize; 17]> {
-        ensure!(
-            b.is_power_of_two() && b <= 16 && (16..=512).contains(&l) && l.is_multiple_of(16),
-            "invalid workspace shape"
-        );
+    fn sizes(
+        b: usize,
+        l: usize,
+        structure: &ModernBertStructure,
+        limits: &BackendLimits,
+    ) -> Result<[usize; 17]> {
+        limits.check_request(b, l)?;
         let m = b * l;
         let encoder = EncoderScratch::new(b, l, structure);
         Ok([
@@ -166,11 +169,22 @@ impl Workspace {
             16 * 2 * 2,
         ])
     }
-    fn required_bytes(b: usize, l: usize, structure: &ModernBertStructure) -> Result<usize> {
-        Ok(Self::sizes(b, l, structure)?.iter().sum())
+    fn required_bytes(
+        b: usize,
+        l: usize,
+        structure: &ModernBertStructure,
+        limits: &BackendLimits,
+    ) -> Result<usize> {
+        Ok(Self::sizes(b, l, structure, limits)?.iter().sum())
     }
-    fn new(c: &Cuda, b: usize, l: usize, structure: &ModernBertStructure) -> Result<Self> {
-        let sizes = Self::sizes(b, l, structure)?;
+    fn new(
+        c: &Cuda,
+        b: usize,
+        l: usize,
+        structure: &ModernBertStructure,
+        limits: &BackendLimits,
+    ) -> Result<Self> {
+        let sizes = Self::sizes(b, l, structure, limits)?;
         let bytes = sizes.iter().sum();
         let mut sizes = sizes.into_iter();
         let mut alloc = || c.alloc(sizes.next().expect("workspace buffer layout"));
@@ -501,9 +515,9 @@ impl Model {
             batch.b <= 16
                 && batch.l <= 512
                 && batch
-                .input_ids
-                .iter()
-                .all(|i| *i >= 0 && (*i as usize) < self.config.structure.vocab_size),
+                    .input_ids
+                    .iter()
+                    .all(|i| *i >= 0 && (*i as usize) < self.config.structure.vocab_size),
             "invalid packed input"
         );
         let n = batch.markers.len();
@@ -534,7 +548,12 @@ impl Model {
             batch.markers.iter().map(Vec::len).sum::<usize>() <= 2048,
             "too many markers"
         );
-        let bytes = Workspace::required_bytes(batch.b, batch.l, &self.config.structure)?;
+        let bytes = Workspace::required_bytes(
+            batch.b,
+            batch.l,
+            &self.config.structure,
+            &self.config.limits,
+        )?;
         let cacheable = self.cache_config.max_shapes > 0 && bytes <= self.cache_config.max_bytes;
         let mut s = if cacheable {
             self.eager = None;
@@ -556,7 +575,13 @@ impl Model {
                     self.cached_bytes -= evicted.bytes;
                     drop(evicted);
                 }
-                Workspace::new(&self.cuda, batch.b, batch.l, &self.config.structure)?
+                Workspace::new(
+                    &self.cuda,
+                    batch.b,
+                    batch.l,
+                    &self.config.structure,
+                    &self.config.limits,
+                )?
             }
         } else {
             let eager = self
@@ -566,7 +591,13 @@ impl Model {
             // A different fallback shape is dropped before replacement allocation.
             match eager {
                 Some(workspace) => workspace,
-                None => Workspace::new(&self.cuda, batch.b, batch.l, &self.config.structure)?,
+                None => Workspace::new(
+                    &self.cuda,
+                    batch.b,
+                    batch.l,
+                    &self.config.structure,
+                    &self.config.limits,
+                )?,
             }
         };
         let (ids, rest) = s.staging.split_at_mut(batch.input_ids.len() * 8);

@@ -14,10 +14,10 @@ pub mod geometry;
 pub mod plan;
 pub mod structure;
 
-pub use adapter::{LayaBundleAdapter, ModernBertConfigAdapter, SourceMeta};
+pub use adapter::{ModernBertConfigAdapter, SourceMeta};
 pub use gate::{BackendLimits, RegisteredProfile, StructureIdentity};
 pub use plan::{EncoderPlanOptions, PlanAnchor, PlanArg, PlanStep, ScratchSlot};
 pub use structure::{
-    Activation, AttentionKind, FieldOrigin, ModernBertStructure, RopeSpec, YarnScaling,
-    SCHEMA_VERSION,
+    Activation, AttentionKind, FieldOrigin, ModernBertStructure, RopeSpec, SCHEMA_VERSION,
+    YarnScaling,
 };

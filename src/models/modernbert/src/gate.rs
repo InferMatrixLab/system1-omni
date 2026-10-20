@@ -123,7 +123,11 @@ impl RegisteredProfile {
         ensure!(
             candidate.schedule == expected.schedule,
             "{}",
-            field("schedule", render_schedule(candidate), render_schedule(expected))
+            field(
+                "schedule",
+                render_schedule(candidate),
+                render_schedule(expected)
+            )
         );
         ensure!(
             candidate.local_window == expected.local_window,
@@ -144,7 +148,17 @@ impl RegisteredProfile {
             )
         );
         ensure!(
-            candidate.rope_full == expected.rope_full && candidate.rope_sliding == expected.rope_sliding,
+            candidate.activation == expected.activation,
+            "{}",
+            field(
+                "activation",
+                format!("{:?}", candidate.activation),
+                format!("{:?}", expected.activation)
+            )
+        );
+        ensure!(
+            candidate.rope_full == expected.rope_full
+                && candidate.rope_sliding == expected.rope_sliding,
             "{}",
             field(
                 "rope",
@@ -179,7 +193,11 @@ impl RegisteredProfile {
                 expected.max_positions.to_string()
             )
         );
-        Ok(structure_identity(candidate, self.backend, self.abi_version))
+        Ok(structure_identity(
+            candidate,
+            self.backend,
+            self.abi_version,
+        ))
     }
 }
 
@@ -223,79 +241,4 @@ pub fn structure_identity(
         abi_version,
         digest: format!("{:x}", Sha256::digest(body.as_bytes())),
     }
-}
-
-/// The one profile the current CUDA bundle serves: the Laya 0.3.20
-/// encoder as shipped, ABI 1.
-pub fn laya_0_3_20() -> RegisteredProfile {
-    RegisteredProfile {
-        name: "laya-0.3.20",
-        structure: laya_structure(),
-        limits: BackendLimits {
-            hidden_sizes: vec![1024],
-            batch_max: 16,
-            len_min: 16,
-            len_max: 512,
-            len_step: 16,
-            yarn_scaling: false,
-        },
-        backend: "laya_cuda",
-        abi_version: 1,
-    }
-}
-
-fn laya_structure() -> ModernBertStructure {
-    let mut provenance = std::collections::BTreeMap::new();
-    for field in [
-        "hidden_size",
-        "intermediate_size",
-        "num_hidden_layers",
-        "norm_eps",
-        "num_attention_heads",
-        "head_dim",
-        "schedule",
-        "local_window",
-        "rope_full",
-        "rope_sliding",
-        "vocab_size",
-        "type_embedding_rows",
-        "max_positions",
-    ] {
-        provenance.insert(field.to_string(), origin_of_profile());
-    }
-    ModernBertStructure {
-        hidden_size: 1024,
-        intermediate_size: 2624,
-        num_hidden_layers: 28,
-        activation: crate::structure::Activation::Gelu,
-        norm_eps: 1e-5,
-        num_attention_heads: 16,
-        head_dim: 64,
-        schedule: (0..28)
-            .map(|i| {
-                if i % 3 == 0 {
-                    crate::structure::AttentionKind::Full
-                } else {
-                    crate::structure::AttentionKind::Sliding
-                }
-            })
-            .collect(),
-        local_window: 128,
-        rope_full: crate::structure::RopeSpec {
-            theta: 160000.0,
-            scaling: None,
-        },
-        rope_sliding: crate::structure::RopeSpec {
-            theta: 10000.0,
-            scaling: None,
-        },
-        vocab_size: 50368,
-        type_embedding_rows: Some(3),
-        max_positions: 512,
-        provenance,
-    }
-}
-
-fn origin_of_profile() -> crate::structure::FieldOrigin {
-    crate::structure::FieldOrigin::Source("registered profile laya-0.3.20".into())
 }

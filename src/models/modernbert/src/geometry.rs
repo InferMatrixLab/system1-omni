@@ -96,7 +96,10 @@ impl EncoderScratch {
     }
 
     pub fn sizes(&self) -> Vec<usize> {
-        [self.ids, self.lens, self.x, self.y, self.qkv, self.o, self.gate].into()
+        [
+            self.ids, self.lens, self.x, self.y, self.qkv, self.o, self.gate,
+        ]
+        .into()
     }
 
     pub fn total(&self) -> usize {

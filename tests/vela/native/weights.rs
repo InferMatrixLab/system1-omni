@@ -49,34 +49,12 @@ fn checkpoint(tensors: &Value) -> (TempDir, std::path::PathBuf) {
     (dir, path)
 }
 
-fn structure() -> omni_modernbert::structure::ModernBertStructure {
-    let (structure, _) = read_structure(&profile_fixture_dir()).unwrap();
-    structure
-}
+mod common;
 
-fn profile_fixture_dir() -> std::path::PathBuf {
-    let config = json!({
-        "model_type": "vela2-unified",
-        "encoder_config": {
-            "model_type": "modernbert", "hidden_activation": "gelu",
-            "attention_bias": false, "mlp_bias": false, "norm_bias": false,
-            "hidden_size": 768, "intermediate_size": 1152,
-            "num_attention_heads": 12, "num_hidden_layers": 22,
-            "vocab_size": 256008, "norm_eps": 1e-5, "local_attention": 128,
-            "global_attn_every_n_layers": 3,
-            "global_rope_theta": 160000, "local_rope_theta": 160000,
-            "max_position_embeddings": 32768,
-            "rope_scaling": {
-                "rope_type": "yarn", "factor": 4.0,
-                "original_max_position_embeddings": 8192, "truncate": true
-            }
-        }
-    });
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join("config.json"), config.to_string()).unwrap();
-    let path = dir.path().to_path_buf();
-    std::mem::forget(dir);
-    path
+fn structure() -> omni_modernbert::structure::ModernBertStructure {
+    let (_keep, path) = common::bundle_dir();
+    let (structure, _) = read_structure(&path).unwrap();
+    structure
 }
 
 #[test]
@@ -106,11 +84,21 @@ fn a_checkpoint_matching_the_profile_validates_completely() {
     let (_dir, path) = checkpoint(&census());
     let weights = Weights::open(&path).unwrap();
     assert_eq!(weights.validate(&structure()).unwrap(), 152);
-    // Storage classes mirror the serving conventions.
-    assert_eq!(storage_dtype("encoder.embeddings.tok_embeddings.weight"), "f16");
+    // Storage classes mirror the Laya baseline: embedding f16, norms,
+    // calibration scalars and head biases f32, GEMM-class bf16.
+    assert_eq!(
+        storage_dtype("encoder.embeddings.tok_embeddings.weight"),
+        "f16"
+    );
     assert_eq!(storage_dtype("encoder.layers.0.attn_norm.weight"), "f32");
     assert_eq!(storage_dtype("encoder.layers.0.attn.Wqkv.weight"), "bf16");
     assert_eq!(storage_dtype("norm.weight"), "f32");
+    assert_eq!(storage_dtype("log_tau"), "f32");
+    assert_eq!(storage_dtype("log_tau_span"), "f32");
+    assert_eq!(storage_dtype("cls_mlp.3.bias"), "f32");
+    assert_eq!(storage_dtype("w_e.bias"), "f32");
+    assert_eq!(storage_dtype("cls_mlp.0.weight"), "bf16");
+    assert_eq!(storage_dtype("w_o.weight"), "bf16");
     let scalar = weights.f32("log_tau", &[]).unwrap();
     assert_eq!(scalar.len(), 1);
 }

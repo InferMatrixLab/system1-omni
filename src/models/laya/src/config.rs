@@ -1,8 +1,10 @@
 use anyhow::{Context, Result, ensure};
-use omni_modernbert::gate;
+use omni_modernbert::gate::BackendLimits;
 use omni_modernbert::structure::ModernBertStructure;
 use serde::Deserialize;
 use std::{collections::HashMap, fs, path::Path};
+
+use crate::profile::{LayaBundleAdapter, laya_0_3_20};
 
 #[derive(Debug, Deserialize)]
 pub struct AgentConfig {
@@ -50,13 +52,18 @@ pub struct Config {
     pub encoder: EncoderConfig,
     /// The admitted family structure; geometry and plans derive from it.
     pub structure: ModernBertStructure,
+    /// The registered profile's request envelope, admitted with the
+    /// structure; the workspace bounds come from here, not inline
+    /// literals.
+    pub limits: BackendLimits,
 }
 impl Config {
     pub fn load(dir: &Path) -> Result<Self> {
         let read = |name| fs::read(dir.join(name)).with_context(|| format!("read {name}"));
         let agent: AgentConfig = serde_json::from_slice(&read("rl_agent_config.json")?)?;
-        let (structure, _meta) = omni_modernbert::LayaBundleAdapter::read(dir)?;
-        gate::laya_0_3_20().admit(&structure)?;
+        let (structure, _meta) = LayaBundleAdapter::read(dir)?;
+        let profile = laya_0_3_20();
+        profile.admit(&structure)?;
         ensure!(
             agent.max_len == 512 && agent.head_max_len == 192 && agent.head_layers == 2,
             "native Laya supports max_len=512, head_max_len=192, head_layers=2"
@@ -74,6 +81,7 @@ impl Config {
             encoder: EncoderConfig::from(structure.clone()),
             agent,
             structure,
+            limits: profile.limits,
         })
     }
 }

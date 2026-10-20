@@ -4,19 +4,35 @@ use omni_modernbert::structure::ModernBertStructure;
 use safetensors::{Dtype, SafeTensors};
 use std::{collections::BTreeMap, fs::File, path::Path};
 
-/// Storage class per tensor name, mirroring the bundle's serving
-/// conventions: the embedding uploads as f16, every norm stays f32, and
-/// the GEMM-class projections narrow to bf16 at upload. The pinned
-/// checkpoint stores everything f32; the narrowing is a declared
-/// numerics choice carried in the profile identity.
+/// Storage class per tensor name, mirroring the Laya baseline's
+/// serving classes: the embedding uploads as f16, every norm, the two
+/// calibration scalars and the head projection biases stay f32, and
+/// only the GEMM-class projections narrow to bf16 at upload. The
+/// pinned checkpoint stores everything f32; the narrowing is a
+/// declared numerics choice carried in the profile identity — a
+/// learned scalar (`log_tau`) or bias is not GEMM-class, and rounding
+/// it to bf16 would surface as unexplained drift in the later parity
+/// harness.
 pub fn storage_dtype(name: &str) -> &'static str {
     if name == "encoder.embeddings.tok_embeddings.weight" {
         "f16"
-    } else if name.contains("norm") {
+    } else if is_f32_class(name) {
         "f32"
     } else {
         "bf16"
     }
+}
+
+/// Norms, the two calibration scalars and the head projection biases
+/// stay f32 — the Laya baseline keeps its learned temperature and head
+/// biases f32 too; a learned scalar or bias is not GEMM-class, and
+/// rounding it to bf16 would surface as unexplained drift in the later
+/// parity harness.
+fn is_f32_class(name: &str) -> bool {
+    name.contains("norm")
+        || name == "log_tau"
+        || name == "log_tau_span"
+        || (!name.starts_with("encoder.") && name.ends_with(".bias"))
 }
 
 /// The head-side tensors of the pinned checkpoint, recorded from its
@@ -50,10 +66,12 @@ pub struct Weights {
 impl Weights {
     /// The checkpoint must remain immutable while the mapping exists.
     pub fn open(path: &Path) -> Result<Self> {
-        let file = File::open(path)?;
+        let file =
+            File::open(path).with_context(|| format!("open weights file {}", path.display()))?;
         // SAFETY: model files are read-only inputs; no mutable mapping is created.
-        let data = unsafe { Mmap::map(&file)? };
-        SafeTensors::deserialize(&data)?;
+        let data = unsafe { Mmap::map(&file) }
+            .with_context(|| format!("map weights file {}", path.display()))?;
+        SafeTensors::deserialize(&data).with_context(|| format!("parse {}", path.display()))?;
         Ok(Self { data })
     }
 
@@ -65,18 +83,20 @@ impl Weights {
         let tensors = SafeTensors::deserialize(&self.data)?;
         let mut expected: BTreeMap<String, Vec<usize>> = BTreeMap::new();
         for (name, shape) in omni_modernbert::geometry::encoder_tensors(structure) {
-            ensure!(expected.insert(name.clone(), shape).is_none(), "duplicate {name}");
+            ensure!(
+                expected.insert(name.clone(), shape).is_none(),
+                "duplicate {name}"
+            );
         }
         for (name, shape) in head_tensors() {
-            ensure!(expected.insert(name.clone(), shape).is_none(), "duplicate {name}");
+            ensure!(
+                expected.insert(name.clone(), shape).is_none(),
+                "duplicate {name}"
+            );
         }
-        let actual: std::collections::BTreeSet<String> = tensors
-            .names()
-            .into_iter()
-            .map(String::from)
-            .collect();
-        let expected_names: std::collections::BTreeSet<String> =
-            expected.keys().cloned().collect();
+        let actual: std::collections::BTreeSet<String> =
+            tensors.names().into_iter().map(String::from).collect();
+        let expected_names: std::collections::BTreeSet<String> = expected.keys().cloned().collect();
         if actual != expected_names {
             let missing: Vec<_> = expected_names.difference(&actual).collect();
             let extra: Vec<_> = actual.difference(&expected_names).collect();

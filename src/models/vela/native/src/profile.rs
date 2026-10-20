@@ -8,7 +8,7 @@ use omni_modernbert::structure::{
 /// recorded tensor census) against the limits of the regenerated CUDA
 /// bundle this profile targets — hidden 768 instantiations, YaRN rotary
 /// tables, requests packed to 8 192 tokens. The bundle's own ABI is
-/// checked when it is loaded; the executor slice lands with it.
+/// checked when it is loaded.
 pub fn profile() -> RegisteredProfile {
     RegisteredProfile {
         name: "vela-2.0-0.3b",
