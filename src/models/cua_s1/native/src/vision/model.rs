@@ -1,5 +1,5 @@
 //! GPU vision forward for the structurally validated, unmerged checkpoint.
-use super::{VisionCheckpoint, geometry::Geometry};
+use super::{VisionCheckpoint, VisionWeights, geometry::Geometry};
 use crate::{
     cuda::{self, DeviceBuffer, Stream, api, check},
     image_preprocess::ProcessedImage,
@@ -9,6 +9,46 @@ use half::bf16;
 use std::{collections::BTreeMap, ffi::c_void, path::Path};
 
 type Trace<'a> = Option<&'a mut dyn FnMut(&str, &[bf16]) -> Result<()>>;
+
+/// Configuration-driven dimensions replacing the pinned 4B literals.
+///
+/// Every field except `out` is validated to the shared Qwen3.5 vision layout
+/// the CUDA kernels implement (so the values equal the old constants); `out`
+/// is the merger output width — 2560 for the Cua-S1 4B, 2048 for Valen's 2B.
+#[derive(Debug, Clone, Copy)]
+struct Dims {
+    depth: usize,
+    /// Block width, also the norm feature dimension.
+    h: usize,
+    /// Block and merger intermediate width.
+    i: usize,
+    /// `h * spatial_merge_size^2`, the merger input width.
+    merged: usize,
+    /// `spatial_merge_size^2` patches per merged token.
+    merge2: usize,
+    patch: usize,
+    /// `in_channels * temporal_patch_size * patch_size^2` values per patch.
+    patch_in: usize,
+    /// Merger output width; equals the text hidden size.
+    out: usize,
+}
+impl From<&super::VisionConfig> for Dims {
+    fn from(config: &super::VisionConfig) -> Self {
+        Self {
+            depth: config.depth,
+            h: config.hidden_size,
+            i: config.intermediate_size,
+            merged: config.hidden_size * config.spatial_merge_size * config.spatial_merge_size,
+            merge2: config.spatial_merge_size * config.spatial_merge_size,
+            patch: config.patch_size,
+            patch_in: config.in_channels
+                * config.temporal_patch_size
+                * config.patch_size
+                * config.patch_size,
+            out: config.out_hidden_size,
+        }
+    }
+}
 
 struct OwnedStream(Stream);
 impl Drop for OwnedStream {
@@ -26,8 +66,10 @@ impl Drop for Gemm {
 }
 
 /// The base remains BF16; all 50 LoRA A/B pairs remain FP32, applied at scale 2.
-/// A model is used by one request at a time and returns row-major [image_tokens,2560].
+/// A model is used by one request at a time and returns row-major
+/// `[image_tokens, out_hidden_size]` (2560 for Cua-S1, 2048 for Valen).
 pub struct VisionModel {
+    dims: Dims,
     // Field order retires graph/scratch before weights, GEMM workspace and stream.
     scratch: Option<Scratch>,
     base: BTreeMap<String, DeviceBuffer>,
@@ -39,12 +81,16 @@ pub struct VisionModel {
 impl VisionModel {
     pub fn load(base: impl AsRef<Path>, adapter: impl AsRef<Path>, library: &Path) -> Result<Self> {
         let checkpoint = VisionCheckpoint::load(base, adapter)?;
+        Self::from_weights(&checkpoint, library)
+    }
+    fn from_weights<W: VisionWeights>(weights: &W, library: &Path) -> Result<Self> {
         cuda::load(library)?;
         cuda::set_device(0)?;
         let stream = OwnedStream(cuda::new_stream()?);
         let gemm = Gemm(unsafe { (api().cs1_gemm_create)(32 << 20) });
         ensure!(!gemm.0.is_null(), "cannot create vision cuBLAS handle");
         let mut model = Self {
+            dims: weights.vision_config().into(),
             scratch: None,
             graph_enabled: std::env::var("CUA_S1_VISION_GRAPH").as_deref() == Ok("1"),
             base: BTreeMap::new(),
@@ -52,15 +98,15 @@ impl VisionModel {
             stream,
             gemm,
         };
-        for name in checkpoint.base_names() {
-            let tensor = checkpoint.base_tensor(name)?;
+        for name in weights.base_names() {
+            let tensor = weights.base_tensor(name)?;
             model.base.insert(
                 name.strip_prefix("model.visual.").unwrap().into(),
                 model.upload(tensor.data())?,
             );
         }
-        for name in checkpoint.adapter_names() {
-            let tensor = checkpoint.adapter_tensor(name)?;
+        for name in weights.adapter_names() {
+            let tensor = weights.adapter_tensor(name)?;
             model.lora.insert(
                 name.strip_prefix("base_model.model.model.visual.")
                     .unwrap()
@@ -68,9 +114,12 @@ impl VisionModel {
                 model.upload(tensor.data())?,
             );
         }
-        model
-            .base
-            .insert("__zero_bias".into(), model.upload(&[0; 2048])?);
+        // The patch embedding is a GEMM against the flattened conv; its bias is
+        // added by cs1_vision_bias, so the GEMM itself sees h zero elements.
+        model.base.insert(
+            "__zero_bias".into(),
+            model.upload(&vec![0u8; model.dims.h * 2])?,
+        );
         Ok(model)
     }
     fn upload(&self, bytes: &[u8]) -> Result<DeviceBuffer> {
@@ -92,7 +141,7 @@ impl VisionModel {
                     self.weight(&format!("{name}.bias")),
                     y.at(0),
                     rows as i32,
-                    1024,
+                    self.dims.h as i32,
                     self.stream.0,
                 ),
                 name,
@@ -248,12 +297,12 @@ impl VisionModel {
         };
         let n = image.image_grid_thw[1] * image.image_grid_thw[2];
         ensure!(
-            image.pixel_values.len() == n * 1536,
+            image.pixel_values.len() == n * self.dims.patch_in,
             "vision pixel_values length does not match grid"
         );
         ensure!(
-            image.resized_height == image.image_grid_thw[1] * 16
-                && image.resized_width == image.image_grid_thw[2] * 16,
+            image.resized_height == image.image_grid_thw[1] * self.dims.patch
+                && image.resized_width == image.image_grid_thw[2] * self.dims.patch,
             "vision resized geometry does not match grid"
         );
         ensure!(
@@ -282,10 +331,10 @@ impl VisionModel {
         {
             graph.launch(self.stream.0)?;
             graph_trace("replayed", scratch.grid);
-            return self.read(&scratch.out, n / 4 * 2560);
+            return self.read(&scratch.out, n / self.dims.merge2 * self.dims.out);
         }
         self.enqueue(scratch, &mut callback)?;
-        let result = self.read(&scratch.out, n / 4 * 2560)?;
+        let result = self.read(&scratch.out, n / self.dims.merge2 * self.dims.out)?;
         if let Some(callback) = callback.as_mut() {
             callback("merger.output", &result)?;
         } else if self.graph_enabled {
@@ -332,8 +381,16 @@ impl VisionModel {
             out,
             ..
         } = scratch;
-        self.linear("patch_embed.proj", pixels, x, n, 1024, 1536, w)?;
-        self.trace(callback, "patch_embed", x, n * 1024)?;
+        self.linear(
+            "patch_embed.proj",
+            pixels,
+            x,
+            n,
+            self.dims.h,
+            self.dims.patch_in,
+            w,
+        )?;
+        self.trace(callback, "patch_embed", x, n * self.dims.h)?;
         unsafe {
             check(
                 (api().cs1_vision_position)(
@@ -347,11 +404,19 @@ impl VisionModel {
                 "vision learned positions",
             )?;
         }
-        self.trace(callback, "position", x, n * 1024)?;
-        for i in 0..24 {
+        self.trace(callback, "position", x, n * self.dims.h)?;
+        for i in 0..self.dims.depth {
             let p = format!("blocks.{i}");
             self.norm(&format!("{p}.norm1"), x, norm, n)?;
-            self.linear(&format!("{p}.attn.qkv"), norm, qkv, n, 3072, 1024, w)?;
+            self.linear(
+                &format!("{p}.attn.qkv"),
+                norm,
+                qkv,
+                n,
+                3 * self.dims.h,
+                self.dims.h,
+                w,
+            )?;
             unsafe {
                 check(
                     (api().cs1_vision_rope)(
@@ -369,7 +434,7 @@ impl VisionModel {
                     (api().cs1_vision_attention)(
                         q.at(0),
                         k.at(0),
-                        qkv.at(2048 * 2),
+                        qkv.at(self.dims.h * 4),
                         attn.at(0),
                         n as i32,
                         self.stream.0,
@@ -377,42 +442,92 @@ impl VisionModel {
                     "vision attention",
                 )?;
             }
-            self.linear(&format!("{p}.attn.proj"), attn, delta, n, 1024, 1024, w)?;
+            self.linear(
+                &format!("{p}.attn.proj"),
+                attn,
+                delta,
+                n,
+                self.dims.h,
+                self.dims.h,
+                w,
+            )?;
             unsafe {
                 check(
-                    (api().cs1_vision_add)(x.at(0), delta.at(0), n * 1024, self.stream.0),
+                    (api().cs1_vision_add)(x.at(0), delta.at(0), n * self.dims.h, self.stream.0),
                     "vision attention residual",
                 )?;
             }
             self.norm(&format!("{p}.norm2"), x, norm, n)?;
-            self.linear(&format!("{p}.mlp.linear_fc1"), norm, mlp, n, 4096, 1024, w)?;
+            self.linear(
+                &format!("{p}.mlp.linear_fc1"),
+                norm,
+                mlp,
+                n,
+                self.dims.i,
+                self.dims.h,
+                w,
+            )?;
             unsafe {
                 check(
-                    (api().cs1_vision_gelu)(mlp.at(0), n * 4096, 0, self.stream.0),
+                    (api().cs1_vision_gelu)(mlp.at(0), n * self.dims.i, 0, self.stream.0),
                     "vision tanh GELU",
                 )?;
             }
-            self.linear(&format!("{p}.mlp.linear_fc2"), mlp, delta, n, 1024, 4096, w)?;
+            self.linear(
+                &format!("{p}.mlp.linear_fc2"),
+                mlp,
+                delta,
+                n,
+                self.dims.h,
+                self.dims.i,
+                w,
+            )?;
             unsafe {
                 check(
-                    (api().cs1_vision_add)(x.at(0), delta.at(0), n * 1024, self.stream.0),
+                    (api().cs1_vision_add)(x.at(0), delta.at(0), n * self.dims.h, self.stream.0),
                     "vision MLP residual",
                 )?;
             }
-            self.trace(callback, &p, x, n * 1024)?;
+            self.trace(callback, &p, x, n * self.dims.h)?;
         }
         self.norm("merger.norm", x, norm, n)?;
-        self.trace(callback, "merger.norm", norm, n * 1024)?;
+        self.trace(callback, "merger.norm", norm, n * self.dims.h)?;
         // Consecutive groups of four patches already have the required 2x2 merge order.
-        self.linear("merger.linear_fc1", norm, mlp, n / 4, 4096, 4096, w)?;
-        self.trace(callback, "merger.linear_fc1", mlp, n * 1024)?;
+        self.linear(
+            "merger.linear_fc1",
+            norm,
+            mlp,
+            n / self.dims.merge2,
+            self.dims.i,
+            self.dims.merged,
+            w,
+        )?;
+        self.trace(
+            callback,
+            "merger.linear_fc1",
+            mlp,
+            n / self.dims.merge2 * self.dims.i,
+        )?;
         unsafe {
             check(
-                (api().cs1_vision_gelu)(mlp.at(0), n * 1024, 1, self.stream.0),
+                (api().cs1_vision_gelu)(
+                    mlp.at(0),
+                    n / self.dims.merge2 * self.dims.i,
+                    1,
+                    self.stream.0,
+                ),
                 "vision exact GELU",
             )?;
         }
-        self.linear("merger.linear_fc2", mlp, out, n / 4, 2560, 4096, w)?;
+        self.linear(
+            "merger.linear_fc2",
+            mlp,
+            out,
+            n / self.dims.merge2,
+            self.dims.out,
+            self.dims.i,
+            w,
+        )?;
         Ok(())
     }
 }
@@ -450,10 +565,11 @@ struct Scratch {
 impl Scratch {
     fn new(model: &VisionModel, grid: [usize; 3], geo: Geometry) -> Result<Self> {
         let n = grid[1] * grid[2];
+        let dims = &model.dims;
         Ok(Self {
             graph: None,
             grid,
-            pixels: DeviceBuffer::new(n * 1536 * 2)?,
+            pixels: DeviceBuffer::new(n * dims.patch_in * 2)?,
             indices: model.upload(
                 &geo.indices
                     .iter()
@@ -478,16 +594,16 @@ impl Scratch {
                     .flat_map(|v| v.to_le_bytes())
                     .collect::<Vec<_>>(),
             )?,
-            w: Work::new(n)?,
-            x: DeviceBuffer::new(n * 1024 * 2)?,
-            norm: DeviceBuffer::new(n * 1024 * 2)?,
-            qkv: DeviceBuffer::new(n * 3072 * 2)?,
-            q: DeviceBuffer::new(n * 1024 * 2)?,
-            k: DeviceBuffer::new(n * 1024 * 2)?,
-            attn: DeviceBuffer::new(n * 1024 * 2)?,
-            delta: DeviceBuffer::new(n * 1024 * 2)?,
-            mlp: DeviceBuffer::new(n * 4096 * 2)?,
-            out: DeviceBuffer::new(n / 4 * 2560 * 2)?,
+            w: Work::new(n, *dims)?,
+            x: DeviceBuffer::new(n * dims.h * 2)?,
+            norm: DeviceBuffer::new(n * dims.h * 2)?,
+            qkv: DeviceBuffer::new(n * 3 * dims.h * 2)?,
+            q: DeviceBuffer::new(n * dims.h * 2)?,
+            k: DeviceBuffer::new(n * dims.h * 2)?,
+            attn: DeviceBuffer::new(n * dims.h * 2)?,
+            delta: DeviceBuffer::new(n * dims.h * 2)?,
+            mlp: DeviceBuffer::new(n * dims.i * 2)?,
+            out: DeviceBuffer::new(n / dims.merge2 * dims.out * 2)?,
         })
     }
 }
@@ -497,11 +613,15 @@ struct Work {
     delta: DeviceBuffer,
 }
 impl Work {
-    fn new(n: usize) -> Result<Self> {
+    fn new(n: usize, dims: Dims) -> Result<Self> {
+        // Only the Cua-S1 adapter (rank 16, validated at load) exercises these;
+        // the widest adapted input is the merger fc1 input (merged) and the
+        // widest adapted output is an intermediate GEMM.
+        let widest = dims.i.max(dims.merged);
         Ok(Self {
-            float_input: DeviceBuffer::new(n * 4096 * 4)?,
+            float_input: DeviceBuffer::new(n * widest * 4)?,
             rank: DeviceBuffer::new(n * 16 * 4)?,
-            delta: DeviceBuffer::new(n * 4096 * 4)?,
+            delta: DeviceBuffer::new(n * dims.i * 4)?,
         })
     }
 }

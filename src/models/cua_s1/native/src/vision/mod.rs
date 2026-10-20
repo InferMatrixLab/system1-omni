@@ -27,8 +27,14 @@ const BASE: &str = "model.visual.";
 const ADAPTER: &str = "base_model.model.model.visual.";
 type Inventory = BTreeMap<String, Vec<usize>>;
 
-/// The supported Qwen3.5-4B vision architecture; all fields are validated at load.
-#[derive(Debug, Deserialize)]
+/// The supported Qwen3.5 vision architecture; all fields are validated at load.
+///
+/// Every dimension the CUDA kernels implement is pinned to the shared layout
+/// (24 blocks, width 1024, intermediate 4096, 16 heads, 16x16x2 patches,
+/// 2x2 merge). The merger output width alone is model-specific — 2560 for the
+/// Cua-S1 4B, 2048 for the Valen 2B — so `out_hidden_size` is configuration
+/// driven and must equal the text hidden size the merger feeds.
+#[derive(Debug, Clone, Deserialize)]
 pub struct VisionConfig {
     pub depth: usize,
     pub hidden_size: usize,
@@ -55,21 +61,25 @@ impl VisionConfig {
             vision.intermediate_size,
             vision.num_heads,
             vision.num_position_embeddings,
-            vision.out_hidden_size,
             vision.in_channels,
             vision.patch_size,
             vision.temporal_patch_size,
             vision.spatial_merge_size,
         ];
         ensure!(
-            sizes == [24, 1024, 4096, 16, 2304, 2560, 3, 16, 2, 2]
+            sizes == [24, 1024, 4096, 16, 2304, 3, 16, 2, 2]
                 && vision.hidden_act == "gelu_pytorch_tanh"
                 && vision.deepstack_visual_indexes.is_empty()
                 && vision.model_type == "qwen3_5"
                 && config["model_type"] == "qwen3_5"
                 && config["text_config"]["hidden_size"].as_u64()
                     == Some(vision.out_hidden_size as u64),
-            "unsupported vision/text config: expected pinned Qwen3.5-4B layout"
+            "unsupported vision/text config: expected the shared Qwen3.5 vision \
+             layout with out_hidden_size equal to the text hidden size"
+        );
+        ensure!(
+            vision.out_hidden_size > 0 && vision.out_hidden_size % 8 == 0,
+            "vision out_hidden_size must be a positive multiple of 8"
         );
         Ok(vision)
     }
@@ -99,12 +109,8 @@ impl VisionConfig {
         }
         let merged = h * self.spatial_merge_size * self.spatial_merge_size;
         linear("merger.norm".into(), h, None);
-        linear("merger.linear_fc1".into(), merged, Some(merged));
-        linear(
-            "merger.linear_fc2".into(),
-            self.out_hidden_size,
-            Some(merged),
-        );
+        linear("merger.linear_fc1".into(), i, Some(merged));
+        linear("merger.linear_fc2".into(), self.out_hidden_size, Some(i));
         tensors.insert(
             format!("{BASE}patch_embed.proj.weight"),
             vec![
@@ -320,6 +326,33 @@ impl VisionCheckpoint {
     }
 }
 
+/// The weight access `VisionModel` uploads, shared by the Cua-S1
+/// base+adapter checkpoint and the manifest-verified Valen export.
+pub(crate) trait VisionWeights {
+    fn vision_config(&self) -> &VisionConfig;
+    fn base_names(&self) -> impl Iterator<Item = &str>;
+    fn base_tensor(&self, name: &str) -> Result<TensorView<'_>>;
+    fn adapter_names(&self) -> impl Iterator<Item = &str>;
+    fn adapter_tensor(&self, name: &str) -> Result<TensorView<'_>>;
+}
+impl VisionWeights for VisionCheckpoint {
+    fn vision_config(&self) -> &VisionConfig {
+        self.config()
+    }
+    fn base_names(&self) -> impl Iterator<Item = &str> {
+        VisionCheckpoint::base_names(self)
+    }
+    fn base_tensor(&self, name: &str) -> Result<TensorView<'_>> {
+        VisionCheckpoint::base_tensor(self, name)
+    }
+    fn adapter_names(&self) -> impl Iterator<Item = &str> {
+        VisionCheckpoint::adapter_names(self)
+    }
+    fn adapter_tensor(&self, name: &str) -> Result<TensorView<'_>> {
+        VisionCheckpoint::adapter_tensor(self, name)
+    }
+}
+
 struct TensorStore {
     maps: Vec<Mmap>,
     tensors: BTreeMap<String, (usize, TensorInfo)>,
@@ -479,4 +512,7 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for UniqueMap<T> {
 
 mod geometry;
 mod model;
+#[cfg(test)]
+#[path = "../../../../../../tests/cua_s1/vision_config.rs"]
+mod vision_config_tests;
 pub use model::VisionModel;
