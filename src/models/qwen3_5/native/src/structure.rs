@@ -114,7 +114,10 @@ impl QwenHybridStructure {
         object.insert("kv_heads".into(), num(self.kv_heads));
         object.insert("head_dim".into(), num(self.head_dim));
         object.insert("rotary_half".into(), num(self.rotary_half));
-        object.insert("rope_theta".into(), Json::String(self.rope_theta.to_string()));
+        object.insert(
+            "rope_theta".into(),
+            Json::String(self.rope_theta.to_string()),
+        );
         object.insert(
             "mrope_section".into(),
             Json::Array(
@@ -151,10 +154,7 @@ impl QwenHybridStructure {
             Json::String(self.attention_bias.to_string()),
         );
         object.insert("rope_type".into(), Json::String(self.rope_type.clone()));
-        object.insert(
-            "conv_kernel_dim".into(),
-            num(self.conv_kernel_dim),
-        );
+        object.insert("conv_kernel_dim".into(), num(self.conv_kernel_dim));
         object.insert(
             "mrope_interleaved".into(),
             Json::String(self.mrope_interleaved.to_string()),
@@ -219,10 +219,6 @@ pub fn read_structure(dir: &Path) -> Result<QwenHybridStructure> {
         })
         .transpose()?;
     let num_hidden_layers = int("num_hidden_layers")?;
-    ensure!(
-        layer_kinds.len() == num_hidden_layers,
-        "layer_types does not match num_hidden_layers"
-    );
     let mut provenance = BTreeMap::new();
     for field in [
         "hidden",
@@ -271,17 +267,23 @@ pub fn read_structure(dir: &Path) -> Result<QwenHybridStructure> {
     let hidden_act = c["hidden_act"].as_str().map(str::to_string);
     let attn_output_gate = c["attn_output_gate"].as_bool().unwrap_or(true);
     let attention_bias = c["attention_bias"].as_bool().unwrap_or(false);
-    let rope_type = rope["rope_type"]
-        .as_str()
-        .unwrap_or("default")
-        .to_string();
+    let rope_type = rope["rope_type"].as_str().unwrap_or("default").to_string();
     let mrope_interleaved = rope["mrope_interleaved"].as_bool().unwrap_or(true);
+    // The layer-count check keeps its base position: after every field
+    // extraction, before the gate's other checks. linear_conv_kernel_dim
+    // is read after it, as in the base loader where the gate extracted
+    // it at its own step.
+    ensure!(
+        layer_kinds.len() == num_hidden_layers,
+        "layer_types does not match num_hidden_layers"
+    );
+    let conv_kernel_dim = int("linear_conv_kernel_dim")?;
     Ok(QwenHybridStructure {
         hidden_act,
         attn_output_gate,
         attention_bias,
         rope_type,
-        conv_kernel_dim: int("linear_conv_kernel_dim")?,
+        conv_kernel_dim,
         mrope_interleaved,
         hidden: int("hidden_size")?,
         intermediate: int("intermediate_size")?,
@@ -317,15 +319,8 @@ pub fn check_abi6(s: &QwenHybridStructure) -> Result<()> {
     );
     ensure!(s.attn_output_gate, "attention without the output gate");
     ensure!(!s.attention_bias, "attention with bias");
-    ensure!(
-        s.rope_type == "default",
-        "rope type {}",
-        s.rope_type
-    );
-    ensure!(
-        s.conv_kernel_dim == 4,
-        "conv kernel is not 4"
-    );
+    ensure!(s.rope_type == "default", "rope type {:?}", s.rope_type);
+    ensure!(s.conv_kernel_dim == 4, "conv kernel is not 4");
     ensure!(
         s.head_dim == 256 && s.lin_k_dim == 128 && s.lin_v_dim == 128,
         "head dims {} / {} / {}",
@@ -333,11 +328,7 @@ pub fn check_abi6(s: &QwenHybridStructure) -> Result<()> {
         s.lin_k_dim,
         s.lin_v_dim
     );
-    ensure!(
-        s.rotary_half == 32,
-        "{} rotary dims",
-        2 * s.rotary_half
-    );
+    ensure!(s.rotary_half == 32, "{} rotary dims", 2 * s.rotary_half);
     ensure!(
         s.rope_theta.is_finite() && s.rope_theta > 0.0,
         "invalid rope_theta"
@@ -418,7 +409,10 @@ pub struct QwenIdentity {
 
 pub fn structure_identity(s: &QwenHybridStructure) -> QwenIdentity {
     let mut body = serde_json::Map::new();
-    body.insert("schema_version".into(), Json::String(SCHEMA_VERSION.to_string()));
+    body.insert(
+        "schema_version".into(),
+        Json::String(SCHEMA_VERSION.to_string()),
+    );
     body.insert("family".into(), Json::String(FAMILY.into()));
     body.insert("backend".into(), Json::String(BACKEND.into()));
     body.insert("abi_version".into(), Json::String(ABI_VERSION.to_string()));

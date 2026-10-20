@@ -1,7 +1,5 @@
 use omni_qwen3_5_native::model::Config;
-use omni_qwen3_5_native::structure::{
-    self, LayerKind, PrefixLayout, QwenHybridStructure,
-};
+use omni_qwen3_5_native::structure::{self, LayerKind, PrefixLayout, QwenHybridStructure};
 use serde_json::json;
 use std::fs;
 use std::path::Path;
@@ -17,7 +15,8 @@ fn hybrid(
     lin_k_heads: usize,
     lin_v_heads: usize,
 ) -> QwenHybridStructure {
-    let mut s = structure::read_structure(&fixture_dir(default_config())).unwrap();
+    let (_keep, path) = fixture_dir(default_config());
+    let mut s = structure::read_structure(&path).unwrap();
     s.hidden = hidden;
     s.intermediate = intermediate;
     s.heads = heads;
@@ -69,18 +68,17 @@ fn default_config() -> serde_json::Value {
     })
 }
 
-fn fixture_dir(config: serde_json::Value) -> std::path::PathBuf {
+fn fixture_dir(config: serde_json::Value) -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("config.json"), config.to_string()).unwrap();
     let path = dir.path().to_path_buf();
-    // Keep the directory alive for the test body.
-    std::mem::forget(dir);
-    path
+    (dir, path)
 }
 
 #[test]
 fn adapter_reads_the_checkpoint_and_records_provenance() {
-    let s = structure::read_structure(&fixture_dir(default_config())).unwrap();
+    let (_keep, path) = fixture_dir(default_config());
+    let s = structure::read_structure(&path).unwrap();
     assert_eq!(s.hidden, 5120);
     assert_eq!(s.head_dim, 256);
     assert_eq!(s.rotary_half, 32);
@@ -128,7 +126,10 @@ fn adapter_rejects_broken_sources() {
         }),
     ] {
         assert!(
-            structure::read_structure(&fixture_dir(config)).is_err(),
+            {
+                let (_keep, path) = fixture_dir(config);
+                structure::read_structure(&path).is_err()
+            },
             "accepted {name}"
         );
     }
@@ -136,11 +137,7 @@ fn adapter_rejects_broken_sources() {
 
 #[test]
 fn the_frozen_gate_accepts_the_three_vela_hybrid_backbones() {
-    for (name, s) in [
-        ("0.8B", vela_08b()),
-        ("4B", vela_4b()),
-        ("9B", vela_9b()),
-    ] {
+    for (name, s) in [("0.8B", vela_08b()), ("4B", vela_4b()), ("9B", vela_9b())] {
         structure::check_abi6(&s).unwrap_or_else(|e| panic!("{name} rejected: {e}"));
     }
 }
@@ -149,27 +146,31 @@ fn the_frozen_gate_accepts_the_three_vela_hybrid_backbones() {
 fn the_frozen_gate_rejects_every_capability_violation() {
     type Mutation = Box<dyn Fn(&mut QwenHybridStructure)>;
     let rejects: Vec<(&str, Mutation)> = vec![
-        ("head_dim", Box::new(|s: &mut QwenHybridStructure| s.head_dim = 128)),
+        (
+            "head_dim",
+            Box::new(|s: &mut QwenHybridStructure| s.head_dim = 128),
+        ),
         ("lin_k_dim", Box::new(|s| s.lin_k_dim = 64)),
         ("lin_v_dim", Box::new(|s| s.lin_v_dim = 64)),
         ("conv", Box::new(|s| s.conv_kernel_dim = 5)),
-        ("hidden_act", Box::new(|s| s.hidden_act = Some("relu".into()))),
+        (
+            "hidden_act",
+            Box::new(|s| s.hidden_act = Some("relu".into())),
+        ),
         ("output gate", Box::new(|s| s.attn_output_gate = false)),
         ("attention bias", Box::new(|s| s.attention_bias = true)),
         ("rope type", Box::new(|s| s.rope_type = "linear".into())),
         ("mrope", Box::new(|s| s.mrope_interleaved = false)),
+        ("mrope sum", Box::new(|s| s.mrope_section = [11, 11, 11])),
+        ("rotary", Box::new(|s| s.rotary_half = 16)),
         (
-            "mrope sum",
-            Box::new(|s| s.mrope_section = [11, 11, 11]),
-        ),
-        (
-            "rotary",
-            Box::new(|s| s.rotary_half = 16),
-        ),
-        (
-            "max positions",
+            "max positions upper",
             Box::new(|s| s.max_positions = 1 << 25),
         ),
+        ("max positions zero", Box::new(|s| s.max_positions = 0)),
+        ("rope theta zero", Box::new(|s| s.rope_theta = 0.0)),
+        ("rope theta negative", Box::new(|s| s.rope_theta = -1.0)),
+        ("rope theta nan", Box::new(|s| s.rope_theta = f64::NAN)),
         (
             "heads divisibility",
             Box::new(|s: &mut QwenHybridStructure| {
@@ -185,15 +186,26 @@ fn the_frozen_gate_rejects_every_capability_violation() {
         ),
         ("hidden alignment", Box::new(|s| s.hidden = 1025)),
     ];
-    assert_eq!(rejects.len(), 15);
+    assert_eq!(rejects.len(), 19);
     for (name, mutate) in rejects {
-        let mut s = structure::read_structure(&fixture_dir(default_config())).unwrap();
+        let (_keep, path) = fixture_dir(default_config());
+        let mut s = structure::read_structure(&path).unwrap();
         mutate(&mut s);
-        assert!(
-            structure::check_abi6(&s).is_err(),
-            "gate accepted {name}"
-        );
+        assert!(structure::check_abi6(&s).is_err(), "gate accepted {name}");
     }
+    let (_keep, path) = fixture_dir(default_config());
+    let mut s = structure::read_structure(&path).unwrap();
+    s.rope_type = "linear".into();
+    let message = structure::check_abi6(&s).unwrap_err().to_string();
+    assert!(message.contains("\"linear\""), "{message}");
+}
+
+#[test]
+fn config_load_rejects_a_defective_checkpoint_end_to_end() {
+    let mut config = default_config();
+    config["hidden_act"] = json!("relu");
+    let (_keep, path) = fixture_dir(config);
+    assert!(Config::load(&path).is_err());
 }
 
 #[test]
