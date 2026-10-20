@@ -1308,9 +1308,11 @@ name = "omni-vela-native"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "half",
  "memmap2",
+ "omni-cuda",
  "omni-modernbert",
- "safetensors 0.6.2",
+ "safetensors 0.8.0",
  "serde_json",
  "tempfile",
 ]

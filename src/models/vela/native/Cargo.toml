@@ -7,10 +7,15 @@ description = "Vela 2.0 0.3B ModernBERT profile on the family core"
 
 [dependencies]
 anyhow = "1"
+half = { version = "2", optional = true }
 memmap2 = "0.9"
+omni-cuda = { path = "../../../backends/cuda", optional = true }
 omni-modernbert = { path = "../../modernbert" }
-safetensors = "0.6"
+safetensors = "0.8.0"
 serde_json = "1"
+
+[features]
+cuda = ["dep:omni-cuda", "dep:half"]
 
 [dev-dependencies]
 tempfile = "3"
@@ -26,3 +31,8 @@ path = "../../../../tests/vela/native/weights.rs"
 [[test]]
 name = "vela_rope"
 path = "../../../../tests/vela/native/rope.rs"
+
+[[test]]
+name = "vela_executor"
+path = "../../../../tests/vela/native/executor.rs"
+required-features = ["cuda"]

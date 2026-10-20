@@ -9,6 +9,9 @@ pub mod profile;
 pub mod rope;
 pub mod weights;
 
+#[cfg(feature = "cuda")]
+pub mod executor;
+
 pub use config::read_structure;
 pub use profile::profile;
 pub use rope::{YarnTables, cos_sin_tables, yarn};
