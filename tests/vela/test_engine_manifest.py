@@ -28,6 +28,7 @@ from models.vela.engine import (
     PINNED_FILES_SHA256,
     REFERENCE_REPO,
     REFERENCE_REVISION,
+    put_first_on_sys_path,
     verify_config,
     verify_files,
     verify_no_foreign_runtime,
@@ -61,6 +62,14 @@ def build_package(root: Path, files: dict[str, bytes], config: dict | None = Non
     return table_of(files)
 
 
+def sparse_weights(root: Path, size: int = EXPECTED_WEIGHTS_BYTES) -> None:
+    """The gate reads ``stat().st_size`` only, so a sparse hole stands
+    in for the 1.2 GB file instead of a full heap allocation."""
+
+    with (root / "model.safetensors").open("wb") as stream:
+        stream.truncate(size)
+
+
 def small_files():
     return {
         "vela2_serve.py": b"upstream server stub\n",
@@ -89,7 +98,7 @@ def test_verification_accepts_a_package_matching_its_table(tmp_path):
     assert verify_files(tmp_path, table) == sorted(table)
     verify_config(tmp_path)
     # verify_weights needs the exact pinned size; the stub above is short.
-    (tmp_path / "model.safetensors").write_bytes(b"0" * EXPECTED_WEIGHTS_BYTES)
+    sparse_weights(tmp_path)
     verify_package(tmp_path, table)
 
 
@@ -255,12 +264,32 @@ def test_a_runtime_module_without_a_file_is_refused(tmp_path):
         sys.modules.pop("vela2_inference", None)
 
 
+def test_the_package_root_is_forced_to_the_front_of_sys_path(tmp_path):
+    # A PYTHONPATH copy of the root listed later must not leave a foreign
+    # directory ahead of it: verify_no_foreign_runtime cannot catch this,
+    # because sys.modules is empty before the first import.
+    package = tmp_path / "pkg"
+    shadow = tmp_path / "shadow"
+    package.mkdir()
+    shadow.mkdir()
+    resolved = str(package.resolve())
+    sys.path.insert(0, str(shadow))
+    sys.path.append(str(package))
+    try:
+        assert put_first_on_sys_path(package) == resolved
+        assert sys.path[0] == resolved
+        assert resolved not in sys.path[1:]
+        assert str(shadow) in sys.path
+    finally:
+        sys.path[:] = [entry for entry in sys.path if entry not in (str(shadow), resolved)]
+
+
 def test_weights_are_checked_by_exact_pinned_size(tmp_path):
     table = build_package(tmp_path, small_files())
-    (tmp_path / "model.safetensors").write_bytes(b"0" * EXPECTED_WEIGHTS_BYTES)
+    sparse_weights(tmp_path)
     verify_weights(tmp_path)
 
-    (tmp_path / "model.safetensors").write_bytes(b"0" * (EXPECTED_WEIGHTS_BYTES - 1))
+    sparse_weights(tmp_path, EXPECTED_WEIGHTS_BYTES - 1)
     with pytest.raises(ValueError, match="is 1236473251 bytes"):
         verify_weights(tmp_path)
 

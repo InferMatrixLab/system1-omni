@@ -1,6 +1,6 @@
 """Ties the frozen oracle fixtures to the recipe examples they came from.
 
-The three oracle fixtures under ``tests/vela/fixtures`` are the frozen
+The four oracle fixtures under ``tests/vela/fixtures`` are the frozen
 comparison baseline for the later native encoder slices: each one's
 ``request`` is the recipe's example request, and its recorded
 ``system_one`` response passes the worker's own response gate. This
@@ -25,6 +25,7 @@ CASES = [
     ("oracle-example-request", "example-request.json"),
     ("oracle-example-request-cjk", "example-request-cjk.json"),
     ("oracle-example-request-set-threshold", "example-request-set-threshold.json"),
+    ("oracle-example-request-score", "example-request-score.json"),
 ]
 
 

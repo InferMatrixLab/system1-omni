@@ -217,6 +217,21 @@ def verify_no_foreign_runtime(root: Path) -> None:
             )
 
 
+def put_first_on_sys_path(root: Path) -> str:
+    """Put the resolved package root at the front of ``sys.path``.
+
+    Equivalent entries are dropped, not reused: a ``PYTHONPATH`` copy of
+    the root listed later would leave foreign directories ahead of it,
+    and ``verify_no_foreign_runtime`` only guards ``sys.modules``, which
+    is empty before the first import.
+    """
+
+    resolved = Path(root).resolve()
+    sys.path[:] = [entry for entry in sys.path if Path(entry or ".").resolve() != resolved]
+    sys.path.insert(0, str(resolved))
+    return str(resolved)
+
+
 def verify_package(root: Path, table: dict[str, str] | None = None) -> None:
     """The full pre-import gate for one package directory."""
 
@@ -235,6 +250,7 @@ class Vela2Executor:
         device: str = "cpu",
         model_name: str | None = None,
         batch_size: int | None = None,
+        token_budget: int | None = None,
     ) -> None:
         root = Path(package)
         if not root.is_dir():
@@ -248,12 +264,7 @@ class Vela2Executor:
         # imported from another directory would silently be the wrong
         # runtime.
         verify_no_foreign_runtime(root)
-        root_str = str(root)
-        # Promote to the front even when already on the path: an earlier
-        # entry would otherwise win the flat-module import.
-        if root_str in sys.path:
-            sys.path.remove(root_str)
-        sys.path.insert(0, root_str)
+        put_first_on_sys_path(root)
         import vela2_inference
 
         self.SystemOneError = vela2_inference.SystemOneError
@@ -261,6 +272,7 @@ class Vela2Executor:
         self.engine = vela2_inference.Vela2.from_pretrained(
             root, backend="torch", device=device,
             **({"batch_size": batch_size} if batch_size is not None else {}),
+            **({"token_budget": token_budget} if token_budget is not None else {}),
         )
         self.model_name = model_name or vela2_inference.DEFAULT_MODEL_NAME
         self.max_length = int(self.engine.max_len)
