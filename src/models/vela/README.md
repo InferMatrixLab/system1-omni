@@ -131,7 +131,11 @@ per-question errors on this path:
 4. HTTP 401 (`{"detail": "Missing or invalid API key"}`) only when
    `VELA2_API_KEY` is set and the request does not carry exactly
    `Authorization: Bearer <key>` (applies to `/v1/systemone` and
-   `/v1/models`; `/health` and `/ready` stay open).
+   `/v1/models`; `/health` and `/ready` stay open). The transport
+   checks above (411/413/415) run before this gate, so a request that
+   is both malformed and unauthenticated answers with its transport
+   status, not 401 — upstream FastAPI checks auth first; a recorded
+   slice-scoped divergence.
 
 **Over-limit state is truncated, not refused** — a recorded divergence
 from the "no silent truncation" convention this repository's other
