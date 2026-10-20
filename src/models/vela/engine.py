@@ -25,6 +25,7 @@ import hashlib
 import json
 import sys
 import threading
+from importlib.machinery import BYTECODE_SUFFIXES, EXTENSION_SUFFIXES, SOURCE_SUFFIXES
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,10 @@ PINNED_FILES_SHA256 = {
 # import of any of them from another package directory would silently
 # mix two runtimes once this package's root goes first on ``sys.path``.
 RUNTIME_MODULES = tuple(name[:-3] for name in PINNED_FILES_SHA256 if name.endswith(".py"))
+# Every suffix CPython's source, bytecode and extension loaders import
+# from a ``sys.path`` entry; an unlisted file or directory entry wearing
+# one of them can shadow a dependency once the package root goes first.
+IMPORTABLE_SUFFIXES = frozenset(SOURCE_SUFFIXES + BYTECODE_SUFFIXES + EXTENSION_SUFFIXES)
 # A warmup that touches every question kind's readout path (cosine + MLP
 # option heads, the span head and the span decoder, the set sigmoid and
 # threshold echo). Model text only; the result is discarded.
@@ -129,16 +134,23 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
     files this process is about to execute or read as calibration, so
     there is no size shortcut. It also refuses importable entries the
     table does not name — the package root is about to go first on
-    ``sys.path``, where an extra ``*.py`` file or ``__init__.py``
-    package would shadow one of the pinned runtime's dependencies. A
-    directory without ``__init__.py`` can shadow the same way as a
-    namespace package, so any directory carrying importable code at
-    any depth is refused too; a directory of pure data assets cannot
-    execute and is left alone.
+    ``sys.path``, where an extra source, bytecode or extension module
+    (not just ``*.py``) or an ``__init__.py`` package would shadow one
+    of the pinned runtime's dependencies. A directory without
+    ``__init__.py`` can shadow the same way as a namespace package, so
+    any directory carrying importable code at any depth is refused too;
+    ``__pycache__`` bytecode is the interpreter's cache for the sources
+    beside it, never reached by ``import`` by name, and a directory of
+    pure data assets cannot execute; both are left alone.
     """
 
     def carries_code(entry: Path) -> bool:
-        return any(entry.rglob("*.py"))
+        return any(
+            path.is_file()
+            and path.suffix in IMPORTABLE_SUFFIXES
+            and "__pycache__" not in path.parts
+            for path in entry.rglob("*")
+        )
 
     table = dict(table or PINNED_FILES_SHA256)
     problems: list[str] = []
@@ -154,7 +166,7 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
     for entry in sorted(Path(root).iterdir()):
         if entry.name in table:
             continue
-        if entry.is_file() and entry.suffix == ".py":
+        if entry.is_file() and entry.suffix in IMPORTABLE_SUFFIXES:
             problems.append(f"unexpected importable file {entry.name} in the package root")
         elif entry.is_dir() and (entry / "__init__.py").is_file():
             problems.append(f"unexpected importable package {entry.name}/ in the package root")

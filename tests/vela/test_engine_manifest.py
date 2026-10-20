@@ -148,10 +148,21 @@ def test_unsafe_pinned_names_are_rejected_before_any_file_access(tmp_path):
         verify_files(tmp_path, {"../escape.py": "0" * 64})
 
 
-def test_extra_importable_files_in_the_package_root_are_refused(tmp_path):
+@pytest.mark.parametrize(
+    "shadow",
+    [
+        "tokenizers.py",
+        "torch.pyc",
+        "torch.cpython-312-x86_64-linux-gnu.so",
+    ],
+)
+def test_extra_importable_files_in_the_package_root_are_refused(tmp_path, shadow):
+    # Sourceless bytecode and extension modules import from a sys.path
+    # entry exactly like source files, so every loader suffix is
+    # refused, not just .py.
     table = build_package(tmp_path, small_files())
-    (tmp_path / "tokenizers.py").write_text("shadowing module\n")
-    with pytest.raises(ValueError, match="unexpected importable file tokenizers.py"):
+    (tmp_path / shadow).write_bytes(b"shadowing module\n")
+    with pytest.raises(ValueError, match=f"unexpected importable file {re.escape(shadow)}"):
         verify_files(tmp_path, table)
 
 
@@ -167,11 +178,22 @@ def test_extra_package_directories_in_the_package_root_are_refused(tmp_path):
 def test_namespace_package_directories_with_code_are_refused(tmp_path):
     # A directory without __init__.py still shadows a dependency as a
     # namespace package once it carries importable code at any depth;
-    # the pinned package's own data directories (no .py) still pass.
+    # the pinned package's own data directories (no importables) pass.
     table = build_package(tmp_path, small_files())
     numpy = tmp_path / "numpy"
     (numpy / "core").mkdir(parents=True)
     (numpy / "core" / "__init__.py").write_text("shadowing namespace code\n")
+    with pytest.raises(ValueError, match="unexpected namespace package numpy"):
+        verify_files(tmp_path, table)
+
+
+def test_namespace_directories_with_extension_modules_are_refused(tmp_path):
+    # Deep extension modules import as pkg.mod the same as deep .py
+    # files, so the namespace-package refusal covers them too.
+    table = build_package(tmp_path, small_files())
+    numpy = tmp_path / "numpy"
+    (numpy / "core").mkdir(parents=True)
+    (numpy / "core" / "_multiarray_umath.cpython-312-x86_64-linux-gnu.so").write_bytes(b"elf")
     with pytest.raises(ValueError, match="unexpected namespace package numpy"):
         verify_files(tmp_path, table)
 
