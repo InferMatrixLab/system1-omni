@@ -62,6 +62,13 @@ def main() -> None:
     lines, ok = tool.compare_case("fixture", (200, response(drifted)), (200, reference))
     check("numeric drift fails (exact-match criterion)", not ok, "\n".join(lines))
 
+    same_answers = {"q": {"type": "noul", "noul": 0.75}, "other": {"type": "noul", "noul": 0.5}}
+    reordered_answers = {"other": {"type": "noul", "noul": 0.5}, "q": {"type": "noul", "noul": 0.75}}
+    lines, ok = tool.compare_case(
+        "fixture", (200, response(same_answers)), (200, response(reordered_answers))
+    )
+    check("key-order divergence fails (order is part of the match)", not ok, "\n".join(lines))
+
     # 2. Rejections agree only on both status and body.
     rejection = {"detail": [{"loc": ["body", "questions", "bad", "criteria"],
                              "msg": "span criteria must be an object with 1 to 255 entries",
@@ -83,38 +90,49 @@ def main() -> None:
     cases = tool.default_cases()
     names = [name for name, _ in cases]
     check(
-        "default cases are the three examples plus five rejections",
+        "default cases are the four examples plus five rejections",
         names == ["example-request", "example-request-set-threshold", "example-request-cjk",
+                  "example-request-score",
                   "invalid-span-422", "over-limit-413",
                   "missing-model-422", "extra-field-422", "wrong-model-422"],
         str(names),
     )
-    missing = dict(cases[5][1])
+    score = json.loads(
+        (tool.HERE / "example-request-score.json").read_text(encoding="utf-8")
+    )
+    check(
+        "the score example carries score questions with level criteria",
+        score["questions"]
+        and all(question["type"] == "score" for question in score["questions"].values())
+        and all(isinstance(question["criteria"], list) for question in score["questions"].values()),
+        json.dumps(score)[:160],
+    )
+    missing = dict(cases[6][1])
     check(
         "the missing-model case is an envelope without the model field",
         set(missing) == {"state", "questions"},
         json.dumps(missing)[:120],
     )
-    extra = dict(cases[6][1])
+    extra = dict(cases[7][1])
     check(
         "the extra-field case carries a field the preamble forbids",
         "images" in extra and set(extra) == {"model", "state", "questions", "images"},
         json.dumps(extra)[:120],
     )
-    wrong = dict(cases[7][1])
+    wrong = dict(cases[8][1])
     check(
         "the wrong-model case names the 0.8B member",
         wrong["model"] == "vllm-sr/Vela-2.0-0.8B",
         wrong["model"],
     )
-    invalid = dict(cases[3][1])
+    invalid = dict(cases[4][1])
     check(
         "the invalid-span case is a span question with list criteria",
         invalid["questions"]["bad"]["type"] == "span"
         and isinstance(invalid["questions"]["bad"]["criteria"], list),
         json.dumps(invalid)[:200],
     )
-    over = dict(cases[4][1])
+    over = dict(cases[5][1])
     check(
         "the over-limit case is questions+schema overflow by construction",
         len(over["questions"]["big"]["criteria"]) == 255,

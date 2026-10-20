@@ -126,7 +126,7 @@ concurrent one gets 503.
 
 ## Example requests
 
-Three complete runnable requests ship with the recipe:
+Four complete runnable requests ship with the recipe:
 
 - [`example-request.json`](example-request.json) — the model card's PII
   example: a span question over the 17 trained PII labels (the PII
@@ -137,7 +137,10 @@ Three complete runnable requests ship with the recipe:
   applied value 0.15 is echoed in `thresholds`; the pinned predict
   level marks overrides with rule `given` on span answers);
 - [`example-request-cjk.json`](example-request-cjk.json) — CJK state
-  exercising Unicode code-point offsets (one unit per CJK character).
+  exercising Unicode code-point offsets (one unit per CJK character);
+- [`example-request-score.json`](example-request-score.json) — two
+  `score` questions (three and four ordered levels) covering the fifth
+  answer kind in the default parity run.
 
 ~~~sh
 curl -sS http://127.0.0.1:8000/v1/systemone \
@@ -220,7 +223,7 @@ in the pull request description, not in this recipe.
 ## Reference parity (author-side, opt-in)
 
 [`compare_reference.py`](compare_reference.py) drives the fixture set —
-the three example requests and five synthetic rejections (an
+the four example requests and five synthetic rejections (an
 invalid-span 422, an over-limit 413, and the missing-field /
 extra-field / wrong-model envelope 422s) — through two paths that
 share one loaded engine: the pinned

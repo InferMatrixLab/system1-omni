@@ -22,7 +22,7 @@ future native encoder slices, and writes it only after a passing,
 non-rejected comparison. Requires the pinned package, the reference
 dependencies, and fastapi+uvicorn+httpx; see recipe/vela/reference.md.
 
-The default fixture set is the recipe's three example requests plus
+The default fixture set is the recipe's four example requests plus
 five synthetic rejections: an invalid span question (whole-request
 422), a schema that alone exceeds the 8,192-token window (413), and
 the three envelope 422s (missing field, extra field, wrong model
@@ -135,6 +135,7 @@ def default_cases():
         ("example-request", HERE / "example-request.json"),
         ("example-request-set-threshold", HERE / "example-request-set-threshold.json"),
         ("example-request-cjk", HERE / "example-request-cjk.json"),
+        ("example-request-score", HERE / "example-request-score.json"),
         ("invalid-span-422", invalid_span_body()),
         ("over-limit-413", over_limit_body()),
         ("missing-model-422", missing_model_body()),
@@ -179,6 +180,17 @@ def worker_response(raw, executor, decide):
         return status, body if body is not None else {"detail": str(exc)}
 
 
+def same_result(worker, reference) -> bool:
+    """Order-preserving equality of the two observed results.
+
+    ``dict == dict`` ignores insertion order, but key order is part of
+    the parity criterion; text dumped from each side keeps that order in
+    the comparison.
+    """
+
+    return json.dumps(worker, ensure_ascii=False) == json.dumps(reference, ensure_ascii=False)
+
+
 def compare_case(name, worker, reference):
     """Exact-match comparison of the two observed results.
 
@@ -188,7 +200,7 @@ def compare_case(name, worker, reference):
 
     lines = [f"case: {name}", "reference path: pinned vela2_serve app (FastAPI test client)"]
     problems = []
-    if worker == reference:
+    if same_result(worker, reference):
         status = worker[0]
         lines.append(f"both paths: HTTP {status}")
         if status == 200:

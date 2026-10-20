@@ -25,6 +25,7 @@ import hashlib
 import json
 import sys
 import threading
+from importlib.machinery import EXTENSION_SUFFIXES, SOURCE_SUFFIXES
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,9 @@ PINNED_FILES_SHA256 = {
 # import of any of them from another package directory would silently
 # mix two runtimes once this package's root goes first on ``sys.path``.
 RUNTIME_MODULES = tuple(name[:-3] for name in PINNED_FILES_SHA256 if name.endswith(".py"))
+# Every module-file form importable from a plain sys.path entry: source,
+# sourceless and CPython extension suffixes.
+IMPORTABLE_FILE_SUFFIXES = frozenset(SOURCE_SUFFIXES) | {".pyc"} | frozenset(EXTENSION_SUFFIXES)
 # A warmup that touches every question kind's readout path (cosine + MLP
 # option heads, the span head and the span decoder, the set sigmoid and
 # threshold echo). Model text only; the result is discarded.
@@ -129,8 +133,9 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
     files this process is about to execute or read as calibration, so
     there is no size shortcut. It also refuses importable entries the
     table does not name — the package root is about to go first on
-    ``sys.path``, where an extra ``*.py`` file or ``__init__.py`` package
-    would shadow one of the pinned runtime's dependencies.
+    ``sys.path``, where an extra module file (source, sourceless or
+    extension) or ``__init__.py`` package would shadow one of the pinned
+    runtime's dependencies.
     """
 
     table = dict(table or PINNED_FILES_SHA256)
@@ -147,7 +152,7 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
     for entry in sorted(Path(root).iterdir()):
         if entry.name in table:
             continue
-        if entry.is_file() and entry.suffix == ".py":
+        if entry.is_file() and entry.suffix in IMPORTABLE_FILE_SUFFIXES:
             problems.append(f"unexpected importable file {entry.name} in the package root")
         elif entry.is_dir() and (entry / "__init__.py").is_file():
             problems.append(f"unexpected importable package {entry.name}/ in the package root")
@@ -187,6 +192,21 @@ def verify_no_foreign_runtime(root: Path) -> None:
             )
 
 
+def put_first_on_sys_path(root: Path) -> str:
+    """Put the resolved package root at the front of ``sys.path``.
+
+    Equivalent entries are dropped, not reused: a ``PYTHONPATH`` copy of
+    the root listed later would leave foreign directories ahead of it,
+    and ``verify_no_foreign_runtime`` only guards ``sys.modules``, which
+    is empty before the first import.
+    """
+
+    resolved = Path(root).resolve()
+    sys.path[:] = [entry for entry in sys.path if Path(entry or ".").resolve() != resolved]
+    sys.path.insert(0, str(resolved))
+    return str(resolved)
+
+
 def verify_package(root: Path, table: dict[str, str] | None = None) -> None:
     """The full pre-import gate for one package directory."""
 
@@ -219,9 +239,7 @@ class Vela2Executor:
         # imported from another directory would silently be the wrong
         # runtime.
         verify_no_foreign_runtime(root)
-        root_str = str(root)
-        if root_str not in sys.path:
-            sys.path.insert(0, root_str)
+        put_first_on_sys_path(root)
         import vela2_inference
 
         self.SystemOneError = vela2_inference.SystemOneError
