@@ -6,7 +6,7 @@
 //! bundle's bf16 working precision after the final norm; readouts
 //! gather requested positions from it.
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use half::bf16;
 use omni_cuda::{Buffer, Cuda, Kernel, Ptr};
 use omni_modernbert::geometry::EncoderScratch;
@@ -76,16 +76,21 @@ impl Scratch {
         })
     }
 
-    fn buffer(&self, slot: ScratchSlot) -> &Buffer {
+    fn buffer(&self, slot: ScratchSlot) -> Result<&Buffer> {
         match slot {
-            ScratchSlot::Ids => &self.ids,
-            ScratchSlot::Lens => &self.lens,
-            ScratchSlot::Types => &self.ids,
-            ScratchSlot::X => &self.x,
-            ScratchSlot::Y => &self.y,
-            ScratchSlot::Qkv => &self.qkv,
-            ScratchSlot::O => &self.o,
-            ScratchSlot::Gate => &self.gate,
+            ScratchSlot::Ids => Ok(&self.ids),
+            ScratchSlot::Lens => Ok(&self.lens),
+            // No admitted profile carries a type embedding; a plan
+            // asking for that slot is a plan/profile mismatch to fail
+            // loudly, not a mapping onto the token-id buffer.
+            ScratchSlot::Types => {
+                bail!("type-embedding scratch is not supported by the admitted profile")
+            }
+            ScratchSlot::X => Ok(&self.x),
+            ScratchSlot::Y => Ok(&self.y),
+            ScratchSlot::Qkv => Ok(&self.qkv),
+            ScratchSlot::O => Ok(&self.o),
+            ScratchSlot::Gate => Ok(&self.gate),
         }
     }
 }
@@ -220,10 +225,10 @@ impl Encoder {
             let pointers: Vec<Ptr> = step.args[..step.count]
                 .iter()
                 .map(|arg| match arg {
-                    Arg::Weight(p) => *p,
-                    Arg::Scratch(slot) => scratch.buffer(*slot).ptr(),
+                    Arg::Weight(p) => Ok(*p),
+                    Arg::Scratch(slot) => Ok(scratch.buffer(*slot)?.ptr()),
                 })
-                .collect();
+                .collect::<Result<Vec<_>>>()?;
             // SAFETY: buffers are sized by the family geometry for this
             // admitted structure and stay alive through the sync below.
             unsafe { step.kernel.launch(&pointers, 1, len)? };
