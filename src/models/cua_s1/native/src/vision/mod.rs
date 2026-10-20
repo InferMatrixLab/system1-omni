@@ -512,7 +512,12 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for UniqueMap<T> {
 
 mod geometry;
 mod model;
+pub(crate) mod valen;
+#[cfg(test)]
+#[path = "../../../../../../tests/cua_s1/valen_manifest.rs"]
+mod valen_manifest_tests;
 #[cfg(test)]
 #[path = "../../../../../../tests/cua_s1/vision_config.rs"]
 mod vision_config_tests;
 pub use model::VisionModel;
+pub use valen::ValenVisionCheckpoint;

@@ -83,6 +83,13 @@ impl VisionModel {
         let checkpoint = VisionCheckpoint::load(base, adapter)?;
         Self::from_weights(&checkpoint, library)
     }
+    /// The Valen path (spec 03, N1): the manifest-verified export's vision
+    /// tensors, trained vision-top blocks and merger included, with no
+    /// adapter. Output width is the export's `out_hidden_size` (2048).
+    pub fn load_valen(export: impl AsRef<Path>, library: &Path) -> Result<Self> {
+        let checkpoint = super::ValenVisionCheckpoint::load(export)?;
+        Self::from_weights(&checkpoint, library)
+    }
     fn from_weights<W: VisionWeights>(weights: &W, library: &Path) -> Result<Self> {
         cuda::load(library)?;
         cuda::set_device(0)?;
@@ -629,3 +636,6 @@ impl Work {
 #[cfg(test)]
 #[path = "../../../../../../tests/cua_s1/vision_graph.rs"]
 mod graph_tests;
+#[cfg(test)]
+#[path = "../../../../../../tests/cua_s1/valen_vision.rs"]
+mod valen_vision_tests;

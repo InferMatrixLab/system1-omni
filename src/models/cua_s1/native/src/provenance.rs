@@ -23,7 +23,10 @@ fn hash_file(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hash.finalize()))
 }
 
-fn verify_files(
+/// Verify a marker's file hashes; shared by the cua_s1 export policy and the
+/// Valen vision export loader. `extra` names a non-hashed marker file allowed
+/// to sit beside the hashed artifacts.
+pub(crate) fn verify_files(
     root: &Path,
     files: &serde_json::Map<String, Value>,
     extra: Option<&str>,
