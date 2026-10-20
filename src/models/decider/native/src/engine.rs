@@ -1,5 +1,8 @@
 //! Assemble verified artifacts, model-owned processing, and serial eager execution.
-use crate::{Config, Kind, Limits, Processor, checkpoint::Checkpoint, executor::Executor};
+use crate::{
+    Config, Kind, Limits, Processor, batching::BatchLimits, checkpoint::Checkpoint,
+    executor::Executor,
+};
 use anyhow::Result;
 use omni_runtime::SerialScheduler;
 use serde_json::{Value, json};
@@ -13,8 +16,15 @@ pub struct Engine {
 }
 impl Engine {
     pub async fn load(dir: &Path, library: &Path) -> Result<Self> {
+        Self::load_with_batch(dir, library, BatchLimits::from_env()?).await
+    }
+    pub async fn load_with_batch(
+        dir: &Path,
+        library: &Path,
+        batching: BatchLimits,
+    ) -> Result<Self> {
         let directory = dir.to_owned();
-        let (processor,checkpoint,metadata) = tokio::task::spawn_blocking(move || -> Result<_> {
+        let (processor,checkpoint,mut metadata) = tokio::task::spawn_blocking(move || -> Result<_> {
             let processor = Processor::load(&directory,Limits::default())?;
             let labels: Vec<u32> = processor.labels().iter().map(|label| label.id).collect();
             let checkpoint = Checkpoint::load(&directory,&labels)?;
@@ -23,7 +33,9 @@ impl Engine {
             Ok((processor,checkpoint,metadata))
         }).await??;
         let labels = processor.labels().iter().map(|label| label.id).collect();
-        let executor = Executor::load(dir, library, checkpoint, labels).await?;
+        let executor = Executor::load(dir, library, checkpoint, labels, batching).await?;
+        metadata["batch_limits"] =
+            json!({"rows":batching.max_rows(),"tokens":batching.max_tokens()});
         let engine = Self {
             processor: Arc::new(processor),
             executor,
