@@ -149,27 +149,38 @@ fn parse_hf_config(config: &Json, source: &str) -> Result<(ModernBertStructure, 
             })
             .collect()
     };
-    let theta =
-        |field: &str, json_key: &str, provenance: &mut BTreeMap<String, FieldOrigin>| match config
-            .get(json_key)
-        {
-            None => {
-                provenance.insert(
-                    field.into(),
-                    FieldOrigin::Default("HF ModernBERT rope_theta default"),
-                );
-                Ok(10000.0)
-            }
-            Some(_) => {
-                provenance.insert(
-                    field.into(),
-                    FieldOrigin::Source(format!("{source}#{json_key}")),
-                );
-                float(config, json_key)
-            }
+    // ModernBERT configs carry per-kind thetas; a stock HF config may
+    // carry only the generic rope_theta, which then fills both kinds.
+    let theta = |field: &str,
+                 json_key: &str,
+                 generic_key: &str,
+                 provenance: &mut BTreeMap<String, FieldOrigin>| {
+        let key = if config.get(json_key).is_some() {
+            json_key
+        } else if config.get(generic_key).is_some() {
+            generic_key
+        } else {
+            provenance.insert(
+                field.into(),
+                FieldOrigin::Default("HF ModernBERT rope_theta default"),
+            );
+            return Ok(10000.0);
         };
-    let theta_full = theta("rope_full", "global_rope_theta", &mut provenance)?;
-    let theta_sliding = theta("rope_sliding", "local_rope_theta", &mut provenance)?;
+        provenance.insert(field.into(), FieldOrigin::Source(format!("{source}#{key}")));
+        float(config, key)
+    };
+    let theta_full = theta(
+        "rope_full",
+        "global_rope_theta",
+        "rope_theta",
+        &mut provenance,
+    )?;
+    let theta_sliding = theta(
+        "rope_sliding",
+        "local_rope_theta",
+        "rope_theta",
+        &mut provenance,
+    )?;
     let scaling = match config.get("rope_scaling") {
         None => None,
         Some(entry) => {

@@ -105,6 +105,39 @@ fn hf_adapter_accepts_explicit_layer_types_over_the_interval() {
 }
 
 #[test]
+fn hf_adapter_falls_back_to_the_generic_rope_theta() {
+    let mut config = family_config();
+    let object = config.as_object_mut().unwrap();
+    object.remove("global_rope_theta");
+    object.remove("local_rope_theta");
+    object.insert("rope_theta".into(), json!(500000.0));
+    let structure = parse(&config);
+    assert_eq!(structure.rope_full.theta, 500000.0);
+    assert_eq!(structure.rope_sliding.theta, 500000.0);
+    for field in ["rope_full", "rope_sliding"] {
+        match structure.provenance.get(field) {
+            Some(FieldOrigin::Source(key)) => assert_eq!(key, "config.json#rope_theta"),
+            other => panic!("{field} provenance {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn hf_adapter_prefers_the_per_kind_theta_over_the_generic_key() {
+    let mut config = family_config();
+    let object = config.as_object_mut().unwrap();
+    object.remove("global_rope_theta");
+    object.insert("rope_theta".into(), json!(500000.0));
+    let structure = parse(&config);
+    assert_eq!(structure.rope_full.theta, 500000.0);
+    assert_eq!(structure.rope_sliding.theta, 10000.0);
+    assert!(matches!(
+        structure.provenance.get("rope_sliding"),
+        Some(FieldOrigin::Source(_))
+    ));
+}
+
+#[test]
 fn hf_adapter_reads_type_vocab_and_position_members() {
     let (structure, meta) =
         ModernBertConfigAdapter::from_value(&family_config(), "encoder/config.json").unwrap();
