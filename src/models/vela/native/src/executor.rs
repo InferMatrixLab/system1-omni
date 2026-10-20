@@ -187,6 +187,14 @@ impl Encoder {
     pub fn encode(&self, ids: &[i64], positions: &[usize]) -> Result<Vec<Vec<f32>>> {
         let limits = &profile().limits;
         ensure!(!ids.is_empty(), "empty sequence");
+        // The embedding kernel indexes the token table unchecked, so an
+        // id outside [0, vocab_size) would fault on device; refuse it
+        // here before anything is allocated or launched.
+        ensure!(
+            ids.iter()
+                .all(|id| (0..self.structure.vocab_size as i64).contains(id)),
+            "token id outside the vocabulary"
+        );
         let len = ids.len().next_multiple_of(limits.len_step);
         limits.check_request(1, len)?;
         ensure!(

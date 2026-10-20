@@ -23,6 +23,12 @@ fn encoder_runs_and_produces_finite_hidden() {
     };
     let encoder = unsafe { Encoder::load(&checkpoint, &library) }.unwrap();
     assert_eq!(encoder.structure.hidden_size, 768);
+    // The embedding kernel indexes the token table unchecked, so ids
+    // outside the vocabulary must fail on the host before any launch.
+    let vocab = encoder.structure.vocab_size as i64;
+    for bad in [-1, vocab] {
+        assert!(encoder.encode(&[bad], &[0]).is_err(), "accepted id {bad}");
+    }
     let ids: Vec<i64> = (1..=97).collect();
     let hidden = encoder.encode(&ids, &[0, 47, 96]).unwrap();
     assert_eq!(hidden.len(), 3);
