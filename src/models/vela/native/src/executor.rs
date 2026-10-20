@@ -164,9 +164,7 @@ impl Encoder {
             let mut resolved = [Arg::Weight(std::ptr::null_mut()); 5];
             for (slot, arg) in resolved.iter_mut().zip(&args) {
                 *slot = match arg {
-                    PlanArg::Weight(name) => {
-                        Arg::Weight(weights[name].ptr())
-                    }
+                    PlanArg::Weight(name) => Arg::Weight(weights[name].ptr()),
                     PlanArg::Scratch(s) => Arg::Scratch(*s),
                 };
             }
@@ -199,11 +197,17 @@ impl Encoder {
         let mut staging = vec![0i64; len];
         staging[..ids.len()].copy_from_slice(ids);
         scratch.ids.write(
-            &staging.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<_>>(),
+            &staging
+                .iter()
+                .flat_map(|v| v.to_le_bytes())
+                .collect::<Vec<_>>(),
         )?;
-        scratch
-            .lens
-            .write(&vec![ids.len() as i32; 1][..].iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<_>>())?;
+        scratch.lens.write(
+            &vec![ids.len() as i32; 1][..]
+                .iter()
+                .flat_map(|v| v.to_le_bytes())
+                .collect::<Vec<_>>(),
+        )?;
         for step in &self.plan {
             let pointers: Vec<Ptr> = step.args[..step.count]
                 .iter()
