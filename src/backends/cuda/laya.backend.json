@@ -1,6 +1,6 @@
 {
   "name": "laya",
-  "abi_version": 1,
+  "abi_version": 2,
   "status": "experimental",
   "sources": [
     "kernels/runtime.cu",
