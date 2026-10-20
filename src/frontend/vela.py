@@ -46,6 +46,10 @@ MODELS_ENTRY = {
     ),
 }
 UNAUTHORIZED_BODY = {"detail": "Missing or invalid API key"}
+# Upstream verbatim endpoint bodies; compare_reference.py pins them
+# against the live reference app.
+HEALTH_BODY = {"status": "ok"}
+READY_BODY = {"ready": True}
 
 
 def decide(raw: bytes, executor: Vela2Executor) -> dict[str, Any]:
@@ -126,9 +130,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             # Upstream verbatim; the worker binds the port only after
             # loading and warmup, so answering at all means ready.
-            self.send_json(200, {"status": "ok"})
+            self.send_json(200, HEALTH_BODY)
         elif path == "/ready":
-            self.send_json(200, {"ready": True})
+            self.send_json(200, READY_BODY)
         elif path == "/v1/models":
             if self._unauthorized():
                 return

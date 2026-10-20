@@ -11,6 +11,7 @@ deliberately not configurable for tests.
 from __future__ import annotations
 
 import json
+import socket
 import threading
 from http.client import HTTPConnection
 
@@ -116,6 +117,23 @@ def test_models_lists_the_served_member_upstream_verbatim(server):
             }
         ]
     }
+
+
+def test_body_short_of_content_length_answers_400(server):
+    payload = json.dumps(five_kind_body()).encode("utf-8")
+    conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+    conn.putrequest("POST", "/v1/systemone", skip_accept_encoding=True)
+    conn.putheader("Content-Type", "application/json")
+    conn.putheader("Content-Length", str(len(payload) + 64))
+    conn.endheaders(payload)
+    # Half-close: the client will never send the promised remaining bytes.
+    conn.sock.shutdown(socket.SHUT_WR)
+    response = conn.getresponse()
+    raw = response.read()
+    status = response.status
+    conn.close()
+    assert status == 400
+    assert json.loads(raw) == {"detail": "incomplete body"}
 
 
 def test_valid_five_kind_decision_returns_200(server):

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Regression tests for recipe/vela/compare_reference.py.
 
-Checks the pure comparison, case-loading and export helpers without the
-pinned package, weights, torch or fastapi: exact-match verdicts
-including key order, rejection agreement, the default fixture set's
-shape (the invalid-span 422 and over-limit 413 synthetic cases), the
-oracle export gate, and the oracle export structure.
+Checks the pure comparison, case-loading, endpoint-parity and export
+helpers without the pinned package, weights, torch or fastapi:
+exact-match verdicts including key order, rejection agreement, the
+default fixture set's shape (the invalid-span 422 and over-limit 413
+synthetic cases), the oracle export gate, and the oracle export
+structure.
 
     python recipe/vela/test_compare_reference.py
 """
@@ -86,7 +87,7 @@ def main() -> None:
     lines, ok = tool.compare_case("fixture", (200, response()), (422, rejection))
     check("worker answering a rejected request fails", not ok, "\n".join(lines))
 
-    # 3. The default case set carries the charter's fixture list shape.
+    # 3. The default case set carries the documented fixture list shape.
     cases = tool.default_cases()
     names = [name for name, _ in cases]
     check(
@@ -139,18 +140,73 @@ def main() -> None:
         json.dumps(over)[:120],
     )
 
-    # 4. The oracle export freezes the full native-comparison surface.
+    # 4. Endpoint parity fails only on a real body or status drift.
+    class FakeResponse:
+        def __init__(self, status_code, body):
+            self.status_code = status_code
+            self._body = body
+
+        def json(self):
+            return self._body
+
+    class FakeClient:
+        def __init__(self, gets, post=None):
+            self._gets = gets
+            self._post = post
+
+        def get(self, path):
+            return self._gets[path]
+
+        def post(self, path, json=None):
+            return self._post
+
+    health = {"status": "ok"}
+    models = {"models": [{"name": tool.MODEL_NAME}]}
+    endpoints = [("/health", health), ("/v1/models", models)]
+    unauthorized = {"detail": "Missing or invalid API key"}
+    probe = {"model": tool.MODEL_NAME, "state": "s", "questions": {}}
+
+    same = FakeClient(
+        {"/health": FakeResponse(200, dict(health)), "/v1/models": FakeResponse(200, {"models": [{"name": tool.MODEL_NAME}]})},
+        post=FakeResponse(401, dict(unauthorized)),
+    )
+    lines, failures = tool.endpoint_parity(same, same, endpoints, unauthorized, probe)
+    check(
+        "endpoint parity passes on exact bodies",
+        failures == 0 and lines[0].endswith("PASS") and lines[1].endswith("PASS")
+        and lines[2].endswith("PASS"),
+        "\n".join(lines),
+    )
+
+    drifted = FakeClient(
+        {"/health": FakeResponse(200, {"status": "degraded"}), "/v1/models": FakeResponse(200, {"models": [{"name": "other"}]})},
+        post=FakeResponse(401, {"detail": "different"}),
+    )
+    lines, failures = tool.endpoint_parity(drifted, drifted, endpoints, unauthorized, probe)
+    check("endpoint body drift fails", failures == 3, "\n".join(lines))
+
+    wrong_status = FakeClient(
+        {"/health": FakeResponse(503, dict(health)), "/v1/models": FakeResponse(200, {"models": [{"name": tool.MODEL_NAME}]})},
+        post=FakeResponse(401, dict(unauthorized)),
+    )
+    lines, failures = tool.endpoint_parity(wrong_status, wrong_status, endpoints, unauthorized, probe)
+    check("endpoint status drift fails", failures == 1, "\n".join(lines))
+
+    # 5. The oracle export freezes the full native-comparison surface.
     body = {"model": tool.MODEL_NAME, "state": "s",
             "questions": {"q": {"type": "noul", "instructions": "x"}}}
+    source = {"model": tool.MODEL_NAME, "device": "cpu",
+              "generator": "recipe/vela/compare_reference.py --export"}
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "oracle.json"
         oracle = tool.export_oracle(
-            "case", body, response(), {"answers": [{"id": "q", "type": "choice"}]}, path
+            "case", body, response(), {"answers": [{"id": "q", "type": "choice"}]}, path, source
         )
         reread = json.loads(path.read_text(encoding="utf-8"))
         check(
             "oracle export round-trips",
             oracle == reread
+            and oracle["source"] == source
             and oracle["request"] == body
             and oracle["system_one"]["answers"]["q"]["noul"] == 0.75
             and oracle["predict"]["answers"][0]["id"] == "q",

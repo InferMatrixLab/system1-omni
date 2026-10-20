@@ -5,11 +5,13 @@ This directory contains the System1-Omni integration slice for
 (`vela2-unified`). It is a reference-serving boundary only: a Python
 worker that runs the checkpoint's own pinned runtime for text state and
 all five typed question kinds (`choice`, `noul`, `score`, `span`, `set`)
-on `/v1/systemone`. Native execution is not part of this slice; per the
-frozen RFC this worker is the Phase-1 entry that freezes the
-text/token_ids input, the position-level final-hidden readout contract,
-the error/length boundaries and the parity baseline for later
-ModernBERT-profile work.
+on `/v1/systemone`. Native execution is not part of this slice; this
+worker freezes the text/token_ids input, the position-level final-hidden
+readout contract, the error/length boundaries and the parity baseline
+for later ModernBERT-profile work. The CPU half of that native route —
+the 0.3B ModernBERT profile registration, the checkpoint census and the
+YaRN tables — lives in [`native/`](native/README.md), whose
+`cuda`-gated executor runs the encoder on the regenerated bundle.
 
 The shared Vela 2.0 wire module is deliberately shaped for the family:
 the envelope admission (`protocol`), the pinned-runtime error mapping
@@ -27,7 +29,7 @@ this slice ships the 0.3B pinned executor (`engine`). The hybrid members
 | Runtime | the checkpoint's own flat files: `vela2_inference.py`, `modeling_vela2.py`, `configuration_vela2.py`, `vela2_serve.py` |
 | Calibration | the package's own `calibration.json` (never cross-copied between members) |
 | License | Apache-2.0; the inherited tokenizer material carries Gemma Terms of Use |
-| Runtime dependencies | [recipe/vela/requirements.txt](../../recipe/vela/requirements.txt) (torch, transformers, safetensors, tokenizers, numpy) |
+| Runtime dependencies | [recipe/vela/requirements.txt](../../../recipe/vela/requirements.txt) (torch, transformers, safetensors, tokenizers, numpy) |
 
 The package ships no manifest, so the executor's startup gate checks the
 config's structural identity (model type, architecture, `max_length`
@@ -195,4 +197,4 @@ the shared worker-contract issue, and nothing is posted upstream.
   flash-linear-attention) is the oracle setting; GPU bf16-autocast is
   a deployment option outside this slice's evidence.
 - The serving procedure, hardware requirements and the recorded
-  evidence pointer are [recipe/vela/reference.md](../../recipe/vela/reference.md).
+  evidence pointer are [recipe/vela/reference.md](../../../recipe/vela/reference.md).

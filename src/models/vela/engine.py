@@ -25,7 +25,6 @@ import hashlib
 import json
 import sys
 import threading
-from importlib.machinery import EXTENSION_SUFFIXES, SOURCE_SUFFIXES
 from pathlib import Path
 from typing import Any
 
@@ -54,9 +53,6 @@ PINNED_FILES_SHA256 = {
 # import of any of them from another package directory would silently
 # mix two runtimes once this package's root goes first on ``sys.path``.
 RUNTIME_MODULES = tuple(name[:-3] for name in PINNED_FILES_SHA256 if name.endswith(".py"))
-# Every module-file form importable from a plain sys.path entry: source,
-# sourceless and CPython extension suffixes.
-IMPORTABLE_FILE_SUFFIXES = frozenset(SOURCE_SUFFIXES) | {".pyc"} | frozenset(EXTENSION_SUFFIXES)
 # A warmup that touches every question kind's readout path (cosine + MLP
 # option heads, the span head and the span decoder, the set sigmoid and
 # threshold echo). Model text only; the result is discarded.
@@ -133,10 +129,16 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
     files this process is about to execute or read as calibration, so
     there is no size shortcut. It also refuses importable entries the
     table does not name — the package root is about to go first on
-    ``sys.path``, where an extra module file (source, sourceless or
-    extension) or ``__init__.py`` package would shadow one of the pinned
-    runtime's dependencies.
+    ``sys.path``, where an extra ``*.py`` file or ``__init__.py``
+    package would shadow one of the pinned runtime's dependencies. A
+    directory without ``__init__.py`` can shadow the same way as a
+    namespace package, so any directory carrying importable code at
+    any depth is refused too; a directory of pure data assets cannot
+    execute and is left alone.
     """
+
+    def carries_code(entry: Path) -> bool:
+        return any(entry.rglob("*.py"))
 
     table = dict(table or PINNED_FILES_SHA256)
     problems: list[str] = []
@@ -152,10 +154,15 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
     for entry in sorted(Path(root).iterdir()):
         if entry.name in table:
             continue
-        if entry.is_file() and entry.suffix in IMPORTABLE_FILE_SUFFIXES:
+        if entry.is_file() and entry.suffix == ".py":
             problems.append(f"unexpected importable file {entry.name} in the package root")
         elif entry.is_dir() and (entry / "__init__.py").is_file():
             problems.append(f"unexpected importable package {entry.name}/ in the package root")
+        elif entry.is_dir() and carries_code(entry):
+            problems.append(
+                f"unexpected namespace package {entry.name}/ in the package root: "
+                "it carries importable code the pin does not name"
+            )
     if problems:
         raise ValueError("package verification failed: " + "; ".join(problems[:8]))
     return sorted(table)
@@ -185,26 +192,17 @@ def verify_no_foreign_runtime(root: Path) -> None:
 
     for name in RUNTIME_MODULES:
         loaded = sys.modules.get(name)
-        if loaded is not None and Path(loaded.__file__).resolve().parent != Path(root).resolve():
+        if loaded is None:
+            continue
+        origin = getattr(loaded, "__file__", None)
+        if origin is None or Path(origin).resolve().parent != Path(root).resolve():
+            # A module without a file is a namespace package or a
+            # builtin; either way it is not this package's flat module.
             raise ValueError(
-                f"a {name} module from another package directory is already "
-                "imported in this process; serve one package per process"
+                f"a {name} module from another package directory (or a namespace "
+                "package) is already imported in this process; "
+                "serve one package per process"
             )
-
-
-def put_first_on_sys_path(root: Path) -> str:
-    """Put the resolved package root at the front of ``sys.path``.
-
-    Equivalent entries are dropped, not reused: a ``PYTHONPATH`` copy of
-    the root listed later would leave foreign directories ahead of it,
-    and ``verify_no_foreign_runtime`` only guards ``sys.modules``, which
-    is empty before the first import.
-    """
-
-    resolved = Path(root).resolve()
-    sys.path[:] = [entry for entry in sys.path if Path(entry or ".").resolve() != resolved]
-    sys.path.insert(0, str(resolved))
-    return str(resolved)
 
 
 def verify_package(root: Path, table: dict[str, str] | None = None) -> None:
@@ -225,7 +223,6 @@ class Vela2Executor:
         device: str = "cpu",
         model_name: str | None = None,
         batch_size: int | None = None,
-        token_budget: int | None = None,
     ) -> None:
         root = Path(package)
         if not root.is_dir():
@@ -239,7 +236,12 @@ class Vela2Executor:
         # imported from another directory would silently be the wrong
         # runtime.
         verify_no_foreign_runtime(root)
-        put_first_on_sys_path(root)
+        root_str = str(root)
+        # Promote to the front even when already on the path: an earlier
+        # entry would otherwise win the flat-module import.
+        if root_str in sys.path:
+            sys.path.remove(root_str)
+        sys.path.insert(0, root_str)
         import vela2_inference
 
         self.SystemOneError = vela2_inference.SystemOneError
@@ -247,7 +249,6 @@ class Vela2Executor:
         self.engine = vela2_inference.Vela2.from_pretrained(
             root, backend="torch", device=device,
             **({"batch_size": batch_size} if batch_size is not None else {}),
-            **({"token_budget": token_budget} if token_budget is not None else {}),
         )
         self.model_name = model_name or vela2_inference.DEFAULT_MODEL_NAME
         self.max_length = int(self.engine.max_len)

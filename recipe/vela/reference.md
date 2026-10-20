@@ -30,7 +30,7 @@ The slice is:
 
 Out of scope for this slice: the hybrid members (0.8B/4B/9B — their
 reference workers are a separate slice), the ONNX backend, any native
-Rust/CUDA executor (the frozen RFC's ModernBERT-profile route), and
+Rust/CUDA executor (a future ModernBERT-profile route), and
 `noul_calibration` (a hybrid-only feature that does not exist on 0.3B).
 
 ## Architecture and ownership
@@ -228,13 +228,17 @@ invalid-span 422, an over-limit 413, and the missing-field /
 extra-field / wrong-model envelope 422s) — through two paths that
 share one loaded engine: the pinned
 `vela2_serve.py` app via FastAPI's test client, and the production
-`frontend.vela.decide` pipeline. The criterion is the charter's
-reference parity: **exact match** including JSON key order for 200s,
+`frontend.vela.decide` pipeline. The criterion is reference parity:
+**exact match** including JSON key order for 200s,
 and agreement on status and body for rejections (needs `pip install
-fastapi uvicorn httpx` on top of the requirements file).
+fastapi uvicorn httpx` on top of the requirements file). The run also
+compares the worker's verbatim endpoint bodies — `/health`, `/ready`,
+`/v1/models` and the unauthorized 401 — against the live reference app,
+so a drift in either direction fails the run.
 `--export tests/vela/fixtures/oracle-<case>.json` freezes each passing
-200 case — request, SystemOne response and predict()-level answers — as
-the frozen comparison baseline for the frozen RFC's native encoder
+200 case — request, SystemOne response, predict()-level answers and the
+generating run's provenance — as
+the frozen comparison baseline for the future native encoder
 slices, and writes it only after a passing comparison.
 
 ~~~sh
