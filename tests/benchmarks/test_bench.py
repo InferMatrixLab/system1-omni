@@ -316,9 +316,9 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
                 clock[0] += 1
                 yield body
 
-        def validate(case, payload):
+        def validate(case, payload, *settings):
             clock[0] += 2
-            return original(case, payload)
+            return original(case, payload, *settings)
 
         original = bench.read_answers
         async with httpx.AsyncClient(

@@ -24,8 +24,9 @@ The JSONL format is one object per request:
 ```
 
 Use a criteria map and a label target for Choice; an ordered criteria list and a
-numeric level target for Score. Every question needs a target. The runner adds
-only the backend model alias; all other request fields are replayed unchanged.
+numeric level target for Score. Every question needs a target. With the default
+`--protocol systemone`, the runner adds only the backend model alias; all other
+request fields are replayed unchanged.
 Keep source dataset revision, selected record IDs, sampling seed, transformation
 code revision, token lengths and truncation decisions with the manifest. Freeze
 short/near-limit and option-count slices as separate manifests.
@@ -75,8 +76,18 @@ the token is not saved. Redirects, proxy environment variables and retries are
 disabled. `--timeout` is a total deadline for each HTTP exchange, including body
 receipt; response validation is included in recorded client latency.
 Each answer must be an object whose `type` matches the requested question type.
-Missing or incorrect types are `invalid_response`; the runner keeps the original
-body and does not supply missing fields.
+Missing or incorrect System One answer types are `invalid_response`; the runner
+keeps the original body and does not supply missing fields.
+For JEV-VL, use `--protocol jev-vl` with a manifest containing one Choice question
+per request. The adapter checks the returned options, index, label and maximal
+probability, then supplies the requested `type` in the normalized answer envelope.
+Both online collection and offline replay use this same adapter. An image-only
+state object is sent as a media-parts list; other state objects remain text data.
+Use `--score-decimals 2`, `3` or `4` to match the model's scalar Score precision
+(default `4`); this is separate from the GPU dtype in metadata. Probabilities
+remain four-decimal wire values. Score validation bounds their independent
+rounding together with the scalar's rounding, and accepts Decider's all-zero
+Score distribution only with its complete isolated zero-fit metadata.
 Online validation and offline replay both parse the saved HTTPX-decoded
 `response.text` with `json.loads`. No BOM is stripped or missing field supplied.
 An initial U+FEFF is rejected by string JSON parsing. HTTPX may replace invalid
@@ -178,6 +189,30 @@ interruption boundaries through this command.
 Runs recorded before `warmup_sha256` was added must use their original collector
 for offline summaries. Do not add a checksum to historical evidence to make it
 look verified at collection time.
+
+New runs save `protocol`, `score_decimals` and
+`validation_protocol=probabilities-4dp-model-score-v1` in the checksummed config.
+Offline replay validates these settings before interpreting response records.
+Unknown protocol/version values and unsupported or non-integer precisions are
+rejected, even if the config checksum matches. Missing protocol and precision
+selectors default to `systemone` and `4`.
+
+For supported archives without `validation_protocol`, the reader uses
+`systemone-4dp-score-abs1e-4-v1`: the original typed System One validation and
+`math.isclose(..., abs_tol=1e-4)` Score rule. This legacy contract only permits
+System One and four-decimal Score. It does not reinterpret old failures using
+the newer independent-rounding allowance. These defaults do not make pre-hash
+archives readable: runs without the completion/warmup checksums still require
+their producing collector. Do not rewrite historical configs or hashes.
+
+The Score rules reuse [#93](https://github.com/InferMatrixLab/system1-omni/pull/93),
+and the wire adapters reuse [#141](https://github.com/InferMatrixLab/system1-omni/pull/141).
+The weekly consumer must require `evidence_complete` to be exactly true alongside
+zero failures before aggregating measured passes. That consumer change belongs
+to #141; retain its companion guard when combining the branches.
+CPU regression coverage includes both protocols, supported precisions,
+interrupted/torn snapshots, raw-response hashes and online/offline/CLI agreement,
+alongside the retained deep-JSON and HTTP 600/999 cases.
 
 For pooled percentiles, first validate each of the three measured rounds with its
 original collector's `summary`; pool only rounds with the same deployment,

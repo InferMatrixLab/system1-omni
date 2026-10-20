@@ -83,6 +83,25 @@ def number(value):
 
 
 WIRE_DECIMALS = 4  # workers round probabilities on the wire to four decimal places
+VALIDATION_PROTOCOL = "probabilities-4dp-model-score-v1"
+LEGACY_VALIDATION_PROTOCOL = "systemone-4dp-score-abs1e-4-v1"
+
+
+def validation_settings(config):
+    version = config.get("validation_protocol", LEGACY_VALIDATION_PROTOCOL)
+    protocol = config.get("protocol", "systemone")
+    decimals = config.get("score_decimals", 4)
+    if version not in (LEGACY_VALIDATION_PROTOCOL, VALIDATION_PROTOCOL):
+        raise ValueError("unsupported saved validation protocol")
+    if protocol not in ("systemone", "jev-vl"):
+        raise ValueError("unsupported wire protocol")
+    if type(decimals) is not int or decimals not in (2, 3, 4):
+        raise ValueError("score_decimals must be 2, 3 or 4")
+    if version == LEGACY_VALIDATION_PROTOCOL and (
+        protocol != "systemone" or decimals != 4
+    ):
+        raise ValueError("legacy validation requires System One and four-decimal Score")
+    return protocol, decimals, version
 
 
 def sum_allowance(count):
@@ -93,7 +112,36 @@ def sum_allowance(count):
     return count * 0.5 * 10**-WIRE_DECIMALS + 1e-9
 
 
-def read_answers(case, payload):
+def score_allowance(count, score_decimals=4):
+    """Bound independent rounding of the scalar and its weighted probabilities."""
+    return (
+        0.5 * 10**-score_decimals
+        + 0.5 * 10**-WIRE_DECIMALS * count * (count - 1) / 2
+        + 1e-9
+    )
+
+
+def zero_score_fit(answer, probabilities):
+    """Recognize Decider's isolated Score response when no level has any fit."""
+    level_fit = answer.get("level_fit")
+    return (
+        answer.get("type") == "score"
+        and all(p == 0 for p in probabilities.values())
+        and isinstance(level_fit, dict)
+        and set(level_fit) == set(probabilities)
+        and all(v == 0 and number(v) for v in level_fit.values())
+        and all(
+            answer.get(key) == 0 and number(answer[key])
+            for key in ("score", "confidence", "x_p_max", "fit_mass")
+        )
+        and answer.get("certainty") == 1
+        and number(answer["certainty"])
+    )
+
+
+def read_answers(
+    case, payload, score_decimals=4, validation_protocol=VALIDATION_PROTOCOL
+):
     """Validate wire results and normalize probabilities by label, never by order."""
     answers = payload["answers"]
     if not isinstance(answers, dict) or set(answers) != set(
@@ -126,7 +174,12 @@ def read_answers(case, payload):
         if any(not number(p) or not 0 <= p <= 1 for p in probabilities.values()):
             raise ValueError("probabilities must be finite and in [0, 1]")
         total = math.fsum(probabilities.values())
-        if abs(total - 1) > sum_allowance(len(probabilities)):
+        if abs(total - 1) > sum_allowance(len(probabilities)) and not (
+            validation_protocol == VALIDATION_PROTOCOL
+            and kind == "score"
+            and total == 0
+            and zero_score_fit(answer, probabilities)
+        ):
             raise ValueError("probabilities must sum to one")
         if kind == "choice":
             if value not in probabilities or probabilities[value] != max(
@@ -136,8 +189,20 @@ def read_answers(case, payload):
         elif not number(value):
             raise ValueError("decision value must be finite")
         if kind == "score":
-            expected = sum(int(k) * p for k, p in probabilities.items())
-            if not math.isclose(value, expected, abs_tol=1e-4):
+            if validation_protocol == LEGACY_VALIDATION_PROTOCOL:
+                expected = sum(int(k) * p for k, p in probabilities.items())
+                valid = math.isclose(value, expected, abs_tol=1e-4)
+            else:
+                if not 0 <= value <= len(probabilities) - 1:
+                    raise ValueError("score must be in the level range")
+                expected = math.fsum(int(k) * p for k, p in probabilities.items())
+                valid = math.isclose(
+                    value,
+                    expected,
+                    rel_tol=0,
+                    abs_tol=score_allowance(len(probabilities), score_decimals),
+                )
+            if not valid:
                 raise ValueError("score must equal the expected level")
         normalized[qid] = {"value": value, "probabilities": probabilities}
     return normalized
@@ -232,7 +297,80 @@ def summarize(cases, records, elapsed, attempted_ids=None):
     }
 
 
-async def request_one(client, endpoint, case, model, timeout):
+def wire_request(case, model, protocol):
+    if protocol == "systemone":
+        return {**case["request"], "model": model}
+    if protocol != "jev-vl":
+        raise ValueError("unsupported wire protocol")
+    questions = case["request"]["questions"]
+    if len(questions) != 1:
+        raise ValueError("JEV-VL requires one question per request")
+    question = next(iter(questions.values()))
+    if question["type"] != "choice":
+        raise ValueError("the JEV-VL benchmark adapter supports choice only")
+    state = case["request"]["state"]
+    if isinstance(state, dict) and set(state) == {"image"}:
+        # JEV-VL treats a plain object as JSON text; media must be a parts list.
+        state = [state]
+    return {
+        "model": model,
+        "kind": "choice",
+        "state": state,
+        "question": question["instructions"],
+        "options": [f"{k}: {v}" for k, v in question["criteria"].items()],
+    }
+
+
+def wire_answers(
+    case,
+    payload,
+    model,
+    protocol,
+    score_decimals=4,
+    validation_protocol=VALIDATION_PROTOCOL,
+):
+    if protocol == "systemone":
+        return read_answers(case, payload, score_decimals, validation_protocol)
+    request = wire_request(case, model, protocol)
+    qid, question = next(iter(case["request"]["questions"].items()))
+    labels = list(question["criteria"])
+    index = payload["choice_index"]
+    if (
+        payload["kind"] != "choice"
+        or payload["effective_kind"] != "choice"
+        or payload["options"] != request["options"]
+        or type(index) is not int
+        or not 0 <= index < len(labels)
+        or payload["choice"] != request["options"][index]
+        or len(payload["probabilities"]) != len(labels)
+    ):
+        raise ValueError("JEV-VL decision does not match the request")
+    return read_answers(
+        case,
+        {
+            "answers": {
+                qid: {
+                    "type": question["type"],
+                    "choice": labels[index],
+                    "probabilities": dict(zip(labels, payload["probabilities"])),
+                }
+            }
+        },
+        score_decimals,
+        validation_protocol,
+    )
+
+
+async def request_one(
+    client,
+    endpoint,
+    case,
+    model,
+    timeout,
+    protocol="systemone",
+    score_decimals=4,
+    validation_protocol=VALIDATION_PROTOCOL,
+):
     started = time.perf_counter()
     record = {
         "id": case["id"],
@@ -246,12 +384,19 @@ async def request_one(client, endpoint, case, model, timeout):
     try:
         async with asyncio.timeout(timeout):
             response = await client.post(
-                endpoint, json={**case["request"], "model": model}
+                endpoint, json=wire_request(case, model, protocol)
             )
         record["status"] = response.status_code
         record["response"] = response.text
         response.raise_for_status()
-        record["answers"] = read_answers(case, json.loads(record["response"]))
+        record["answers"] = wire_answers(
+            case,
+            json.loads(record["response"]),
+            model,
+            protocol,
+            score_decimals,
+            validation_protocol,
+        )
     except httpx.HTTPStatusError as exc:
         record.update(error=str(exc), error_kind=f"http_{record['status']}")
     except (TimeoutError, httpx.TimeoutException) as exc:
@@ -294,7 +439,19 @@ def measurement_state(output):
     return state
 
 
-async def replay(client, endpoint, cases, model, concurrency, timeout, output=None):
+async def replay(
+    client,
+    endpoint,
+    cases,
+    model,
+    concurrency,
+    timeout,
+    output=None,
+    *,
+    protocol="systemone",
+    score_decimals=4,
+    validation_protocol=VALIDATION_PROTOCOL,
+):
     pending = iter(enumerate(cases))
     records = [None] * len(cases)
     state = measurement_state(output)
@@ -302,9 +459,7 @@ async def replay(client, endpoint, cases, model, concurrency, timeout, output=No
     response_hash = hashlib.sha256()
     if output is not None:
         state["responses_sha256"] = response_hash.hexdigest()
-        responses = (output / "responses.jsonl").open(
-            "w", encoding="utf-8", newline=""
-        )
+        responses = (output / "responses.jsonl").open("w", encoding="utf-8", newline="")
 
     def save_state():
         if output is not None:
@@ -315,7 +470,16 @@ async def replay(client, endpoint, cases, model, concurrency, timeout, output=No
             state["attempted_ids"].append(case["id"])
             state["active_ids"].append(case["id"])
             save_state()
-            records[index] = await request_one(client, endpoint, case, model, timeout)
+            records[index] = await request_one(
+                client,
+                endpoint,
+                case,
+                model,
+                timeout,
+                protocol,
+                score_decimals,
+                validation_protocol,
+            )
             record = records[index]
             if responses is not None:
                 line = json.dumps(record, allow_nan=False) + "\n"
@@ -367,6 +531,13 @@ async def replay(client, endpoint, cases, model, concurrency, timeout, output=No
 
 
 async def run(args, cases):
+    protocol, score_decimals, version = validation_settings(
+        {
+            "protocol": getattr(args, "protocol", "systemone"),
+            "score_decimals": getattr(args, "score_decimals", 4),
+            "validation_protocol": VALIDATION_PROTOCOL,
+        }
+    )
     warmup_manifest = getattr(args, "warmup_manifest", None)
     warmup_cases = load_cases(warmup_manifest) if warmup_manifest else cases
     metadata = json.loads(args.metadata.read_text())
@@ -391,6 +562,9 @@ async def run(args, cases):
             "manifest_sha256": digest(args.manifest),
             "runner_sha256": digest(Path(__file__)),
             "metadata": metadata,
+            "validation_protocol": version,
+            "score_decimals": score_decimals,
+            "protocol": protocol,
             "endpoint": args.endpoint,
             "model": args.model,
             "phase": args.phase,
@@ -431,6 +605,9 @@ async def run(args, cases):
                     warmup_cases[i % len(warmup_cases)],
                     args.model,
                     args.timeout,
+                    protocol,
+                    score_decimals,
+                    version,
                 )
             )
             if warmup[-1]["error"] is not None:
@@ -454,6 +631,9 @@ async def run(args, cases):
                 args.concurrency,
                 args.timeout,
                 args.output,
+                protocol=protocol,
+                score_decimals=score_decimals,
+                validation_protocol=version,
             )
         except asyncio.CancelledError:
             # Replay has saved the completed samples and the measured stop boundary.
@@ -471,9 +651,15 @@ def summarize_saved(path):
     if digest(path / "config.json") != state["config_sha256"]:
         raise ValueError("saved config checksum does not match completion")
     if "warmup_sha256" not in state:
-        raise ValueError("saved warmup checksum missing; use the collector that produced this run")
-    if not (path / "warmup.json").is_file() or digest(path / "warmup.json") != state["warmup_sha256"]:
+        raise ValueError(
+            "saved warmup checksum missing; use the collector that produced this run"
+        )
+    if (
+        not (path / "warmup.json").is_file()
+        or digest(path / "warmup.json") != state["warmup_sha256"]
+    ):
         raise ValueError("saved warmup checksum does not match completion")
+    protocol, score_decimals, version = validation_settings(config)
     if config["latency_basis"] != "post_to_body_json_and_schema_validation":
         raise ValueError("unsupported saved latency basis")
     manifest_hash = digest(path / "requests.jsonl")
@@ -541,7 +727,8 @@ def summarize_saved(path):
         status = record["status"]
         if status is None:
             if record["response"] is not None or record["error_kind"] not in (
-                "timeout", "transport"
+                "timeout",
+                "transport",
             ):
                 raise ValueError("response without status must be a client failure")
             error_kind = record["error_kind"]
@@ -555,8 +742,13 @@ def summarize_saved(path):
             error_kind = f"http_{status}"
         else:
             try:
-                answers = read_answers(
-                    by_id[record["id"]], json.loads(record["response"])
+                answers = wire_answers(
+                    by_id[record["id"]],
+                    json.loads(record["response"]),
+                    config.get("model"),
+                    protocol,
+                    score_decimals,
+                    version,
                 )
             except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
                 error_kind = "invalid_response"
@@ -608,6 +800,7 @@ def compare(args):
         for p in (args.reference, args.candidate)
     ]
     for path, config in zip((args.reference, args.candidate), configs):
+        validation_settings(config)
         if digest(path / "requests.jsonl") != config["manifest_sha256"]:
             raise ValueError("saved manifest checksum does not match config")
     if configs[0]["manifest_sha256"] != configs[1]["manifest_sha256"]:
@@ -686,6 +879,10 @@ def main():
     runner.add_argument(
         "--model", required=True, help="backend's alias for the pinned checkpoint"
     )
+    runner.add_argument(
+        "--protocol", choices=("systemone", "jev-vl"), default="systemone"
+    )
+    runner.add_argument("--score-decimals", type=int, choices=(2, 3, 4), default=4)
     runner.add_argument("--metadata", type=Path, required=True)
     runner.add_argument(
         "--output", type=Path, required=True, help="new directory; never overwritten"
