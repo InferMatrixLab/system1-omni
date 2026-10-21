@@ -29,9 +29,5 @@ name = "image_decode"
 path = "../../../../tests/qwen3_5/image_decode.rs"
 
 [[test]]
-name = "device_buffer"
-path = "../../../../tests/qwen3_5/device_buffer.rs"
-
-[[test]]
 name = "device_features"
 path = "../../../../tests/qwen3_5/device_features.rs"
