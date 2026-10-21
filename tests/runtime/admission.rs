@@ -3,6 +3,7 @@
 //! Everything goes through the public API, because that is all a worker sees.
 
 use std::{
+    mem::ManuallyDrop,
     sync::{
         Arc, Barrier,
         atomic::{AtomicUsize, Ordering},
@@ -11,6 +12,44 @@ use std::{
 };
 
 use omni_runtime::admission::BoundedAdmission;
+
+#[test]
+fn request_only_admission_releases_large_cost_first() {
+    request_only_admission_preserves_costs_and_recovers(true);
+}
+
+#[test]
+fn request_only_admission_releases_small_cost_first() {
+    request_only_admission_preserves_costs_and_recovers(false);
+}
+
+fn request_only_admission_preserves_costs_and_recovers(large_first: bool) {
+    let admission = BoundedAdmission::new(2, None);
+    let large = admission.try_admit(usize::MAX).expect("first request");
+    let small = admission.try_admit(1).expect("second request");
+    assert_eq!(large.units(), usize::MAX);
+    assert_eq!(small.units(), 1);
+    assert_eq!(admission.report().depth, 2);
+    assert!(admission.try_admit(0).is_none(), "request capacity is full");
+    assert_eq!(admission.report().rejected, 1);
+
+    let (first, last) = if large_first {
+        (large, small)
+    } else {
+        (small, large)
+    };
+    // Keep a broken release from triggering a second destructor panic while unwinding.
+    let last = ManuallyDrop::new(last);
+    drop(first);
+    assert_eq!(admission.report().depth, 1);
+    drop(ManuallyDrop::into_inner(last));
+    assert_eq!(admission.report().depth, 0);
+    let again = admission.try_admit(usize::MAX).expect("capacity recovered");
+    assert_eq!(again.units(), usize::MAX);
+    drop(again);
+    assert_eq!(admission.report().depth, 0);
+    assert_eq!(admission.report().rejected, 1);
+}
 
 #[test]
 fn a_request_bound_refuses_once_it_is_full() {

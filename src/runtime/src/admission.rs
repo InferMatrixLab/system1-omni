@@ -67,10 +67,9 @@ struct Held {
 
 /// One admitted piece of work's reservation, released when its [`Permit`] drops.
 ///
-/// A permit stores the units it *actually* reserved rather than the units its caller asked for.
-/// The two differ only when the request was clamped to the ceiling, and storing the clamped
-/// value is what makes the counter self-balancing: what goes in is exactly what comes out, so no
-/// sequence of admissions and releases can drive the counter below zero.
+/// A permit stores the requested cost, which is never clamped. The shared unit counter
+/// tracks that cost only when a unit budget is configured; request-only admission does
+/// not need a sum of otherwise unbounded costs.
 #[derive(Clone, Copy, Debug)]
 pub struct Reservation {
     units: usize,
@@ -107,8 +106,8 @@ impl BoundedAdmission {
     /// A refusal is counted and nothing is reserved.
     ///
     /// A request costing more than the unit ceiling is refused rather than admitted and
-    /// overrunning it, so a reservation is never larger than the ceiling and the held total
-    /// cannot reach `usize::MAX` by accumulation.
+    /// overrunning it. When a unit ceiling is configured, no reservation or held total
+    /// can exceed that ceiling.
     ///
     /// The permit owns a share of this admission, so it can outlive the handle that issued it
     /// and be moved into the blocking work it was granted for.
@@ -133,7 +132,9 @@ impl BoundedAdmission {
             None => units,
         };
         held.outstanding += 1;
-        held.units += reserved;
+        if self.0.units.is_some() {
+            held.units += reserved;
+        }
         Some(Permit {
             admission: Arc::clone(&self.0),
             reserved: Reservation { units: reserved },
@@ -157,17 +158,20 @@ impl Admission {
     ///
     /// Guarded rather than saturating: a reservation larger than what is held would mean two
     /// permits for one admission, and quietly underflowing would hide that. The public API
-    /// cannot produce one, because a reservation is refused unless it fits under the ceiling.
+    /// cannot produce one: each permit releases its recorded cost exactly once, and costs
+    /// are counted only when they fit under a configured unit ceiling.
     fn release(&self, reservation: Reservation) {
         let mut held = self.lock();
         held.outstanding = held
             .outstanding
             .checked_sub(1)
             .expect("a permit releases exactly one admission");
-        held.units = held
-            .units
-            .checked_sub(reservation.units)
-            .expect("a permit releases the units it was admitted with");
+        if self.units.is_some() {
+            held.units = held
+                .units
+                .checked_sub(reservation.units)
+                .expect("a permit releases the units it was admitted with");
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Held> {
