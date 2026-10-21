@@ -18,11 +18,13 @@
 //!   token source is an [`compile::Encoder`] so the layout logic is testable
 //!   CPU-only, with the real `tokenizers` backend behind [`Processor`].
 //!
-//! Execution (forward passes, the decision head) and the HTTP worker are N4;
-//! `noul`/`score` *finishing* variations are N5 — the [`protocol::Kind`] enum
-//! and the compiled structures carry all three kinds already. The unmerged
-//! text-path LoRA application (spec 03, N2) is [`text`]: export-policy
-//! validation over the five-file export plus the shared `#143` machinery.
+//! Execution (forward passes, the decision head) and the HTTP worker live in
+//! [`engine`]/[`text`]/[`head`]/[`server`]; [`finish`] serves all three wire
+//! question types' finishing variants — `choice`, `noul` (P(true) + the full
+//! pair) and `score` (cross-branch softmax → expected level + legend +
+//! concentration confidence). The unmerged text-path LoRA application
+//! (spec 03, N2) is [`text`]: export-policy validation over the five-file
+//! export plus the shared `#143` machinery.
 
 pub mod compile;
 pub mod engine;

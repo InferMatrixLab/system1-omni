@@ -1,10 +1,11 @@
-//! CPU-only worker tests (spec 03, N4): the finishing layer's byte parity
-//! with the Python reference postprocessor (recorded once from
-//! `models.valen.postprocess` in the pinned venv and pinned here), the head
-//! readout's formula on a deterministic synthetic head, and the HTTP surface
-//! over real sockets against a stub inference — the same shape as the
-//! reference suite's `test_worker_server.py` (FakeProcessor/FakeExecutor),
-//! with the real wire and finishing layers in the loop.
+//! CPU-only worker tests (spec 03, N4 + N5): the finishing layer's byte
+//! parity with the Python reference postprocessor for all three question
+//! types (recorded once from `models.valen.postprocess` in the pinned venv
+//! and pinned here), the head readout's formula on a deterministic synthetic
+//! head, and the HTTP surface over real sockets against a stub inference —
+//! the same shape as the reference suite's `test_worker_server.py`
+//! (FakeProcessor/FakeExecutor), with the real wire and finishing layers in
+//! the loop.
 
 use std::sync::Arc;
 use std::time::Duration;

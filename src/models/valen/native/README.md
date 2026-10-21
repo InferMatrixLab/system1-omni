@@ -22,17 +22,22 @@ the reference worker's contract is documented in [`../README.md`](../README.md).
 | `server` | the HTTP surface: routes, gate order, error bodies, serial admission |
 | `main.rs` | the `omni-valen-native` binary: warmup before the listener binds |
 
-## Milestone scope
+## Served scope
 
-`choice` is served end-to-end (text and single-image states). `noul` and
-`score` are compiled by the wire and compiler layers but rejected with a
-deterministic 422 until their finishing variations land (ticket N5).
+All three question types are served end-to-end (text and single-image
+states): `choice` (1–255 named candidates), `noul` (fixed `true`/`false`,
+optional custom wording compiles as the equivalent choice record and still
+answers `type: noul` with P(true)), and `score` (2–10 ordered levels, one
+isolated branch per level, cross-branch softmax → expected level + legend +
+concentration confidence). The types mix freely in one request.
 
 ## Tests
 
 - CPU, no GPU: `tests/valen/native.rs`, `native_tokenization.rs` (N3),
-  `worker.rs` (this ticket's contract suite), plus the frontend integration
+  `worker.rs` (the N4 contract suite + the N5 noul/score finisher byte
+  parity and mixed-type round trips), plus the frontend integration
   `tests/frontend/native_worker.rs`.
 - Env-gated GPU: `tests/valen/valen_vision.rs` (N1), `tests/valen/text.rs`,
-  `text_reference.rs` (N2), and `worker_gpu.rs` (this ticket's parity gate;
-  run serially on one GPU — `--test-threads 1` — each test loads the model).
+  `text_reference.rs` (N2), and `worker_gpu.rs` (the end-to-end parity gate
+  for all three question types; run serially on one GPU — `--test-threads 1`
+  — each test loads the model).
