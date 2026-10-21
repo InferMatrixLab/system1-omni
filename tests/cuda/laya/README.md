@@ -23,5 +23,11 @@ library until their CUDA handles are dropped. These native fixture tests are
 Unix-only. CI enables `omni-laya/serve`, compiling the native model/worker and
 running its root-tree private tests on Linux.
 
-The registered tests at this stage cover resolved dispatch, grouped uploads and Graph capture cleanup.
-They validate host behavior without Laya tensor math or a CUDA driver.
+Backend tests cover resolved-handle lifetime, grouped validation/draining,
+capture error/unwind/partial/null cleanup, missing optional API, and prohibited
+operations. Model tests cover the frozen dispatch trace, sparse attention
+wrappers, refreshed/reused staging, count/byte/LRU admission and allocation
+peaks, actual requested workspace sizes, clear/reuse and capture-failure retry.
+They cannot establish driver failure semantics, Hopper model parity or speed.
+The production CUDA capture-end implementation still requires real-driver
+validation; this fixture substitutes its C ABI when testing the Rust boundary.

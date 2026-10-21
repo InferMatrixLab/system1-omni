@@ -1,7 +1,7 @@
 //! GPU vision forward for the structurally validated, unmerged checkpoint.
 use super::{VisionCheckpoint, VisionConfig, geometry::VisionGeometry};
 use crate::{
-    cuda::{self, DeviceBuffer, Stream, api, check},
+    cuda::{self, DeviceBf16Matrix, DeviceBuffer, Stream, api, check},
     image_preprocess::ProcessedImage,
 };
 use anyhow::{Result, ensure};
@@ -116,7 +116,7 @@ impl VisionModel {
             );
         }
         cuda::load(library)?;
-        // ABI6 is required; head-64 Cua layouts use the original vision entry points.
+        // ABI8 is required; head-64 Cua layouts use the original vision entry points.
         if config.hidden_size != 1024 {
             api().vision_v2()?;
         }
@@ -315,7 +315,69 @@ impl VisionModel {
     ) -> Result<Vec<bf16>> {
         self.run(image, Some(&mut callback))
     }
+    /// Synchronized resident merger output; the borrow prevents cache mutation/retirement.
+    pub fn forward_device(&mut self, image: &ProcessedImage) -> Result<DeviceBf16Matrix<'_>> {
+        let result: Result<(usize, usize)> = (|| {
+            let (n, index, capture) = self.enqueue_image(image, &mut None)?;
+            self.synchronize()?;
+            if capture {
+                self.capture_current(index);
+            }
+            Ok((n, index))
+        })();
+        if result.is_err() {
+            // Drain while every referenced allocation and Graph is still owned.
+            self.synchronize()?;
+        }
+        let (n, index) = result?;
+        self.scratch[index]
+            .out
+            .bf16_matrix(n / 4, self.config.out_hidden_size)
+    }
     fn run(&mut self, image: &ProcessedImage, mut callback: Trace<'_>) -> Result<Vec<bf16>> {
+        let result = (|| {
+            let (n, index, capture) = self.enqueue_image(image, &mut callback)?;
+            let output = self.read(
+                &self.scratch[index].out,
+                n / 4 * self.config.out_hidden_size,
+            )?;
+            if let Some(callback) = callback.as_mut() {
+                callback("merger.output", &output)?;
+            } else if capture {
+                self.capture_current(index);
+            }
+            Ok(output)
+        })();
+        if result.is_err() {
+            self.synchronize()?;
+        }
+        result
+    }
+    fn capture_current(&mut self, index: usize) {
+        let scratch = &self.scratch[index];
+        // The caller completes warmup before recording; capture never reruns math.
+        let captured = cuda::Graph::capture(self.stream.0, || self.enqueue(scratch, &mut None));
+        match captured {
+            Ok(graph) => {
+                let scratch = &mut self.scratch[index];
+                scratch.graph = Some(graph);
+                graph_trace("captured", scratch.grid);
+            }
+            Err(error) => {
+                eprintln!("Vision CUDA Graph capture failed; using eager execution: {error:#}");
+                self.graph_enabled = false;
+                for scratch in &mut self.scratch {
+                    scratch.graph = None;
+                }
+            }
+        }
+    }
+
+    fn enqueue_image(
+        &mut self,
+        image: &ProcessedImage,
+        callback: &mut Trace<'_>,
+    ) -> Result<(usize, usize, bool)> {
         cuda::set_device(0)?;
         let cached = self
             .scratch
@@ -368,31 +430,10 @@ impl VisionModel {
         {
             graph.launch(self.stream.0)?;
             graph_trace("replayed", scratch.grid);
-            return self.read(&scratch.out, n / 4 * self.config.out_hidden_size);
+            return Ok((n, index, false));
         }
-        self.enqueue(scratch, &mut callback)?;
-        let result = self.read(&scratch.out, n / 4 * self.config.out_hidden_size)?;
-        if let Some(callback) = callback.as_mut() {
-            callback("merger.output", &result)?;
-        } else if self.graph_enabled {
-            // Readback completed warmup. Capture records without executing; keep
-            // the eager result even when recording/instantiation fails.
-            let captured = cuda::Graph::capture(self.stream.0, || self.enqueue(scratch, &mut None));
-            match captured {
-                Ok(graph) => {
-                    self.scratch[index].graph = Some(graph);
-                    graph_trace("captured", image.image_grid_thw);
-                }
-                Err(error) => {
-                    eprintln!("Vision CUDA Graph capture failed; using eager execution: {error:#}");
-                    self.graph_enabled = false;
-                    for scratch in &mut self.scratch {
-                        scratch.graph = None;
-                    }
-                }
-            }
-        }
-        Ok(result)
+        self.enqueue(scratch, callback)?;
+        Ok((n, index, callback.is_none() && self.graph_enabled))
     }
     fn enqueue(&self, scratch: &Scratch, callback: &mut Trace<'_>) -> Result<()> {
         let n = scratch.grid[1] * scratch.grid[2];
