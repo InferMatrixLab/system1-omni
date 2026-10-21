@@ -55,6 +55,20 @@ fn float_formatting_matches_cpython_repr() {
         let value: f64 = literal.parse().unwrap();
         assert_eq!(&python_float(value), expected, "repr of {literal}");
     }
+    // The exact shortest-decimal tie bit patterns pinned by the shared
+    // `tests/qwen3_5/json.rs` oracle: at a tie Rust's own `{:e}` picks the
+    // upper digit (…0.3) where CPython's repr picks the even one (…0.2), so
+    // the finisher delegates to the shared float_repr instead of deriving
+    // from `{:e}` itself.
+    for (bits, expected) in [
+        (0x430c_6bf5_2634_0002u64, "1000000000000000.2"),
+        (0xc30c_6bf5_2634_0002, "-1000000000000000.2"),
+        (0x4315_dccb_2cbf_5325, "1538434924532937.2"),
+        (0xc2ec_82d6_25e7_6314, "-250786113075992.62"),
+        (0x42ed_db24_4866_3844, "262616350142914.12"),
+    ] {
+        assert_eq!(python_float(f64::from_bits(bits)), expected, "{bits:016x}");
+    }
 }
 
 #[test]

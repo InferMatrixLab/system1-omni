@@ -17,46 +17,16 @@ pub fn python_float(value: f64) -> String {
     // CPython's repr: shortest round-trip digits, fixed notation while
     // -4 < decimal point position <= 16, otherwise d.ddde±XX (two-digit
     // minimum exponent, no trailing ".0" — repr(1e16) is "1e+16").
-    // Rust's LowerExp is also shortest round-trip.
     if !value.is_finite() {
         // allow_nan=False rejects these before serialization; the finisher
         // reports them as an inference failure instead.
         return String::new();
     }
-    let (sign, magnitude) = if value < 0.0 || (value == 0.0 && value.is_sign_negative()) {
-        ("-", -value)
-    } else {
-        ("", value)
-    };
-    let exp_form = format!("{magnitude:e}");
-    let (mantissa, exponent) = exp_form.split_once('e').expect("LowerExp format");
-    let exponent: i32 = exponent.parse().expect("LowerExp exponent");
-    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
-    let digits = digits.trim_end_matches('0');
-    let digits = if digits.is_empty() { "0" } else { digits };
-    let decpt = exponent + 1; // digits[0] sits at 10^(decpt-1)
-    if decpt <= -4 || decpt > 16 {
-        let mantissa = if digits.len() == 1 {
-            digits.to_owned()
-        } else {
-            format!("{head}.{tail}", head = &digits[..1], tail = &digits[1..])
-        };
-        return format!("{sign}{mantissa}e{exponent:+03}");
-    }
-    if decpt <= 0 {
-        format!("{sign}0.{}{digits}", "0".repeat((-decpt) as usize))
-    } else if decpt as usize >= digits.len() {
-        format!(
-            "{sign}{digits}{}.0",
-            "0".repeat(decpt as usize - digits.len())
-        )
-    } else {
-        format!(
-            "{sign}{}.{}",
-            &digits[..decpt as usize],
-            &digits[decpt as usize..]
-        )
-    }
+    // The shared qwen3_5 float_repr is the repository's CPython-parity repr.
+    // Deriving from Rust's own {:e} here would diverge at exact
+    // shortest-decimal ties, where {:e} picks the upper digit and CPython's
+    // repr picks the even one (pinned by the tests/qwen3_5/json.rs oracle).
+    omni_qwen3_5_native::json::float_repr(value)
 }
 
 /// `json.dumps(..., ensure_ascii=False)` string escaping: the two mandatory
