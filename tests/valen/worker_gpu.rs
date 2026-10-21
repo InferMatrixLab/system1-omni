@@ -88,6 +88,7 @@ fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, re
     let mut max_confidence = 0.0f64;
     let mut max_score = 0.0f64;
     let mut checked = 0usize;
+    let declared_flips = declared_flip_qids(fixture, case_name);
     for (qid, expected) in reference_answers.as_object().unwrap() {
         let answer = &native_answers[qid];
         if answer["type"] != expected["type"] {
@@ -98,9 +99,11 @@ fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, re
             && answer["choice"] != expected["choice"]
         {
             // An answer flip is a discrete failure unless the fixture carries
-            // an explicit per-case declaration that the reference's own margin
-            // was near a tie inside the declared component tolerances.
-            if fixture["declared_flips"][case_name].is_null() {
+            // an explicit declaration that *this question's* reference margin
+            // was near a tie inside the declared component tolerances —
+            // matched per qid, so a declaration for one question does not
+            // excuse another question's flip in the same case.
+            if !declared_flips.iter().any(|declared| declared == qid) {
                 problems.push(format!(
                     "{qid}: chose {:?}, the reference chose {:?}",
                     answer["choice"], expected["choice"]
@@ -222,6 +225,47 @@ fn case<'a>(fixture: &'a Value, name: &str) -> &'a Value {
         .iter()
         .find(|case| case["name"] == name)
         .unwrap_or_else(|| panic!("the fixture carries no {name} case"))
+}
+
+/// The qids a case's `declared_flips` entry declares. The entry is the
+/// recording script's note, which names each declared question with its
+/// reference decision margin (`qid: 0.108029`) — the same margins the case
+/// records under `reference_decision_margins` — so a qid is declared exactly
+/// when the note names it. Per question, not per case: a declaration for one
+/// question must not excuse another question's flip. Anything unrecognized
+/// (a missing note, an unknown shape) declares nothing — the gate fails
+/// closed instead of accepting an undeclared flip.
+fn declared_flip_qids(fixture: &Value, case_name: &str) -> Vec<String> {
+    let entry = &fixture["declared_flips"][case_name];
+    if entry.is_null() {
+        return Vec::new();
+    }
+    let Some(note) = entry.get("note").and_then(Value::as_str) else {
+        return Vec::new();
+    };
+    let Some(margins) = case(fixture, case_name)["reference_decision_margins"].as_object() else {
+        return Vec::new();
+    };
+    margins
+        .keys()
+        .filter(|qid| note.contains(&format!("{qid}: ")))
+        .cloned()
+        .collect()
+}
+
+/// The declaration matcher is fixture logic, not device logic: pin it against
+/// the committed fixture on CPU — the image case declares exactly `color`,
+/// every other case declares nothing.
+#[test]
+fn declared_flips_match_by_qid_in_the_committed_fixture() {
+    let (fixture, _) = fixture();
+    assert_eq!(declared_flip_qids(&fixture, "image"), vec!["color"]);
+    for undeclared in ["text", "noul", "score", "mixed"] {
+        assert!(
+            declared_flip_qids(&fixture, undeclared).is_empty(),
+            "{undeclared}: nothing is declared for this case"
+        );
+    }
 }
 
 fn native_response(engine: &mut Engine, body: &Value) -> Value {
