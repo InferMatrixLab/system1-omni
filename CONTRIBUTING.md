@@ -4,6 +4,17 @@ Review the [README](README.md) and
 [architecture and integration contracts](docs/architecture.md) for the project's
 ownership boundaries and current implementation status before making changes.
 
+## Before implementation or a PR
+
+Complete the [human contributor-intent gate](.agents/skills/self-review/SKILL.md#human-contributor-intent-gate)
+before implementation and before submitting a PR, including a draft. It records
+the human's outcome, highest-leverage variable, why the work moves it, customer
+and actual need, then whether a PR is needed at all. Reuse explicit traceable
+answers and ask only what is missing; wait rather than filling in answers for the
+contributor. Bug fixes need linked observed failure evidence. Keep private source
+material private. This contributor gate does not block independent read-only
+reviews or change automated review selection.
+
 ## Adding a model
 
 Keep model-specific preprocessing, execution and response formatting under
@@ -72,6 +83,33 @@ draft until the self-review is complete.
 5. Re-read the PR description and complete the template's self-review checklist.
    Repeat the relevant checks after subsequent changes.
 
+### Choose validation by changed area
+
+Use the current workflow files and component contracts as the source of truth.
+The matrix routes a change to relevant checks; it does not replace the full
+configured CI suite or establish branch-protection requirements. Run commands
+from the repository root and record the exact revision and environment.
+
+| Changed area | Fast feedback | Broader evidence / handoff |
+| --- | --- | --- |
+| Documentation or review guidance | Check relative paths, heading anchors, examples and claims against current source. | Run the [strict documentation build](#documentation-site). No GPU benchmark is needed for documentation-only changes. |
+| Rust workspace | Run the affected crate or test target, then the [Rust CI checks](#rust-ci-checks). | Report pass, fail, ignored and unrun checks separately; CPU success does not establish CUDA or Metal support. |
+| Frontend transport (`src/frontend/`) | `cargo test -p omni-jev --test frontend --locked`; include `cargo test -p omni-jev --test forwarding_limits --test in_process --locked` when those paths change. | Check request/response, failure and cancellation behavior against the [frontend contract](src/frontend/README.md), then run Rust CI. |
+| Native admission or execution interface (`src/runtime/`) | `cargo test --locked -p omni-runtime` | Check affected workers against the [runtime contract](src/runtime/README.md) and [architecture invariants](docs/architecture.md), then run Rust CI. |
+| Benchmark tooling (`benchmarks/`, `tests/benchmarks/`) | Install `benchmarks/requirements.txt`; run `python benchmarks/bench.py validate benchmarks/smoke.jsonl` and `python -m unittest discover -s tests/benchmarks -p 'test_*.py' -v`. | Follow the [benchmark protocol](benchmarks/README.md) for performance claims. Tooling smoke tests are not model-quality or throughput measurements. |
+| CUDA contract or backend tooling | Use the `cuda-contract` job's current commands and prerequisites in [CI](.github/workflows/ci.yml). | Text-based contract checks do not execute kernels. Changed native/device behavior needs the affected model recipe's hardware and numerical evidence. |
+| Model processing, execution, batching or backend behavior | Select tests under root `tests/` using the model's manifest, README and recipe. | Follow the [architecture contracts](docs/architecture.md), [model/hardware coverage](docs/supported-models.md) and model-specific validation recipe. Identify unsupported and untested configurations; arrange unavailable hardware checks with the maintainer. |
+
+The author supplies reproducible results and names any unresolved validation
+handoff. Maintainer review remains separate from author evidence. Do not claim
+merge authority or required-check settings from this matrix or passing CI alone.
+Before handing off, record the PR head, commands, results and evidence links,
+remaining blockers, and next action. Recheck evidence after a head change;
+same-head check reruns can also change the result. Report source inspection,
+personally executed tests and observed CI distinctly.
+
+### Rust CI checks
+
 The Rust checks used by [CI](.github/workflows/ci.yml) are:
 
 ```sh
@@ -114,3 +152,4 @@ python3 -m venv .venv-docs
 .venv-docs/bin/mkdocs build --strict
 .venv-docs/bin/mkdocs serve    # http://127.0.0.1:8001/system1-omni/
 ```
+

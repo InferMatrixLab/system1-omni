@@ -1203,3 +1203,5 @@ fn fixed_gemm_rows_do_not_depend_on_m() {
     // SAFETY: created above and not destroyed before.
     unsafe { (api().cs1_gemm_destroy)(fixed) };
 }
+#[path = "vision_v2_kernels.rs"]
+mod vision_v2;

@@ -40,8 +40,14 @@ mod model_fixture;
 #[cfg(unix)]
 use model_fixture::fixture_model_at;
 #[cfg(unix)]
+#[path = "model_cache.rs"]
+mod cache;
+#[cfg(unix)]
 #[path = "model_dispatch.rs"]
 mod dispatch;
+#[cfg(unix)]
+#[path = "model_grouped.rs"]
+mod grouped;
 #[cfg(unix)]
 #[path = "original_encode.rs"]
 mod original_encode;
