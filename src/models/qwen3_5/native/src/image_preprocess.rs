@@ -18,10 +18,10 @@ const FACTOR: usize = PATCH_SIZE * MERGE_SIZE;
 const PATCH_VALUES: usize = 3 * 2 * PATCH_SIZE * PATCH_SIZE;
 /// Source validation and upstream smart-resize limits. Prompt budgeting belongs to callers.
 ///
-/// Crate-private until a second consumer exists, so the limit surface stays
+/// Shared by the cua-s1 and jemm consumers, so the limit surface stays
 /// single-sourced through [`preprocess_rgb8`].
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ImageLimits {
+pub struct ImageLimits {
     pub max_source_side: usize,
     pub max_source_pixels: usize,
     pub min_pixels: usize,
@@ -68,7 +68,7 @@ pub fn preprocess_rgb8(width: usize, height: usize, rgb: &[u8]) -> Result<Proces
 }
 
 /// Uses the same RGB8 bicubic resize and block-major patch packing with explicit limits.
-pub(crate) fn preprocess_rgb8_with_limits(
+pub fn preprocess_rgb8_with_limits(
     width: usize,
     height: usize,
     rgb: &[u8],
