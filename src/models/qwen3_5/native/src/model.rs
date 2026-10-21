@@ -1001,6 +1001,24 @@ impl Model {
         Ok(self.forward_batch(&[ids])?.pop().unwrap())
     }
 
+    /// The final-norm hidden states at the given positions of one prompt, as
+    /// float32 (BF16 values upcast). Positions are validated ascending and in
+    /// range; the forward itself is exactly [`Model::forward`]'s.
+    pub fn forward_positions(&mut self, ids: &[u32], positions: &[usize]) -> Result<Vec<Vec<f32>>> {
+        ensure!(!positions.is_empty(), "no hidden positions requested");
+        ensure!(
+            positions.is_sorted(),
+            "hidden positions must be ascending"
+        );
+        ensure!(
+            positions.last().is_some_and(|&p| p < ids.len()),
+            "hidden position outside the prompt"
+        );
+        self.forward_batch(&[ids])?;
+        let s = self.scratch.as_ref().unwrap();
+        self.hidden_rows(s, positions)
+    }
+
     /// Pack independent text prompts for input and gate/up GEMMs.
     /// Mixers reset at each boundary; final-position hidden states retain input order.
     pub fn forward_batch(&mut self, inputs: &[&[u32]]) -> Result<Vec<Vec<f32>>> {
@@ -1101,6 +1119,30 @@ impl Model {
             self.run(s, &[t], true)?;
         }
         self.last_hidden(self.scratch.as_ref().unwrap(), t)
+    }
+
+    /// [`Model::forward_multimodal`] with the final-norm hidden states read at
+    /// the given positions instead of only the last one. The forward itself is
+    /// exactly [`Model::forward_multimodal`]'s; positions are validated
+    /// ascending and in range.
+    pub fn forward_multimodal_positions(
+        &mut self,
+        input: &MultimodalInput<'_>,
+        positions: &[usize],
+    ) -> Result<Vec<Vec<f32>>> {
+        ensure!(!positions.is_empty(), "no hidden positions requested");
+        let t = input.token_ids.len();
+        ensure!(
+            positions.is_sorted(),
+            "hidden positions must be ascending"
+        );
+        ensure!(
+            positions.last().is_some_and(|&p| p < t),
+            "hidden position outside the prompt"
+        );
+        self.forward_multimodal(input)?;
+        let s = self.scratch.as_ref().unwrap();
+        self.hidden_rows(s, positions)
     }
 
     /// Both modes retain the eager miss result; capture records without executing.
@@ -1411,6 +1453,31 @@ impl Model {
             .iter()
             .map(|&b| half::bf16::from_le_bytes(b).to_f32())
             .collect())
+    }
+
+    /// The final-norm hidden states at the given in-range positions, one row
+    /// per position, read back after a completed forward.
+    fn hidden_rows(&self, s: &Scratch, positions: &[usize]) -> Result<Vec<Vec<f32>>> {
+        let mut row = vec![0u8; self.cfg.hidden * BF16];
+        let mut rows = Vec::with_capacity(positions.len());
+        for &p in positions {
+            // SAFETY: x holds at least the validated prompt length of hidden-size rows.
+            unsafe {
+                cuda::download(
+                    &mut row,
+                    s.at(s.x + p * self.cfg.hidden * BF16),
+                    self.stream,
+                )?;
+            }
+            let (pairs, _) = row.as_chunks::<2>();
+            rows.push(
+                pairs
+                    .iter()
+                    .map(|&b| half::bf16::from_le_bytes(b).to_f32())
+                    .collect(),
+            );
+        }
+        Ok(rows)
     }
 
     /// Queue language layers over packed embeddings, resetting sequence positions.

@@ -235,7 +235,7 @@ fn adapter_tensor_names(path: &Path) -> Result<Vec<String>> {
     Ok(names)
 }
 
-fn hash_file(path: &Path) -> Result<String> {
+pub(crate) fn hash_file(path: &Path) -> Result<String> {
     let mut file = std::fs::File::open(path)?;
     let mut hash = Sha256::new();
     let mut buffer = vec![0; 1024 * 1024];
@@ -275,9 +275,26 @@ impl TextModel {
         self.model.forward(ids)
     }
 
+    /// The final-norm hidden states at the given ascending positions of one
+    /// prompt, as FP32 — the candidate-end and decision-end rows the decision
+    /// head reads (N4). The forward itself is [`TextModel::forward`]'s.
+    pub fn forward_positions(
+        &mut self,
+        ids: &[u32],
+        positions: &[usize],
+    ) -> Result<Vec<Vec<f32>>> {
+        self.model.forward_positions(ids, positions)
+    }
+
     /// Synchronize the underlying stream before external reuse.
     pub fn synchronize(&self) -> Result<()> {
         self.model.synchronize()
+    }
+
+    /// The wrapped language model, for the multimodal boundary (N4): the
+    /// same unmerged backbone and numerics, fed already-adapted image rows.
+    pub fn language(&mut self) -> &mut Model {
+        &mut self.model
     }
 
     pub fn config(&self) -> &Config {

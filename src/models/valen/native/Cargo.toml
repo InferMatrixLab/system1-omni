@@ -3,19 +3,31 @@ name = "omni-valen-native"
 version = "0.1.0"
 edition = "2024"
 publish = false
-description = "Valen-Preview-0923 request contract and compiler-equivalent processing"
+description = "Native /v1/systemone worker for Valen-Preview-0923 (choice)"
+
+[[bin]]
+name = "omni-valen-native"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.100"
+axum = "0.8.8"
 base64 = "0.22.1"
 half = "2.7.1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 omni-qwen3-5-native = { path = "../../qwen3_5/native" }
+omni-runtime = { path = "../../../runtime" }
+safetensors = "0.8.0"
 serde = "1.0.229"
 serde_json = { version = "1.0.149", features = ["float_roundtrip", "preserve_order"] }
 sha2 = "0.10"
+tokio = { version = "1.49.0", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 # the onig regex backend, as in the Python tokenizers wheel
 tokenizers = { version = "=0.22.2", default-features = false, features = ["onig"] }
+
+[dev-dependencies]
+axum = "0.8.8"
+reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls"] }
 
 [[test]]
 name = "native"
@@ -32,3 +44,11 @@ path = "../../../../tests/valen/text.rs"
 [[test]]
 name = "text_reference"
 path = "../../../../tests/valen/text_reference.rs"
+
+[[test]]
+name = "worker"
+path = "../../../../tests/valen/worker.rs"
+
+[[test]]
+name = "worker_gpu"
+path = "../../../../tests/valen/worker_gpu.rs"

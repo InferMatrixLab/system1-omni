@@ -25,8 +25,12 @@
 //! validation over the five-file export plus the shared `#143` machinery.
 
 pub mod compile;
+pub mod engine;
+pub mod finish;
+pub mod head;
 pub mod preprocess;
 pub mod protocol;
+pub mod server;
 pub mod text;
 pub mod wire;
 
