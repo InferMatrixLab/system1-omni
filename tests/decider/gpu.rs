@@ -91,3 +91,47 @@ async fn maximum_complete_row_grows_scratch_without_leaking_state() {
     assert_eq!(engine.predict(short).await.unwrap(), baseline);
     assert!(engine.executor.is_ready());
 }
+
+#[tokio::test]
+#[ignore = "requires pinned Decider-2B checkpoint and NVIDIA CUDA; request packing"]
+async fn packed_mixed_rows_preserve_order_usage_and_recovery() {
+    use omni_decider_native::batching::BatchLimits;
+    use serde_json::json;
+    let dir = std::env::var("DECIDER_MODEL").unwrap();
+    let library = std::env::var("DECIDER_CUDA_LIB").unwrap();
+    let engine = Engine::load_with_batch(
+        Path::new(&dir),
+        Path::new(&library),
+        BatchLimits::new(4, 4096).unwrap(),
+    )
+    .await
+    .unwrap();
+    let raw=json!({"state":"A customer requests a refund for a damaged item.","questions":{"first":{"instructions":"Choose the team.","criteria":["refund","shipping"]},"score":{"type":"score","instructions":"Severity.","criteria":["low","medium","high"]},"last":{"type":"noul","instructions":"The item is damaged."}}}).to_string();
+    let first = engine.predict(raw.as_bytes()).await.unwrap();
+    assert_eq!(
+        first["answers"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        vec!["first", "score", "last"]
+    );
+    assert_eq!(engine.health()["batch_limits"]["rows"], 4);
+    let long=json!({"state":"The item is damaged. ".repeat(1000),"questions":{"q":{"instructions":"Choose the team.","criteria":["refund","shipping"]}}}).to_string();
+    assert!(
+        engine.processor.prepare(long.as_bytes()).unwrap().rows[0]
+            .ids
+            .len()
+            > 4096
+    );
+    assert!(engine.predict(long.as_bytes()).await.is_ok());
+    assert_eq!(engine.predict(raw.as_bytes()).await.unwrap(), first);
+    assert!(
+        engine
+            .predict(br#"{"state":0,"questions":{"q":{"criteria":["only"]}}}"#)
+            .await
+            .is_err()
+    );
+    assert_eq!(engine.predict(raw.as_bytes()).await.unwrap(), first);
+}
