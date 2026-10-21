@@ -20,7 +20,9 @@ use std::{
 const BASE: &str = "model.visual.";
 type Inventory = BTreeMap<String, Vec<usize>>;
 
-/// Exact supported Qwen3.5-4B and Qwen3.8-27B vision configurations.
+/// Exact supported Qwen3.5-4B, Qwen3.8-27B and Valen-Preview-0923 (Qwen3.5-2B
+/// base) vision configurations. The Valen 2B differs from the 4B only in the
+/// merger output width (2048 vs 2560): the width-1024 kernel path is shared.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VisionConfig {
     pub depth: usize,
@@ -58,7 +60,8 @@ impl VisionConfig {
         ];
         ensure!(
             (sizes == [24, 1024, 4096, 16, 2304, 2560, 3, 16, 2, 2]
-                || sizes == [27, 1152, 4304, 16, 2304, 5120, 3, 16, 2, 2])
+                || sizes == [27, 1152, 4304, 16, 2304, 5120, 3, 16, 2, 2]
+                || sizes == [24, 1024, 4096, 16, 2304, 2048, 3, 16, 2, 2])
                 && self.hidden_act == "gelu_pytorch_tanh"
                 && self.deepstack_visual_indexes.is_empty()
                 && self.model_type == "qwen3_5",
@@ -317,5 +320,7 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for UniqueMap<T> {
 
 mod geometry;
 mod model;
+mod valen;
 pub use geometry::VisionGeometry;
 pub use model::VisionModel;
+pub use valen::ValenVisionCheckpoint;

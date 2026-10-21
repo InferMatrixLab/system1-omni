@@ -3,16 +3,22 @@
 //! The spec-02 export (`valen-checkpoint-export/2`, `valen_export.json`) is
 //! the only weight source: the base's `model.visual.*` tensors with the
 //! trained vision-top blocks and merger substituted as plain replacements.
-//! Validation follows the cua_s1 export-policy style — the manifest's format,
-//! provenance pins and per-file hashes are checked before any tensor is read,
-//! and the manifest's tensor records must agree with the configuration-
-//! derived inventory (names, shapes, dtypes and which tensors are trained
-//! replacements). No vision adapter exists for Valen.
-use super::{BASE, Inventory, TensorStore, VisionConfig, VisionWeights, inside, is_visual};
+//! Validation follows the export-policy style used across the native workers —
+//! the manifest's format, provenance pins and per-file hashes are checked
+//! before any tensor is read, and the manifest's tensor records must agree
+//! with the configuration-derived inventory (names, shapes, dtypes and which
+//! tensors are trained replacements). No vision adapter exists for Valen.
+use super::{BASE, Inventory, TensorStore, VisionConfig, VisionModel, inside, is_visual};
 use anyhow::{Context, Result, ensure};
 use safetensors::tensor::TensorView;
 use serde_json::Value;
-use std::{collections::BTreeSet, fs, path::Path};
+use sha2::{Digest, Sha256};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs::{self, File},
+    io::Read,
+    path::Path,
+};
 
 const MANIFEST: &str = "valen_export.json";
 const FORMAT: &str = "valen-checkpoint-export/2";
@@ -72,7 +78,7 @@ pub(super) fn validate_manifest(manifest: &Value, config: &VisionConfig) -> Resu
     let tensors = manifest["tensors"]
         .as_array()
         .context("manifest has no tensor records")?;
-    let mut visual = std::collections::BTreeMap::new();
+    let mut visual = BTreeMap::new();
     for record in tensors {
         let name = record["name"]
             .as_str()
@@ -146,6 +152,18 @@ pub(super) fn validate_manifest(manifest: &Value, config: &VisionConfig) -> Resu
     Ok(())
 }
 
+/// The export's model config must carry the shared Qwen3.5 vision layout with
+/// the Valen 2B merger width and a text tower of the same hidden size.
+fn export_vision_config(config: &Value) -> Result<VisionConfig> {
+    let vision = VisionConfig::from_value(config["vision_config"].clone())?;
+    ensure!(
+        config["model_type"] == "qwen3_5"
+            && config["text_config"]["hidden_size"].as_u64() == Some(vision.out_hidden_size as u64),
+        "vision/text config mismatch"
+    );
+    Ok(vision)
+}
+
 /// Immutable mmap storage for the vision tensors of one verified export.
 pub struct ValenVisionCheckpoint {
     config: VisionConfig,
@@ -164,8 +182,10 @@ impl ValenVisionCheckpoint {
         for name in ["config.json", "model.safetensors"] {
             ensure!(files.contains_key(name), "export must hash {name}");
         }
-        crate::provenance::verify_files(&dir, files, Some(MANIFEST))?;
-        let config = VisionConfig::load(&dir).context("Valen export config")?;
+        verify_export_files(&dir, files, MANIFEST)?;
+        let config: Value = serde_json::from_slice(&fs::read(inside(&dir, "config.json")?)?)
+            .context("Valen export config")?;
+        let config = export_vision_config(&config)?;
         validate_manifest(&manifest, &config)?;
         let expected = config.inventory();
         let base = TensorStore::load(
@@ -177,21 +197,91 @@ impl ValenVisionCheckpoint {
         )?;
         Ok(Self { config, base })
     }
-}
-impl VisionWeights for ValenVisionCheckpoint {
-    fn vision_config(&self) -> &VisionConfig {
+    pub fn vision_config(&self) -> &VisionConfig {
         &self.config
     }
-    fn base_names(&self) -> impl Iterator<Item = &str> {
+    pub fn base_names(&self) -> impl Iterator<Item = &str> {
         self.base.tensors.keys().map(String::as_str)
     }
-    fn base_tensor(&self, name: &str) -> Result<TensorView<'_>> {
+    pub fn base_tensor(&self, name: &str) -> Result<TensorView<'_>> {
         self.base.tensor(name)
     }
-    fn adapter_names(&self) -> impl Iterator<Item = &str> {
-        std::iter::empty()
-    }
-    fn adapter_tensor(&self, _name: &str) -> Result<TensorView<'_>> {
-        Err(anyhow::anyhow!("the Valen vision export has no adapter"))
+}
+
+impl VisionModel {
+    /// Upload the manifest-verified Valen 2B vision tower: the base layout
+    /// with the trained vision-top replacements and no adapter.
+    pub fn load_valen(export: impl AsRef<Path>, library: &Path) -> Result<Self> {
+        let checkpoint = ValenVisionCheckpoint::load(export)?;
+        let base = checkpoint
+            .base_names()
+            .map(|name| Ok((name.to_owned(), checkpoint.base_tensor(name)?)))
+            .collect::<Result<Vec<_>>>()?;
+        Self::from_tensors(
+            checkpoint.vision_config().clone(),
+            base,
+            Vec::new(),
+            library,
+        )
     }
 }
+
+/// Verify a manifest's file hashes; every listed file is checked for size and
+/// sha256, and no unlisted artifact may sit beside the hashed ones and the
+/// manifest itself (`.cache` is ignored).
+fn verify_export_files(
+    root: &Path,
+    files: &serde_json::Map<String, Value>,
+    manifest: &str,
+) -> Result<()> {
+    ensure!(!files.is_empty(), "empty artifact hash manifest");
+    for (name, expected) in files {
+        ensure!(
+            Path::new(name).components().count() == 1
+                && matches!(
+                    Path::new(name).components().next(),
+                    Some(std::path::Component::Normal(_))
+                ),
+            "invalid artifact name"
+        );
+        let path = root.join(name);
+        ensure!(
+            Some(fs::metadata(&path)?.len()) == expected["size"].as_u64(),
+            "{} size mismatch",
+            path.display()
+        );
+        ensure!(
+            Some(hash_file(&path)?.as_str()) == expected["sha256"].as_str(),
+            "{} checksum mismatch",
+            path.display()
+        );
+    }
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_str().context("non-UTF8 artifact")?;
+        ensure!(
+            name == ".cache" || name == manifest || files.contains_key(name),
+            "unlisted artifact: {name}"
+        );
+    }
+    Ok(())
+}
+
+fn hash_file(path: &Path) -> Result<String> {
+    let mut file = File::open(path)?;
+    let mut hash = Sha256::new();
+    let mut buffer = vec![0; 1024 * 1024];
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&buffer[..n]);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+
+#[cfg(test)]
+#[path = "../../../../../../tests/valen/valen_manifest.rs"]
+mod valen_manifest_tests;

@@ -1,8 +1,13 @@
-//! CPU tests for the Valen export-manifest vision checks (spec 03, N1).
+//! CPU tests for the Valen export-manifest vision checks (spec 03, N1;
+//! ported to the shared Qwen vision executor).
 //!
 //! The pure manifest validation runs without weights: it pins the export
 //! format, the checkpoint/base provenance and the trained vision-top +
 //! merger replacement records against the configuration-derived inventory.
+//! The layout cases replace the old cua_s1-side unpinning tests: the shared
+//! `VisionConfig` whitelist accepts the 4B (2560) and Valen 2B (2048) merger
+//! widths on the width-1024 kernel path and rejects every other dimension
+//! drift.
 use super::*;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -81,7 +86,7 @@ fn export_manifest() -> Value {
 
 #[test]
 fn valid_manifest_passes() {
-    valen::validate_manifest(&export_manifest(), &two_b_config()).unwrap();
+    validate_manifest(&export_manifest(), &two_b_config()).unwrap();
 }
 
 #[test]
@@ -97,7 +102,7 @@ fn format_and_provenance_pins_are_enforced() {
     for corrupt in cases {
         let mut value = export_manifest();
         corrupt(&mut value);
-        assert!(valen::validate_manifest(&value, &two_b_config()).is_err());
+        assert!(validate_manifest(&value, &two_b_config()).is_err());
     }
 }
 
@@ -112,7 +117,7 @@ fn trained_replacements_must_be_recorded() {
         .unwrap();
     record["source"] = json!("base");
     record["component"] = json!("backbone");
-    assert!(valen::validate_manifest(&value, &two_b_config()).is_err());
+    assert!(validate_manifest(&value, &two_b_config()).is_err());
 
     // A base tensor relabeled as trained must fail too.
     let mut value = export_manifest();
@@ -123,7 +128,7 @@ fn trained_replacements_must_be_recorded() {
         .unwrap();
     record["source"] = json!("checkpoint");
     record["component"] = json!("vision-top");
-    assert!(valen::validate_manifest(&value, &two_b_config()).is_err());
+    assert!(validate_manifest(&value, &two_b_config()).is_err());
 }
 
 #[test]
@@ -171,13 +176,13 @@ fn visual_records_must_match_the_inventory() {
         let mut owned = value["tensors"].as_array().unwrap().clone();
         corrupt(&mut owned);
         value["tensors"] = Value::Array(owned);
-        assert!(valen::validate_manifest(&value, &two_b_config()).is_err());
+        assert!(validate_manifest(&value, &two_b_config()).is_err());
     }
 }
 
 #[test]
 fn trained_inventory_covers_last_four_blocks_and_merger() {
-    let trained = valen::trained_tensor_names(&two_b_config());
+    let trained = trained_tensor_names(&two_b_config());
     assert_eq!(trained.len(), 48 + 6);
     assert!(trained.contains("model.visual.blocks.20.mlp.linear_fc2.bias"));
     assert!(trained.contains("model.visual.blocks.23.norm1.weight"));
@@ -187,4 +192,90 @@ fn trained_inventory_covers_last_four_blocks_and_merger() {
     // Every trained name is part of the config inventory.
     let inventory: BTreeMap<String, Vec<usize>> = two_b_config().inventory();
     assert!(trained.iter().all(|name| inventory.contains_key(name)));
+}
+
+fn model_config(out_hidden_size: u64, text_hidden_size: u64) -> Value {
+    json!({
+        "model_type": "qwen3_5",
+        "text_config": {"hidden_size": text_hidden_size},
+        "vision_config": {
+            "deepstack_visual_indexes": [],
+            "depth": 24,
+            "hidden_act": "gelu_pytorch_tanh",
+            "hidden_size": 1024,
+            "in_channels": 3,
+            "intermediate_size": 4096,
+            "model_type": "qwen3_5",
+            "num_heads": 16,
+            "num_position_embeddings": 2304,
+            "out_hidden_size": out_hidden_size,
+            "patch_size": 16,
+            "spatial_merge_size": 2,
+            "temporal_patch_size": 2
+        }
+    })
+}
+
+/// The shared layout accepts the Valen 2B merger width and keeps the 4B path.
+#[test]
+fn valen_and_cua_merger_widths_load() {
+    let valen = export_vision_config(&model_config(2048, 2048)).unwrap();
+    assert_eq!(valen.out_hidden_size, 2048);
+    let inventory = valen.inventory();
+    assert_eq!(
+        inventory["model.visual.merger.linear_fc2.weight"],
+        &[2048_usize, 4096]
+    );
+    assert_eq!(
+        inventory["model.visual.merger.linear_fc2.bias"],
+        &[2048_usize]
+    );
+    assert_eq!(
+        inventory["model.visual.merger.linear_fc1.weight"],
+        &[4096_usize, 4096]
+    );
+    assert_eq!(
+        inventory["model.visual.patch_embed.proj.weight"],
+        &[1024_usize, 3, 2, 16, 16]
+    );
+    let cua = export_vision_config(&model_config(2560, 2560)).unwrap();
+    assert_eq!(cua.out_hidden_size, 2560);
+    assert_eq!(
+        cua.inventory()["model.visual.merger.linear_fc2.weight"],
+        &[2560_usize, 4096]
+    );
+}
+
+/// The merger output width must equal the text hidden size it feeds.
+#[test]
+fn text_hidden_mismatch_is_rejected() {
+    assert!(export_vision_config(&model_config(2048, 2560)).is_err());
+    assert!(export_vision_config(&model_config(2560, 2048)).is_err());
+}
+
+/// Every other vision dimension stays pinned to the layout the kernels
+/// implement; changing any of them must stay a load error.
+#[test]
+fn shared_layout_dimensions_stay_pinned() {
+    let cases = [
+        ("depth", json!(23)),
+        ("hidden_size", json!(512)),
+        ("intermediate_size", json!(2048)),
+        ("num_heads", json!(8)),
+        ("num_position_embeddings", json!(1152)),
+        ("in_channels", json!(1)),
+        ("patch_size", json!(14)),
+        ("temporal_patch_size", json!(1)),
+        ("spatial_merge_size", json!(4)),
+        ("out_hidden_size", json!(1024)),
+    ];
+    for (field, value) in cases {
+        let mut config = model_config(2048, 2048);
+        config["vision_config"][field] = value;
+        assert!(
+            VisionConfig::from_value(config["vision_config"].clone()).is_err()
+                || export_vision_config(&config).is_err(),
+            "{field} must stay pinned"
+        );
+    }
 }

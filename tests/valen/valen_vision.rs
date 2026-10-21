@@ -1,4 +1,5 @@
-//! Device-gated Valen vision checks (spec 03, N1).
+//! Device-gated Valen vision checks (spec 03, N1; ported to the shared Qwen
+//! vision executor that PR #117 introduced).
 //!
 //! The reference fixture is recorded by
 //! `recipe/valen/dump_vision_reference.py` from the pinned reference tower
@@ -15,22 +16,22 @@
 //! BF16 rounding scale accumulate over the 24 blocks and the merger; the
 //! gate quantifies that drift instead of demanding bit equality.
 //!
-//! Recorded measurement (RTX 5060 Laptop GPU, sm_120, BF16, torch
-//! 2.11.0+cu128, 2026-10-21): native vs reference max abs 1.03125, mean abs
-//! 1.00e-2, 3361/131072 elements bit-exact, reference output scale 2.5. The
-//! drift is cross-kernel BF16 noise, not an implementation error: the
-//! reference's own attention-kernel choice (eager vs sdpa, everything else
-//! identical) drifts by max abs 0.734, mean abs 9.0e-3, 4401/131072
-//! bit-exact — the same class. Per-stage tracing (forward_with_trace vs
-//! hooked reference stages) shows the patch embedding bit-exact, the first
-//! blocks within 1-2 BF16 ulp, and amplification starting where the
-//! reference's own activations jump an order of magnitude (block 10,
-//! scale 7 -> 120). The declared tolerance 1.25 sits above the measured
-//! native maximum with ~20% headroom and above the reference's own
-//! kernel-choice spread. It gates the tower output only; the end-to-end
-//! native probability gate is N4's separate measured declaration.
+//! Recorded measurement on the pre-#117 executor (RTX 5060 Laptop GPU,
+//! sm_120, BF16, torch 2.11.0+cu128, 2026-10-21): native vs reference max
+//! abs 1.03125, mean abs 1.00e-2, 3361/131072 elements bit-exact, reference
+//! output scale 2.5. The drift is cross-kernel BF16 noise, not an
+//! implementation error: the reference's own attention-kernel choice (eager
+//! vs sdpa, everything else identical) drifts by max abs 0.734, mean abs
+//! 9.0e-3, 4401/131072 bit-exact — the same class. Per-stage tracing shows
+//! the patch embedding bit-exact, the first blocks within 1-2 BF16 ulp, and
+//! amplification starting where the reference's own activations jump an
+//! order of magnitude (block 10, scale 7 -> 120). The declared tolerance
+//! 1.25 sits above the measured native maximum with ~20% headroom and above
+//! the reference's own kernel-choice spread. It gates the tower output only;
+//! the end-to-end native probability gate is N4's separate measured
+//! declaration.
 use super::*;
-use crate::image_preprocess::ProcessedImage;
+use crate::vision::ValenVisionCheckpoint;
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -67,7 +68,7 @@ fn env_path(name: &str) -> PathBuf {
 #[test]
 #[ignore = "requires VALEN_EXPORT pointing at the spec-02 export directory"]
 fn valen_vision_checkpoint_loads_from_the_verified_export() {
-    let checkpoint = super::super::ValenVisionCheckpoint::load(env_path("VALEN_EXPORT")).unwrap();
+    let checkpoint = ValenVisionCheckpoint::load(env_path("VALEN_EXPORT")).unwrap();
     let config = checkpoint.vision_config();
     assert_eq!(config.out_hidden_size, 2048);
     assert_eq!(config.depth, 24);
@@ -82,7 +83,6 @@ fn valen_vision_checkpoint_loads_from_the_verified_export() {
         assert_eq!(tensor.shape(), &shape[..], "{name}");
         assert_eq!(tensor.dtype(), safetensors::Dtype::BF16);
     }
-    assert_eq!(checkpoint.adapter_names().count(), 0);
 }
 
 /// GPU parity: the native tower's output against the recorded reference on
