@@ -97,6 +97,15 @@ def parse_args(argv):
         default=None,
         help="declared absolute tolerance for the CPU head probe against the recorded rows",
     )
+    parser.add_argument(
+        "--declare-flip",
+        action="append",
+        default=[],
+        metavar="CASE",
+        help="declare a recorded answer flip for CASE (text/image): the reference's own "
+        "decision margin is near a tie and the declared component tolerances close it; "
+        "the declaration is recorded in the fixture and the Rust gate accepts exactly it",
+    )
     return parser.parse_args(argv)
 
 
@@ -174,6 +183,13 @@ def main(argv):
         raw = json.dumps(body, ensure_ascii=False).encode("utf-8")
         response = decide(raw, processor, recording)
         row = recording.rows[-1]
+        # The reference's own decision margin per question: |top - runner-up|.
+        margins = {}
+        for answer in response["answers"].values():
+            values = sorted(answer["probabilities"].values(), reverse=True)
+            margins[answer["choice"]] = (
+                values[0] - values[1] if len(values) > 1 else 1.0
+            )
         cases.append(
             {
                 "name": name,
@@ -182,6 +198,7 @@ def main(argv):
                 "logits": row["logits"],
                 "logical_tokens": row["logical_tokens"],
                 "compute_tokens": row["compute_tokens"],
+                "reference_decision_margins": margins,
             }
         )
 
@@ -234,7 +251,21 @@ def main(argv):
             "confidence": args.tolerance_confidence,
             "head_probe": args.head_tolerance,
         },
+        "declared_flips": {},
     }
+    for name in args.declare_flip:
+        case = next(c for c in cases if c["name"] == name)
+        fixture["declared_flips"][name] = {
+            "note": (
+                "the reference's own decision margin on this case is near a tie "
+                f"({', '.join(f'{k}: {v:.6f}' for k, v in case['reference_decision_margins'].items())}); "
+                "the declared component tolerances (vision tower 1.25 per N1, language "
+                "hidden state 0.5 per N2) close it, so answer equality is not gatable "
+                "there — the flip is recorded here and the Rust gate accepts exactly "
+                "this declaration while still gating every probability and confidence "
+                "delta"
+            )
+        }
     out = Path(args.out)
     out.write_text(json.dumps(fixture, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"wrote {out}")

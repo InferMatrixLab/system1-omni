@@ -167,6 +167,32 @@ impl Engine {
         Ok(rows)
     }
 
+    /// The decomposition seam for the parity diagnostics: the vision rows of
+    /// one request, the language model and the head, so env-gated tests can
+    /// attribute end-to-end deltas (pixels → tower → language → head).
+    pub fn image_rows_probe(
+        &mut self,
+        request: &Request,
+        prepared: &Prepared,
+        compiled: &Compiled,
+    ) -> Result<Vec<half::bf16>> {
+        let Some(layout) = &compiled.base.image else {
+            anyhow::bail!("the request has no image");
+        };
+        let RenderedState::Image { grid_thw, .. } = &prepared.state else {
+            anyhow::bail!("the prepared state has no image");
+        };
+        self.image_rows(request, *grid_thw, layout.visual_tokens)
+    }
+
+    pub fn text(&mut self) -> &mut TextModel {
+        &mut self.text
+    }
+
+    pub fn head(&self) -> &Head {
+        &self.head
+    }
+
     /// Decode, resize and run the vision tower once for the whole request;
     /// `branch()` reuses the rows for every branch of every question.
     fn image_rows(
@@ -208,7 +234,7 @@ impl Engine {
 ///
 /// The grid is the compiled image layout's `[1, patches_h, patches_w]`; the
 /// merged meshgrid axes are the patch grid halved by the 2×2 spatial merge.
-fn mrope_positions(
+pub fn mrope_positions(
     tokens: &[u32],
     image_pad: u32,
     grid_thw: &[usize; 3],
