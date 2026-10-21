@@ -1,10 +1,12 @@
 # Valen-Preview-0923 reference contract
 
-This directory contains the System1-Omni reference integration for
-Valen-Preview-0923. It is a reference-serving boundary only: the Python worker,
-processor, executor, and postprocessor serve the pinned text and single-image
-`choice`, `noul`, and `score` questions. Native CUDA execution is not part of
-it.
+This directory contains the System1-Omni integration for Valen-Preview-0923.
+The Python worker, processor, executor, and postprocessor are the reference
+serving boundary for the pinned text and single-image `choice`, `noul`, and
+`score` questions; the [`native/`](native/) subdirectory (spec 03) is the
+native Rust/CUDA worker that serves the same contract on the shared Qwen3.5
+backends — startup, parity gates and recorded deviations in
+[recipe/valen/native.md](../../../recipe/valen/native.md).
 
 ## Pinned artifacts
 
