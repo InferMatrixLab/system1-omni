@@ -325,6 +325,67 @@ class SavedProtocolTests(unittest.IsolatedAsyncioTestCase):
                 self.assert_cli_summary(args.output, summary)
 
 
+def choice_case(case_id):
+    return {
+        "id": case_id,
+        "request": {
+            "state": "A saved CPU state fixture",
+            "questions": {
+                "q": {
+                    "type": "choice",
+                    "instructions": "Pick one",
+                    "criteria": {"a": "A", "b": "B"},
+                }
+            },
+        },
+        "expected": {"q": "a"},
+    }
+
+
+def multi_question_case():
+    case = choice_case("two-questions")
+    case["request"]["questions"]["r"] = {
+        "type": "choice",
+        "instructions": "Pick another",
+        "criteria": {"a": "A", "b": "B"},
+    }
+    case["expected"]["r"] = "a"
+    return case
+
+
+class WirePreflightTests(unittest.IsolatedAsyncioTestCase):
+    def jev_args(self, root):
+        args = run_args(root)
+        args.manifest = root / "manifest.jsonl"
+        args.protocol = "jev-vl"
+        return args
+
+    async def assert_rejected_before_any_artifact(self, args, cases):
+        with self.assertRaisesRegex(
+            ValueError, "incompatible with the jev-vl wire protocol"
+        ):
+            await bench.run(args, cases)
+        self.assertFalse(args.output.exists())
+
+    async def test_incompatible_cases_are_rejected_before_any_artifact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args = self.jev_args(root)
+            args.manifest.write_text(json.dumps(choice_case("ok")) + "\n")
+            await self.assert_rejected_before_any_artifact(
+                args, [choice_case("ok"), multi_question_case(), score_case()]
+            )
+
+    async def test_incompatible_warmup_manifest_is_rejected_before_any_artifact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args = self.jev_args(root)
+            args.manifest.write_text(json.dumps(choice_case("ok")) + "\n")
+            args.warmup_manifest = root / "warmup.jsonl"
+            args.warmup_manifest.write_text(json.dumps(multi_question_case()) + "\n")
+            await self.assert_rejected_before_any_artifact(args, [choice_case("ok")])
+
+
 class AdapterContractTests(unittest.TestCase):
     def test_systemone_missing_or_wrong_answer_type_still_fails(self):
         case = CASES[0]

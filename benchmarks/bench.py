@@ -555,6 +555,16 @@ async def run(args, cases):
     ):
         if not metadata.get(name):
             raise ValueError(f"metadata requires {name}")
+    # A case the adapter cannot wire fails before any HTTP exchange; reject it
+    # before creating the output directory so a saved archive stays summarizable.
+    for case in cases if warmup_cases is cases else [*cases, *warmup_cases]:
+        try:
+            wire_request(case, args.model, protocol)
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            raise ValueError(
+                f"case {case['id']!r} is incompatible with the {protocol} "
+                f"wire protocol: {exc}"
+            ) from exc
     args.output.mkdir(parents=True, exist_ok=False)
     write_json(
         args.output / "config.json",
