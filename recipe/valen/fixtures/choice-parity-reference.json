@@ -1,7 +1,7 @@
 {
- "format": "valen-choice-parity/1",
+ "format": "valen-choice-parity/2",
  "recorded": {
-  "date": "2026-10-21T16:29:59Z",
+  "date": "2026-10-21T17:19:37Z",
   "device": "NVIDIA GeForce RTX 5060 Laptop GPU",
   "compute_capability": "12.0",
   "torch": "2.11.0+cu128",
@@ -58,7 +58,7 @@
    "logical_tokens": 80,
    "compute_tokens": 80,
    "reference_decision_margins": {
-    "r1_and_r3": 0.5139568231418924
+    "which_passed": 0.5139568231418924
    }
   },
   {
@@ -109,7 +109,228 @@
    "logical_tokens": 108,
    "compute_tokens": 108,
    "reference_decision_margins": {
-    "black": 0.10802918274226259
+    "color": 0.10802918274226259
+   }
+  },
+  {
+   "name": "noul",
+   "request": {
+    "model": "valen-preview-0923",
+    "state": "The card was charged twice for one order.",
+    "questions": {
+     "duplicate": {
+      "type": "noul",
+      "instructions": "Was the card charged twice for one order?"
+     },
+     "authorized": {
+      "type": "noul",
+      "instructions": "Did the customer authorize both charges?",
+      "criteria": {
+       "true": "Both charges were authorized by the customer.",
+       "false": "At least one charge was unauthorized."
+      }
+     }
+    }
+   },
+   "response": {
+    "model": "valen-preview-0923",
+    "answers": {
+     "duplicate": {
+      "type": "noul",
+      "noul": 0.19441015095399058,
+      "probabilities": {
+       "true": 0.19441015095399058,
+       "false": 0.8055898490460095
+      },
+      "confidence": 0.611179698092019
+     },
+     "authorized": {
+      "type": "noul",
+      "noul": 0.3848572797166159,
+      "probabilities": {
+       "true": 0.3848572797166159,
+       "false": 0.6151427202833842
+      },
+      "confidence": 0.23028544056676847
+     }
+    },
+    "usage": {
+     "input_tokens": 109,
+     "output_tokens": 0
+    },
+    "internal_usage": {
+     "compute_tokens": 123
+    }
+   },
+   "logits": [
+    [
+     -0.1466970443725586,
+     1.2749075889587402
+    ],
+    [
+     0.30092716217041016,
+     0.7699089050292969
+    ]
+   ],
+   "logical_tokens": 109,
+   "compute_tokens": 123,
+   "reference_decision_margins": {
+    "duplicate": 0.6111796980920189,
+    "authorized": 0.23028544056676836
+   }
+  },
+  {
+   "name": "score",
+   "request": {
+    "model": "valen-preview-0923",
+    "state": "The card was charged twice for one order.",
+    "questions": {
+     "severity": {
+      "type": "score",
+      "instructions": "How severe is the billing error?",
+      "criteria": [
+       "No billing error: every charge is correct.",
+       "Minor error: a single duplicated charge.",
+       "Major error: repeated duplicated charges."
+      ]
+     }
+    }
+   },
+   "response": {
+    "model": "valen-preview-0923",
+    "answers": {
+     "severity": {
+      "type": "score",
+      "probabilities": {
+       "0": 0.17458891628733877,
+       "1": 0.6222512480902359,
+       "2": 0.2031598356224252
+      },
+      "score": 1.0285709193350863,
+      "legend": {
+       "0": "No billing error: every charge is correct.",
+       "1": "Minor error: a single duplicated charge.",
+       "2": "Major error: repeated duplicated charges."
+      },
+      "confidence": 0.43337687213535403
+     }
+    },
+    "usage": {
+     "input_tokens": 107,
+     "output_tokens": 0
+    },
+    "internal_usage": {
+     "compute_tokens": 135
+    }
+   },
+   "logits": [
+    [
+     0.17940568923950195,
+     1.4503154754638672,
+     0.3309645652770996
+    ]
+   ],
+   "logical_tokens": 107,
+   "compute_tokens": 135,
+   "reference_decision_margins": {
+    "severity": 0.4190914124678107
+   }
+  },
+  {
+   "name": "mixed",
+   "request": {
+    "model": "valen-preview-0923",
+    "state": "The card was charged twice for one order.",
+    "questions": {
+     "move": {
+      "type": "choice",
+      "instructions": "Should the duplicate charge be voided?",
+      "criteria": {
+       "void": "Void the duplicate charge.",
+       "keep": "Keep both charges."
+      }
+     },
+     "duplicate": {
+      "type": "noul",
+      "instructions": "Was the card charged twice for one order?"
+     },
+     "severity": {
+      "type": "score",
+      "instructions": "How severe is the billing error?",
+      "criteria": [
+       "No billing error: every charge is correct.",
+       "Minor error: a single duplicated charge.",
+       "Major error: repeated duplicated charges."
+      ]
+     }
+    }
+   },
+   "response": {
+    "model": "valen-preview-0923",
+    "answers": {
+     "move": {
+      "type": "choice",
+      "choice": "void",
+      "probabilities": {
+       "void": 0.8038185939478896,
+       "keep": 0.19618140605211046
+      },
+      "confidence": 0.6076371878957791
+     },
+     "duplicate": {
+      "type": "noul",
+      "noul": 0.19441015095399058,
+      "probabilities": {
+       "true": 0.19441015095399058,
+       "false": 0.8055898490460095
+      },
+      "confidence": 0.611179698092019
+     },
+     "severity": {
+      "type": "score",
+      "probabilities": {
+       "0": 0.17458891628733877,
+       "1": 0.6222512480902359,
+       "2": 0.2031598356224252
+      },
+      "score": 1.0285709193350863,
+      "legend": {
+       "0": "No billing error: every charge is correct.",
+       "1": "Minor error: a single duplicated charge.",
+       "2": "Major error: repeated duplicated charges."
+      },
+      "confidence": 0.43337687213535403
+     }
+    },
+    "usage": {
+     "input_tokens": 197,
+     "output_tokens": 0
+    },
+    "internal_usage": {
+     "compute_tokens": 253
+    }
+   },
+   "logits": [
+    [
+     1.3364851474761963,
+     -0.07384869456291199
+    ],
+    [
+     -0.1466970443725586,
+     1.2749075889587402
+    ],
+    [
+     0.17940568923950195,
+     1.4503154754638672,
+     0.3309645652770996
+    ]
+   ],
+   "logical_tokens": 197,
+   "compute_tokens": 253,
+   "reference_decision_margins": {
+    "move": 0.6076371878957791,
+    "duplicate": 0.6111796980920189,
+    "severity": 0.4190914124678107
    }
   }
  ],
@@ -126,11 +347,12 @@
  "tolerance": {
   "probability": 0.1,
   "confidence": 0.1,
+  "score": 0.05,
   "head_probe": 0.0001
  },
  "declared_flips": {
   "image": {
-   "note": "the reference's own decision margin on this case is near a tie (black: 0.108029); the declared component tolerances (vision tower 1.25 per N1, language hidden state 0.5 per N2) close it, so answer equality is not gatable there — the flip is recorded here and the Rust gate accepts exactly this declaration while still gating every probability and confidence delta"
+   "note": "the reference's own decision margin on this case is near a tie (color: 0.108029); the declared component tolerances (vision tower 1.25 per N1, language hidden state 0.5 per N2) close it, so answer equality is not gatable there — the flip is recorded here and the Rust gate accepts exactly this declaration while still gating every probability and confidence delta"
   }
  }
 }

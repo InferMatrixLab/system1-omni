@@ -1,17 +1,20 @@
-//! Device-gated native choice-worker checks (spec 03, N4).
+//! Device-gated native worker checks (spec 03, N4 choice + N5 noul/score).
 //!
 //! The parity fixture is recorded by `recipe/valen/dump_choice_parity.py`
 //! from the pinned reference stack (Valen @ 750bfcf, Preview checkpoint
 //! 81b9c63 sha256-pinned, Qwen3.5-2B base 15852e8c, peft 0.18.1 unmerged
-//! FP32 adapters, eager attention, TF32 off, BF16) over the recipe's two
-//! choice fixtures — the N2 hidden fixture's text state and the example
-//! image request — and committed as
-//! `recipe/valen/fixtures/choice-parity-reference.json`.
+//! FP32 adapters, eager attention, TF32 off, BF16) over five fixtures: the
+//! N2 hidden fixture's text choice state, the example image choice request,
+//! the example noul request (plain + custom wording), the example score
+//! request (3 levels, one branch per level), and one mixed-type body —
+//! committed as `recipe/valen/fixtures/choice-parity-reference.json`.
 //!
 //! Gate semantics (measured first, then declared in the fixture): exact
-//! agreement on every discrete field (the chosen key per question, the full
-//! answer shape, the usage accounting) and an absolute tolerance on the
-//! probability and confidence scalars. The native stack runs its own
+//! agreement on every discrete field (the chosen key per choice question,
+//! the static score legend, the full answer shape, the usage accounting)
+//! and an absolute tolerance on the probability and confidence scalars; the
+//! score questions' expected level carries its own declared tolerance
+//! (an aggregate of the gated probabilities). The native stack runs its own
 //! kernels over the same numeric profile — cross-kernel BF16 drift
 //! accumulates over 24 language layers (N2 measured 0.5 max-abs on the
 //! final hidden at scale 50) and, on the image path, the vision tower adds
@@ -36,7 +39,7 @@ fn fixture() -> (Value, PathBuf) {
     let fixture: Value =
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert!(
-        fixture["format"] == "valen-choice-parity/1",
+        fixture["format"] == "valen-choice-parity/2",
         "unexpected fixture format"
     );
     (fixture, path)
@@ -77,12 +80,13 @@ fn load() -> Engine {
 /// Compare one case's native outcome against the recorded reference.
 /// A `None` tolerance measures and reports without asserting, so the first
 /// run on new hardware produces the declaration numbers.
-fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, recorded: &Value, tolerance: Option<f64>) {
+fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, recorded: &Value, tolerance: Option<f64>, score_tolerance: Option<f64>) {
     let reference_answers = &recorded["answers"];
     let native_answers = &native["answers"];
     let mut problems = Vec::new();
     let mut max_probability = 0.0f64;
     let mut max_confidence = 0.0f64;
+    let mut max_score = 0.0f64;
     let mut checked = 0usize;
     for (qid, expected) in reference_answers.as_object().unwrap() {
         let answer = &native_answers[qid];
@@ -90,7 +94,9 @@ fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, re
             problems.push(format!("{qid}: type {} != {}", answer["type"], expected["type"]));
             continue;
         }
-        if answer["choice"] != expected["choice"] {
+        if answer.is_object() && answer.as_object().unwrap().contains_key("choice")
+            && answer["choice"] != expected["choice"]
+        {
             // An answer flip is a discrete failure unless the fixture carries
             // an explicit per-case declaration that the reference's own margin
             // was near a tie inside the declared component tolerances.
@@ -107,6 +113,39 @@ fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, re
                 );
             }
         }
+        if expected.is_object() && expected.as_object().unwrap().contains_key("noul") {
+            // The noul scalar is P(true): gated by the probability tolerance
+            // and folded into the same reported figure.
+            let delta = (answer["noul"].as_f64().unwrap()
+                - expected["noul"].as_f64().unwrap())
+                .abs();
+            max_probability = max_probability.max(delta);
+            if tolerance.is_some_and(|t| delta > t) {
+                problems.push(format!(
+                    "{qid}: noul {} vs {} (delta {delta})",
+                    answer["noul"], expected["noul"]
+                ));
+            }
+        }
+        if expected.is_object() && expected.as_object().unwrap().contains_key("score") {
+            let delta = (answer["score"].as_f64().unwrap()
+                - expected["score"].as_f64().unwrap())
+                .abs();
+            max_score = max_score.max(delta);
+            if score_tolerance.is_some_and(|t| delta > t) {
+                problems.push(format!(
+                    "{qid}: score {} vs {} (delta {delta})",
+                    answer["score"], expected["score"]
+                ));
+            }
+            // The legend is static text from the request: exact or a bug.
+            if answer["legend"] != expected["legend"] {
+                problems.push(format!(
+                    "{qid}: legend {:?} != {:?}",
+                    answer["legend"], expected["legend"]
+                ));
+            }
+        }
         for (key, value) in expected["probabilities"].as_object().unwrap() {
             let native_value = answer["probabilities"][key].as_f64().unwrap();
             let reference_value = value.as_f64().unwrap();
@@ -121,7 +160,7 @@ fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, re
         }
         let delta = (answer["confidence"].as_f64().unwrap()
             - expected["confidence"].as_f64().unwrap())
-        .abs();
+            .abs();
         max_confidence = max_confidence.max(delta);
         if tolerance.is_some_and(|t| delta > t) {
             problems.push(format!(
@@ -143,9 +182,10 @@ fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, re
         ));
     }
     eprintln!(
-        "valen choice parity ({name}): {checked} probabilities compared, \
+        "valen parity ({name}): {checked} probabilities compared, \
          max probability delta {max_probability:.6e}, max confidence delta \
-         {max_confidence:.6e}, tolerance {tolerance:?}"
+         {max_confidence:.6e}, max score delta {max_score:.6e}, tolerance \
+         {tolerance:?} (score {score_tolerance:?})"
     );
     let discrete: Vec<String> = problems
         .iter()
@@ -154,10 +194,10 @@ fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, re
         .collect();
     assert!(
         discrete.is_empty(),
-        "native choice parity failed for {name}: {}",
+        "native parity failed for {name}: {}",
         discrete.join("; ")
     );
-    if let Some(_tolerance) = tolerance {
+    if tolerance.is_some() {
         let numeric: Vec<String> = problems
             .iter()
             .filter(|p| p.contains("delta"))
@@ -165,7 +205,7 @@ fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, re
             .collect();
         assert!(
             numeric.is_empty(),
-            "native choice parity failed for {name}: {}",
+            "native parity failed for {name}: {}",
             numeric.join("; ")
         );
     }
@@ -173,6 +213,15 @@ fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, re
 
 fn tolerance(fixture: &Value, kind: &str) -> Option<f64> {
     fixture["tolerance"][kind].as_f64()
+}
+
+fn case<'a>(fixture: &'a Value, name: &str) -> &'a Value {
+    fixture["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["name"] == name)
+        .unwrap_or_else(|| panic!("the fixture carries no {name} case"))
 }
 
 fn native_response(engine: &mut Engine, body: &Value) -> Value {
@@ -189,16 +238,11 @@ fn native_response(engine: &mut Engine, body: &Value) -> Value {
 #[ignore = "requires CUDA, VALEN_EXPORT, VALEN_BASE and VALEN_CUDA_LIB"]
 fn native_text_choice_matches_the_recorded_reference() {
     let (fixture, _) = fixture();
-    let case = fixture["cases"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|case| case["name"] == "text")
-        .unwrap();
+    let case = case(&fixture, "text");
     let mut engine = load();
     let native = native_response(&mut engine, &case["request"]);
     let tolerance = tolerance(&fixture, "probability");
-    compare_case("text", "text", &fixture, &native, &case["response"], tolerance);
+    compare_case("text", "text", &fixture, &native, &case["response"], tolerance, None);
     assert!(
         tolerance.is_some(),
         "the fixture declares no probability tolerance; the measured deltas above \
@@ -213,20 +257,79 @@ fn native_text_choice_matches_the_recorded_reference() {
 #[ignore = "requires CUDA, VALEN_EXPORT, VALEN_BASE and VALEN_CUDA_LIB"]
 fn native_image_choice_matches_the_recorded_reference() {
     let (fixture, _) = fixture();
-    let case = fixture["cases"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|case| case["name"] == "image")
-        .unwrap();
+    let case = case(&fixture, "image");
     let mut engine = load();
     let native = native_response(&mut engine, &case["request"]);
     let tolerance = tolerance(&fixture, "probability");
-    compare_case("image", "image", &fixture, &native, &case["response"], tolerance);
+    compare_case("image", "image", &fixture, &native, &case["response"], tolerance, None);
     assert!(
         tolerance.is_some(),
         "the fixture declares no probability tolerance; the measured deltas above \
          are the declaration input (dump_choice_parity.py --tolerance-probability)"
+    );
+}
+
+/// GPU parity for the noul fixture (N5): one plain noul question (the
+/// reference's native noul record) and one with custom true/false wording
+/// (compiled as a choice record, finished as noul) — both answer `type: noul`
+/// with the reference's field semantics.
+#[test]
+#[ignore = "requires CUDA, VALEN_EXPORT, VALEN_BASE and VALEN_CUDA_LIB"]
+fn native_noul_matches_the_recorded_reference() {
+    let (fixture, _) = fixture();
+    let case = case(&fixture, "noul");
+    let mut engine = load();
+    let native = native_response(&mut engine, &case["request"]);
+    let tolerance = tolerance(&fixture, "probability");
+    compare_case("noul", "noul", &fixture, &native, &case["response"], tolerance, None);
+    assert!(
+        tolerance.is_some(),
+        "the fixture declares no probability tolerance; the measured deltas above \
+         are the declaration input (dump_choice_parity.py --tolerance-probability)"
+    );
+}
+
+/// GPU parity for the score fixture (N5): three levels, one branch per level,
+/// cross-branch softmax → expected level + legend + concentration confidence.
+/// The expected-level scalar carries its own declared tolerance.
+#[test]
+#[ignore = "requires CUDA, VALEN_EXPORT, VALEN_BASE and VALEN_CUDA_LIB"]
+fn native_score_matches_the_recorded_reference() {
+    let (fixture, _) = fixture();
+    let case = case(&fixture, "score");
+    let mut engine = load();
+    let native = native_response(&mut engine, &case["request"]);
+    let probability = tolerance(&fixture, "probability");
+    let score = tolerance(&fixture, "score");
+    compare_case("score", "score", &fixture, &native, &case["response"], probability, score);
+    assert!(
+        probability.is_some(),
+        "the fixture declares no probability tolerance; the measured deltas above \
+         are the declaration input (dump_choice_parity.py --tolerance-probability)"
+    );
+    assert!(
+        score.is_some(),
+        "the fixture declares no score tolerance; the measured max score delta above \
+         is the declaration input (dump_choice_parity.py --tolerance-score)"
+    );
+}
+
+/// GPU parity for the mixed fixture (N5): choice + noul + score in one body,
+/// one admission, per-kind execution and finishing in request order.
+#[test]
+#[ignore = "requires CUDA, VALEN_EXPORT, VALEN_BASE and VALEN_CUDA_LIB"]
+fn native_mixed_types_match_the_recorded_reference() {
+    let (fixture, _) = fixture();
+    let case = case(&fixture, "mixed");
+    let mut engine = load();
+    let native = native_response(&mut engine, &case["request"]);
+    let probability = tolerance(&fixture, "probability");
+    let score = tolerance(&fixture, "score");
+    compare_case("mixed", "mixed", &fixture, &native, &case["response"], probability, score);
+    assert!(
+        probability.is_some() && score.is_some(),
+        "the fixture declares no probability/score tolerance; the measured deltas \
+         above are the declaration input (dump_choice_parity.py)"
     );
 }
 
@@ -307,17 +410,13 @@ fn native_head_matches_the_reference_probe() {
 }
 
 /// The serving surface over a real socket with the real engine: health after
-/// warmup is the main binary's job; here one admitted request round-trips.
+/// warmup is the main binary's job; here one admitted mixed-type request
+/// round-trips (N5: all three finishing variants over one HTTP response).
 #[tokio::test]
 #[ignore = "requires CUDA, VALEN_EXPORT, VALEN_BASE and VALEN_CUDA_LIB"]
-async fn native_worker_serves_one_choice_request_over_http() {
+async fn native_worker_serves_one_request_over_http() {
     let (fixture, _) = fixture();
-    let case = fixture["cases"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|case| case["name"] == "text")
-        .unwrap();
+    let case = case(&fixture, "mixed");
     let engine = load();
     let worker = Arc::new(Worker::with_engine(engine));
     let router = omni_valen_native::server::router(worker);
@@ -349,9 +448,16 @@ async fn native_worker_serves_one_choice_request_over_http() {
         .unwrap();
     assert_eq!(decision.status(), 200);
     let body: Value = serde_json::from_slice(&decision.bytes().await.unwrap()).unwrap();
+    for qid in ["move", "duplicate", "severity"] {
+        assert_eq!(
+            body["answers"][qid]["type"],
+            case["response"]["answers"][qid]["type"],
+            "{qid}: the served answer type must be the reference's"
+        );
+    }
     assert_eq!(
-        body["answers"]["which_passed"]["choice"],
-        case["response"]["answers"]["which_passed"]["choice"]
+        body["answers"]["move"]["choice"],
+        case["response"]["answers"]["move"]["choice"]
     );
 }
 
@@ -370,12 +476,7 @@ fn image_path_decomposition_diagnostic() {
             .join("../../../../recipe/valen/fixtures/vision-tower-example-image.json"),
     ).unwrap()).unwrap();
     let (fixture, _) = fixture();
-    let case = fixture["cases"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|case| case["name"] == "image")
-        .unwrap();
+    let case = case(&fixture, "image");
     let expected_logits: Vec<f64> = case["logits"][0]
         .as_array()
         .unwrap()

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Record the pinned reference's end-to-end choice answers for the N4 gate.
+"""Record the pinned reference's end-to-end answers for the N4/N5 gates.
 
-Serves the recipe's two choice fixtures — the text state of the N2 hidden
-fixture and the example image request — through the production reference
-worker pipeline (``frontend.valen.decide``: protocol, preprocessing, the
-pinned executor with the unmerged FP32 language adapters and the eager
-BF16 backbone, postprocessing) with a recording wrapper around the
-executor, and records, per case:
+Serves the five parity fixtures — the text state of the N2 hidden fixture and
+the example image request (both ``choice``), the example ``noul`` request,
+the example ``score`` request, and one mixed-type body — through the
+production reference worker pipeline (``frontend.valen.decide``: protocol,
+preprocessing, the pinned executor with the unmerged FP32 language adapters
+and the eager BF16 backbone, postprocessing) with a recording wrapper around
+the executor, and records, per case:
 
 - the exact request body served,
 - the reference response (the parsed JSON the worker returns),
@@ -21,8 +22,9 @@ native CPU head is compared against those rows and logits directly.
 The output is the committed fixture consumed by the env-gated Rust test
 (``tests/valen/worker_gpu.rs``). Tolerances are measured first and then
 declared via ``--tolerance-probability`` / ``--tolerance-confidence``
-(``--head-tolerance`` for the probe); without them the fixture records
-``null`` and the Rust test refuses to pass until they are declared.
+(``--head-tolerance`` for the probe, ``--tolerance-score`` for the score
+questions' expected level); without them the fixture records ``null`` and the
+Rust test refuses to pass until they are declared.
 
 Usage (from the repository root, on the GPU host):
 
@@ -47,7 +49,7 @@ sys.path.insert(0, str(HERE))
 
 import compare_reference as reference  # noqa: E402  (the recipe's fixture helpers)
 
-FIXTURE_FORMAT = "valen-choice-parity/1"
+FIXTURE_FORMAT = "valen-choice-parity/2"
 DEFAULT_FIXTURE_NAME = "choice-parity-reference.json"
 
 TEXT_REQUEST = {
@@ -63,6 +65,37 @@ TEXT_REQUEST = {
                 "r1_and_r3": "Runs r1 and r3 passed.",
             },
         }
+    },
+}
+
+# The N5 mixed body: one question of each wire type over the example noul
+# state, so the all-types chain (compile → execute → finish per kind) is one
+# recorded round trip.
+MIXED_REQUEST = {
+    "model": "valen-preview-0923",
+    "state": "The card was charged twice for one order.",
+    "questions": {
+        "move": {
+            "type": "choice",
+            "instructions": "Should the duplicate charge be voided?",
+            "criteria": {
+                "void": "Void the duplicate charge.",
+                "keep": "Keep both charges.",
+            },
+        },
+        "duplicate": {
+            "type": "noul",
+            "instructions": "Was the card charged twice for one order?",
+        },
+        "severity": {
+            "type": "score",
+            "instructions": "How severe is the billing error?",
+            "criteria": [
+                "No billing error: every charge is correct.",
+                "Minor error: a single duplicated charge.",
+                "Major error: repeated duplicated charges.",
+            ],
+        },
     },
 }
 
@@ -96,6 +129,12 @@ def parse_args(argv):
         type=float,
         default=None,
         help="declared absolute tolerance for the CPU head probe against the recorded rows",
+    )
+    parser.add_argument(
+        "--tolerance-score",
+        type=float,
+        default=None,
+        help="declared absolute tolerance on score questions' expected level (native vs reference)",
     )
     parser.add_argument(
         "--declare-flip",
@@ -178,18 +217,27 @@ def main(argv):
     recording = Recording()
 
     image_request = json.loads((HERE / "example-request.json").read_text(encoding="utf-8"))
+    noul_request = json.loads((HERE / "example-noul-request.json").read_text(encoding="utf-8"))
+    score_request = json.loads((HERE / "example-score-request.json").read_text(encoding="utf-8"))
     cases = []
-    for name, body in (("text", TEXT_REQUEST), ("image", image_request)):
+    for name, body in (
+        ("text", TEXT_REQUEST),
+        ("image", image_request),
+        ("noul", noul_request),
+        ("score", score_request),
+        ("mixed", MIXED_REQUEST),
+    ):
         raw = json.dumps(body, ensure_ascii=False).encode("utf-8")
         response = decide(raw, processor, recording)
         row = recording.rows[-1]
-        # The reference's own decision margin per question: |top - runner-up|.
+        # The reference's own decision margin per question: |top - runner-up|
+        # over the answer's probabilities — the flip-risk figure for every
+        # question type (noul and score carry no discrete answer field, and a
+        # mode flip moves only gated floats there).
         margins = {}
-        for answer in response["answers"].values():
+        for qid, answer in response["answers"].items():
             values = sorted(answer["probabilities"].values(), reverse=True)
-            margins[answer["choice"]] = (
-                values[0] - values[1] if len(values) > 1 else 1.0
-            )
+            margins[qid] = values[0] - values[1] if len(values) > 1 else 1.0
         cases.append(
             {
                 "name": name,
@@ -249,6 +297,7 @@ def main(argv):
         "tolerance": {
             "probability": args.tolerance_probability,
             "confidence": args.tolerance_confidence,
+            "score": args.tolerance_score,
             "head_probe": args.head_tolerance,
         },
         "declared_flips": {},
