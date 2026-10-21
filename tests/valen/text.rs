@@ -20,10 +20,8 @@ impl Directory {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "valen-text-export-{}-{nonce}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("valen-text-export-{}-{nonce}", std::process::id()));
         fs::create_dir(&path).unwrap();
         Self(path)
     }
@@ -78,7 +76,10 @@ fn write_config(dir: &Path) {
 fn write_adapter(dir: &Path, variant: Adapter) -> u64 {
     let prefix = "backbone.language_model.base_model.model.";
     let mut values: Vec<(String, Vec<usize>, Vec<u8>)> = Vec::new();
-    let target = |values: &mut Vec<(String, Vec<usize>, Vec<u8>)>, name: String, rows: usize, cols: usize| {
+    let target = |values: &mut Vec<(String, Vec<usize>, Vec<u8>)>,
+                  name: String,
+                  rows: usize,
+                  cols: usize| {
         values.push((
             format!("{prefix}{name}.lora_A.default.weight"),
             vec![32, cols],
@@ -94,16 +95,61 @@ fn write_adapter(dir: &Path, variant: Adapter) -> u64 {
         Adapter::Complete => {
             for layer in 0..4 {
                 if layer == 3 {
-                    target(&mut values, format!("layers.{layer}.self_attn.q_proj"), 512, 8);
-                    target(&mut values, format!("layers.{layer}.self_attn.k_proj"), 256, 8);
-                    target(&mut values, format!("layers.{layer}.self_attn.v_proj"), 256, 8);
-                    target(&mut values, format!("layers.{layer}.self_attn.o_proj"), 8, 256);
+                    target(
+                        &mut values,
+                        format!("layers.{layer}.self_attn.q_proj"),
+                        512,
+                        8,
+                    );
+                    target(
+                        &mut values,
+                        format!("layers.{layer}.self_attn.k_proj"),
+                        256,
+                        8,
+                    );
+                    target(
+                        &mut values,
+                        format!("layers.{layer}.self_attn.v_proj"),
+                        256,
+                        8,
+                    );
+                    target(
+                        &mut values,
+                        format!("layers.{layer}.self_attn.o_proj"),
+                        8,
+                        256,
+                    );
                 } else {
-                    target(&mut values, format!("layers.{layer}.linear_attn.in_proj_qkv"), 384, 8);
-                    target(&mut values, format!("layers.{layer}.linear_attn.in_proj_z"), 128, 8);
-                    target(&mut values, format!("layers.{layer}.linear_attn.in_proj_b"), 1, 8);
-                    target(&mut values, format!("layers.{layer}.linear_attn.in_proj_a"), 1, 8);
-                    target(&mut values, format!("layers.{layer}.linear_attn.out_proj"), 8, 128);
+                    target(
+                        &mut values,
+                        format!("layers.{layer}.linear_attn.in_proj_qkv"),
+                        384,
+                        8,
+                    );
+                    target(
+                        &mut values,
+                        format!("layers.{layer}.linear_attn.in_proj_z"),
+                        128,
+                        8,
+                    );
+                    target(
+                        &mut values,
+                        format!("layers.{layer}.linear_attn.in_proj_b"),
+                        1,
+                        8,
+                    );
+                    target(
+                        &mut values,
+                        format!("layers.{layer}.linear_attn.in_proj_a"),
+                        1,
+                        8,
+                    );
+                    target(
+                        &mut values,
+                        format!("layers.{layer}.linear_attn.out_proj"),
+                        8,
+                        128,
+                    );
                 }
                 target(&mut values, format!("layers.{layer}.mlp.gate_proj"), 8, 8);
                 target(&mut values, format!("layers.{layer}.mlp.up_proj"), 8, 8);
@@ -253,9 +299,15 @@ fn valid_synthetic_export_validates_and_reports_the_inventory() {
 
 #[test]
 fn unknown_manifest_format_is_rejected() {
-    let dir = export(Adapter::Complete, Some(json!({"format": "valen-checkpoint-export/1"})));
+    let dir = export(
+        Adapter::Complete,
+        Some(json!({"format": "valen-checkpoint-export/1"})),
+    );
     let error = text::validate_export(&dir.0).unwrap_err();
-    assert!(error.to_string().contains("unsupported export"), "{error:#}");
+    assert!(
+        error.to_string().contains("unsupported export"),
+        "{error:#}"
+    );
 }
 
 #[test]

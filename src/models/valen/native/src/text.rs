@@ -67,7 +67,10 @@ pub fn validate_export(dir: &Path) -> Result<ExportPolicy> {
         let scale = lora["scaling"].as_f64().context("lora.scaling")?;
         let alpha = lora["alpha"].as_u64().context("lora.alpha")?;
         let rank = lora["rank"].as_u64().context("lora.rank")?;
-        ensure!(scale.is_finite() && scale > 0., "LoRA profile: invalid scaling");
+        ensure!(
+            scale.is_finite() && scale > 0.,
+            "LoRA profile: invalid scaling"
+        );
         ensure!(
             (alpha as f64 / rank as f64 - scale).abs() < f64::EPSILON,
             "LoRA profile: scaling must be alpha/rank"
@@ -76,7 +79,10 @@ pub fn validate_export(dir: &Path) -> Result<ExportPolicy> {
             rank == RANK && alpha == ALPHA,
             "LoRA profile: the pinned adapter is rank {RANK} / alpha {ALPHA}"
         );
-        ensure!(scale as f32 == SCALE, "LoRA profile: scaling must be {SCALE}");
+        ensure!(
+            scale as f32 == SCALE,
+            "LoRA profile: scaling must be {SCALE}"
+        );
         ensure!(
             lora["dtype"].as_str() == Some("float32"),
             "LoRA profile: adapters must be FP32"
@@ -115,8 +121,11 @@ pub fn validate_export(dir: &Path) -> Result<ExportPolicy> {
             .with_context(|| format!("export must hash {name}"))?;
         let path = dir.join(&name);
         ensure!(
-            Some(std::fs::metadata(&path).with_context(|| format!("{name}"))?.len())
-                == expected["size"].as_u64(),
+            Some(
+                std::fs::metadata(&path)
+                    .with_context(|| name.to_string())?
+                    .len()
+            ) == expected["size"].as_u64(),
             "{name} size mismatch"
         );
         ensure!(
@@ -170,7 +179,12 @@ fn inventory(cfg: &Config) -> Vec<String> {
     let mut targets = Vec::new();
     for (layer, &full) in cfg.full_attention.iter().enumerate() {
         if full {
-            for name in ["self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.o_proj"] {
+            for name in [
+                "self_attn.q_proj",
+                "self_attn.k_proj",
+                "self_attn.v_proj",
+                "self_attn.o_proj",
+            ] {
                 targets.push(format!("layers.{layer}.{name}"));
             }
         } else {
@@ -195,7 +209,10 @@ fn inventory(cfg: &Config) -> Vec<String> {
 fn adapter_tensor_names(path: &Path) -> Result<Vec<String>> {
     let bytes = std::fs::read(path)?;
     let header_len = usize::try_from(u64::from_le_bytes(
-        bytes.get(..8).context("adapter header length")?.try_into()?,
+        bytes
+            .get(..8)
+            .context("adapter header length")?
+            .try_into()?,
     ))?;
     let header: Value =
         serde_json::from_slice(bytes.get(8..8 + header_len).context("adapter header")?)
@@ -208,7 +225,11 @@ fn adapter_tensor_names(path: &Path) -> Result<Vec<String>> {
         let target = native
             .strip_suffix(".lora_A.default.weight")
             .or_else(|| native.strip_suffix(".lora_B.default.weight"));
-        names.push(target.context("unsupported adapter tensor name")?.to_string());
+        names.push(
+            target
+                .context("unsupported adapter tensor name")?
+                .to_string(),
+        );
     }
     ensure!(!names.is_empty(), "adapter carries no language tensors");
     Ok(names)

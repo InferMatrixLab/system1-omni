@@ -155,10 +155,17 @@ fn valen_layout_parses_the_complete_adapter_with_the_same_inventory() {
     );
     let out = find("layers.0.linear_attn.out_proj");
     assert_eq!(out.group, Group::LinearOutput);
-    assert_eq!(find("layers.3.self_attn.o_proj").group, Group::AttentionOutput);
+    assert_eq!(
+        find("layers.3.self_attn.o_proj").group,
+        Group::AttentionOutput
+    );
     assert_eq!(find("layers.0.mlp.down_proj").group, Group::Down);
     // Rank and FP32 bytes survive the named layout unchanged.
-    let pair = parsed.pairs.iter().find(|p| p.target.name == "layers.0.mlp.down_proj").unwrap();
+    let pair = parsed
+        .pairs
+        .iter()
+        .find(|p| p.target.name == "layers.0.mlp.down_proj")
+        .unwrap();
     assert_eq!(pair.rank, 1);
     assert_eq!(&bytes[pair.a.clone()][..4], &0.125f32.to_le_bytes());
     assert_eq!(&bytes[pair.b.clone()][..4], &(-0.25f32).to_le_bytes());
@@ -168,7 +175,10 @@ fn valen_layout_parses_the_complete_adapter_with_the_same_inventory() {
 fn valen_layout_rejects_foreign_prefix_suffix_combinations() {
     let cfg = valen_config();
     let layout = targets(&cfg).unwrap();
-    let target = layout.iter().find(|t| t.name == "layers.0.mlp.down_proj").unwrap();
+    let target = layout
+        .iter()
+        .find(|t| t.name == "layers.0.mlp.down_proj")
+        .unwrap();
     let shape = |letter: usize| {
         if letter == 0 {
             vec![1, target.cols]
@@ -184,17 +194,12 @@ fn valen_layout_rejects_foreign_prefix_suffix_combinations() {
         // Cua-S1 prefix carrying the named suffix.
         format!("{PREFIX}layers.0.mlp.down_proj.lora_A.default.weight"),
         // A visual-tower prefix must never enter the language inventory.
-        format!("backbone.visual.blocks.20.mlp.linear_fc1.lora_A.default.weight"),
+        "backbone.visual.blocks.20.mlp.linear_fc1.lora_A.default.weight".to_string(),
     ];
     for name in names {
         let bytes = tensors(&[
             (&name, shape(0), Dtype::F32, 0.),
-            (
-                &name.replace("lora_A", "lora_B"),
-                shape(1),
-                Dtype::F32,
-                0.,
-            ),
+            (&name.replace("lora_A", "lora_B"), shape(1), Dtype::F32, 0.),
         ]);
         let error = parse(&cfg, &bytes, 2.0)
             .err()
@@ -222,7 +227,10 @@ fn valen_hand_computed_rounding_matches_the_pinned_python_cases() {
     );
     // A tie at the 3.0078125 midpoint rounds to even (3.0), per the reference's
     // own downcast; an untrained (zero-B) delta leaves the base bits alone.
-    assert_eq!(half::bf16::from_f32(3.0f32 + 0.0078125), half::bf16::from_f32(3.0));
+    assert_eq!(
+        half::bf16::from_f32(3.0f32 + 0.0078125),
+        half::bf16::from_f32(3.0)
+    );
     assert_eq!(
         half::bf16::from_f32(3.0f32 + 2.0 * 0.0),
         half::bf16::from_f32(3.0)
@@ -248,10 +256,8 @@ fn valen_layout_applies_the_manifest_formula_in_every_group() {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let path = std::env::temp_dir().join(format!(
-                "valen-lora-{}-{unique}",
-                std::process::id()
-            ));
+            let path =
+                std::env::temp_dir().join(format!("valen-lora-{}-{unique}", std::process::id()));
             std::fs::create_dir(&path).unwrap();
             Self(path)
         }
@@ -262,67 +268,10 @@ fn valen_layout_applies_the_manifest_formula_in_every_group() {
         }
     }
     let temporary = Temporary::new();
-    let source = temporary.0.join("fake.c");
-    let library = temporary.0.join("fake.so");
-    let mut code = include_str!("lora_fake.c").to_owned();
-    let implemented = [
-        "cs1_abi_version",
-        "cs1_get_device",
-        "cs1_error_string",
-        "cs1_malloc",
-        "cs1_free",
-        "cs1_stream_create",
-        "cs1_stream_sync",
-        "cs1_stream_destroy",
-        "cs1_upload",
-        "cs1_download",
-        "cs1_copy2d",
-        "cs1_vision_to_float",
-        "cs1_gemm_f32",
-        "cs1_gemm",
-        "cs1_vision_lora_add",
-    ];
-    let cuda_source = include_str!("../../src/models/qwen3_5/native/src/cuda.rs");
-    let abi = cuda_source
-        .lines()
-        .find(|line| line.starts_with("const ABI_VERSION:"))
-        .unwrap()
-        .split('=')
-        .nth(1)
-        .unwrap()
-        .trim()
-        .trim_end_matches(';');
-    let api = cuda_source
-        .split("api! {")
-        .nth(1)
-        .unwrap()
-        .split("\n}\n")
-        .next()
-        .unwrap();
-    for line in api.lines() {
-        let line = line.trim();
-        if !line.starts_with("cs1_") {
-            continue;
-        }
-        let name = line.split('(').next().unwrap();
-        if !implemented.contains(&name) {
-            code.push_str(&format!("\nint {name}(void) {{ return 77; }}\n"));
-        }
-    }
-    std::fs::write(&source, code).unwrap();
-    let output = std::process::Command::new("cc")
-        .args(["-shared", "-fPIC", "-ffp-contract=off"])
-        .arg(format!("-DLORA_FAKE_ABI={abi}"))
-        .arg(&source)
-        .arg("-o")
-        .arg(&library)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let library = crate::lora::fake_cuda_library();
+    let _guard = crate::lora::FAKE_CUDA_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     cuda::load(&library).unwrap();
     let cfg = valen_config();
     let scale = 2.0f32;
@@ -351,7 +300,11 @@ fn valen_layout_applies_the_manifest_formula_in_every_group() {
         let (cols, stride) = (target.cols, target.stride);
         // Inputs: row r carries the BF16 value (r + 1) across the width.
         let input: Vec<_> = (0..rows_total)
-            .flat_map(|r| half::bf16::from_f32((r + 1) as f32).to_le_bytes().repeat(cols))
+            .flat_map(|r| {
+                half::bf16::from_f32((r + 1) as f32)
+                    .to_le_bytes()
+                    .repeat(cols)
+            })
             .collect();
         // Base weights: stacked row j carries the BF16 value (j + 1).
         let weight_rows = if fused {
@@ -360,7 +313,11 @@ fn valen_layout_applies_the_manifest_formula_in_every_group() {
             target.rows
         };
         let weights: Vec<_> = (0..weight_rows)
-            .flat_map(|j| half::bf16::from_f32((j + 1) as f32).to_le_bytes().repeat(cols))
+            .flat_map(|j| {
+                half::bf16::from_f32((j + 1) as f32)
+                    .to_le_bytes()
+                    .repeat(cols)
+            })
             .collect();
         let output_bytes = half::bf16::ONE.to_le_bytes().repeat(rows_total * stride);
         let work = adapter.work(rows_total).unwrap();
@@ -442,16 +399,14 @@ fn valen_layout_applies_the_manifest_formula_in_every_group() {
                     } else {
                         half::bf16::from_f32((j + 1) as f32).to_f32()
                     };
-                    let base =
-                        half::bf16::from_f32(x_value * weight * cols as f32).to_f32();
+                    let base = half::bf16::from_f32(x_value * weight * cols as f32).to_f32();
                     let hidden = x_value * cols as f32 * a_value;
                     let delta = hidden * b_value;
                     let expected = half::bf16::from_f32(base + scale * delta);
                     let col = target.offset + j;
                     let offset = (r * stride + col) * 2;
-                    let value = half::bf16::from_le_bytes(
-                        actual[offset..offset + 2].try_into().unwrap(),
-                    );
+                    let value =
+                        half::bf16::from_le_bytes(actual[offset..offset + 2].try_into().unwrap());
                     assert_eq!(value, expected, "{name}, row {r}, col {col}");
                 }
             }
@@ -466,9 +421,8 @@ fn valen_layout_applies_the_manifest_formula_in_every_group() {
                     continue;
                 }
                 let offset = (r * stride + col) * 2;
-                let value = half::bf16::from_le_bytes(
-                    actual[offset..offset + 2].try_into().unwrap(),
-                );
+                let value =
+                    half::bf16::from_le_bytes(actual[offset..offset + 2].try_into().unwrap());
                 let x_value = (r + 1) as f32;
                 let weight = half::bf16::from_f32((col + 1) as f32).to_f32();
                 let base = half::bf16::from_f32(x_value * weight * cols as f32).to_f32();

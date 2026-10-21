@@ -811,9 +811,7 @@ impl Model {
     /// per-prompt state reset and no prefix continuation.
     pub fn enable_valen_text_numerics(&mut self) -> Result<()> {
         ensure!(
-            self.cfg.hidden == 2048
-                && self.cfg.full_attention.len() == 24
-                && self.lora.is_some(),
+            self.cfg.hidden == 2048 && self.cfg.full_attention.len() == 24 && self.lora.is_some(),
             "Valen reference text numerics require the unmerged 2B language model"
         );
         ensure!(
@@ -2085,3 +2083,7 @@ impl Model {
 #[cfg(test)]
 #[path = "../../../../../tests/qwen3_5/multimodal_graph.rs"]
 mod graph_tests;
+
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/valen_text_gpu.rs"]
+mod valen_text_gpu_tests;
