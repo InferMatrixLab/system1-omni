@@ -804,6 +804,36 @@ impl Model {
         Ok(())
     }
 
+    /// Valen's unmerged text path (spec 03, N2): the same numeric profile as
+    /// [`Model::enable_reference_text_numerics`] over the 2B backbone — the
+    /// framework norm/GEMM/attention selection, FP32 LoRA branches, FP32
+    /// chunked GDN with the pinned Torch cumulative-decay association,
+    /// per-prompt state reset and no prefix continuation.
+    pub fn enable_valen_text_numerics(&mut self) -> Result<()> {
+        ensure!(
+            self.cfg.hidden == 2048
+                && self.cfg.full_attention.len() == 24
+                && self.lora.is_some(),
+            "Valen reference text numerics require the unmerged 2B language model"
+        );
+        ensure!(
+            self.scratch.is_none() && self.reference.is_none() && self.fp32_gdn.is_none(),
+            "select reference text numerics before the first forward"
+        );
+        cuda::set_device(0)?;
+        let gdn = cuda::api().fp32_gdn()?;
+        let reference = cuda::api().language_reference()?;
+        cuda::synchronize(self.stream)?;
+        // SAFETY: both handles are model-owned; no queued work or captures exist.
+        let gemm = unsafe { (reference.gemm_create)(GEMM_WORKSPACE) };
+        ensure!(!gemm.is_null(), "reference text cuBLASLt setup failed");
+        unsafe { (cuda::api().cs1_gemm_destroy)(self.gemm) };
+        self.gemm = gemm;
+        self.reference = Some(reference);
+        self.fp32_gdn = Some(gdn);
+        Ok(())
+    }
+
     /// Select JEMM's pinned framework arithmetic before the first forward.
     /// Prefix caching is outside this execution contract.
     pub fn enable_reference_numerics(&mut self) -> Result<()> {

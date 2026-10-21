@@ -6,11 +6,13 @@ publish = false
 description = "Valen-Preview-0923 request contract and compiler-equivalent processing"
 
 [dependencies]
+anyhow = "1.0.100"
 base64 = "0.22.1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 omni-qwen3-5-native = { path = "../../qwen3_5/native" }
 serde = "1.0.229"
 serde_json = { version = "1.0.149", features = ["float_roundtrip", "preserve_order"] }
+sha2 = "0.10"
 # the onig regex backend, as in the Python tokenizers wheel
 tokenizers = { version = "=0.22.2", default-features = false, features = ["onig"] }
 
@@ -21,3 +23,7 @@ path = "../../../../tests/valen/native.rs"
 [[test]]
 name = "native_tokenization"
 path = "../../../../tests/valen/native_tokenization.rs"
+
+[[test]]
+name = "text"
+path = "../../../../tests/valen/text.rs"
