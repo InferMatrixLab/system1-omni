@@ -36,8 +36,7 @@ use omni_valen_native::server::Worker;
 fn fixture() -> (Value, PathBuf) {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../recipe/valen/fixtures/choice-parity-reference.json");
-    let fixture: Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let fixture: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert!(
         fixture["format"] == "valen-choice-parity/2",
         "unexpected fixture format"
@@ -80,7 +79,15 @@ fn load() -> Engine {
 /// Compare one case's native outcome against the recorded reference.
 /// A `None` tolerance measures and reports without asserting, so the first
 /// run on new hardware produces the declaration numbers.
-fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, recorded: &Value, tolerance: Option<f64>, score_tolerance: Option<f64>) {
+fn compare_case(
+    name: &str,
+    case_name: &str,
+    fixture: &Value,
+    native: &Value,
+    recorded: &Value,
+    tolerance: Option<f64>,
+    score_tolerance: Option<f64>,
+) {
     let reference_answers = &recorded["answers"];
     let native_answers = &native["answers"];
     let mut problems = Vec::new();
@@ -92,10 +99,14 @@ fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, re
     for (qid, expected) in reference_answers.as_object().unwrap() {
         let answer = &native_answers[qid];
         if answer["type"] != expected["type"] {
-            problems.push(format!("{qid}: type {} != {}", answer["type"], expected["type"]));
+            problems.push(format!(
+                "{qid}: type {} != {}",
+                answer["type"], expected["type"]
+            ));
             continue;
         }
-        if answer.is_object() && answer.as_object().unwrap().contains_key("choice")
+        if answer.is_object()
+            && answer.as_object().unwrap().contains_key("choice")
             && answer["choice"] != expected["choice"]
         {
             // An answer flip is a discrete failure unless the fixture carries
@@ -119,9 +130,8 @@ fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, re
         if expected.is_object() && expected.as_object().unwrap().contains_key("noul") {
             // The noul scalar is P(true): gated by the probability tolerance
             // and folded into the same reported figure.
-            let delta = (answer["noul"].as_f64().unwrap()
-                - expected["noul"].as_f64().unwrap())
-                .abs();
+            let delta =
+                (answer["noul"].as_f64().unwrap() - expected["noul"].as_f64().unwrap()).abs();
             max_probability = max_probability.max(delta);
             if tolerance.is_some_and(|t| delta > t) {
                 problems.push(format!(
@@ -131,9 +141,8 @@ fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, re
             }
         }
         if expected.is_object() && expected.as_object().unwrap().contains_key("score") {
-            let delta = (answer["score"].as_f64().unwrap()
-                - expected["score"].as_f64().unwrap())
-                .abs();
+            let delta =
+                (answer["score"].as_f64().unwrap() - expected["score"].as_f64().unwrap()).abs();
             max_score = max_score.max(delta);
             if score_tolerance.is_some_and(|t| delta > t) {
                 problems.push(format!(
@@ -163,7 +172,7 @@ fn compare_case(name: &str, case_name: &str, fixture: &Value, native: &Value, re
         }
         let delta = (answer["confidence"].as_f64().unwrap()
             - expected["confidence"].as_f64().unwrap())
-            .abs();
+        .abs();
         max_confidence = max_confidence.max(delta);
         if tolerance.is_some_and(|t| delta > t) {
             problems.push(format!(
@@ -270,9 +279,12 @@ fn declared_flips_match_by_qid_in_the_committed_fixture() {
 
 fn native_response(engine: &mut Engine, body: &Value) -> Value {
     let outcome = engine.decide(&request_bytes(body)).unwrap();
-    let bytes =
-        omni_valen_native::finish::build_response(&outcome.answers, outcome.logical_tokens, outcome.compute_tokens)
-            .unwrap();
+    let bytes = omni_valen_native::finish::build_response(
+        &outcome.answers,
+        outcome.logical_tokens,
+        outcome.compute_tokens,
+    )
+    .unwrap();
     serde_json::from_slice(&bytes).unwrap()
 }
 
@@ -286,7 +298,15 @@ fn native_text_choice_matches_the_recorded_reference() {
     let mut engine = load();
     let native = native_response(&mut engine, &case["request"]);
     let tolerance = tolerance(&fixture, "probability");
-    compare_case("text", "text", &fixture, &native, &case["response"], tolerance, None);
+    compare_case(
+        "text",
+        "text",
+        &fixture,
+        &native,
+        &case["response"],
+        tolerance,
+        None,
+    );
     assert!(
         tolerance.is_some(),
         "the fixture declares no probability tolerance; the measured deltas above \
@@ -305,7 +325,15 @@ fn native_image_choice_matches_the_recorded_reference() {
     let mut engine = load();
     let native = native_response(&mut engine, &case["request"]);
     let tolerance = tolerance(&fixture, "probability");
-    compare_case("image", "image", &fixture, &native, &case["response"], tolerance, None);
+    compare_case(
+        "image",
+        "image",
+        &fixture,
+        &native,
+        &case["response"],
+        tolerance,
+        None,
+    );
     assert!(
         tolerance.is_some(),
         "the fixture declares no probability tolerance; the measured deltas above \
@@ -325,7 +353,15 @@ fn native_noul_matches_the_recorded_reference() {
     let mut engine = load();
     let native = native_response(&mut engine, &case["request"]);
     let tolerance = tolerance(&fixture, "probability");
-    compare_case("noul", "noul", &fixture, &native, &case["response"], tolerance, None);
+    compare_case(
+        "noul",
+        "noul",
+        &fixture,
+        &native,
+        &case["response"],
+        tolerance,
+        None,
+    );
     assert!(
         tolerance.is_some(),
         "the fixture declares no probability tolerance; the measured deltas above \
@@ -345,7 +381,15 @@ fn native_score_matches_the_recorded_reference() {
     let native = native_response(&mut engine, &case["request"]);
     let probability = tolerance(&fixture, "probability");
     let score = tolerance(&fixture, "score");
-    compare_case("score", "score", &fixture, &native, &case["response"], probability, score);
+    compare_case(
+        "score",
+        "score",
+        &fixture,
+        &native,
+        &case["response"],
+        probability,
+        score,
+    );
     assert!(
         probability.is_some(),
         "the fixture declares no probability tolerance; the measured deltas above \
@@ -369,7 +413,15 @@ fn native_mixed_types_match_the_recorded_reference() {
     let native = native_response(&mut engine, &case["request"]);
     let probability = tolerance(&fixture, "probability");
     let score = tolerance(&fixture, "score");
-    compare_case("mixed", "mixed", &fixture, &native, &case["response"], probability, score);
+    compare_case(
+        "mixed",
+        "mixed",
+        &fixture,
+        &native,
+        &case["response"],
+        probability,
+        score,
+    );
     assert!(
         probability.is_some() && score.is_some(),
         "the fixture declares no probability/score tolerance; the measured deltas \
@@ -450,7 +502,10 @@ fn native_head_matches_the_reference_probe() {
             expected.len()
         );
     }
-    eprintln!("valen head probe: max logit delta {max_delta:.6e} over {} logits", expected.len());
+    eprintln!(
+        "valen head probe: max logit delta {max_delta:.6e} over {} logits",
+        expected.len()
+    );
 }
 
 /// The serving surface over a real socket with the real engine: health after
@@ -494,8 +549,7 @@ async fn native_worker_serves_one_request_over_http() {
     let body: Value = serde_json::from_slice(&decision.bytes().await.unwrap()).unwrap();
     for qid in ["move", "duplicate", "severity"] {
         assert_eq!(
-            body["answers"][qid]["type"],
-            case["response"]["answers"][qid]["type"],
+            body["answers"][qid]["type"], case["response"]["answers"][qid]["type"],
             "{qid}: the served answer type must be the reference's"
         );
     }
@@ -515,10 +569,14 @@ async fn native_worker_serves_one_request_over_http() {
 #[test]
 #[ignore = "requires CUDA, VALEN_EXPORT, VALEN_BASE and VALEN_CUDA_LIB"]
 fn image_path_decomposition_diagnostic() {
-    let vision: Value = serde_json::from_slice(&std::fs::read(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../recipe/valen/fixtures/vision-tower-example-image.json"),
-    ).unwrap()).unwrap();
+    let vision: Value = serde_json::from_slice(
+        &std::fs::read(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../../recipe/valen/fixtures/vision-tower-example-image.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let (fixture, _) = fixture();
     let case = case(&fixture, "image");
     let expected_logits: Vec<f64> = case["logits"][0]
@@ -596,7 +654,9 @@ fn image_path_decomposition_diagnostic() {
     );
 
     // (2) native tower rows vs recorded
-    let native_rows = engine.image_rows_probe(&request, &prepared, &compiled).unwrap();
+    let native_rows = engine
+        .image_rows_probe(&request, &prepared, &compiled)
+        .unwrap();
     let mut tower_max = 0.0f32;
     for (a, b) in native_rows.iter().zip(&reference_rows) {
         tower_max = tower_max.max((a.to_f32() - b.to_f32()).abs());
@@ -639,7 +699,10 @@ fn image_path_decomposition_diagnostic() {
             .iter()
             .zip(&expected_logits)
             .map(|(native, reference)| {
-                format!("{native:.6} (ref {reference:.6}, delta {:.6})", (*native as f64 - reference).abs())
+                format!(
+                    "{native:.6} (ref {reference:.6}, delta {:.6})",
+                    (*native as f64 - reference).abs()
+                )
             })
             .collect();
         eprintln!("({label}) logits: {}", report.join(", "));

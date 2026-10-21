@@ -42,7 +42,9 @@ impl Head {
                 && head["bias"] == false,
             "the export must serve a bias-free FP32 head as head.safetensors"
         );
-        let projection = head["projection_dim"].as_u64().context("head.projection_dim")? as usize;
+        let projection = head["projection_dim"]
+            .as_u64()
+            .context("head.projection_dim")? as usize;
         let hidden = head["hidden_size"].as_u64().context("head.hidden_size")? as usize;
         ensure!(
             projection == 256 && hidden == 2048,
@@ -51,8 +53,8 @@ impl Head {
         let expected = &manifest["files"]["head.safetensors"];
         let path = export.join("head.safetensors");
         ensure!(
-            Some(std::fs::metadata(&path).context("head.safetensors")?.len()) == expected["size"]
-                .as_u64(),
+            Some(std::fs::metadata(&path).context("head.safetensors")?.len())
+                == expected["size"].as_u64(),
             "head.safetensors size mismatch"
         );
         ensure!(
@@ -64,8 +66,7 @@ impl Head {
         let read = |name: &str| -> Result<Vec<f32>> {
             let tensor = tensors.tensor(name).with_context(|| name.to_owned())?;
             ensure!(
-                tensor.dtype() == safetensors::Dtype::F32
-                    && tensor.shape() == [projection, hidden],
+                tensor.dtype() == safetensors::Dtype::F32 && tensor.shape() == [projection, hidden],
                 "{name} must be float32 [{projection}, {hidden}]"
             );
             Ok(tensor
@@ -83,7 +84,10 @@ impl Head {
             hidden,
         };
         ensure!(
-            head.candidate.iter().chain(&head.decision).all(|w| w.is_finite()),
+            head.candidate
+                .iter()
+                .chain(&head.decision)
+                .all(|w| w.is_finite()),
             "non-finite decision-head weight"
         );
         Ok(head)
@@ -96,7 +100,12 @@ impl Head {
     /// A head over caller-supplied matrices (row-major `[projection, hidden]`),
     /// for the deterministic synthetic fixtures in the CPU suite. Serving
     /// always loads the export's own file instead.
-    pub fn from_parts(candidate: Vec<f32>, decision: Vec<f32>, projection: usize, hidden: usize) -> Self {
+    pub fn from_parts(
+        candidate: Vec<f32>,
+        decision: Vec<f32>,
+        projection: usize,
+        hidden: usize,
+    ) -> Self {
         debug_assert_eq!(candidate.len(), projection * hidden);
         debug_assert_eq!(decision.len(), projection * hidden);
         Self {
@@ -120,10 +129,7 @@ impl Head {
     /// both already FP32 upcasts of the backbone's BF16 output.
     pub fn logits(&self, candidates: &[Vec<f32>], decision: &[f32]) -> Result<Vec<f32>> {
         ensure!(
-            decision.len() == self.hidden
-                && candidates
-                    .iter()
-                    .all(|h| h.len() == self.hidden),
+            decision.len() == self.hidden && candidates.iter().all(|h| h.len() == self.hidden),
             "hidden states must be {} wide",
             self.hidden
         );

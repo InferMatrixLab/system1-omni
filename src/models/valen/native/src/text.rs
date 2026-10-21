@@ -278,11 +278,7 @@ impl TextModel {
     /// The final-norm hidden states at the given ascending positions of one
     /// prompt, as FP32 — the candidate-end and decision-end rows the decision
     /// head reads (N4). The forward itself is [`TextModel::forward`]'s.
-    pub fn forward_positions(
-        &mut self,
-        ids: &[u32],
-        positions: &[usize],
-    ) -> Result<Vec<Vec<f32>>> {
+    pub fn forward_positions(&mut self, ids: &[u32], positions: &[usize]) -> Result<Vec<Vec<f32>>> {
         self.model.forward_positions(ids, positions)
     }
 

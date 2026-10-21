@@ -110,17 +110,18 @@ fn json_response(status: StatusCode, body: impl Into<Bytes>) -> Response {
 }
 
 fn detail(status: u16, message: &str) -> Response {
-    let body = format!(
-        "{{\"detail\": {}}}",
-        crate::finish::json_string(message)
-    );
+    let body = format!("{{\"detail\": {}}}", crate::finish::json_string(message));
     json_response(StatusCode::from_u16(status).expect("a static status"), body)
 }
 
 /// The admitted decision pipeline: the permit is held across the whole
 /// blocking inference, exactly as the reference holds its lock through
 /// `decide`.
-async fn decide(inference: Arc<dyn Inference>, raw: Bytes, permit: OwnedSemaphorePermit) -> Response {
+async fn decide(
+    inference: Arc<dyn Inference>,
+    raw: Bytes,
+    permit: OwnedSemaphorePermit,
+) -> Response {
     let result = tokio::task::spawn_blocking(move || {
         let _guard = permit;
         inference.decide(&raw)
@@ -162,7 +163,13 @@ async fn systemone(State(worker): State<Arc<Worker>>, request: Request) -> Respo
     let content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .map(|v| v.split(';').next().unwrap_or("").trim().to_ascii_lowercase())
+        .map(|v| {
+            v.split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase()
+        })
         .unwrap_or_else(|| "text/plain".to_owned());
     if content_type != "application/json" {
         return detail(415, "Content-Type must be application/json");

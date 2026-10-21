@@ -29,7 +29,12 @@ impl Inference for Stub {
         )?;
         let mut answers = Vec::new();
         for question in &request.questions {
-            let logits: Vec<f32> = question.keys.iter().enumerate().map(|(i, _)| i as f32).collect();
+            let logits: Vec<f32> = question
+                .keys
+                .iter()
+                .enumerate()
+                .map(|(i, _)| i as f32)
+                .collect();
             let descriptions: Vec<String> = question
                 .descriptions
                 .iter()
@@ -164,7 +169,11 @@ async fn native_contract_rejections_pass_through_the_frontend_unchanged() {
             .send()
             .await
             .unwrap();
-        assert_eq!(forwarded.status().as_u16(), status, "{name}: forwarded status");
+        assert_eq!(
+            forwarded.status().as_u16(),
+            status,
+            "{name}: forwarded status"
+        );
         assert_eq!(
             forwarded.bytes().await.unwrap(),
             direct_bytes,
@@ -185,7 +194,8 @@ async fn health_flows_through_the_frontend() {
     assert_eq!(health.status(), 200);
     assert_eq!(
         health.bytes().await.unwrap(),
-        b"{\"status\": \"ready\", \"model\": \"valen-preview-0923\", \"modality\": \"multimodal\"}"[..]
+        b"{\"status\": \"ready\", \"model\": \"valen-preview-0923\", \"modality\": \"multimodal\"}"
+            [..]
     );
     // A busy worker's 503 is observable only while one request is in flight;
     // the stub here is instant, so that mapping is pinned in the worker's own

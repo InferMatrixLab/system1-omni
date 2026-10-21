@@ -15,11 +15,11 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
+use omni_qwen3_5_native::image_preprocess::{ImageLimits, preprocess_rgb8_with_limits};
 use omni_qwen3_5_native::inputs::MultimodalInput;
 use omni_qwen3_5_native::vision::VisionModel;
-use omni_qwen3_5_native::image_preprocess::{ImageLimits, preprocess_rgb8_with_limits};
 
-use crate::compile::{Compiled, Processor, IMAGE_PAD};
+use crate::compile::{Compiled, IMAGE_PAD, Processor};
 use crate::head::Head;
 use crate::preprocess::{self, Prepared, RenderedState};
 use crate::protocol::{Request, State};
@@ -146,9 +146,7 @@ impl Engine {
                     None => self.text.forward_positions(&branch.tokens, &positions)?,
                     Some((embeddings, grid_thw)) => {
                         let mrope = mrope_positions(&branch.tokens, IMAGE_PAD, grid_thw)?;
-                        self.text
-                            .language()
-                            .forward_multimodal_positions(
+                        self.text.language().forward_multimodal_positions(
                             &MultimodalInput {
                                 token_ids: &branch.tokens,
                                 image_token_indices: &mrope.1,

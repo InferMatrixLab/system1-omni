@@ -77,9 +77,15 @@ fn json_strings_match_the_reference_escaping() {
     assert_eq!(json_string("say \"hi\""), "\"say \\\"hi\\\"\"");
     assert_eq!(json_string("back\\slash"), "\"back\\\\slash\"");
     assert_eq!(json_string("a\nb\tc"), "\"a\\nb\\tc\"");
-    assert_eq!(json_string("\u{1}\u{8}\u{c}\u{1f}"), "\"\\u0001\\b\\f\\u001f\"");
+    assert_eq!(
+        json_string("\u{1}\u{8}\u{c}\u{1f}"),
+        "\"\\u0001\\b\\f\\u001f\""
+    );
     // ensure_ascii=False leaves non-ASCII verbatim, including the noul wording.
-    assert_eq!(json_string("True / 是：满足问题中的条件。"), "\"True / 是：满足问题中的条件。\"");
+    assert_eq!(
+        json_string("True / 是：满足问题中的条件。"),
+        "\"True / 是：满足问题中的条件。\""
+    );
 }
 
 /// Recorded from the pinned venv's `models.valen.postprocess` + `json.dumps`:
@@ -239,9 +245,16 @@ fn score_responses_are_byte_identical_to_the_reference() {
         // spread distribution that clamps confidence to 0.
         Case {
             levels: &[
-                "等级 0：描述“0”", "等级 1：描述“1”", "等级 2：描述“2”", "等级 3：描述“3”",
-                "等级 4：描述“4”", "等级 5：描述“5”", "等级 6：描述“6”", "等级 7：描述“7”",
-                "等级 8：描述“8”", "等级 9：描述“9”",
+                "等级 0：描述“0”",
+                "等级 1：描述“1”",
+                "等级 2：描述“2”",
+                "等级 3：描述“3”",
+                "等级 4：描述“4”",
+                "等级 5：描述“5”",
+                "等级 6：描述“6”",
+                "等级 7：描述“7”",
+                "等级 8：描述“8”",
+                "等级 9：描述“9”",
             ],
             logits: &[0.5, 0.2, 0.3, -1.0, -2.0, 0.0, 1.0, 0.1, -0.5, 0.0],
             body: "{\"type\": \"score\", \"probabilities\": {\"0\": 0.1478252054193804, \"1\": 0.10951160597706486, \"2\": 0.12102904319969529, \"3\": 0.03298426175920089, \"4\": 0.012134231783427398, \"5\": 0.08966051936517236, \"6\": 0.24372256052054833, \"7\": 0.0990901986496028, \"8\": 0.054381853960735325, \"9\": 0.08966051936517236}, \"score\": 4.345328261256573, \"legend\": {\"0\": \"等级 0：描述“0”\", \"1\": \"等级 1：描述“1”\", \"2\": \"等级 2：描述“2”\", \"3\": \"等级 3：描述“3”\", \"4\": \"等级 4：描述“4”\", \"5\": \"等级 5：描述“5”\", \"6\": \"等级 6：描述“6”\", \"7\": \"等级 7：描述“7”\", \"8\": \"等级 8：描述“8”\", \"9\": \"等级 9：描述“9”\"}, \"confidence\": 0.0}",
@@ -286,7 +299,10 @@ fn mixed_type_bodies_finish_every_question_in_order() {
             answer(
                 Kind::Noul,
                 &["true".to_string(), "false".to_string()],
-                &["True / 是：满足问题中的条件。".to_string(), "False / 否：不满足问题中的条件。".to_string()],
+                &[
+                    "True / 是：满足问题中的条件。".to_string(),
+                    "False / 否：不满足问题中的条件。".to_string(),
+                ],
                 &[0.0, 1.0],
             )
             .unwrap(),
@@ -296,7 +312,11 @@ fn mixed_type_bodies_finish_every_question_in_order() {
             answer(
                 Kind::Score,
                 &["0".to_string(), "1".to_string(), "2".to_string()],
-                &["No error".to_string(), "A minor error".to_string(), "A major error".to_string()],
+                &[
+                    "No error".to_string(),
+                    "A minor error".to_string(),
+                    "A major error".to_string(),
+                ],
                 &[0.0, 1.0, 2.0],
             )
             .unwrap(),
@@ -314,8 +334,7 @@ fn mixed_type_bodies_finish_every_question_in_order() {
 // ---------------------------------------------------------------------------
 
 fn lcg(i: usize, j: usize) -> f32 {
-    ((((i.wrapping_mul(73_856_093)) ^ j.wrapping_mul(19_349_663)) & 0xFFFF_FFFF) % 1_000_003)
-        as f32
+    ((((i.wrapping_mul(73_856_093)) ^ j.wrapping_mul(19_349_663)) & 0xFFFF_FFFF) % 1_000_003) as f32
         / 1_000_003.0
         - 0.5
 }
@@ -325,10 +344,14 @@ fn lcg(i: usize, j: usize) -> f32 {
 /// the FP32 rounding scale.
 #[test]
 fn head_readout_matches_the_recorded_numpy_logits() {
-    let fixture: serde_json::Value = serde_json::from_slice(&std::fs::read(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../tests/valen/data/head-readout.json"),
-    ).unwrap()).unwrap();
+    let fixture: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../../tests/valen/data/head-readout.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     assert_eq!(fixture["format"], "valen-head-readout/1");
     let (projection, hidden) = (256usize, 2048usize);
     let candidates = fixture["candidates"].as_u64().unwrap() as usize;
@@ -344,10 +367,18 @@ fn head_readout_matches_the_recorded_numpy_logits() {
     let hidden_decision: Vec<f32> = (0..hidden).map(|j| lcg(5, 7 + j)).collect();
     let head = omni_valen_native::head::Head::from_parts(candidate, decision, projection, hidden);
     let logits = head.logits(&rows, &hidden_decision).unwrap();
-    let recorded_f32: Vec<f64> = fixture["logits_f32"].as_array().unwrap()
-        .iter().map(|v| v.as_f64().unwrap()).collect();
-    let recorded_f64: Vec<f64> = fixture["logits_f64"].as_array().unwrap()
-        .iter().map(|v| v.as_f64().unwrap()).collect();
+    let recorded_f32: Vec<f64> = fixture["logits_f32"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect();
+    let recorded_f64: Vec<f64> = fixture["logits_f64"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect();
     assert_eq!(logits.len(), recorded_f32.len());
     for (index, value) in logits.iter().enumerate() {
         let delta = (*value as f64 - recorded_f32[index]).abs();
@@ -389,8 +420,12 @@ mod http {
             let request = protocol::parse_request(&body, &protocol::default_special_tokens())?;
             let mut answers = Vec::new();
             for question in &request.questions {
-                let logits: Vec<f32> =
-                    question.keys.iter().enumerate().map(|(i, _)| i as f32).collect();
+                let logits: Vec<f32> = question
+                    .keys
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| i as f32)
+                    .collect();
                 let descriptions: Vec<String> = question
                     .descriptions
                     .iter()
@@ -421,9 +456,12 @@ mod http {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         tokio::spawn(async move {
-            axum::serve(listener, omni_valen_native::server::router(Arc::new(worker)))
-                .await
-                .unwrap();
+            axum::serve(
+                listener,
+                omni_valen_native::server::router(Arc::new(worker)),
+            )
+            .await
+            .unwrap();
         });
         url
     }
@@ -452,7 +490,10 @@ mod http {
         );
         let get = client().get(format!("{url}/nope")).send().await.unwrap();
         assert_eq!(get.status(), 404);
-        assert_eq!(get.bytes().await.unwrap(), b"{\"detail\": \"unknown route\"}"[..]);
+        assert_eq!(
+            get.bytes().await.unwrap(),
+            b"{\"detail\": \"unknown route\"}"[..]
+        );
         let post = client()
             .post(format!("{url}/other"))
             .header("content-type", "application/json")
@@ -461,7 +502,10 @@ mod http {
             .await
             .unwrap();
         assert_eq!(post.status(), 404);
-        assert_eq!(post.bytes().await.unwrap(), b"{\"detail\": \"unknown route\"}"[..]);
+        assert_eq!(
+            post.bytes().await.unwrap(),
+            b"{\"detail\": \"unknown route\"}"[..]
+        );
     }
 
     #[tokio::test]
@@ -649,7 +693,11 @@ mod http {
                 .to_owned(),
         )
         .await;
-        assert!(response.starts_with(b"HTTP/1.1 413"), "{}", String::from_utf8_lossy(&response));
+        assert!(
+            response.starts_with(b"HTTP/1.1 413"),
+            "{}",
+            String::from_utf8_lossy(&response)
+        );
         assert!(response.ends_with(b"{\"detail\": \"request exceeds body limit\"}"));
 
         // Truncated body with the write side closed: 400 incomplete body
@@ -732,7 +780,10 @@ mod http {
             .await
             .unwrap();
         assert_eq!(busy.status(), 503);
-        assert_eq!(busy.bytes().await.unwrap(), b"{\"detail\": \"worker busy\"}"[..]);
+        assert_eq!(
+            busy.bytes().await.unwrap(),
+            b"{\"detail\": \"worker busy\"}"[..]
+        );
         assert_eq!(first.await.unwrap(), 200);
         // Admission is released after completion.
         let after = client()

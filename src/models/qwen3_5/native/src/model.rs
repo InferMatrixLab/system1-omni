@@ -1006,10 +1006,7 @@ impl Model {
     /// range; the forward itself is exactly [`Model::forward`]'s.
     pub fn forward_positions(&mut self, ids: &[u32], positions: &[usize]) -> Result<Vec<Vec<f32>>> {
         ensure!(!positions.is_empty(), "no hidden positions requested");
-        ensure!(
-            positions.is_sorted(),
-            "hidden positions must be ascending"
-        );
+        ensure!(positions.is_sorted(), "hidden positions must be ascending");
         ensure!(
             positions.last().is_some_and(|&p| p < ids.len()),
             "hidden position outside the prompt"
@@ -1132,10 +1129,7 @@ impl Model {
     ) -> Result<Vec<Vec<f32>>> {
         ensure!(!positions.is_empty(), "no hidden positions requested");
         let t = input.token_ids.len();
-        ensure!(
-            positions.is_sorted(),
-            "hidden positions must be ascending"
-        );
+        ensure!(positions.is_sorted(), "hidden positions must be ascending");
         ensure!(
             positions.last().is_some_and(|&p| p < t),
             "hidden position outside the prompt"

@@ -33,7 +33,8 @@ fn main() -> Result<()> {
 
 async fn run() -> Result<()> {
     let export = PathBuf::from(
-        std::env::var_os("VALEN_MODEL").context("set VALEN_MODEL to the spec-02 export directory")?,
+        std::env::var_os("VALEN_MODEL")
+            .context("set VALEN_MODEL to the spec-02 export directory")?,
     );
     let base = PathBuf::from(
         std::env::var_os("VALEN_BASE")

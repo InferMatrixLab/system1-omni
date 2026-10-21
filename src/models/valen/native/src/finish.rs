@@ -72,7 +72,10 @@ fn choice_confidence(probabilities: &[f64]) -> f64 {
     if probabilities.len() == 1 {
         return 1.0;
     }
-    let best = probabilities.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let best = probabilities
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
     (best - 1.0 / n).max(0.0) / (1.0 - 1.0 / n)
 }
 
