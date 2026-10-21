@@ -11,9 +11,10 @@ the upstream default, whose ``verify_package`` walks only the 39-entry
 ``files_sha256`` table and skips hashing files over 64 MiB in fast mode — the
 executor hashes every file of the manifest's ``runtime.files_sha256`` table
 in full before importing anything from the package directory, and refuses
-unlisted importable entries (an extra ``*.py`` file or ``__init__.py``
-package) in the package root: that root goes first on ``sys.path``, so such
-an entry would shadow a dependency the pinned runtime imports. Hash
+unlisted importable entries (an extra source, ``.pyc`` or extension module,
+or an ``__init__.py`` package) in the package root: that root goes first on
+``sys.path``, so such an entry would shadow a dependency the pinned runtime
+imports. Hash
 agreement proves only internal consistency — a later snapshot ships a
 self-consistent table of its own — so the gate first requires the manifest
 to carry exactly the repo id and runtime digests checked in for
@@ -26,6 +27,7 @@ import hashlib
 import json
 import sys
 import threading
+from importlib.machinery import EXTENSION_SUFFIXES, SOURCE_SUFFIXES
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +36,7 @@ REFERENCE_REVISION = "cbff3a3cb0b074b6585fe9f747b9f9f5557a0e75"
 MANIFEST_NAME = "MODEL_MANIFEST.json"
 MANIFEST_SCHEMA = "d3-package-manifest/1"
 VERIFY_MODES = ("fast", "full", "none")
+IMPORTABLE_FILE_SUFFIXES = frozenset(SOURCE_SUFFIXES) | {".pyc"} | frozenset(EXTENSION_SUFFIXES)
 # The runtime.files_sha256 table of REFERENCE_REVISION, transcribed from the
 # pinned package's manifest; repinning means updating this table together
 # with REFERENCE_REVISION.
@@ -105,8 +108,9 @@ def verify_runtime_files(root: Path, manifest: dict[str, Any]) -> list[str]:
     files this process is about to execute, so unlike the upstream shard
     verification there is no size shortcut. It also refuses importable
     entries the table does not name — the package root is about to go first
-    on ``sys.path``, where an extra ``*.py`` file or ``__init__.py`` package
-    would shadow one of the pinned runtime's dependencies.
+    on ``sys.path``, where an extra source, ``.pyc`` or extension module,
+    or an ``__init__.py`` package would shadow one of the pinned runtime's
+    dependencies.
     """
 
     table = (manifest.get("runtime") or {}).get("files_sha256")
@@ -125,13 +129,26 @@ def verify_runtime_files(root: Path, manifest: dict[str, Any]) -> list[str]:
     for entry in sorted(Path(root).iterdir()):
         if entry.name in table:
             continue
-        if entry.is_file() and entry.suffix == ".py":
+        if entry.is_file() and entry.suffix in IMPORTABLE_FILE_SUFFIXES:
             problems.append(f"unexpected importable file {entry.name} in the package root")
         elif entry.is_dir() and (entry / "__init__.py").is_file():
             problems.append(f"unexpected importable package {entry.name}/ in the package root")
     if problems:
         raise ValueError("runtime verification failed: " + "; ".join(problems[:8]))
     return sorted(table)
+
+
+def put_first_on_sys_path(root: Path) -> str:
+    """Put the resolved package root at the front of ``sys.path``.
+
+    Equivalent entries are dropped, not reused: a ``PYTHONPATH`` copy of
+    the root listed later would leave foreign directories ahead of it.
+    """
+
+    resolved = Path(root).resolve()
+    sys.path[:] = [entry for entry in sys.path if Path(entry or ".").resolve() != resolved]
+    sys.path.insert(0, str(resolved))
+    return str(resolved)
 
 
 class D3Executor:
@@ -164,9 +181,7 @@ class D3Executor:
         # the package directory goes first on sys.path so the flat runtime
         # modules (d3_runtime, d3_format, ...) resolve to the checkpoint's own
         # copies. One worker process serves one package.
-        root_str = str(root)
-        if root_str not in sys.path:
-            sys.path.insert(0, root_str)
+        put_first_on_sys_path(root)
         import d3_runtime
 
         self.model = d3_runtime.D3.from_pretrained(

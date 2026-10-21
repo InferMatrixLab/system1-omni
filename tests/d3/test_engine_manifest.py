@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,6 +22,7 @@ from models.d3.engine import (
     PINNED_RUNTIME_SHA256,
     REFERENCE_REPO,
     load_manifest,
+    put_first_on_sys_path,
     verify_pinned_package,
     verify_runtime_files,
 )
@@ -169,6 +172,19 @@ def test_extra_importable_files_in_the_package_root_are_refused(tmp_path):
         verify_runtime_files(tmp_path, load_manifest(tmp_path))
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["torch.pyc", "torch.abi3.so", "_d3.cpython-312-x86_64-linux-gnu.so"],
+)
+def test_sourceless_and_extension_module_files_are_refused(tmp_path, name):
+    # Python imports .pyc bytecode and compiled extensions from sys.path
+    # entries too, not just .py source files.
+    build_package(tmp_path, small_files())
+    (tmp_path / name).write_bytes(b"module bytes\n")
+    with pytest.raises(ValueError, match=f"unexpected importable file {re.escape(name)}"):
+        verify_runtime_files(tmp_path, load_manifest(tmp_path))
+
+
 def test_extra_package_directories_in_the_package_root_are_refused(tmp_path):
     build_package(tmp_path, small_files())
     fla = tmp_path / "fla"
@@ -193,3 +209,23 @@ def test_unimportable_package_root_entries_still_pass(tmp_path):
     (pycache / "d3_runtime.cpython-312.pyc").write_bytes(b"bytecode\n")
 
     assert verify_runtime_files(tmp_path, manifest) == ["d3_runtime.py", "requirements.txt"]
+
+
+def test_the_package_root_is_forced_to_the_front_of_sys_path(tmp_path):
+    # A PYTHONPATH copy of the root listed later must not leave a foreign
+    # directory ahead of it: sys.path order alone decides which copy the
+    # runtime import resolves to, and nothing else checks it.
+    package = tmp_path / "pkg"
+    shadow = tmp_path / "shadow"
+    package.mkdir()
+    shadow.mkdir()
+    resolved = str(package.resolve())
+    sys.path.insert(0, str(shadow))
+    sys.path.append(str(package))
+    try:
+        assert put_first_on_sys_path(package) == resolved
+        assert sys.path[0] == resolved
+        assert resolved not in sys.path[1:]
+        assert str(shadow) in sys.path
+    finally:
+        sys.path[:] = [entry for entry in sys.path if entry not in (str(shadow), resolved)]
