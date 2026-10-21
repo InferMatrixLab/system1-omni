@@ -296,72 +296,10 @@ fn malformed_adapter_is_rejected_before_loading_cuda() {
 #[test]
 fn cpu_cuda_boundary_checks_fp32_sums_fused_offsets_sequences_and_retirement() {
     let temporary = Temporary::new();
-    let source = temporary.0.join("fake.c");
-    let library = temporary.0.join(if cfg!(target_os = "macos") {
-        "fake.dylib"
-    } else {
-        "fake.so"
-    });
-    let mut code = include_str!("lora_fake.c").to_owned();
-    let implemented = [
-        "cs1_abi_version",
-        "cs1_get_device",
-        "cs1_error_string",
-        "cs1_malloc",
-        "cs1_free",
-        "cs1_stream_create",
-        "cs1_stream_sync",
-        "cs1_stream_destroy",
-        "cs1_upload",
-        "cs1_download",
-        "cs1_copy2d",
-        "cs1_vision_to_float",
-        "cs1_gemm_f32",
-        "cs1_gemm",
-        "cs1_vision_lora_add",
-    ];
-    // Required but unused functions return an error, so an unexpected dispatch fails.
-    let cuda_source = include_str!("../../src/models/qwen3_5/native/src/cuda.rs");
-    let abi = cuda_source
-        .lines()
-        .find(|line| line.starts_with("const ABI_VERSION:"))
-        .unwrap()
-        .split('=')
-        .nth(1)
-        .unwrap()
-        .trim()
-        .trim_end_matches(';');
-    let api = cuda_source
-        .split("api! {")
-        .nth(1)
-        .unwrap()
-        .split("\n}\n")
-        .next()
-        .unwrap();
-    for line in api.lines() {
-        let line = line.trim();
-        if !line.starts_with("cs1_") {
-            continue;
-        }
-        let name = line.split('(').next().unwrap();
-        if !implemented.contains(&name) {
-            code.push_str(&format!("\nint {name}(void) {{ return 77; }}\n"));
-        }
-    }
-    std::fs::write(&source, code).unwrap();
-    let output = std::process::Command::new("cc")
-        .args(["-shared", "-fPIC", "-ffp-contract=off"])
-        .arg(format!("-DLORA_FAKE_ABI={abi}"))
-        .arg(&source)
-        .arg("-o")
-        .arg(&library)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let library = crate::lora::fake_cuda_library();
+    let _guard = crate::lora::FAKE_CUDA_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     cuda::load(&library).unwrap();
     // SAFETY: these symbols are defined immediately above and live for this test.
     let metrics = unsafe { libloading::Library::new(&library).unwrap() };

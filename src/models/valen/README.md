@@ -178,6 +178,38 @@ every transformation recorded in a JSON
 manifest: see [recipe/valen/export.md](../../../recipe/valen/export.md).
 Consuming that export does not change this worker.
 
+## Native unmerged text path (spec 03, N2)
+
+`native/src/text.rs` loads the five-file export (`valen-checkpoint-export/2`)
+onto the shared Qwen3.5 CUDA machinery: the manifest format, LoRA profile
+(rank 32 / alpha 64 / scaling 2 / FP32 / `lora.safetensors`), the hashed
+adapter bytes and the complete configuration-derived inventory (186 targets,
+372 tensors) are validated before any CUDA loading, mirroring the Cua-S1
+`cua-s1-text-unmerged/1` gate. The Valen checkpoint's peft key layout
+(`backbone.language_model.base_model.model.<target>.lora_{A,B}.default.weight`)
+is accepted alongside the Cua-S1 prefixes.
+
+`Model::enable_valen_text_numerics` selects the same numeric profile as the
+Cua-S1 unmerged text path — framework-compatible BF16 norm/GEMM/attention,
+FP32 LoRA deltas on the activations with one final rounding (the manifest's
+application formula), FP32 chunked Gated DeltaNet with the pinned Torch
+cumulative-decay association, per-prompt state reset, and no prefix
+continuation. The optional reference-language and FP32-GDN CUDA symbols are
+resolved at load and fail before the first forward when absent; the
+reference RMS-norm kernels additionally accept the 2B hidden width 2048.
+
+Measured native parity against the pinned reference (RTX 5060 Laptop, sm_120,
+BF16, torch 2.11.0+cu128, peft 0.18.1, TF32 off; fixtures recorded by
+[recipe/valen/dump_text_reference.py](../../../recipe/valen/dump_text_reference.py)):
+per-projection outputs agree within one BF16 ulp per element (the fused
+gate/up projection is bit-exact over the compared tail), and the end-to-end
+final hidden state drifts by at most one BF16 ulp at the largest element
+(max abs 0.25 at output scale 50.75) — declared tolerances 0.0625 and 0.5 in
+the committed fixture. The device gates are env-gated
+(`VALEN_EXPORT`, `VALEN_CUDA_LIB`) in `tests/valen/text_reference.rs` and
+`tests/qwen3_5/valen_text_gpu.rs`; the formula itself is pinned CPU-only in
+`tests/qwen3_5/lora_valen.rs` and `tests/valen/text.rs`.
+
 ## Ownership boundary
 
 - `protocol.py` owns wire validation and safe inline-image limits.

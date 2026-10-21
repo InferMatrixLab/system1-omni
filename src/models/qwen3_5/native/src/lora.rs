@@ -7,6 +7,10 @@ use anyhow::{Context, Result, ensure};
 use std::{collections::BTreeMap, ffi::c_void, ops::Range, path::Path};
 
 const PREFIX: &str = "base_model.model.model.language_model.";
+/// The Valen-Preview peft layout (`PEFT_LANGUAGE_PREFIX` in
+/// recipe/valen/export_checkpoint.py): the backbone wraps the language model,
+/// and peft names its adapters (`lora_A.default.weight`).
+const VALEN_PREFIX: &str = "backbone.language_model.base_model.model.";
 const MAX_RANK: usize = 128;
 const MAX_HEADER: usize = 8 << 20;
 
@@ -185,16 +189,28 @@ fn parse(cfg: &Config, bytes: &[u8], scale: f32) -> Result<Parsed> {
         if name == "__metadata__" {
             continue;
         }
-        let native = name
+        // The two accepted key layouts: the Cua-S1 export prefixes the language
+        // model directly with plain `.lora_A.weight` suffixes, while the Valen
+        // peft checkpoint nests the language model inside `backbone` and names
+        // its single `default` adapter in the suffix. Prefix and suffix must
+        // come from the same layout.
+        let (native, named) = name
             .strip_prefix(PREFIX)
             .or_else(|| name.strip_prefix("base_model.model.model."))
+            .map(|native| (native, false))
+            .or_else(|| name.strip_prefix(VALEN_PREFIX).map(|native| (native, true)))
             .context("unsupported LoRA tensor prefix")?;
-        let (target, letter) = if let Some(target) = native.strip_suffix(".lora_A.weight") {
+        let (suffix_a, suffix_b) = if named {
+            (".lora_A.default.weight", ".lora_B.default.weight")
+        } else {
+            (".lora_A.weight", ".lora_B.weight")
+        };
+        let (target, letter) = if let Some(target) = native.strip_suffix(suffix_a) {
             (target, 0)
         } else {
             (
                 native
-                    .strip_suffix(".lora_B.weight")
+                    .strip_suffix(suffix_b)
                     .context("unsupported LoRA tensor suffix")?,
                 1,
             )
@@ -618,6 +634,107 @@ pub(crate) unsafe fn project_components(
     Ok(())
 }
 
+/// The fake-CUDA tests route device calls through the process-wide API
+/// (first `cuda::load` wins) while reading counters through their own
+/// `dlopen`, so every such test must build and open the ONE shared library
+/// (same path, same instance) and no two may run concurrently.
+#[cfg(test)]
+pub(crate) static FAKE_CUDA_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Compile the fake CUDA boundary once per process; every fake-lib test
+/// dlopens this same path so its counters observe the instance that serves
+/// the global API, whichever test loaded it.
+#[cfg(test)]
+pub(crate) fn fake_cuda_library() -> std::path::PathBuf {
+    use std::sync::Mutex;
+    static BUILT: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
+    let mut built = BUILT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(path) = built.as_ref() {
+        return path.clone();
+    }
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory =
+        std::env::temp_dir().join(format!("qwen-lora-fake-{}-{unique}", std::process::id()));
+    std::fs::create_dir(&directory).unwrap();
+    let source = directory.join("fake.c");
+    let library = directory.join(if cfg!(target_os = "macos") {
+        "fake.dylib"
+    } else {
+        "fake.so"
+    });
+    let mut code = include_str!("../../../../../tests/qwen3_5/lora_fake.c").to_owned();
+    let implemented = [
+        "cs1_abi_version",
+        "cs1_get_device",
+        "cs1_error_string",
+        "cs1_malloc",
+        "cs1_free",
+        "cs1_stream_create",
+        "cs1_stream_sync",
+        "cs1_stream_destroy",
+        "cs1_upload",
+        "cs1_download",
+        "cs1_copy2d",
+        "cs1_vision_to_float",
+        "cs1_gemm_f32",
+        "cs1_gemm",
+        "cs1_vision_lora_add",
+    ];
+    // Required but unused functions return an error, so an unexpected dispatch fails.
+    let cuda_source = include_str!("cuda.rs");
+    let abi = cuda_source
+        .lines()
+        .find(|line| line.starts_with("const ABI_VERSION:"))
+        .unwrap()
+        .split('=')
+        .nth(1)
+        .unwrap()
+        .trim()
+        .trim_end_matches(';');
+    let api = cuda_source
+        .split("api! {")
+        .nth(1)
+        .unwrap()
+        .split("\n}\n")
+        .next()
+        .unwrap();
+    for line in api.lines() {
+        let line = line.trim();
+        if !line.starts_with("cs1_") {
+            continue;
+        }
+        let name = line.split('(').next().unwrap();
+        if !implemented.contains(&name) {
+            code.push_str(&format!("\nint {name}(void) {{ return 77; }}\n"));
+        }
+    }
+    std::fs::write(&source, code).unwrap();
+    let output = std::process::Command::new("cc")
+        .args(["-shared", "-fPIC", "-ffp-contract=off"])
+        .arg(format!("-DLORA_FAKE_ABI={abi}"))
+        .arg(&source)
+        .arg("-o")
+        .arg(&library)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    *built = Some(library.clone());
+    library
+}
+
 #[cfg(test)]
 #[path = "../../../../../tests/qwen3_5/lora.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/lora_valen.rs"]
+mod valen_layout_tests;

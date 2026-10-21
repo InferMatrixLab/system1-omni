@@ -20,11 +20,14 @@
 //!
 //! Execution (forward passes, the decision head) and the HTTP worker are N4;
 //! `noul`/`score` *finishing* variations are N5 — the [`protocol::Kind`] enum
-//! and the compiled structures carry all three kinds already.
+//! and the compiled structures carry all three kinds already. The unmerged
+//! text-path LoRA application (spec 03, N2) is [`text`]: export-policy
+//! validation over the five-file export plus the shared `#143` machinery.
 
 pub mod compile;
 pub mod preprocess;
 pub mod protocol;
+pub mod text;
 pub mod wire;
 
 pub use compile::{Branch, Compiled, CompiledQuestion, Processor};
