@@ -77,10 +77,15 @@ pub fn python_strip(s: &str) -> &str {
 /// Python's `json.loads` accepts them as value tokens and the reference
 /// rejects them by name; a constant anywhere else (inside a string, or where a
 /// key is expected) is ordinary invalid JSON and keeps the generic message, so
-/// the scan tracks string and container state. A constant only *decides* the
-/// error when the rest of the document is grammatical — Python's scanner must
-/// walk everything before it successfully to reach it — which [`parse_body`]
-/// checks by re-parsing with the constants replaced by `null`.
+/// the scan tracks string and container state. Python's scanner errors the
+/// moment it *reaches* the first constant, whatever follows; reproducing that
+/// ordering exactly would mean porting the scanner (constants raise at reach,
+/// the duplicate-key hook at object close, surrogates and out-of-range floats
+/// only at the round-trip check). [`parse_body`] instead gives the constant
+/// the specific detail only when the whole document — constants substituted
+/// with `null` — is well-formed, and the generic malformed-JSON body
+/// otherwise: a recorded detail-text deviation on doubly-invalid bodies (the
+/// status is 400 either way), pinned below and in recipe/valen/native.md.
 fn nonfinite_spans(raw: &[u8]) -> Vec<(usize, usize)> {
     const CONSTANTS: [&[u8]; 3] = [b"Infinity", b"-Infinity", b"NaN"];
     let mut spans = Vec::new();
@@ -300,15 +305,49 @@ mod tests {
     }
 
     #[test]
-    fn malformed_around_a_constant_keeps_the_generic_body() {
+    fn malformed_before_a_constant_keeps_the_generic_body() {
         // Python's scanner fails at the ',' before ever reaching the constant.
         assert_eq!(
             parse_body(b"[,NaN]").unwrap_err(),
             error(400, "request body must contain valid JSON and UTF-8 text")
         );
+    }
+
+    /// Recorded deviation (recipe/valen/native.md): CPython's scanner errors
+    /// as soon as it reaches the first constant, so a body that is also
+    /// malformed *after* it still earns the specific non-finite detail; this
+    /// layer answers specifically only when the whole substituted document is
+    /// well-formed, and keeps the generic body here. The status agrees (400
+    /// both ways); only the detail text differs, on doubly-invalid bodies.
+    #[test]
+    fn malformed_after_a_constant_keeps_the_generic_body_recorded_deviation() {
+        // Missing separator between the members.
         assert_eq!(
             parse_body(b"{\"a\": NaN \"b\": NaN}").unwrap_err(),
             error(400, "request body must contain valid JSON and UTF-8 text")
+        );
+        // Trailing data after an otherwise complete document.
+        assert_eq!(
+            parse_body(b"{\"a\": NaN}trailing").unwrap_err(),
+            error(400, "request body must contain valid JSON and UTF-8 text")
+        );
+        // A container left open after the constant.
+        assert_eq!(
+            parse_body(b"[NaN").unwrap_err(),
+            error(400, "request body must contain valid JSON and UTF-8 text")
+        );
+    }
+
+    /// The reverse ordering of the same deviation: a duplicate-key object
+    /// that *closes* before a later constant makes the reference report the
+    /// duplicate (its hook fires at object close, before the scanner reaches
+    /// the constant), while the native pre-check must not fail on duplicates
+    /// and so reaches the constant and answers with the non-finite detail.
+    #[test]
+    fn a_closed_duplicate_object_before_a_constant_keeps_the_nonfinite_detail() {
+        assert_eq!(
+            parse_body(b"[{\"a\": 1, \"a\": 2}, NaN]").unwrap_err(),
+            error(400, "non-finite JSON number NaN is not supported")
         );
     }
 

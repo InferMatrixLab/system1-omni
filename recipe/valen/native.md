@@ -238,6 +238,35 @@ request is prepare → execute → finish under one admission.
   Content-Length` with a JSON body. Only non-conformant clients reach this;
   every gate reachable through a conforming client is pinned byte-identical in
   `tests/valen/worker.rs`.
+- Slow-body timeout semantics: the reference arms a per-operation 15 s socket
+  timeout (`connection.settimeout(15)`), so a body that keeps dribbling in with
+  gaps under 15 s is read indefinitely; the native worker budgets one 15 s
+  window for the whole body read, so the same drip-fed body eventually gets
+  `408 request body timed out`. A body that stalls for 15 s mid-read gets the
+  same 408 on both. Pinned in `tests/valen/worker.rs` (the total-budget
+  reading); recorded here as a deliberate semantic difference.
+- Non-finite JSON constants in a body that is malformed *elsewhere*: CPython's
+  scanner errors the instant it reaches the first constant — `{"a": NaN}xyz`,
+  `[NaN` and `{"a": NaN "b": NaN}` all get the reference's specific
+  `non-finite JSON number … is not supported` detail — while the native wire
+  layer answers with that detail only when the whole body with the constants
+  substituted is well-formed, and with the generic malformed-JSON detail
+  otherwise. The reverse ordering also differs: a duplicate-key object that
+  closes *before* a later constant makes the reference report the duplicate
+  (its `object_pairs_hook` fires at object close), where the native pre-check
+  must tolerate duplicates and reaches the constant instead. Both are detail-
+  text-only differences on doubly-invalid bodies (the status is 400 either
+  way); exact parity would mean porting the CPython scanner's error ordering,
+  so the behavior is pinned as the recorded deviation in
+  `src/models/valen/native/src/wire.rs` tests and the contract table above.
+- Integer literals beyond `u64` in an object or array `state` (or other
+  rendered text fields): `serde_json` parses one that fits neither `i64` nor
+  `u64` straight to a double — `18446744073709551616` re-serializes as
+  `1.8446744073709552e+19` — where Python's `json.loads` keeps an
+  arbitrary-precision `int` and `json.dumps` prints every digit, so the
+  compiled text (and therefore the tokens) silently differ on such states.
+  Inherited from the shared #143 JSON layer (`src/models/qwen3_5/native/src/json.rs`),
+  which this worker reuses verbatim; not fixed here per the shared-code scope.
 - Image decoding: PNG (all colour modes PIL supports) decodes
   deterministically across stacks; JPEG baseline decode differences between
   libjpeg-turbo and the Rust decoder are not gated — the parity fixtures are
@@ -262,9 +291,10 @@ material.
 | Content-Type ≠ application/json | `415 {"detail": "Content-Type must be application/json"}` | identical (parameters allowed) |
 | Concurrent request | `503 {"detail": "worker busy"}` | identical |
 | Incomplete body | `400 {"detail": "incomplete body"}` | identical |
-| Slow body (> 15 s) | `408 {"detail": "request body timed out"}` | identical |
+| Slow body (> 15 s) | `408 {"detail": "request body timed out"}` | identical for a stalled body; a drip-fed body under the reference's per-recv timeout is read indefinitely there but hits the native total 15 s budget (see limitations) |
 | Body > 8 MiB at parse | `413 {"detail": "request body exceeds 8 MiB"}` | identical |
 | Malformed JSON / non-object / duplicates / non-finite | `400 {"detail": …}` (N3 wire layer corpus, 70 cases) | identical |
+| Non-finite constant in a body that is also malformed elsewhere | the scanner errors at the first constant it reaches — the specific non-finite detail even when what follows is garbage (a duplicate-key object closing earlier wins instead) | generic malformed-JSON detail unless the whole body with constants substituted is well-formed; the earlier-closed-duplicate ordering is reversed (recorded deviation; the status is 400 either way, only the detail text differs, and only on doubly-invalid bodies) |
 | Wire validation (model/state/questions) | `422 {"detail": …}` (N3 corpus) | identical |
 | Token budget (max_length 8192) | `422 "request rejected by the pinned compiler: …"` | identical |
 | `noul` / `score` questions | served by the reference | identical (N5; finishing byte-identical for equal logits) |
