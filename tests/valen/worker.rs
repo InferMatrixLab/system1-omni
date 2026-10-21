@@ -765,4 +765,60 @@ mod http {
             b"{\"detail\": \"inference failed\"}"[..]
         );
     }
+
+    /// A panic inside the *guarded* decision poisons the mutex. The reference
+    /// holds its lock in a Python `with` block, which simply releases on the
+    /// way out — the failing request answers 500 and the next one proceeds on
+    /// a fresh lock. The native worker must recover the poison the same way
+    /// instead of turning every later request into a permanent 500.
+    struct Flaky {
+        calls: usize,
+    }
+
+    impl omni_valen_native::server::Decide for Flaky {
+        fn decide(
+            &mut self,
+            _raw: &[u8],
+        ) -> Result<omni_valen_native::engine::Outcome, RequestError> {
+            self.calls += 1;
+            if self.calls == 1 {
+                panic!("engine boom");
+            }
+            Ok(omni_valen_native::engine::Outcome {
+                answers: Vec::new(),
+                logical_tokens: 0,
+                compute_tokens: 0,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_poisoned_engine_mutex_serves_the_next_request() {
+        let url = start(Worker::new(Arc::new(std::sync::Mutex::new(Flaky {
+            calls: 0,
+        }))))
+        .await;
+        let first = client()
+            .post(format!("{url}/v1/systemone"))
+            .header("content-type", "application/json")
+            .body(body())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(first.status(), 500);
+        assert_eq!(
+            first.bytes().await.unwrap(),
+            b"{\"detail\": \"inference failed\"}"[..]
+        );
+        let second = client()
+            .post(format!("{url}/v1/systemone"))
+            .header("content-type", "application/json")
+            .body(body())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(second.status(), 200);
+        let text = String::from_utf8(second.bytes().await.unwrap().to_vec()).unwrap();
+        assert!(text.starts_with("{\"model\": \"valen-preview-0923\", \"answers\": {}"));
+    }
 }

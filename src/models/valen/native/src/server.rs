@@ -39,11 +39,27 @@ pub trait Inference: Send + Sync {
     fn decide(&self, raw: &[u8]) -> Result<Vec<u8>, RequestError>;
 }
 
+/// The blocking decision step behind the admission mutex: the engine's full
+/// request path. A trait separate from [`Inference`] so the CPU contract
+/// tests can put a flaky stub behind the same `Mutex` recovery without CUDA.
+pub trait Decide: Send {
+    fn decide(&mut self, raw: &[u8]) -> Result<Outcome, RequestError>;
+}
+
+impl Decide for Engine {
+    fn decide(&mut self, raw: &[u8]) -> Result<Outcome, RequestError> {
+        Engine::decide(self, raw)
+    }
+}
+
 /// The mutex-guarded model engine as the serving [`Inference`]: one request at
-/// a time (the HTTP admission serializes callers before this is reached).
-impl Inference for Mutex<Engine> {
+/// a time (the HTTP admission serializes callers before this is reached). A
+/// panicking decision poisons the mutex; the poison is recovered — the
+/// reference's `with`-block lock simply releases on the way out, so the next
+/// request proceeds instead of failing with permanent 500s.
+impl<T: Decide> Inference for Mutex<T> {
     fn decide(&self, raw: &[u8]) -> Result<Vec<u8>, RequestError> {
-        let mut engine = self.lock().expect("the engine lock is never poisoned");
+        let mut engine = self.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let Outcome {
             answers,
             logical_tokens,
