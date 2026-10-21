@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use omni_jev::Config;
-use omni_valen_native::finish::{build_response, choice_answer};
+use omni_valen_native::finish::{answer, build_response};
 use omni_valen_native::server::{Inference, Worker};
 use omni_valen_native::wire::{RequestError, error};
 
@@ -27,13 +27,17 @@ impl Inference for Stub {
             &body,
             &omni_valen_native::protocol::default_special_tokens(),
         )?;
-        omni_valen_native::engine::choice_only_guard(&request)?;
         let mut answers = Vec::new();
         for question in &request.questions {
             let logits: Vec<f32> = question.keys.iter().enumerate().map(|(i, _)| i as f32).collect();
-            let answer = choice_answer(&question.keys, &logits)
+            let descriptions: Vec<String> = question
+                .descriptions
+                .iter()
+                .map(|d| d.clone().unwrap_or_default())
+                .collect();
+            let produced = answer(question.kind, &question.keys, &descriptions, &logits)
                 .map_err(|_| error(500, "inference failed"))?;
-            answers.push((question.name.clone(), answer));
+            answers.push((question.name.clone(), produced));
         }
         build_response(&answers, 17, 17).map_err(|_| error(500, "inference failed"))
     }
@@ -63,6 +67,12 @@ fn text_choice(state: &str) -> Vec<u8> {
     .into_bytes()
 }
 
+/// All three question types in one body (N5): the forwarded bytes must stay
+/// byte-identical whichever finishing variant answered.
+fn mixed_types() -> Vec<u8> {
+    br#"{"model": "valen-preview-0923", "state": "The card was charged twice.", "questions": {"move": {"type": "choice", "instructions": "Close it?", "criteria": {"down": "Close", "wait": "Wait"}}, "dup": {"type": "noul", "instructions": "Was it duplicated?"}, "sev": {"type": "score", "instructions": "How severe?", "criteria": ["No error", "A minor error", "A major error"]}}}"#.to_vec()
+}
+
 #[tokio::test]
 async fn native_worker_answers_choice_directly() {
     let worker = start_worker().await;
@@ -85,28 +95,30 @@ async fn native_worker_answers_choice_directly() {
 async fn frontend_forwards_the_native_worker_bytes_unchanged() {
     let worker = start_worker().await;
     let frontend = start_frontend(&worker).await;
-    let state = "The card was charged twice for one order. 请处理。";
-    let request = text_choice(state);
+    for request in [
+        text_choice("The card was charged twice for one order. 请处理。"),
+        mixed_types(),
+    ] {
+        let direct = client()
+            .post(format!("{worker}/v1/systemone"))
+            .header("content-type", "application/json")
+            .body(request.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(direct.status(), 200);
+        let direct_bytes = direct.bytes().await.unwrap();
 
-    let direct = client()
-        .post(format!("{worker}/v1/systemone"))
-        .header("content-type", "application/json")
-        .body(request.clone())
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(direct.status(), 200);
-    let direct_bytes = direct.bytes().await.unwrap();
-
-    let forwarded = client()
-        .post(format!("{frontend}/v1/systemone"))
-        .header("content-type", "application/json")
-        .body(request)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(forwarded.status(), 200);
-    assert_eq!(forwarded.bytes().await.unwrap(), direct_bytes);
+        let forwarded = client()
+            .post(format!("{frontend}/v1/systemone"))
+            .header("content-type", "application/json")
+            .body(request)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(forwarded.status(), 200);
+        assert_eq!(forwarded.bytes().await.unwrap(), direct_bytes);
+    }
 }
 
 #[tokio::test]
@@ -125,14 +137,14 @@ async fn native_contract_rejections_pass_through_the_frontend_unchanged() {
             br#"{"model": "other", "state": "x", "questions": {"q": {"type": "choice", "instructions": "i", "criteria": {"a": "A"}}}}"#.to_vec(),
         ),
         (
-            "milestone noul",
+            "invalid noul criteria",
             422,
-            br#"{"model": "valen-preview-0923", "state": "x", "questions": {"n": {"type": "noul", "instructions": "i"}}}"#.to_vec(),
+            br#"{"model": "valen-preview-0923", "state": "x", "questions": {"n": {"type": "noul", "instructions": "i", "criteria": {"maybe": "Neither"}}}}"#.to_vec(),
         ),
         (
-            "milestone score",
+            "invalid score levels",
             422,
-            br#"{"model": "valen-preview-0923", "state": "x", "questions": {"s": {"type": "score", "instructions": "i", "criteria": ["a", "b"]}}}"#.to_vec(),
+            br#"{"model": "valen-preview-0923", "state": "x", "questions": {"s": {"type": "score", "instructions": "i", "criteria": ["only one"]}}}"#.to_vec(),
         ),
     ];
     for (name, status, request) in cases {

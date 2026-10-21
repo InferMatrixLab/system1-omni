@@ -9,8 +9,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use omni_valen_native::finish::{build_response, choice_answer, json_string, python_float};
-use omni_valen_native::protocol;
+use omni_valen_native::finish::{
+    answer, build_response, choice_answer, json_string, noul_answer, python_float, score_answer,
+};
+use omni_valen_native::protocol::{self, Kind};
 use omni_valen_native::server::{Inference, Worker};
 use omni_valen_native::wire::RequestError;
 
@@ -131,6 +133,167 @@ fn choice_responses_are_byte_identical_to_the_reference() {
     assert!(text.contains(", \"first\":"));
 }
 
+/// Recorded from the pinned venv's `models.valen.postprocess._noul_answer` +
+/// `json.dumps`: the exact answer bytes for `true`/`false` keys and these
+/// logits. P(true) plus the full pair, choice confidence on the two
+/// candidates, field order type/noul/probabilities/confidence.
+#[test]
+fn noul_responses_are_byte_identical_to_the_reference() {
+    struct Case {
+        logits: &'static [f32],
+        body: &'static str,
+    }
+    let cases = [
+        // A tie: P(true) 0.5, confidence 0.
+        Case {
+            logits: &[0.0, 0.0],
+            body: "{\"type\": \"noul\", \"noul\": 0.5, \"probabilities\": {\"true\": 0.5, \"false\": 0.5}, \"confidence\": 0.0}",
+        },
+        Case {
+            logits: &[0.0, 1.0],
+            body: "{\"type\": \"noul\", \"noul\": 0.2689414213699951, \"probabilities\": {\"true\": 0.2689414213699951, \"false\": 0.7310585786300049}, \"confidence\": 0.4621171572600098}",
+        },
+        Case {
+            logits: &[2.5, -3.0],
+            body: "{\"type\": \"noul\", \"noul\": 0.995929862284104, \"probabilities\": {\"true\": 0.995929862284104, \"false\": 0.004070137715896127}, \"confidence\": 0.9918597245682079}",
+        },
+        // Negative logits pick the same softmax shape as [0,1].
+        Case {
+            logits: &[-1.0, -2.0],
+            body: "{\"type\": \"noul\", \"noul\": 0.7310585786300049, \"probabilities\": {\"true\": 0.7310585786300049, \"false\": 0.2689414213699951}, \"confidence\": 0.4621171572600098}",
+        },
+    ];
+    let keys: Vec<String> = ["true", "false"].iter().map(|k| k.to_string()).collect();
+    for case in cases {
+        let produced = noul_answer(&keys, case.logits).unwrap();
+        assert_eq!(produced, case.body, "logits {:?}", case.logits);
+    }
+    // A logit-count mismatch is the worker's inference failure (500), as the
+    // reference's ValueError on `answer` is.
+    assert!(noul_answer(&keys, &[0.0]).is_err());
+}
+
+/// Recorded from the pinned venv's `models.valen.postprocess._score_answer` +
+/// `json.dumps`: expected level `sum(i*p)`, the static legend keyed "0"…, and
+/// the concentration confidence `max(0, 1 - distance/uniform_mad)`, field
+/// order type/probabilities/score/legend/confidence.
+#[test]
+fn score_responses_are_byte_identical_to_the_reference() {
+    struct Case {
+        levels: &'static [&'static str],
+        logits: &'static [f32],
+        body: &'static str,
+    }
+    const THREE: &[&str] = &["No error", "A minor error", "A major error"];
+    let cases = [
+        // Uniform: score 1.0, no concentration.
+        Case {
+            levels: THREE,
+            logits: &[0.0, 0.0, 0.0],
+            body: "{\"type\": \"score\", \"probabilities\": {\"0\": 0.3333333333333333, \"1\": 0.3333333333333333, \"2\": 0.3333333333333333}, \"score\": 1.0, \"legend\": {\"0\": \"No error\", \"1\": \"A minor error\", \"2\": \"A major error\"}, \"confidence\": 0.0}",
+        },
+        // Fully peaked on level 1.
+        Case {
+            levels: THREE,
+            logits: &[-100.0, 3.0, -100.0],
+            body: "{\"type\": \"score\", \"probabilities\": {\"0\": 1.8521167695179754e-45, \"1\": 1.0, \"2\": 1.8521167695179754e-45}, \"score\": 1.0, \"legend\": {\"0\": \"No error\", \"1\": \"A minor error\", \"2\": \"A major error\"}, \"confidence\": 1.0}",
+        },
+        // Tilted toward p = [0.7, 0.2, 0.1]: mode 0, distance 0.4, MAD 2/3 →
+        // 0.4-class. Logits are the f32 head outputs of ln(7)/ln(2)/0 (the
+        // finisher's input contract), so the expected bytes were recorded
+        // from the f32-rounded values.
+        Case {
+            levels: THREE,
+            logits: &[1.9459101490553132, 0.6931471805599453, 0.0],
+            body: "{\"type\": \"score\", \"probabilities\": {\"0\": 0.6999999886271213, \"1\": 0.20000000770889612, \"2\": 0.10000000366398262}, \"score\": 0.40000001503686133, \"legend\": {\"0\": \"No error\", \"1\": \"A minor error\", \"2\": \"A major error\"}, \"confidence\": 0.39999997744470794}",
+        },
+        // Mass split across the endpoints clamps confidence to 0.
+        Case {
+            levels: THREE,
+            logits: &[0.4054651081081644, -50.0, 0.0],
+            body: "{\"type\": \"score\", \"probabilities\": {\"0\": 0.5999999971505067, \"1\": 7.714999446815271e-23, \"2\": 0.4000000028494934}, \"score\": 0.8000000056989868, \"legend\": {\"0\": \"No error\", \"1\": \"A minor error\", \"2\": \"A major error\"}, \"confidence\": 0.0}",
+        },
+        // Two levels are the noul pair in score clothing: expected level is
+        // P(1), confidence the choice confidence.
+        Case {
+            levels: &["lo", "hi"],
+            logits: &[0.0, 1.0],
+            body: "{\"type\": \"score\", \"probabilities\": {\"0\": 0.2689414213699951, \"1\": 0.7310585786300049}, \"score\": 0.7310585786300049, \"legend\": {\"0\": \"lo\", \"1\": \"hi\"}, \"confidence\": 0.4621171572600098}",
+        },
+        // Ten levels pin the legend's verbatim UTF-8 (never \u-escaped) and a
+        // spread distribution that clamps confidence to 0.
+        Case {
+            levels: &[
+                "等级 0：描述“0”", "等级 1：描述“1”", "等级 2：描述“2”", "等级 3：描述“3”",
+                "等级 4：描述“4”", "等级 5：描述“5”", "等级 6：描述“6”", "等级 7：描述“7”",
+                "等级 8：描述“8”", "等级 9：描述“9”",
+            ],
+            logits: &[0.5, 0.2, 0.3, -1.0, -2.0, 0.0, 1.0, 0.1, -0.5, 0.0],
+            body: "{\"type\": \"score\", \"probabilities\": {\"0\": 0.1478252054193804, \"1\": 0.10951160597706486, \"2\": 0.12102904319969529, \"3\": 0.03298426175920089, \"4\": 0.012134231783427398, \"5\": 0.08966051936517236, \"6\": 0.24372256052054833, \"7\": 0.0990901986496028, \"8\": 0.054381853960735325, \"9\": 0.08966051936517236}, \"score\": 4.345328261256573, \"legend\": {\"0\": \"等级 0：描述“0”\", \"1\": \"等级 1：描述“1”\", \"2\": \"等级 2：描述“2”\", \"3\": \"等级 3：描述“3”\", \"4\": \"等级 4：描述“4”\", \"5\": \"等级 5：描述“5”\", \"6\": \"等级 6：描述“6”\", \"7\": \"等级 7：描述“7”\", \"8\": \"等级 8：描述“8”\", \"9\": \"等级 9：描述“9”\"}, \"confidence\": 0.0}",
+        },
+        // A three-way tie: mode is level 0 by candidate order, uniform score 1.
+        Case {
+            levels: &["a", "b", "c"],
+            logits: &[1.0, 1.0, 1.0],
+            body: "{\"type\": \"score\", \"probabilities\": {\"0\": 0.3333333333333333, \"1\": 0.3333333333333333, \"2\": 0.3333333333333333}, \"score\": 1.0, \"legend\": {\"0\": \"a\", \"1\": \"b\", \"2\": \"c\"}, \"confidence\": 0.0}",
+        },
+    ];
+    for case in cases {
+        let keys: Vec<String> = (0..case.levels.len()).map(|i| i.to_string()).collect();
+        let levels: Vec<String> = case.levels.iter().map(|l| l.to_string()).collect();
+        let produced = score_answer(&keys, &levels, case.logits).unwrap();
+        assert_eq!(produced, case.body, "levels {:?}", case.levels);
+    }
+    let keys: Vec<String> = (0..3).map(|i| i.to_string()).collect();
+    let levels: Vec<String> = THREE.iter().map(|l| l.to_string()).collect();
+    assert!(score_answer(&keys, &levels, &[0.0, 1.0]).is_err());
+}
+
+/// The finisher's per-kind dispatch, `postprocess.answer`'s shape: one mixed
+/// body finishes choice + noul + score in request order with each type's
+/// exact bytes. Expected body recorded from the pinned venv (stub logits:
+/// candidate k scores k).
+#[test]
+fn mixed_type_bodies_finish_every_question_in_order() {
+    let body = vec![
+        (
+            "move".to_string(),
+            answer(
+                Kind::Choice,
+                &["down".to_string(), "wait".to_string()],
+                &["Close".to_string(), "Wait".to_string()],
+                &[0.0, 1.0],
+            )
+            .unwrap(),
+        ),
+        (
+            "dup".to_string(),
+            answer(
+                Kind::Noul,
+                &["true".to_string(), "false".to_string()],
+                &["True / 是：满足问题中的条件。".to_string(), "False / 否：不满足问题中的条件。".to_string()],
+                &[0.0, 1.0],
+            )
+            .unwrap(),
+        ),
+        (
+            "sev".to_string(),
+            answer(
+                Kind::Score,
+                &["0".to_string(), "1".to_string(), "2".to_string()],
+                &["No error".to_string(), "A minor error".to_string(), "A major error".to_string()],
+                &[0.0, 1.0, 2.0],
+            )
+            .unwrap(),
+        ),
+    ];
+    let bytes = build_response(&body, 17, 42).unwrap();
+    assert_eq!(
+        String::from_utf8(bytes).unwrap(),
+        "{\"model\": \"valen-preview-0923\", \"answers\": {\"move\": {\"type\": \"choice\", \"choice\": \"wait\", \"probabilities\": {\"down\": 0.2689414213699951, \"wait\": 0.7310585786300049}, \"confidence\": 0.4621171572600098}, \"dup\": {\"type\": \"noul\", \"noul\": 0.2689414213699951, \"probabilities\": {\"true\": 0.2689414213699951, \"false\": 0.7310585786300049}, \"confidence\": 0.4621171572600098}, \"sev\": {\"type\": \"score\", \"probabilities\": {\"0\": 0.09003057317038046, \"1\": 0.24472847105479764, \"2\": 0.6652409557748218}, \"score\": 1.5752103826044412, \"legend\": {\"0\": \"No error\", \"1\": \"A minor error\", \"2\": \"A major error\"}, \"confidence\": 0.3628155739066622}}, \"usage\": {\"input_tokens\": 17, \"output_tokens\": 0}, \"internal_usage\": {\"compute_tokens\": 42}}",
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Head readout on the deterministic synthetic head (tests/valen/data).
 // ---------------------------------------------------------------------------
@@ -209,14 +372,18 @@ mod http {
             }
             let body = omni_valen_native::wire::parse_body(raw)?;
             let request = protocol::parse_request(&body, &protocol::default_special_tokens())?;
-            omni_valen_native::engine::choice_only_guard(&request)?;
             let mut answers = Vec::new();
             for question in &request.questions {
                 let logits: Vec<f32> =
                     question.keys.iter().enumerate().map(|(i, _)| i as f32).collect();
-                let answer = choice_answer(&question.keys, &logits)
+                let descriptions: Vec<String> = question
+                    .descriptions
+                    .iter()
+                    .map(|d| d.clone().unwrap_or_default())
+                    .collect();
+                let produced = answer(question.kind, &question.keys, &descriptions, &logits)
                     .map_err(|_| omni_valen_native::wire::error(500, "inference failed"))?;
-                answers.push((question.name.clone(), answer));
+                answers.push((question.name.clone(), produced));
             }
             // Token accounting values are the stub's; the compiled accounting
             // is pinned by the compiler tests and the GPU gate.
@@ -227,6 +394,12 @@ mod http {
 
     fn body() -> Vec<u8> {
         br#"{"model": "valen-preview-0923", "state": "The card was charged twice.", "questions": {"move": {"type": "choice", "instructions": "Close it?", "criteria": {"down": "Close", "wait": "Wait"}}}}"#.to_vec()
+    }
+
+    /// A choice + noul + score body (the N5 all-types round trip): the same
+    /// stub-logits convention, so the response is the recorded reference body.
+    fn mixed_body() -> Vec<u8> {
+        br#"{"model": "valen-preview-0923", "state": "The card was charged twice.", "questions": {"move": {"type": "choice", "instructions": "Close it?", "criteria": {"down": "Close", "wait": "Wait"}}, "dup": {"type": "noul", "instructions": "Was it duplicated?"}, "sev": {"type": "score", "instructions": "How severe?", "criteria": ["No error", "A minor error", "A major error"]}}}"#.to_vec()
     }
 
     async fn start(worker: Worker) -> String {
@@ -334,20 +507,48 @@ mod http {
             b"{\"detail\": \"model must be valen-preview-0923\"}"[..]
         );
 
-        let milestone = br#"{"model": "valen-preview-0923", "state": "x", "questions": {"n": {"type": "noul", "instructions": "i"}}}"#.to_vec();
-        let response = post(milestone).await;
+        // N5 removed the N4 milestone guard: all three question types serve.
+        // A malformed noul still gets the wire layer's 422, byte-identical to
+        // the reference's validation order.
+        let bad_noul = br#"{"model": "valen-preview-0923", "state": "x", "questions": {"n": {"type": "noul", "instructions": "i", "criteria": {"maybe": "Neither"}}}}"#.to_vec();
+        let response = post(bad_noul).await;
         assert_eq!(response.status(), 422);
-        let detail = String::from_utf8(response.bytes().await.unwrap().to_vec()).unwrap();
-        assert!(
-            detail.starts_with("{\"detail\": \"question 'n': the noul question type is not served"),
-            "{detail}"
+        assert_eq!(
+            response.bytes().await.unwrap(),
+            b"{\"detail\": \"question 'n': noul criteria must describe true and/or false\"}"[..]
         );
 
-        let score = br#"{"model": "valen-preview-0923", "state": "x", "questions": {"s": {"type": "score", "instructions": "i", "criteria": ["a", "b"]}}}"#.to_vec();
-        let response = post(score).await;
+        let bad_score = br#"{"model": "valen-preview-0923", "state": "x", "questions": {"s": {"type": "score", "instructions": "i", "criteria": ["only one"]}}}"#.to_vec();
+        let response = post(bad_score).await;
         assert_eq!(response.status(), 422);
-        let detail = String::from_utf8(response.bytes().await.unwrap().to_vec()).unwrap();
-        assert!(detail.contains("the score question type is not served"), "{detail}");
+        assert_eq!(
+            response.bytes().await.unwrap(),
+            b"{\"detail\": \"question 's': score requires an ordered list of 2 to 10 level descriptions\"}"[..]
+        );
+    }
+
+    /// All three question types in one body answer 200 through the real wire
+    /// and finishing layers, each type's bytes the reference's own.
+    #[tokio::test]
+    async fn a_mixed_type_request_answers_200_for_every_kind() {
+        let url = start(Worker::new(Arc::new(Stub {
+            delay: Duration::ZERO,
+            panic: false,
+        })))
+        .await;
+        let response = client()
+            .post(format!("{url}/v1/systemone"))
+            .header("content-type", "application/json")
+            .body(mixed_body())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let text = String::from_utf8(response.bytes().await.unwrap().to_vec()).unwrap();
+        assert_eq!(
+            text,
+            "{\"model\": \"valen-preview-0923\", \"answers\": {\"move\": {\"type\": \"choice\", \"choice\": \"wait\", \"probabilities\": {\"down\": 0.2689414213699951, \"wait\": 0.7310585786300049}, \"confidence\": 0.4621171572600098}, \"dup\": {\"type\": \"noul\", \"noul\": 0.2689414213699951, \"probabilities\": {\"true\": 0.2689414213699951, \"false\": 0.7310585786300049}, \"confidence\": 0.4621171572600098}, \"sev\": {\"type\": \"score\", \"probabilities\": {\"0\": 0.09003057317038046, \"1\": 0.24472847105479764, \"2\": 0.6652409557748218}, \"score\": 1.5752103826044412, \"legend\": {\"0\": \"No error\", \"1\": \"A minor error\", \"2\": \"A major error\"}, \"confidence\": 0.3628155739066622}}, \"usage\": {\"input_tokens\": 17, \"output_tokens\": 0}, \"internal_usage\": {\"compute_tokens\": 17}}",
+        );
     }
 
     #[tokio::test]

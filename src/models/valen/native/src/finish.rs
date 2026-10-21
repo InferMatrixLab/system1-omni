@@ -1,13 +1,12 @@
 //! Response finishing, equivalent to `src/models/valen/postprocess.py` at the
-//! pinned reference: the FP64 softmax and Valen's confidence formulas, and the
-//! response reconstruction with `json.dumps(..., ensure_ascii=False,
-//! allow_nan=False)` byte semantics — Python's `repr` floats, `", "`/`": "`
-//! separators and control-character escaping, so a native response body is
-//! byte-for-byte what the reference worker sends for the same logits.
-//!
-//! N4 finishes `choice`; the `noul`/`score` variations are N5.
+//! pinned reference: the FP64 softmax and Valen's three answer variants
+//! (`choice`, `noul`, `score`), and the response reconstruction with
+//! `json.dumps(..., ensure_ascii=False, allow_nan=False)` byte semantics —
+//! Python's `repr` floats, `", "`/`": "` separators and control-character
+//! escaping, so a native response body is byte-for-byte what the reference
+//! worker sends for the same logits.
 
-use crate::protocol::MODEL_NAME;
+use crate::protocol::{Kind, MODEL_NAME};
 
 /// The worker's inference failure: the reference's generic handler turns any
 /// non-`RequestError` exception into 500 `inference failed`.
@@ -136,6 +135,100 @@ pub fn choice_answer(keys: &[String], logits: &[f32]) -> Result<String, Invalid>
         pairs.join(", "),
         python_float(choice_confidence(&probabilities)),
     ))
+}
+
+/// One serialized `noul` answer object (`_noul_answer`): P(true) — the wire
+/// layer pins `keys` to `["true", "false"]` in that order — plus the full
+/// pair and the choice confidence over the two candidates. The reference
+/// answers the *wire* type `noul` even when custom wording compiled the
+/// question as a `choice` record, so the finishing depends on nothing but
+/// the keys and probabilities.
+pub fn noul_answer(keys: &[String], logits: &[f32]) -> Result<String, Invalid> {
+    if logits.len() != keys.len() {
+        return Err(Invalid);
+    }
+    let probabilities = probabilities(logits)?;
+    let pairs: Vec<String> = keys
+        .iter()
+        .zip(&probabilities)
+        .map(|(key, &value)| format!("{}: {}", json_string(key), python_float(value)))
+        .collect();
+    Ok(format!(
+        "{{\"type\": \"noul\", \"noul\": {}, \"probabilities\": {{{}}}, \"confidence\": {}}}",
+        python_float(probabilities[0]),
+        pairs.join(", "),
+        python_float(choice_confidence(&probabilities)),
+    ))
+}
+
+/// One serialized `score` answer object (`_score_answer`): the K level
+/// probabilities, the expected level `sum(i * p)` (Python's sequential
+/// `sum`, i.e. left-to-right from 0), the static legend keyed `"0"`…, and
+/// the distribution-concentration confidence
+/// `max(0, 1 - distance / uniform_mad)` where `distance` is the probability-
+/// weighted absolute deviation from the first argmax level and
+/// `uniform_mad` the mean absolute deviation of the uniform distribution
+/// over K levels. The wire layer guarantees K >= 2, so `uniform_mad` is
+/// never zero.
+pub fn score_answer(
+    keys: &[String],
+    descriptions: &[String],
+    logits: &[f32],
+) -> Result<String, Invalid> {
+    if logits.len() != keys.len() || descriptions.len() != keys.len() {
+        return Err(Invalid);
+    }
+    let probabilities = probabilities(logits)?;
+    let mode = argmax(&probabilities);
+    let count = probabilities.len();
+    let distance: f64 = probabilities
+        .iter()
+        .enumerate()
+        .map(|(index, &value)| value * (index as f64 - mode as f64).abs())
+        .sum();
+    let uniform_mad: f64 = (0..count)
+        .map(|index| (index as f64 - (count - 1) as f64 / 2.0).abs())
+        .sum::<f64>()
+        / count as f64;
+    let expected_level: f64 = probabilities
+        .iter()
+        .enumerate()
+        .map(|(index, &value)| index as f64 * value)
+        .sum();
+    let pairs: Vec<String> = keys
+        .iter()
+        .zip(&probabilities)
+        .map(|(key, &value)| format!("{}: {}", json_string(key), python_float(value)))
+        .collect();
+    let legend: Vec<String> = keys
+        .iter()
+        .zip(descriptions)
+        .map(|(key, description)| format!("{}: {}", json_string(key), json_string(description)))
+        .collect();
+    Ok(format!(
+        "{{\"type\": \"score\", \"probabilities\": {{{}}}, \"score\": {}, \"legend\": {{{}}}, \"confidence\": {}}}",
+        pairs.join(", "),
+        python_float(expected_level),
+        legend.join(", "),
+        python_float((1.0 - distance / uniform_mad).max(0.0)),
+    ))
+}
+
+/// The per-kind dispatch of `postprocess.answer`: the wire type (not the
+/// compiled record type) selects the finishing variant, exactly as the
+/// reference answers `response_context.questions` — the original wire
+/// questions — so a custom-wording `noul` still answers `type: noul`.
+pub fn answer(
+    kind: Kind,
+    keys: &[String],
+    descriptions: &[String],
+    logits: &[f32],
+) -> Result<String, Invalid> {
+    match kind {
+        Kind::Choice => choice_answer(keys, logits),
+        Kind::Noul => noul_answer(keys, logits),
+        Kind::Score => score_answer(keys, descriptions, logits),
+    }
 }
 
 /// The serialized full response body, `build_response`'s field order and

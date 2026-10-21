@@ -22,7 +22,7 @@ use omni_qwen3_5_native::image_preprocess::{ImageLimits, preprocess_rgb8_with_li
 use crate::compile::{Compiled, Processor, IMAGE_PAD};
 use crate::head::Head;
 use crate::preprocess::{self, Prepared, RenderedState};
-use crate::protocol::{Kind, Request, State};
+use crate::protocol::{Request, State};
 use crate::text::TextModel;
 use crate::wire::{RequestError, error};
 use crate::{finish, protocol};
@@ -92,7 +92,6 @@ impl Engine {
 
     /// `decide` over an already-parsed request (the warmup path reuses it).
     pub fn decide_request(&mut self, request: &Request) -> Result<Outcome, RequestError> {
-        choice_only_guard(request)?;
         let prepared = preprocess::prepare(request);
         let compiled = self.processor.compiler().compile(&prepared)?;
         let logits = self
@@ -100,9 +99,17 @@ impl Engine {
             .map_err(|_| error(500, "inference failed"))?;
         let mut answers = Vec::with_capacity(compiled.questions.len());
         for (question, logits) in compiled.questions.iter().zip(&logits) {
-            let answer = finish::choice_answer(&question.keys, logits)
-                .map_err(|_| error(500, "inference failed"))?;
-            answers.push((question.qid.clone(), answer));
+            // The wire type selects the finishing variant, as the reference
+            // answers the original wire questions — a custom-wording noul
+            // (compiled as a choice record) still answers type noul.
+            let produced = finish::answer(
+                question.wire_kind,
+                &question.keys,
+                &question.descriptions,
+                logits,
+            )
+            .map_err(|_| error(500, "inference failed"))?;
+            answers.push((question.qid.clone(), produced));
         }
         finish::build_response(&answers, compiled.logical_tokens, compiled.compute_tokens)
             .map_err(|_| error(500, "inference failed"))?;
@@ -287,26 +294,4 @@ pub fn mrope_positions(
         current += 1;
     }
     Ok((axes, indices))
-}
-
-/// The N4 milestone guard: `choice` is served end-to-end; `noul` and `score`
-/// are compiled by the wire and compiler layers but their finishing
-/// variations are N5, so the worker fails closed with a deterministic 422
-/// instead of serving an ungated type. Recorded deviation from the reference
-/// contract (the reference serves all three); see recipe/valen/native.md.
-pub fn choice_only_guard(request: &Request) -> Result<(), RequestError> {
-    for question in &request.questions {
-        if question.kind != Kind::Choice {
-            return Err(error(
-                422,
-                format!(
-                    "question {}: the {} question type is not served by this worker \
-                     milestone; see recipe/valen/native.md",
-                    crate::wire::python_repr(&question.name),
-                    question.kind.as_str(),
-                ),
-            ));
-        }
-    }
-    Ok(())
 }
