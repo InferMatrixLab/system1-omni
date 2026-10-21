@@ -1246,6 +1246,7 @@ impl Model {
         rows: &[usize],
         targets: &[(usize, u32)],
     ) -> Result<Readout> {
+        self.ensure_fixed_profile()?;
         let result = self.run_readout(input, rows, targets);
         if result.is_err() {
             // Work already queued may still use the buffers.
@@ -1739,8 +1740,9 @@ impl Model {
         Ok(Some(state))
     }
 
-    /// `forward_fixed` and `forward_shared` cover merged weights with the default
-    /// numerics. Refuse the other profiles before any allocation or CUDA call.
+    /// `forward_fixed`, `forward_shared` and `forward_multimodal_readout` cover merged
+    /// weights with the default numerics. Refuse the other profiles before any
+    /// allocation or CUDA call.
     fn ensure_fixed_profile(&self) -> Result<()> {
         ensure!(
             self.lora.is_none() && self.reference.is_none() && self.fp32_gdn.is_none(),

@@ -267,11 +267,22 @@ fn cpu_fixed_and_shared_refuse_other_profiles_before_device_work() {
             branches: vec![&[4], &[5, 6]],
         }],
     };
+    let positions = [0, 1, 2];
+    let input = MultimodalInput {
+        token_ids: &[1, 2, 3],
+        image_token_indices: &[],
+        image_embeddings: &[],
+        position_ids: [&positions; 3],
+    };
     let refuse = |model: &mut Model, profile: &str| {
         let before = unsafe { calls() };
         for error in [
             model.forward_fixed(&[1, 2, 3]).unwrap_err(),
             model.forward_shared(&prompts).unwrap_err(),
+            model
+                .forward_multimodal_readout(&input, &[2], &[(2, 4)])
+                .map(drop)
+                .unwrap_err(),
         ] {
             assert!(
                 error.to_string().contains("only merged weights"),
@@ -281,6 +292,7 @@ fn cpu_fixed_and_shared_refuse_other_profiles_before_device_work() {
         assert_eq!(unsafe { calls() }, before, "{profile}: CUDA calls");
         assert!(
             model.scratch.is_none()
+                && model.vocab_buffers.is_none()
                 && model.fixed_gemm.is_null()
                 && model.shared.iter().all(Option::is_none),
             "{profile}: buffers"
