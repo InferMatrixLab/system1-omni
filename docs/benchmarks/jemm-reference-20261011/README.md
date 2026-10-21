@@ -1,5 +1,10 @@
 # JEMM 1–4-image numerical regression
 
+This page records the **2026-10-11 ABI 6 campaign** and its original corpus.
+The later [2026-10-21 ABI 8 qualification](../../../src/models/jemm/README.md#source-pinned-abi-8-qualification-2026-10-21)
+has a separate source pin, extended corpus and combined multimodal-language
+Graph evidence. Its results do not change the historical records below.
+
 The optional reference-numerics path passes the frozen 16-request / 25-question
 corpus on one NVIDIA A800 80 GB. Maximum probability drift is
 **0.0166172279642417**. The unchanged gates are probability/confidence/noul 0.02,

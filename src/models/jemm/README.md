@@ -100,15 +100,37 @@ slots, not weights or GEMM plan memory. Startup's image warmup can capture its o
 shape when enabled; it does not prewarm every user grid. Graph replay does not
 establish lower latency on every workload.
 
-The archived v2 HTTP campaign below used text-language and vision graphs with
-multimodal language eager. The combined v2 reference path and multimodal language
-replay has not yet been rerun on a GPU; earlier multimodal replay evidence used
-the premerged v1 path. CPU checks compile the graph regressions but cannot prove
-device replay equality for this integration.
+The 2026-10-11 v2 HTTP campaign used text-language and vision graphs with
+multimodal language eager. The separate 2026-10-21 ABI 8 campaign below exercised
+combined text, multimodal-language and vision replay at its exact source pin.
+CPU checks compile the graph regressions but do not execute device replay.
 
 ## Validation
 
-The unmerged FP32-adapter v2 path passes the frozen **16 requests / 25 questions**
+### Source-pinned ABI 8 qualification — 2026-10-21
+
+The [public report and raw evidence](https://github.com/Levius-Fubuki/system1-omni/releases/tag/jemm-abi8-5bdd625b-20261021)
+qualify source `5bdd625b4c27efb02f43a1f71150e1a7d7c0f071` on one A800 80 GB
+PCIe (`sm_80`), using a cuDNN-enabled ABI 8 library and a fresh pinned FLA
+reference. Reference, native eager and combined Graph each completed two passes
+of **28 requests / 49 questions**, including the original 16/25 subset.
+Maximum probability drift was **0.0166172279642417**, below 0.02; maximum Score
+drift was **7.638334409421077e-14**, below 0.1, with no decision changes.
+Eager/Graph semantic responses matched after excluding only `usage.latency_ms`.
+
+The campaign covered text and 1–4 images, changed pixels/geometry/order,
+1240-token multimodal and 2282-token text scratch growth, and invalid-input
+recovery. All three Graph paths captured and replayed without fallback;
+11 reference operators and one selected-head device test passed. The release
+includes raw responses, logs, failed bootstrap attempts, source hashes and an
+offline audit. It does not qualify resident-device image embeddings, the
+separate cache or Cua-S1 precision increments, broader task accuracy, other
+hardware, latency, throughput or peak memory. Later integration checks must
+retain this source boundary rather than claim a fresh full-model GPU run.
+
+### Historical v2 qualification — 2026-10-11
+
+The unmerged FP32-adapter v2 path passed the frozen **16 requests / 25 questions**
 covering text and 1–4 images on A800. Maximum probability drift is
 **0.0166172279642417**, under the unchanged 0.02 gate. Score tolerance remains
 0.1 and winner agreement is required at reference margins of at least 0.05;
@@ -134,4 +156,6 @@ resource boundary, response math, image decoding/positions, tokenizer and token
 budgets, export integrity, BF16 head padding, error-envelope bounds, warmup image
 decoding and synchronized retirement. The real CUDA head test is ignored in CPU
 CI. CPU tests do not prove full-model parity or execute the startup image forward.
-No fresh GPU campaign or performance claim accompanies the review fixes.
+The calibration-loading review fixes are covered by host/export tests; the GPU
+campaigns above retain their own source pins and do not constitute a fresh
+device run of those fixes. No performance claim accompanies them.
