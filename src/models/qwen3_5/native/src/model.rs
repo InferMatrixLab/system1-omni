@@ -1451,6 +1451,7 @@ impl Model {
     /// `forward` with the GEMM algorithms of `forward_shared`, one per weight shape, run
     /// eagerly: the result that `forward_shared` reproduces for this prompt.
     pub fn forward_fixed(&mut self, ids: &[u32]) -> Result<Vec<f32>> {
+        self.ensure_fixed_profile()?;
         let result = self.run_fixed(ids);
         if result.is_err() {
             // Work already queued may still use the buffers.
@@ -1492,6 +1493,7 @@ impl Model {
     /// Runs eagerly. The prefix states are overwritten by the next call, and the stream
     /// is synchronized before this returns, also on error.
     pub fn forward_shared(&mut self, prompts: &SharedPrompts) -> Result<Vec<Vec<Vec<f32>>>> {
+        self.ensure_fixed_profile()?;
         let result = self.run_shared(prompts);
         if result.is_err() {
             // Work already queued may still use the buffers.
@@ -1599,6 +1601,16 @@ impl Model {
         let state = slot.as_mut().unwrap();
         state.len = len;
         Ok(Some(state))
+    }
+
+    /// `forward_fixed` and `forward_shared` cover merged weights with the default
+    /// numerics. Refuse the other profiles before any allocation or CUDA call.
+    fn ensure_fixed_profile(&self) -> Result<()> {
+        ensure!(
+            self.lora.is_none() && self.reference.is_none() && self.fp32_gdn.is_none(),
+            "fixed-algorithm GEMMs and shared prefixes support only merged weights with the default numerics"
+        );
+        Ok(())
     }
 
     /// The GEMM handle with one algorithm per weight shape, created on first use.
