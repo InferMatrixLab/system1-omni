@@ -170,6 +170,12 @@ result is not a native-engine speedup. Metal and vision benchmarks follow CUDA.
 python -m unittest discover -s tests/benchmarks -p 'test_*.py' -v
 ```
 
+## Frozen serving matrix
+
+See [the matrix client guide](serving_matrix.md) and [example plan](serving_matrix.example.json)
+for exact response oracles, workload variants, concurrency rounds, pinned runtime
+metadata and environment-based bearer authentication.
+
 ## Laya on Apple Silicon
 
 [`laya_mps/`](laya_mps/README.md) holds the scripts behind the numbers of the
