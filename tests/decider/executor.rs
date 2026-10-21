@@ -44,11 +44,44 @@ fn bf16_head_rounds_before_fp32_calibration() {
     ] {
         weights[offset..offset + 2].copy_from_slice(&bf16::from_f32(value).to_le_bytes());
     }
-    let head = Head::new(&weights).unwrap();
+    let head = Head::new(&weights, 1).unwrap();
     let mut hidden = vec![0.0; HIDDEN];
     hidden[..2].copy_from_slice(&[1.0, 1.0]);
     assert_eq!(head.project(&hidden, 2).unwrap(), vec![1.0, 1.015625]);
     assert_eq!(head.project(&hidden, 255).unwrap()[254], 0.0);
     hidden[0] = f32::NAN;
     assert!(head.project(&hidden, 2).is_err());
+}
+
+#[test]
+#[ignore = "requires the built Qwen CUDA library and an available NVIDIA GPU"]
+fn batched_head_preserves_rows_counts_and_bf16_rounding() {
+    cuda::load(Path::new(&std::env::var("DECIDER_CUDA_LIB").unwrap())).unwrap();
+    cuda::set_device(0).unwrap();
+    let mut weights = vec![0; PADDED_LABELS * HIDDEN * 2];
+    for (offset, value) in [
+        (0, 1.0),
+        (2, 0.00390625),
+        (HIDDEN * 2, 1.0),
+        (HIDDEN * 2 + 2, 0.015625),
+    ] {
+        weights[offset..offset + 2].copy_from_slice(&bf16::from_f32(value).to_le_bytes());
+    }
+    let head = Head::new(&weights, 2).unwrap();
+    let mut a = vec![0.0; HIDDEN];
+    a[..2].copy_from_slice(&[1.0, 1.0]);
+    let mut b = vec![0.0; HIDDEN];
+    b[..2].copy_from_slice(&[2.0, 1.0]);
+    let first = head.project_batch(&[&a, &b], &[2, 255]).unwrap();
+    assert_eq!(first[0], vec![1.0, 1.015625]);
+    assert_eq!(&first[1][..2], &[2.0, 2.015625]);
+    assert_eq!(first[1].len(), 255);
+    assert!(first[1][2..].iter().all(|&x| x == 0.0));
+    let reversed = head.project_batch(&[&b, &a], &[255, 2]).unwrap();
+    assert_eq!(reversed[0], first[1]);
+    assert_eq!(reversed[1], first[0]);
+    assert!(head.project_batch(&[&a, &b, &a], &[2, 2, 2]).is_err());
+    assert!(head.project_batch(&[&a, &b], &[2]).is_err());
+    b[0] = f32::NAN;
+    assert!(head.project_batch(&[&a, &b], &[2, 2]).is_err());
 }

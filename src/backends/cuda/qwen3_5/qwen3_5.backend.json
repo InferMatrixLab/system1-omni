@@ -1,6 +1,6 @@
 {
   "name": "qwen3_5",
-  "abi_version": 7,
+  "abi_version": 9,
   "status": "experimental",
   "sources": [
     "ops.h",

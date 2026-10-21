@@ -24,6 +24,10 @@ name = "kernels"
 path = "../../../../tests/qwen3_5/kernels.rs"
 
 [[test]]
+name = "device_features"
+path = "../../../../tests/qwen3_5/device_features.rs"
+
+[[test]]
 name = "prefix"
 path = "../../../../tests/qwen3_5/prefix.rs"
 

@@ -6,7 +6,7 @@
 //!
 //! The resize algorithm is a Rust adaptation of PyTorch's CPU uint8 bicubic
 //! antialias implementation (which credits Pillow). Smart resize and packing
-//! follow Transformers' Qwen2VLImageProcessor. See `../../../cua_s1/native/THIRD_PARTY_NOTICES.md`.
+//! follow Transformers' Qwen2VLImageProcessor. See `../THIRD_PARTY_NOTICES.md`.
 
 use std::borrow::Cow;
 

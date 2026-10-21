@@ -12,10 +12,11 @@ Review the full diff against the target branch for correctness, focused scope,
 architecture alignment and tests. Verify that documentation and PR claims match
 implemented behavior; report commands, outcomes and checks not run.
 
-Apply the [large-code-change requirements](../../../CONTRIBUTING.md#large-code-changes)
-when the diff exceeds 3,000 changed lines of authored code. Use the guide's
-counting convention; require full contributor self-review, a split decision and
-review map, and validation for each affected area before recommending readiness.
+Apply the [contributor self-review requirements](../../../CONTRIBUTING.md#self-review-before-requesting-review)
+when the diff exceeds 3,000 changed lines of authored code. Report authored-code
+and total changed-line counts separately; require full contributor self-review,
+a split decision and review map, and validation for each affected area before
+recommending readiness.
 
 This skill prepares a local contributor report. It does not itself authorize edits,
 commits, pushes, external posts, or review-status changes; follow separate user
@@ -169,3 +170,4 @@ evidence does not authorize external posting.
 An optional shared demo running System1-Agents on Omni may connect the user task
 to the serving change. Pin both repositories and keep task completion evidence
 separate from inference performance and parity claims.
+
