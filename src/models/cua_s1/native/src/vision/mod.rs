@@ -510,7 +510,6 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for UniqueMap<T> {
     }
 }
 
-mod geometry;
 mod model;
 pub(crate) mod valen;
 #[cfg(test)]
