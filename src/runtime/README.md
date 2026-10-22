@@ -74,6 +74,11 @@ admission behavior unless they explicitly opt in.
 Shared processing orchestration, compatibility grouping, cross-request dynamic
 batching and a shared worker drain lifecycle remain planned. Models may pack
 supported inputs within one request; this scheduler does not assemble GPU batches.
+The Qwen executor supports single prompts, bounded packed prefill (Open-Jev
+candidates or Decider complete rows), and request-local shared prefixes
+(Decider opt-in). Graph, fixed and shared execution retain the same complete
+request admission unit and context lifetime; the scheduler does not construct
+GPU batches or coordinate separately running workers.
 
 CPU tests cover FIFO serialization, queued cancellation, retention of admission
 and resources after dispatched cancellation, errors/panics, independent loaded

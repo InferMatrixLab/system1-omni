@@ -20,7 +20,16 @@ pub struct Engine {
 }
 impl Engine {
     pub async fn load(dir: &Path, library: &Path) -> Result<Self> {
-        Self::load_with_batch(dir, library, BatchLimits::from_env()?).await
+        let graph = crate::options::graph_env()?;
+        Self::load_with_modes_and_runtime(
+            dir,
+            library,
+            BatchLimits::from_env()?,
+            graph,
+            crate::options::prefix_env(graph)?,
+            RuntimeConfig::from_env()?,
+        )
+        .await
     }
     pub async fn load_with_batch(
         dir: &Path,
@@ -29,12 +38,68 @@ impl Engine {
     ) -> Result<Self> {
         Self::load_with_runtime(dir, library, batching, RuntimeConfig::from_env()?).await
     }
+    pub async fn load_with_options(
+        dir: &Path,
+        library: &Path,
+        batching: BatchLimits,
+        graph: bool,
+    ) -> Result<Self> {
+        Self::load_with_modes(
+            dir,
+            library,
+            batching,
+            graph,
+            crate::prefix::PrefixMode::Off,
+        )
+        .await
+    }
+    pub async fn load_with_modes(
+        dir: &Path,
+        library: &Path,
+        batching: BatchLimits,
+        graph: bool,
+        prefix_mode: crate::prefix::PrefixMode,
+    ) -> Result<Self> {
+        Self::load_with_modes_and_runtime(
+            dir,
+            library,
+            batching,
+            graph,
+            prefix_mode,
+            RuntimeConfig::from_env()?,
+        )
+        .await
+    }
+    /// Explicit runtime configuration with the existing independent eager defaults.
     pub async fn load_with_runtime(
         dir: &Path,
         library: &Path,
         batching: BatchLimits,
         config: RuntimeConfig,
     ) -> Result<Self> {
+        Self::load_with_modes_and_runtime(
+            dir,
+            library,
+            batching,
+            false,
+            crate::prefix::PrefixMode::Off,
+            config,
+        )
+        .await
+    }
+    /// Select execution and HTTP policy together without reading environment switches.
+    pub async fn load_with_modes_and_runtime(
+        dir: &Path,
+        library: &Path,
+        batching: BatchLimits,
+        graph: bool,
+        prefix_mode: crate::prefix::PrefixMode,
+        config: RuntimeConfig,
+    ) -> Result<Self> {
+        anyhow::ensure!(
+            !graph || prefix_mode == crate::prefix::PrefixMode::Off,
+            "shared/fixed execution requires Graph off"
+        );
         let runtime = Runtime::new(config)?;
         let directory = dir.to_owned();
         let (processor,checkpoint,mut metadata) = tokio::task::spawn_blocking(move || -> Result<_> {
@@ -46,9 +111,19 @@ impl Engine {
             Ok((processor,checkpoint,metadata))
         }).await??;
         let labels = processor.labels().iter().map(|label| label.id).collect();
-        let executor = Executor::load(dir, library, checkpoint, labels, batching).await?;
+        let executor = Executor::load(
+            dir,
+            library,
+            checkpoint,
+            labels,
+            batching,
+            graph,
+            prefix_mode,
+        )
+        .await?;
         metadata["batch_limits"] =
             json!({"rows":batching.max_rows(),"tokens":batching.max_tokens()});
+        metadata["prefix_mode"] = json!(prefix_mode.name());
         let engine = Self {
             processor: Arc::new(processor),
             executor,
@@ -70,6 +145,19 @@ impl Engine {
     }
     pub fn health(&self) -> Value {
         let mut metadata = self.metadata.clone();
+        let stats = self.executor.graph_stats();
+        metadata["execution"] = json!(if !self.executor.is_ready() {
+            "unavailable"
+        } else if stats.enabled {
+            "graph"
+        } else {
+            "eager"
+        });
+        metadata["graph"] = json!(stats);
+        metadata["prefix"] = json!(self.executor.prefix_stats());
+        if self.executor.is_ready() && metadata["prefix_mode"] != "off" {
+            metadata["execution"] = metadata["prefix_mode"].clone();
+        }
         metadata["status"] = json!(if self.executor.is_ready() {
             "ready"
         } else {

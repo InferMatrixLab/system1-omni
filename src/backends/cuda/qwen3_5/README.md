@@ -17,32 +17,60 @@ The norm, elementwise and q/k preparation kernels round to bfloat16 where Transf
 the BF16 rounding of both attention and sigmoid before multiplication. The native
 workers use this entry point; the separate operations remain available for kernel
 comparisons. Rebuild the library and all native Rust consumers together for
-**ABI version 8**, even with resident features disabled. ABI 8 retains the vision,
-CUDA Graph, gated attention and prefix-continuation entry points and adds
-`cs1_get_device` and `cs1_bf16_finite` for device feature validation. Older
-libraries are rejected at load. See the
+**ABI version 9**. This union retains ABI 8 device-feature entry points and the
+fixed-algorithm GEMM handle, alongside the optional reference and FP32 GDN profiles.
+Older libraries are rejected at load.
+
+cuBLASLt's heuristic picks a GEMM algorithm per M, so a row's result can change with
+the number of rows in the call: a prefix and its branch, run separately, round
+differently from the same tokens in one pass. `cs1_gemm_create_fixed` returns a handle
+that keeps one algorithm per weight shape for every M, the heuristic's first choice at a
+reference M among algorithms without split-K, so each row's result is the same whatever
+M is and wherever the row sits. cuBLASLt doesn't document this property;
+`fixed_gemm_rows_do_not_depend_on_m` checks it, so run it on a new GPU before relying
+on it (it passed on sm_89). It is slower for some shapes and faster for others: on an
+RTX 6000 Ada, the down and output projections take up to about 4 times as long at small
+M without split-K. `cs1_gemm_create` remains the default.
+See the
 [Cua-S1 resident-feature recipe](../../../../recipe/cua_s1/native_vision_graph.md#gpu-resident-vision-features)
-for the opt-in path, lifetime contract and regression commands.
+for the opt-in device feature path, lifetime contract and regression commands.
 
 Gated DeltaNet preparation stores converted TF32 operands in three-byte component planes, preserves the original four-term TF32 accumulation, and writes U/W fragments directly as bfloat16. Dynamic shared memory is 72 KiB per block. The [H200 comparison](../../../../benchmarks/gdn/README.md) records complete GDN call latency, numerical checks, and the small end-to-end change measured with the Open-Jev worker from PR #55.
 
 The shared Rust model can pack independent sequences for input and gate/up GEMMs.
 Output/down GEMMs retain each prompt's original shape and reduction order;
 attention, convolution and GDN calls remain sequence-local. Packing adds no CUDA
-entry points. Open-Jev uses this path within requests; Cua-S1 keeps single-prompt calls.
+entry points. Open-Jev uses this path within requests; Cua-S1 keeps single-prompt calls. Decider optionally packs complete
+question rows within one admitted request.
 
 Prefix continuation retains full-attention KV, three convolution input rows,
 and FP32 Gated DeltaNet state at 64-token chunk boundaries. It is used by the
-experimental JEV-VL worker; existing full-prefill callers keep their own paths.
-ABI 6 adds mandatory copy and prefix entry points after ABI 5 native vision.
+experimental JEV-VL worker and by the shared executor's `forward_shared`, which
+runs prompts that share prefixes once per prefix with the fixed-algorithm GEMM
+handle ([#85](https://github.com/ThinkFlowLab/system1-omni/issues/85)); existing
+full-prefill callers keep their own paths. Fixed/shared execution rejects
+unmerged adapters, reference arithmetic and FP32 GDN before allocating execution
+scratch or selecting the fixed GEMM handle.
+ABI 6 adds mandatory copy and prefix entry points after ABI 5 native vision,
+and the original ABI 7 branch adds the fixed-algorithm GEMM handle. ABI 9
+combines this handle with the current ABI 8 device-feature contract.
 Rebuild the library and **all** Qwen worker binaries together; older libraries
 are rejected. Current-branch GPU regression is required before release.
+
+Decider request-local prefix execution uses the same public `PrefixState` and
+`run_window` continuation path as JEV-VL, with fixed-GEMM selection for its
+independent/shared controls. No separate cached-attention, convolution-history
+or GDN-state ABI is required. See the [Decider recipe](../../../../recipe/decider/README.md).
+The Rust loader checks ABI version before resolving required symbols, so older
+libraries report the rebuild requirement. Decider Graph statistics and synchronized
+stream disposal are preserved; device validation of this consolidated head remains
+unverified. Historical results retain their original implementation provenance.
 
 ## Optional JEMM reference arithmetic
 
 JEMM enables the additive `cs1_reference_*` API group after model load and before
 any forward. It requires cuDNN 9; build with `CUDNN_INCLUDE_DIR` and
-`CUDNN_LIB_DIR`. Builds without those variables retain the current ABI-8 functions;
+`CUDNN_LIB_DIR`. Builds without those variables retain the current ABI-9 functions;
 JEMM reports a missing-capability error rather than silently selecting older numerics.
 
 The reference path uses a per-handle GEMM reduction policy, separate normalization,
@@ -66,7 +94,7 @@ Torch 2.14 cumulative-decay association, and a final BF16 output cast. Each call
 starts with zero state; prefix continuation is rejected by the model adapter.
 The context drains its last stream before destruction, and is retired before
 that stream. Rebuild the library and all consuming workers together for the
-current ABI 8, including this optional group. The independent A800 qualification
+current ABI 9, including this optional group. The independent A800 qualification
 at `27f77e49868d84b091aa804f02ccb4d3474a9a00` used ABI 6; the earlier cumulative
 campaign used ABI 8. Neither campaign qualifies the current integrated source.
 Builds now link both cuBLAS and cuBLASLt. Every consumer of the rebuilt shared

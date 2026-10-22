@@ -8,6 +8,9 @@
 //! their kernels). Text prompts use one position per
 //! token. The explicit multimodal boundary inserts adapted image rows and supplies
 //! the interleaved temporal/height/width rotary positions to the same layer loop.
+//!
+//! `Model::forward_shared` runs prompts that share token prefixes, running each prefix
+//! once and every branch from the state after it (see `SharedPrompts`).
 
 use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
@@ -25,6 +28,9 @@ const ALIGN: usize = 256;
 const BF16: usize = 2;
 const F32: usize = 4;
 const GEMM_WORKSPACE: usize = 32 << 20;
+/// Rows at which `forward_shared` fixes each weight shape's GEMM algorithm (see
+/// cs1_gemm_create_fixed); its branches run tens of tokens.
+const FIXED_GEMM_M: i32 = 64;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -582,6 +588,18 @@ impl Scratch {
     }
 }
 
+/// Cumulative backbone capture/replay evidence, distinct from the decision response.
+#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
+pub struct GraphStats {
+    pub requested: bool,
+    pub enabled: bool,
+    pub captures: u64,
+    pub replays: u64,
+    pub fallbacks: u64,
+    pub invalidations: u64,
+    pub cached_shapes: usize,
+}
+
 /// The cached device-side state of one token prefix (rows `[0, len)`) for the R2d
 /// hybrid path: per full-attention layer the post-prep K rows plus the pre-GEMM V
 /// rows, per Gated DeltaNet layer the float32 recurrent state and the three
@@ -593,6 +611,8 @@ pub struct PrefixState {
     /// Tokens this prefix covers; always a multiple of 64 (the GDN chunk length),
     /// which also aligns the flash-attention key tiles of the one-shot pass.
     len: usize,
+    /// Tokens the buffers hold; `forward_shared` reuses a state for shorter prefixes.
+    cap: usize,
     /// Post-prep K [len, Hk*Dh] and raw V [len, Hk*Dh] rows per full-attention layer.
     attn_kv: Vec<(DeviceBuffer, DeviceBuffer)>,
     /// Float32 [H, K, V] recurrent states, one per Gated DeltaNet layer.
@@ -615,6 +635,62 @@ impl PrefixState {
     }
 }
 
+/// Gated DeltaNet chunk length. `forward_shared` ends prefixes at its multiples, where
+/// a continuation repeats the one-shot arithmetic (see cs1_gdn_prefill_x).
+const GDN_CHUNK: usize = 64;
+
+/// Prompts that share token prefixes, for `Model::forward_shared`. Branch `b` of group `g`
+/// is the prompt `prefix`, then `groups[g].prefix`, then `groups[g].branches[b]`. How the
+/// prompts are grouped does not change any result where the fixed GEMM algorithms keep
+/// rows independent of M (see `forward_shared`).
+pub struct SharedPrompts<'a> {
+    pub prefix: &'a [u32],
+    pub groups: Vec<PromptGroup<'a>>,
+}
+
+pub struct PromptGroup<'a> {
+    pub prefix: &'a [u32],
+    pub branches: Vec<&'a [u32]>,
+}
+
+/// The token runs `forward_shared` executes: the request prefix, then per group its own
+/// prefix and branches. Each prefix ends at the last multiple of `GDN_CHUNK` within it;
+/// its remaining tokens run with every group or branch after it.
+struct Runs {
+    prefix: Vec<u32>,
+    groups: Vec<GroupRuns>,
+}
+
+struct GroupRuns {
+    prefix: Vec<u32>,
+    branches: Vec<Vec<u32>>,
+}
+
+fn runs(prompts: &SharedPrompts) -> Runs {
+    let end = |n: usize| n - n % GDN_CHUNK;
+    let p = end(prompts.prefix.len());
+    let groups = prompts
+        .groups
+        .iter()
+        .map(|g| {
+            let shared = [prompts.prefix, g.prefix].concat();
+            let q = end(shared.len());
+            GroupRuns {
+                prefix: shared[p..q].to_vec(),
+                branches: g
+                    .branches
+                    .iter()
+                    .map(|b| [&shared[q..], b].concat())
+                    .collect(),
+            }
+        })
+        .collect();
+    Runs {
+        prefix: prompts.prefix[..p].to_vec(),
+        groups,
+    }
+}
+
 pub struct Model {
     pub cfg: Config,
     prefix_owner: Arc<()>,
@@ -625,53 +701,69 @@ pub struct Model {
     lora: Option<lora::Lora>,
     stream: Stream,
     gemm: *mut c_void,
+    /// One GEMM algorithm per weight shape for `forward_shared`; created on first use.
+    fixed_gemm: *mut c_void,
     reference: Option<&'static cuda::Reference>,
     fp32_gdn: Option<cuda::Fp32Gdn>,
     /// Buffers for the largest packed token count so far; grows as needed.
     scratch: Option<Scratch>,
+    /// The request and group prefix states of `forward_shared`; grow as needed.
+    shared: [Option<PrefixState>; 2],
     /// Opt-in replay with at most 64 captures per mode, keyed by sequence lengths.
     graph_enabled: bool,
+    graph_stats: GraphStats,
     graphs: VecDeque<(Vec<usize>, cuda::Graph)>,
     mm_graphs: VecDeque<(Vec<usize>, cuda::Graph)>,
-    // The opt-in adapter path owns its stream; it retires after every device allocation.
-    _lora_stream: Option<LoraStream>,
+    // The stream retires after every model allocation, including adapter resources.
+    _stream_owner: ModelStream,
 }
 
-// SAFETY: the raw pointers are device addresses and a cuBLASLt handle owned by the
+// SAFETY: the raw pointers are device addresses and cuBLASLt handles owned by the
 // model; the engine runs one forward pass at a time behind a mutex.
 unsafe impl Send for Model {}
 
-struct LoraStream(Stream);
-impl Drop for LoraStream {
+struct ModelStream(Stream);
+impl Drop for ModelStream {
     fn drop(&mut self) {
-        // SAFETY: the adapter Model owns this stream, and has retired all allocations.
+        // SAFETY: the Model owns this stream, and has retired all allocations.
         unsafe { (cuda::api().cs1_stream_destroy)(self.0) };
     }
 }
 
 impl Drop for Model {
     fn drop(&mut self) {
-        if self.lora.is_some() {
-            let _ = cuda::set_device(0);
-            let _ = cuda::synchronize(self.stream);
-        }
+        let _ = cuda::set_device(0);
+        let _ = cuda::synchronize(self.stream);
         self.graphs.clear();
         self.mm_graphs.clear();
-        if self.lora.is_some() {
-            self.scratch = None;
-        }
+        self.scratch = None;
+        self.shared = [None, None];
         // Retire the FP32 cuBLAS context while its last stream is still valid.
         self.fp32_gdn = None;
-        // SAFETY: created by cs1_gemm_create and not destroyed before.
-        unsafe { (cuda::api().cs1_gemm_destroy)(self.gemm) };
+        // SAFETY: both GEMM handles are owned by this model and destroyed once.
+        unsafe {
+            (cuda::api().cs1_gemm_destroy)(self.gemm);
+            if !self.fixed_gemm.is_null() {
+                (cuda::api().cs1_gemm_destroy)(self.fixed_gemm);
+            }
+        }
     }
 }
 
 impl Model {
     /// Load the CUDA library and the weights.
     pub fn load(dir: &Path, library: &Path) -> Result<Self> {
+        Self::load_with_graph(
+            dir,
+            library,
+            std::env::var("CUA_S1_GRAPH").as_deref() == Ok("1"),
+        )
+    }
+
+    /// Explicit mode for model adapters; does not read another worker's switch.
+    pub fn load_with_graph(dir: &Path, library: &Path, graph: bool) -> Result<Self> {
         let cfg = Config::load(dir)?;
-        Self::load_checkpoint(dir, library, cfg, None)
+        Self::load_checkpoint(dir, library, cfg, None, graph)
     }
 
     /// Load an immutable FP32 PEFT language adapter without merging it into BF16 weights.
@@ -685,7 +777,13 @@ impl Model {
     ) -> Result<Self> {
         let cfg = Config::load(dir)?;
         let adapter = lora::Checkpoint::load(&cfg, adapter_path, scale)?;
-        Self::load_checkpoint(dir, library, cfg, Some(adapter))
+        Self::load_checkpoint(
+            dir,
+            library,
+            cfg,
+            Some(adapter),
+            std::env::var("CUA_S1_GRAPH").as_deref() == Ok("1"),
+        )
     }
 
     fn load_checkpoint(
@@ -693,11 +791,12 @@ impl Model {
         library: &Path,
         cfg: Config,
         adapter: Option<lora::Checkpoint>,
+        graph: bool,
     ) -> Result<Self> {
         cuda::load(library)?;
         cuda::set_device(0)?;
         let stream = cuda::new_stream()?;
-        let stream_owner = adapter.as_ref().map(|_| LoraStream(stream));
+        let stream_owner = ModelStream(stream);
         let weights = Weights::load(dir, stream)?;
         let lora = adapter
             .map(|source| source.upload(cfg.full_attention.len(), stream))
@@ -769,15 +868,29 @@ impl Model {
             lora,
             stream,
             gemm,
+            fixed_gemm: std::ptr::null_mut(),
             reference: None,
             fp32_gdn: None,
             scratch: None,
-            graph_enabled: std::env::var("CUA_S1_GRAPH").as_deref() == Ok("1"),
+            shared: [None, None],
+            graph_enabled: graph,
+            graph_stats: GraphStats {
+                requested: graph,
+                ..GraphStats::default()
+            },
             graphs: VecDeque::new(),
-            _lora_stream: stream_owner,
+            _stream_owner: stream_owner,
             mm_graphs: VecDeque::new(),
         };
         Ok(model)
+    }
+
+    pub fn graph_stats(&self) -> GraphStats {
+        GraphStats {
+            enabled: self.graph_enabled,
+            cached_shapes: self.graphs.len() + self.mm_graphs.len(),
+            ..self.graph_stats
+        }
     }
 
     /// Cua-S1's unmerged text path: framework norm/GEMM/attention plus FP32 GDN.
@@ -836,12 +949,25 @@ impl Model {
     }
 
     fn gemm(&self, s: &Scratch, x: usize, w: &Tensor, y: usize, m: usize) -> Result<()> {
+        self.gemm_with(self.gemm, s, x, w, y, m)
+    }
+
+    /// `gemm` with the cuBLASLt handle `handle`.
+    fn gemm_with(
+        &self,
+        handle: *mut c_void,
+        s: &Scratch,
+        x: usize,
+        w: &Tensor,
+        y: usize,
+        m: usize,
+    ) -> Result<()> {
         let (n, k) = (w.shape[0] as i32, w.shape[1] as i32);
         // SAFETY: x and y are scratch buffers sized for m rows of w's shape.
         check(
             unsafe {
                 (cuda::api().cs1_gemm)(
-                    self.gemm,
+                    handle,
                     s.at(x),
                     w.ptr,
                     s.at(y),
@@ -867,8 +993,23 @@ impl Model {
         lengths: &[usize],
         group: Group,
     ) -> Result<()> {
+        self.gemm_group_with(self.gemm, s, x, w, y, m, lengths, group)
+    }
+
+    #[allow(clippy::too_many_arguments)] // Base projection coordinates and sequence shape.
+    fn gemm_group_with(
+        &self,
+        handle: *mut c_void,
+        s: &Scratch,
+        x: usize,
+        w: &Tensor,
+        y: usize,
+        m: usize,
+        lengths: &[usize],
+        group: Group,
+    ) -> Result<()> {
         if self.lora.is_none() {
-            return self.gemm(s, x, w, y, m);
+            return self.gemm_with(handle, s, x, w, y, m);
         }
         let components = lora::component_rows(&self.cfg, group)?;
         ensure!(
@@ -887,7 +1028,7 @@ impl Model {
                 w.shape[1],
                 &components,
                 work,
-                self.gemm,
+                handle,
                 self.stream,
             )
         }
@@ -950,8 +1091,9 @@ impl Model {
     fn prepare_scratch(&mut self, t: usize) -> Result<()> {
         cuda::set_device(0)?;
         if self.scratch.as_ref().is_none_or(|s| t > s.cap) {
-            if self.lora.is_some() {
-                cuda::synchronize(self.stream)?;
+            cuda::synchronize(self.stream)?;
+            if !self.graphs.is_empty() || !self.mm_graphs.is_empty() {
+                self.graph_stats.invalidations += 1;
             }
             self.graphs.clear();
             self.mm_graphs.clear();
@@ -1006,6 +1148,7 @@ impl Model {
         if self.graph_enabled {
             if let Some((_, graph)) = self.graphs.iter().find(|(shape, _)| *shape == lengths) {
                 graph.launch(self.stream)?;
+                self.graph_stats.replays += 1;
                 if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
                     eprintln!("CUA_S1_GRAPH mode=text event=replay tokens={t}");
                 }
@@ -1015,7 +1158,7 @@ impl Model {
                 self.run(s, &lengths, false)?;
                 cuda::synchronize(self.stream)?;
                 let captured = cuda::Graph::capture(self.stream, || self.run(s, &lengths, false));
-                self.cache_graph(&lengths, false, captured);
+                self.cache_graph(&lengths, false, captured)?;
             }
         } else {
             self.run(s, &lengths, false)?;
@@ -1058,6 +1201,7 @@ impl Model {
                 .find(|(shape, _)| shape.as_slice() == [t])
             {
                 graph.launch(self.stream)?;
+                self.graph_stats.replays += 1;
                 if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
                     eprintln!("CUA_S1_GRAPH mode=multimodal event=replay tokens={t}");
                 }
@@ -1067,7 +1211,7 @@ impl Model {
                 self.run(s, &[t], true)?;
                 cuda::synchronize(self.stream)?;
                 let captured = cuda::Graph::capture(self.stream, || self.run(s, &[t], true));
-                self.cache_graph(&[t], true, captured);
+                self.cache_graph(&[t], true, captured)?;
             }
         } else {
             self.run(s, &[t], true)?;
@@ -1076,16 +1220,23 @@ impl Model {
     }
 
     /// Both modes retain the eager miss result; capture records without executing.
-    fn cache_graph(&mut self, lengths: &[usize], multimodal: bool, captured: Result<cuda::Graph>) {
+    fn cache_graph(
+        &mut self,
+        lengths: &[usize],
+        multimodal: bool,
+        captured: Result<cuda::Graph>,
+    ) -> Result<()> {
         let mode = if multimodal { "multimodal" } else { "text" };
         match captured {
             Ok(graph) => {
+                self.graph_stats.captures += 1;
                 let cache = if multimodal {
                     &mut self.mm_graphs
                 } else {
                     &mut self.graphs
                 };
                 if cache.len() == 64 {
+                    cuda::synchronize(self.stream)?;
                     cache.pop_front();
                 }
                 cache.push_back((lengths.to_vec(), graph));
@@ -1098,11 +1249,13 @@ impl Model {
                 eprintln!(
                     "CUDA Graph capture failed in {mode} mode; using eager execution: {error:#}"
                 );
+                self.graph_stats.fallbacks += 1;
                 self.graph_enabled = false;
                 self.graphs.clear();
                 self.mm_graphs.clear();
             }
         }
+        Ok(())
     }
 
     /// Eager multimodal execution using borrowed device-resident image rows.
@@ -1256,6 +1409,7 @@ impl Model {
             owner: Arc::clone(&self.prefix_owner),
             initialized: false,
             len,
+            cap: len,
             attn_kv,
             gdn_state,
             conv_tail,
@@ -1297,7 +1451,7 @@ impl Model {
         self.upload_positions(s, input.position_ids)?;
         self.embed_tokens(s, input.token_ids)?;
         self.overwrite_image_rows(s, input, 0)?;
-        self.run_window(s, 0, t, true, Some(state), None)?;
+        self.run_window(s, 0, t, true, Some(state), None, self.gemm)?;
         self.synchronize()?;
         state.initialized = true;
         Ok(())
@@ -1339,8 +1493,180 @@ impl Model {
         self.upload_positions(s, input.position_ids)?;
         self.embed_tokens_at(s, input.token_ids, prefix.len)?;
         self.overwrite_image_rows(s, input, prefix.len)?;
-        self.run_window(s, prefix.len, tend, true, None, Some(prefix))?;
+        self.run_window(s, prefix.len, tend, true, None, Some(prefix), self.gemm)?;
         self.last_hidden(s, tend)
+    }
+
+    /// `forward` with the GEMM algorithms of `forward_shared`, one per weight shape, run
+    /// eagerly: the result that `forward_shared` reproduces for this prompt.
+    pub fn forward_fixed(&mut self, ids: &[u32]) -> Result<Vec<f32>> {
+        ensure!(
+            self.lora.is_none() && self.reference.is_none() && self.fp32_gdn.is_none(),
+            "fixed GEMM and shared-prefix execution require merged weights and default numerics"
+        );
+        let result = self.run_fixed(ids);
+        if result.is_err() {
+            // Work already queued may still use the buffers.
+            let _ = cuda::synchronize(self.stream);
+        }
+        result
+    }
+
+    fn run_fixed(&mut self, ids: &[u32]) -> Result<Vec<f32>> {
+        let t = ids.len();
+        ensure!(
+            t > 0 && t <= self.cfg.max_positions,
+            "empty or oversized prompt"
+        );
+        ensure!(
+            ids.iter().all(|&i| (i as usize) < self.embed.shape[0]),
+            "token id outside the vocabulary"
+        );
+        self.prepare_scratch(t)?;
+        let gemm = self.fixed_gemm()?;
+        let s = self.scratch.as_ref().unwrap();
+        self.embed_tokens(s, ids)?;
+        self.run_window(s, 0, t, false, None, None, gemm)?;
+        self.last_hidden(s, t)
+    }
+
+    /// The final-norm hidden state at the last position of every branch, grouped and
+    /// ordered as in `prompts`. Each prefix runs once, up to its last multiple of 64
+    /// tokens, capturing its state as `forward_multimodal_capture` does, and each branch
+    /// continues from the state after its prefixes, with its positions and causal mask
+    /// continuing theirs. A prefix's remaining tokens run with every group or branch
+    /// after it.
+    ///
+    /// On a GPU where the fixed GEMM algorithms keep rows independent of M (see
+    /// cs1_gemm_create_fixed), each result equals `forward_fixed` on the full prompt bit
+    /// for bit, however the prompts are grouped. It differs from `forward`, which picks
+    /// GEMM algorithms per row count, by rounding.
+    ///
+    /// Runs eagerly. The prefix states are overwritten by the next call, and the stream
+    /// is synchronized before this returns, also on error.
+    pub fn forward_shared(&mut self, prompts: &SharedPrompts) -> Result<Vec<Vec<Vec<f32>>>> {
+        ensure!(
+            self.lora.is_none() && self.reference.is_none() && self.fp32_gdn.is_none(),
+            "fixed GEMM and shared-prefix execution require merged weights and default numerics"
+        );
+        let result = self.run_shared(prompts);
+        if result.is_err() {
+            // Work already queued may still use the buffers.
+            let _ = cuda::synchronize(self.stream);
+        }
+        result
+    }
+
+    fn run_shared(&mut self, prompts: &SharedPrompts) -> Result<Vec<Vec<Vec<f32>>>> {
+        let vocab = self.embed.shape[0];
+        ensure!(!prompts.groups.is_empty(), "no prompts");
+        let mut longest = 0;
+        for g in &prompts.groups {
+            ensure!(!g.branches.is_empty(), "a prompt group without branches");
+            for b in &g.branches {
+                ensure!(!b.is_empty(), "an empty branch");
+                longest = longest.max(prompts.prefix.len() + g.prefix.len() + b.len());
+            }
+        }
+        ensure!(longest <= self.cfg.max_positions, "oversized prompt");
+        let all = prompts
+            .groups
+            .iter()
+            .flat_map(|g| g.prefix.iter().chain(g.branches.iter().copied().flatten()));
+        ensure!(
+            prompts
+                .prefix
+                .iter()
+                .chain(all)
+                .all(|&i| (i as usize) < vocab),
+            "token id outside the vocabulary"
+        );
+        let runs = runs(prompts);
+        let p = runs.prefix.len();
+        // the longest group prefix that runs on its own, if any
+        let q = runs
+            .groups
+            .iter()
+            .filter(|g| !g.prefix.is_empty())
+            .map(|g| p + g.prefix.len())
+            .max()
+            .unwrap_or(0);
+        self.prepare_scratch(longest)?;
+        let gemm = self.fixed_gemm()?;
+        let [mut request, mut group] = std::mem::take(&mut self.shared);
+        let result = (|| {
+            let request = self.shared_state(&mut request, p)?;
+            let group = self.shared_state(&mut group, q)?;
+            let s = self.scratch.as_ref().unwrap();
+            let request = match request {
+                Some(state) => {
+                    self.embed_tokens(s, &runs.prefix)?;
+                    self.run_window(s, 0, p, false, Some(&mut *state), None, gemm)?;
+                    Some(&*state)
+                }
+                None => None,
+            };
+            let mut group = group;
+            let mut hidden = Vec::with_capacity(runs.groups.len());
+            for run in &runs.groups {
+                let start = p + run.prefix.len();
+                let from = if run.prefix.is_empty() {
+                    request
+                } else {
+                    let state = group.as_deref_mut().unwrap();
+                    state.len = start;
+                    self.embed_tokens_at(s, &run.prefix, p)?;
+                    self.run_window(s, p, start, false, Some(&mut *state), request, gemm)?;
+                    Some(&*state)
+                };
+                let rows = run
+                    .branches
+                    .iter()
+                    .map(|b| {
+                        let end = start + b.len();
+                        self.embed_tokens_at(s, b, start)?;
+                        self.run_window(s, start, end, false, None, from, gemm)?;
+                        self.last_hidden(s, end)
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                hidden.push(rows);
+            }
+            Ok(hidden)
+        })();
+        self.shared = [request, group];
+        result
+    }
+
+    /// `slot`'s state resized to hold `len` tokens, none for an empty prefix.
+    fn shared_state<'s>(
+        &self,
+        slot: &'s mut Option<PrefixState>,
+        len: usize,
+    ) -> Result<Option<&'s mut PrefixState>> {
+        if len == 0 {
+            return Ok(None);
+        }
+        if slot.as_ref().is_none_or(|state| state.cap < len) {
+            *slot = None;
+            let cap = len
+                .next_multiple_of(1024)
+                .min(self.cfg.max_positions - self.cfg.max_positions % GDN_CHUNK);
+            *slot = Some(self.alloc_prefix(cap.max(len))?);
+        }
+        let state = slot.as_mut().unwrap();
+        state.len = len;
+        Ok(Some(state))
+    }
+
+    /// The GEMM handle with one algorithm per weight shape, created on first use.
+    fn fixed_gemm(&mut self) -> Result<*mut c_void> {
+        if self.fixed_gemm.is_null() {
+            // SAFETY: plain allocation; checked for null below.
+            self.fixed_gemm =
+                unsafe { (cuda::api().cs1_gemm_create_fixed)(GEMM_WORKSPACE, FIXED_GEMM_M) };
+            ensure!(!self.fixed_gemm.is_null(), "cuBLASLt setup failed");
+        }
+        Ok(self.fixed_gemm)
     }
 
     fn embed_tokens(&self, s: &Scratch, ids: &[u32]) -> Result<()> {
@@ -1677,15 +2003,19 @@ impl Model {
     /// The R2d prefix-cache pass: run rows `[qb, tend)` of one prompt with
     /// explicit positions, touching per-layer buffers only for those rows.
     ///
-    /// `capture` (qb must be 0): collect post-prep K and pre-GEMM V columns of each
+    /// `capture` (`tend` rows): collect post-prep K and pre-GEMM V columns of each
     /// full-attention layer plus the float32 GDN state and the three pre-conv
-    /// projection columns of each Gated DeltaNet layer. `prefix` (qb = prefix.len):
+    /// projection columns of each Gated DeltaNet layer, for rows `[0, tend)`; with a
+    /// `prefix` too, the state after it continued. `prefix` (qb = prefix.len):
     /// seed the window from a captured entry — the conv tail columns are copied
     /// back into place before the convolution, and the prefix K/V columns before
     /// the attention. Everything else is `run()` with shifted row bases, so a
     /// captured+continued pass repeats the one-shot arithmetic token for token
     /// (qb is a multiple of the 64-row GDN chunk; the only remaining divergence
-    /// is cuBLASLt's M-shaped plan choice, an f32-accumulation-order ulp).
+    /// is cuBLASLt's M-shaped plan choice, an f32-accumulation-order ulp, which the
+    /// fixed-algorithm `gemm` handle removes). Custom positions hold the window's
+    /// rows from index 0; the text tables are indexed by position.
+    #[allow(clippy::too_many_arguments)] // One window: rows, positions, states and GEMM handle.
     fn run_window(
         &self,
         s: &Scratch,
@@ -1694,13 +2024,16 @@ impl Model {
         custom_positions: bool,
         capture: Option<&mut PrefixState>,
         prefix: Option<&PrefixState>,
+        gemm: *mut c_void,
     ) -> Result<()> {
         ensure!(
             self.fp32_gdn.is_none(),
             "FP32 GDN does not support prefix continuation"
         );
         ensure!(
-            qb <= tend && (qb == 0) == prefix.is_none() && (qb == 0 || capture.is_none()),
+            qb < tend
+                && prefix.map_or(qb == 0, |pre| pre.len == qb)
+                && capture.as_deref().is_none_or(|cap| cap.len == tend),
             "prefix window shape"
         );
         let cfg = &self.cfg;
@@ -1714,7 +2047,8 @@ impl Model {
         let (cos, sin) = if custom_positions {
             (s.custom_cos, s.custom_sin)
         } else {
-            (s.cos, s.sin)
+            let rope = qb * cfg.rotary_half * BF16;
+            (s.cos + rope, s.sin + rope)
         };
         let hb = cfg.hidden * BF16;
         let ob = cfg.heads * cfg.head_dim * BF16; // post-prep q/gate and ao row bytes
@@ -1729,7 +2063,8 @@ impl Model {
         let mut la_i = 0usize;
         // SAFETY (every kernel call below): pointers are weights in the arena or
         // scratch buffers laid out for tend tokens at the widths used here; prefix
-        // buffers hold exactly the shapes allocated by alloc_prefix(qb).
+        // buffers hold at least `len` rows (a capture's `tend`) of the shapes
+        // allocated by alloc_prefix.
         unsafe {
             check(
                 (self
@@ -1749,7 +2084,8 @@ impl Model {
         for (i, layer) in self.layers.iter().enumerate() {
             match &layer.mixer {
                 Mixer::Linear(la) => {
-                    self.gemm_group(
+                    self.gemm_group_with(
+                        gemm,
                         s,
                         s.x + qb * hb,
                         &la.in_proj,
@@ -1770,28 +2106,26 @@ impl Model {
                     let z = s.gdn_in + w.conv * BF16;
                     let b = z + vd * BF16;
                     let a = b + hv * BF16;
-                    let (s_in, s_out): (*const c_void, *mut c_void) =
-                        match (&prefix, capture.as_deref()) {
-                            (Some(pre), _) => {
-                                (pre.gdn_state[la_i].at(0).cast_const(), std::ptr::null_mut())
-                            }
-                            (None, Some(cap)) => (std::ptr::null(), cap.gdn_state[la_i].at(0)),
-                            (None, None) => (std::ptr::null(), std::ptr::null_mut()),
-                        };
+                    let s_in: *const c_void =
+                        prefix.map_or(std::ptr::null(), |pre| pre.gdn_state[la_i].at(0));
+                    let s_out: *mut c_void = capture
+                        .as_deref()
+                        .map_or(std::ptr::null_mut(), |cap| cap.gdn_state[la_i].at(0));
                     unsafe {
-                        if let Some(cap) = capture.as_deref() {
-                            // conv window tail: the last three pre-conv columns.
-                            cuda::copy_dd(
-                                cap.conv_tail[la_i].at(0),
-                                p(s.gdn_in + (rows - 3) * ldbb),
-                                3 * ldbb,
-                                st,
-                            )?;
-                        }
                         if qb > 0 {
                             cuda::copy_dd(
                                 p(s.gdn_in + (qb - 3) * ldbb),
                                 prefix.unwrap().conv_tail[la_i].at(0),
+                                3 * ldbb,
+                                st,
+                            )?;
+                        }
+                        if let Some(cap) = capture.as_deref() {
+                            // conv window tail: the last three pre-conv columns, which
+                            // include restored prefix columns for a window under three rows.
+                            cuda::copy_dd(
+                                cap.conv_tail[la_i].at(0),
+                                p(s.gdn_in + (tend - 3) * ldbb),
                                 3 * ldbb,
                                 st,
                             )?;
@@ -1865,7 +2199,7 @@ impl Model {
                             "gated norm",
                         )?;
                     }
-                    self.gemm(s, s.ln + qb * vb, &la.out, s.delta + qb * hb, rows)?;
+                    self.gemm_with(gemm, s, s.ln + qb * vb, &la.out, s.delta + qb * hb, rows)?;
                     self.apply_lora(
                         i,
                         Group::LinearOutput,
@@ -1877,7 +2211,8 @@ impl Model {
                     la_i += 1;
                 }
                 Mixer::Full(fa) => {
-                    self.gemm_group(
+                    self.gemm_group_with(
+                        gemm,
                         s,
                         s.x + qb * hb,
                         &fa.qkv,
@@ -1953,7 +2288,7 @@ impl Model {
                             "gated attention",
                         )?;
                     }
-                    self.gemm(s, s.ao + qb * ob, &fa.o, s.delta + qb * hb, rows)?;
+                    self.gemm_with(gemm, s, s.ao + qb * ob, &fa.o, s.delta + qb * hb, rows)?;
                     self.apply_lora(
                         i,
                         Group::AttentionOutput,
@@ -1982,7 +2317,8 @@ impl Model {
                     "post-attention norm",
                 )?;
             }
-            self.gemm_group(
+            self.gemm_group_with(
+                gemm,
                 s,
                 s.x + qb * hb,
                 &layer.gate_up,
@@ -2012,7 +2348,8 @@ impl Model {
                     "silu mul",
                 )?;
             }
-            self.gemm(
+            self.gemm_with(
+                gemm,
                 s,
                 s.act + qb * cfg.intermediate * BF16,
                 &layer.down,
@@ -2052,6 +2389,10 @@ impl Model {
         Ok(())
     }
 }
+
 #[cfg(test)]
 #[path = "../../../../../tests/qwen3_5/multimodal_graph.rs"]
 mod graph_tests;
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/model.rs"]
+mod tests;
