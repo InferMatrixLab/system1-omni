@@ -116,3 +116,74 @@ async fn successful_response_and_existing_body_rejections_are_preserved() {
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(runtime.report().unwrap().depth, 0);
 }
+
+#[tokio::test]
+async fn token_ceiling_refusal_is_json_422_without_retry_after() {
+    let runtime =
+        Runtime::new(RuntimeConfig::from_values(Some("2"), Some("100"), None).unwrap()).unwrap();
+    // A permanently oversized request is invalid both when idle and under contention.
+    for held_tokens in [0, 60] {
+        let held = runtime
+            .reserve_tokens(runtime.admit(Instant::now()).unwrap(), held_tokens)
+            .unwrap();
+        let response = within_budget(&runtime, Request::new(Body::empty()), |_, context| async {
+            match runtime.reserve_tokens(context, 101) {
+                Ok(_) => panic!("oversized request reached execution"),
+                Err(error) => runtime_error(error, StatusCode::INTERNAL_SERVER_ERROR),
+            }
+        })
+        .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(!response.headers().contains_key("retry-after"));
+        assert_eq!(response.headers()["content-type"], "application/json");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            json!({"detail": "request exceeds processed-token capacity"})
+        );
+        assert_eq!(runtime.report().unwrap().depth, 1);
+        drop(held);
+        assert_eq!(runtime.report().unwrap().depth, 0);
+    }
+    assert_eq!(runtime.report().unwrap().rejected, 2);
+    let whole = runtime
+        .reserve_tokens(runtime.admit(Instant::now()).unwrap(), 100)
+        .unwrap();
+    drop(whole);
+}
+
+#[tokio::test]
+async fn temporary_token_contention_is_json_503_with_retry_after_and_recovers() {
+    let runtime =
+        Runtime::new(RuntimeConfig::from_values(Some("2"), Some("100"), None).unwrap()).unwrap();
+    let held = runtime
+        .reserve_tokens(runtime.admit(Instant::now()).unwrap(), 60)
+        .unwrap();
+    let response = within_budget(&runtime, Request::new(Body::empty()), |_, context| async {
+        match runtime.reserve_tokens(context, 41) {
+            Ok(_) => panic!("overloaded request reached execution"),
+            Err(error) => runtime_error(error, StatusCode::INTERNAL_SERVER_ERROR),
+        }
+    })
+    .await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response.headers()["retry-after"], "1");
+    assert_eq!(response.headers()["content-type"], "application/json");
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+        json!({"detail": "inference capacity exhausted"})
+    );
+    assert_eq!(runtime.report().unwrap().depth, 1);
+    assert_eq!(runtime.report().unwrap().rejected, 1);
+    drop(held);
+    let retried = runtime
+        .reserve_tokens(runtime.admit(Instant::now()).unwrap(), 41)
+        .unwrap();
+    drop(retried);
+    assert_eq!(runtime.report().unwrap().depth, 0);
+}

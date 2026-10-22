@@ -14,7 +14,7 @@ Run from the repository root on a CUDA host with NVCC, cuBLASLt and an NVIDIA
 GPU supported by the [Qwen backend](../../src/backends/cuda/qwen3_5/README.md).
 The second build-script argument is the GPU compute capability without a dot
 (`89` below is for an RTX 4090). Build the library from the same source as the
-worker; this branch requires Qwen ABI 6. The Rust build itself needs no CUDA
+worker; this branch requires Qwen ABI 8. The Rust build itself needs no CUDA
 toolkit, but serving requires the compiled library and a GPU.
 
 ```sh
@@ -64,13 +64,16 @@ The separate FIFO scheduler still admits one complete Decider execution request
 at a time. Request capacity also bounds preprocessing; a token-only deployment
 must prepare a request before it can determine its token cost.
 
-Capacity refusal returns `503`, `Content-Type: application/json`,
-`Retry-After: 1`, and `{"detail":"inference capacity exhausted"}`. This includes
-a single request whose processed-token cost exceeds the entire token ceiling.
-Such a request cannot succeed unchanged under that configuration: reduce its
-prepared work or raise the configured budget and restart the worker. Do not
-blindly retry it merely because `Retry-After` is present. For transient
-contention, use bounded retries with backoff and an overall client deadline.
+Temporary request/token contention returns `503`, `Content-Type: application/json`,
+`Retry-After: 1`, and `{"detail":"inference capacity exhausted"}`. Use bounded
+retries with backoff and an overall client deadline for this response.
+
+A single request whose processed-token cost exceeds the entire token ceiling
+returns JSON `422` with `{"detail":"request exceeds processed-token capacity"}`
+and no `Retry-After` header. It is rejected before execution and cannot succeed
+unchanged under that configuration: reduce its prepared work or raise the
+configured budget and restart the worker. A request costing exactly the ceiling
+is accepted when that token capacity is free.
 
 Deadline expiry returns JSON `504` with `{"detail":"request timed out"}`.
 The deadline is strict: work that completes after it may still yield `504`
@@ -103,7 +106,8 @@ unset members are `null`.
 Only a configured request-count bound adds top-level `depth`, `capacity` and
 `rejected`. `depth` includes all outstanding request reservations, including
 blocking work retained after a timeout; `capacity` is the request-count ceiling.
-`rejected` counts request-capacity and token-capacity refusals, not timeouts or
+`rejected` counts request-capacity and token-capacity refusals, including requests
+larger than the entire token ceiling. It excludes timeouts and processor
 validation failures. Token-only or timeout-only deployments do not publish
 these three fields. Token occupancy is not exposed by this health interface.
 

@@ -73,6 +73,15 @@ impl std::fmt::Display for Overloaded {
 }
 impl std::error::Error for Overloaded {}
 
+#[derive(Debug)]
+pub struct OversizedRequest;
+impl std::fmt::Display for OversizedRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("request exceeds processed-token capacity")
+    }
+}
+impl std::error::Error for OversizedRequest {}
+
 pub struct Runtime {
     config: RuntimeConfig,
     requests: Option<BoundedAdmission>,
@@ -108,7 +117,22 @@ impl Runtime {
     ) -> Result<ExecutionContext> {
         context.check()?;
         match &self.tokens {
-            Some(admission) => Ok(context.retain(admission.try_admit(tokens).ok_or(Overloaded)?)),
+            Some(admission) => {
+                let permit = admission.try_admit(tokens).ok_or_else(|| {
+                    // Admission records every refusal; the HTTP adapter distinguishes
+                    // requests that can fit after contention clears from those that cannot.
+                    if self
+                        .config
+                        .max_tokens
+                        .is_some_and(|ceiling| tokens > ceiling)
+                    {
+                        anyhow::Error::new(OversizedRequest)
+                    } else {
+                        anyhow::Error::new(Overloaded)
+                    }
+                })?;
+                Ok(context.retain(permit))
+            }
             None => Ok(context),
         }
     }

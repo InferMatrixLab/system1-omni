@@ -2,7 +2,7 @@
 use crate::{
     Limits,
     engine::Engine,
-    runtime::{Overloaded, Runtime},
+    runtime::{Overloaded, OversizedRequest, Runtime},
 };
 use axum::{
     Json, Router,
@@ -96,6 +96,8 @@ fn runtime_error(error: anyhow::Error, fallback: StatusCode) -> Response {
             .headers_mut()
             .insert("retry-after", axum::http::HeaderValue::from_static("1"));
         response
+    } else if error.is::<OversizedRequest>() {
+        self::error(StatusCode::UNPROCESSABLE_ENTITY, error)
     } else if error.is::<ExecutionStopped>() {
         self::error(StatusCode::GATEWAY_TIMEOUT, "request timed out")
     } else if fallback == StatusCode::UNPROCESSABLE_ENTITY {
