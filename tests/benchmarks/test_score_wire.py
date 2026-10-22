@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import copy
 import io
+import json
 import random
 import tempfile
 import unittest
@@ -27,7 +28,11 @@ def case_for(count):
 
 
 def payload(score, probabilities):
-    return {"answers": {"q": {"score": score, "probabilities": probabilities}}}
+    return {
+        "answers": {
+            "q": {"type": "score", "score": score, "probabilities": probabilities}
+        }
+    }
 
 
 class ScoreWireTests(unittest.TestCase):
@@ -168,6 +173,7 @@ class ScoreWireTests(unittest.TestCase):
     def test_run_saves_precision_and_uses_it_for_warmup(self):
         async def check():
             case = case_for(2) | {"id": "score", "expected": {"q": 0.88}}
+            case["request"]["state"] = "CPU fixture"
             response = payload(0.88, {"0": 0.1234, "1": 0.8766})
             with tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -187,7 +193,7 @@ class ScoreWireTests(unittest.TestCase):
                     )
                 }
                 bench.write_json(root / "metadata.json", metadata)
-                bench.write_json(root / "manifest.jsonl", case)
+                (root / "manifest.jsonl").write_text(json.dumps(case) + "\n")
                 args = argparse.Namespace(
                     metadata=root / "metadata.json",
                     output=root / "run",
@@ -210,8 +216,6 @@ class ScoreWireTests(unittest.TestCase):
                     redirect_stdout(io.StringIO()),
                 ):
                     self.assertEqual(await bench.run(args, [case]), 0)
-                import json
-
                 config = json.loads((args.output / "config.json").read_text())
                 self.assertEqual(config["score_decimals"], 2)
                 self.assertEqual(
