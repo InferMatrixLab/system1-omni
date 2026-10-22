@@ -73,7 +73,12 @@ struct Held {
 /// sequence of admissions and releases can drive the counter below zero.
 #[derive(Clone, Copy, Debug)]
 pub struct Reservation {
+    /// The cost the work was admitted at, which is what [`Permit::units`] reports.
     units: usize,
+    /// What the shared unit total was advanced by, so release subtracts exactly that. Zero when
+    /// no unit budget is configured: there is then no total, and charging it would overflow for
+    /// a cost near `usize::MAX` while bounding nothing.
+    charged: usize,
 }
 
 impl BoundedAdmission {
@@ -118,7 +123,7 @@ impl BoundedAdmission {
             held.rejected += 1;
             return None;
         }
-        let reserved = match self.0.units {
+        let charged = match self.0.units {
             Some(ceiling) => {
                 // A request larger than the whole ceiling is refused rather than clamped, so a
                 // reservation is never bigger than the budget it was admitted under. What is
@@ -130,13 +135,16 @@ impl BoundedAdmission {
                 }
                 units
             }
-            None => units,
+            // No unit budget, so there is no total to keep and nothing is charged. Adding the
+            // caller's cost here would overflow for a cost near `usize::MAX` while protecting
+            // nothing: the request bound is the only limit this configuration asked for.
+            None => 0,
         };
         held.outstanding += 1;
-        held.units += reserved;
+        held.units += charged;
         Some(Permit {
             admission: Arc::clone(&self.0),
-            reserved: Reservation { units: reserved },
+            reserved: Reservation { units, charged },
         })
     }
 
@@ -164,10 +172,12 @@ impl Admission {
             .outstanding
             .checked_sub(1)
             .expect("a permit releases exactly one admission");
-        held.units = held
-            .units
-            .checked_sub(reservation.units)
-            .expect("a permit releases the units it was admitted with");
+        if self.units.is_some() {
+            held.units = held
+                .units
+                .checked_sub(reservation.charged)
+                .expect("a permit releases the units it was admitted with");
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Held> {
@@ -192,10 +202,11 @@ pub struct Permit {
 }
 
 impl Permit {
-    /// What this permit reserved, for a caller that wants to report or account it.
+    /// The cost this work was admitted at, for a caller that wants to report or account it.
     ///
-    /// This is the capacity actually held, which is the cost the work was admitted at. Nothing
-    /// is clamped, so it is also the cost the caller asked for.
+    /// This is the cost the caller passed, unchanged: nothing is clamped, because a request too
+    /// large for the unit ceiling is refused rather than shaved to fit. When no unit budget is
+    /// configured the cost is still reported, even though no unit total was kept for it.
     pub fn units(&self) -> usize {
         self.reserved.units
     }
