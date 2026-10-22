@@ -12,7 +12,7 @@ mod reference;
 pub use reference::Reference;
 
 /// `CS1_ABI_VERSION` in ops.h.
-const ABI_VERSION: u32 = 8;
+const ABI_VERSION: u32 = 9;
 // The structure side records the same version in identity records; if
 // one bumps without the other, runtime state keyed by structure
 // identity would silently disagree with the loaded bundle.
@@ -197,6 +197,7 @@ api! {
     cs1_sigmoid_gate(x: *mut c_void, gate: *const c_void, n: usize, stream: Stream) -> c_int;
     cs1_silu_mul(gate_up: *const c_void, ld: c_int, out: *mut c_void, t: c_int, i: c_int, stream: Stream) -> c_int;
     cs1_gemm_create(workspace_bytes: usize) -> *mut c_void;
+    cs1_gemm_create_fixed(workspace_bytes: usize, reference_m: c_int) -> *mut c_void;
     cs1_gemm_destroy(gemm: *mut c_void);
     cs1_gemm(
         gemm: *mut c_void, x: *const c_void, w: *const c_void, y: *mut c_void, m: c_int, n: c_int, k: c_int,

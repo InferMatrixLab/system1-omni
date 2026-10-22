@@ -5,7 +5,7 @@ static int live, linear_count, attention_count, captures, launches, destroyed, f
 static int rows[16384], outs[16384], lens[16384];
 static uintptr_t qkv_base;
 static uintptr_t qs[16384], ks[16384], vs[16384], os[16384];
-unsigned cs1_abi_version(void){return 8;}
+unsigned cs1_abi_version(void){return 9;}
 const char *cs1_error_string(int c){(void)c;return "fake CUDA error";}
 int cs1_get_device(int *d){if(!d)return 1;*d=0;return 0;}
 int cs1_set_device(int d){(void)d;return 0;}

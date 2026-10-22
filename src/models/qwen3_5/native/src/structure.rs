@@ -1,5 +1,5 @@
 //! The Qwen3.5 hybrid family layer: the source adapter that reads a
-//! checkpoint config, the structure it produces, the frozen ABI-8
+//! checkpoint config, the structure it produces, the frozen ABI-9
 //! capability set the CUDA kernels implement, and the prefix-state
 //! layout derived from a structure. Parsing and capability live apart
 //! so both are checkable without a device or a checkpoint.
@@ -13,7 +13,7 @@ use std::path::Path;
 pub const SCHEMA_VERSION: usize = 1;
 pub const FAMILY: &str = "qwen3_5_hybrid";
 pub const BACKEND: &str = "qwen3_5_cuda";
-pub const ABI_VERSION: usize = 8;
+pub const ABI_VERSION: usize = 9;
 
 const BF16: usize = 2;
 const F32: usize = 4;
@@ -308,7 +308,7 @@ pub fn read_structure(dir: &Path) -> Result<QwenHybridStructure> {
     })
 }
 
-/// The frozen ABI-8 kernel capability set: exactly what the CUDA
+/// The frozen ABI-9 kernel capability set: exactly what the CUDA
 /// kernels implement, no more. Widening anything here is a kernel/ABI
 /// decision, not a loader change. Every rejection reports the actual
 /// value.
@@ -395,7 +395,7 @@ impl PrefixLayout {
     }
 }
 
-/// Stable identity of one structure executing on the ABI-8 backend.
+/// Stable identity of one structure executing on the ABI-9 backend.
 /// Any prefix-cache record must carry it; a change means the state
 /// must be re-captured, never reused.
 #[derive(Debug, Clone, PartialEq, Eq)]

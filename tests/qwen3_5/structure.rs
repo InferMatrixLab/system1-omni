@@ -253,7 +253,7 @@ fn identity_is_stable_and_sensitive() {
     let a = structure::structure_identity(&vela_08b());
     let b = structure::structure_identity(&vela_08b());
     assert_eq!(a, b);
-    assert_eq!(a.abi_version, 8);
+    assert_eq!(a.abi_version, 9);
     assert_eq!(a.family, "qwen3_5_hybrid");
     assert_ne!(a, structure::structure_identity(&vela_4b()));
     let mut drifted = vela_08b();

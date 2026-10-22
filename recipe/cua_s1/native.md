@@ -5,7 +5,7 @@ The unmerged precision profile has source-pinned A800 80 GB (sm_80), CUDA 13.0
 evidence at ABI-8 source `7293c71cfb738504a30ff033ae3567f3368333c1`, plus earlier
 cumulative ABI-8 and independent ABI-6 campaigns linked in
 [PR #143](https://github.com/ThinkFlowLab/system1-omni/pull/143).
-The current branch uses ABI 8. The legacy-readout compatibility fix was separately
+The current branch uses ABI 9. The legacy-readout compatibility fix was separately
 GPU-tested at `f212c56f23ac750ebfa38f4c72e9fcdc914bf1cd` on the same pinned A800.
 See the [source-pinned repair evidence](https://github.com/Levius-Fubuki/system1-omni/releases/tag/cua143-merged-readout-f212c56f-20261015).
 The earlier merged path was checked on an RTX 6000 Ada (sm_89) with CUDA 13.2.
@@ -35,7 +35,7 @@ For the local CUDA Graph experiment, also set `CUA_S1_GRAPH=1`. The first use of
 each exact ordered prompt-length vector warms the GEMM plans and captures the forward pass;
 later requests replay it with freshly uploaded token ids. Each language mode keeps a separate 64-entry FIFO cache. Growing the scratch allocation clears the captures before freeing
 their buffers. Capture adds first-use latency; leave the variable unset to use
-the eager control. Rebuild both the worker and CUDA library together (ABI 8).
+the eager control. Rebuild both the worker and CUDA library together (ABI 9).
 If capture fails, the worker returns the completed eager result and disables
 Graph capture/replay for its remaining lifetime, logging the failure to stderr.
 
@@ -62,7 +62,7 @@ against the pinned reference. Results remain scoped to that source and artifact.
 Merging the adapter, TF32/BF16 GDN intermediates, and different
 GEMM reduction policies can change decisions on close or tied options. Re-export
 with the command above to use the precision profile. Rebuild worker and library
-together: this branch now uses ABI 8, and the precision profile also requires the new optional
+together: this branch now uses ABI 9, and the precision profile also requires the new optional
 FP32 GDN symbols. No cuDNN or Python is needed at serving time.
 
 The validation scope and tolerances are in
