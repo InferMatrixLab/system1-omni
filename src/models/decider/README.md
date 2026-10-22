@@ -73,7 +73,7 @@ selection; `DECIDER_FIXED=1` provides independent fixed full rows for a matched
 control. Short/no-sharing cases run independent fixed rows. These paths require
 Graph off. The selected head keeps identical batch grouping; calibrated responses
 and unique-prefix usage remain unchanged. Prefix snapshots/KV are overwritten per
-request and never reused across calls. The backend/consumers require ABI7 rebuilds.
+request and never reused across calls. The backend/consumers require ABI9 rebuilds.
 
 Both streams synchronize on completion, errors and caught execution panics before
 admission is released. An execution failure retires the loaded model/head and makes

@@ -137,7 +137,7 @@ async fn packed_mixed_rows_preserve_order_usage_and_recovery() {
 }
 
 #[tokio::test]
-#[ignore = "requires pinned Decider checkpoint and ABI7 CUDA prefix execution"]
+#[ignore = "requires pinned Decider checkpoint and ABI9 CUDA prefix execution"]
 async fn shared_request_prefix_matches_fixed_rows_and_never_survives_request() {
     use omni_decider_native::{batching::BatchLimits, prefix::PrefixMode};
     use serde_json::json;
@@ -192,7 +192,7 @@ async fn shared_request_prefix_matches_fixed_rows_and_never_survives_request() {
 }
 
 #[tokio::test]
-#[ignore = "requires pinned Decider checkpoint and ABI7 CUDA auto-prefix execution"]
+#[ignore = "requires pinned Decider checkpoint and ABI9 CUDA auto-prefix execution"]
 async fn auto_prefix_keeps_short_packed_outputs_and_isolates_long_shared_state() {
     use omni_decider_native::{batching::BatchLimits, prefix::PrefixMode};
     use serde_json::json;

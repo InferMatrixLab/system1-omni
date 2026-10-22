@@ -6,6 +6,12 @@ below covers the repaired standalone ABI 7 branch with a new frozen synthetic
 corpus. Neither campaign establishes task quality, every supported GPU or
 universal bit-identical agreement with Transformers.
 
+The current integrated branch requires **ABI 9** and a fresh rebuild of the
+CUDA library and all consumers. The historical GPU results below do not qualify
+this source. Current-head fixed/shared execution, Graph replay/fallback and
+reference parity remain device-validation handoffs, including both forced and
+automatically selected shared paths.
+
 ## Controls and fidelity gates
 
 Checkpoint/tokenizer/calibration: Mapika/decider-2b
@@ -221,14 +227,14 @@ its additional ABI8 entry points have been removed. Both workers use public
 requires ABI7. At the time of this historical consolidation, current-head
 GPU/reference/HTTP/performance validation was unverified. The dated qualification
 below records the later selected device checks; broader HTTP and performance
-coverage remains outside that campaign. Rebuild all current-branch consumers with ABI7. The unchanged default GEMM handle serves the
+coverage remains outside that campaign. Rebuild all current-branch consumers with ABI9. The unchanged default GEMM handle serves the
 normal/Graph path; fixed/shared modes use a separate no-split-K handle selected
 at reference M64. Model tests compare shared branches bit for bit with independent
 `forward_fixed` rows, including prefixes around 64-token boundaries, growth,
 repetition, reordering, invalid IDs and interleaved Graph calls. Kernel tests now
 include Decider's 2048 hidden width, 16 GDN heads and 8/2 attention heads alongside
 the existing 4B/9B/27B shapes. Run ignored tests serially with `CUA_S1_CUDA_LIB`,
-`QWEN3_5_MODEL`, `DECIDER_MODEL` and `DECIDER_CUDA_LIB` set to the ABI7 library
+`QWEN3_5_MODEL`, `DECIDER_MODEL` and `DECIDER_CUDA_LIB` set to the rebuilt ABI9 library
 and pinned Decider checkpoint.
 
 For response controls, put fixed4 before shared4 in the frozen modes plan and set
@@ -331,10 +337,11 @@ cannot recover merely by retrying a request or changing the caller's environment
 The repaired standalone branch was executed from committed source
 `4c7d437023c47c777afc7b82e6cb95a399468785`, exported to an isolated server checkout.
 The later documentation-only qualification note does not change runtime, CUDA,
-test or build inputs. Current main and the independent Decider batching/Graph
-branches (#111/#112) use ABI **6**. This complete shared-prefix branch (#113) uses
-ABI **7**, including `cs1_gemm_create_fixed`. Combining it with #135's ABI **8**
-changes requires a separate cumulative rebuild and validation; the results here
+test or build inputs. At the time of that campaign, main and the independent
+Decider batching/Graph branches (#111/#112) used ABI **6**, and the standalone
+shared-prefix branch (#113) used ABI **7**, including `cs1_gemm_create_fixed`.
+The current ABI **9** union with main requires a separate rebuild and validation;
+the results here
 qualify the standalone ABI 7 implementation. Rebuild each library and all its
 consumers together rather than using a library from another ABI.
 

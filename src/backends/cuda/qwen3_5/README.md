@@ -16,9 +16,10 @@ The norm, elementwise and q/k preparation kernels round to bfloat16 where Transf
 `cs1_attention_gated` fuses the sigmoid gate into the attention epilogue, preserving
 the BF16 rounding of both attention and sigmoid before multiplication. The native
 workers use this entry point; the separate operations remain available for kernel
-comparisons. Rebuild the library and workers together for ABI version 7, which
-includes vision, CUDA Graph, gated attention, prefix-continuation entry points and
-the fixed-algorithm GEMM handle below.
+comparisons. Rebuild the library and all native Rust consumers together for
+**ABI version 9**. This union retains ABI 8 device-feature entry points and the
+fixed-algorithm GEMM handle, alongside the optional reference and FP32 GDN profiles.
+Older libraries are rejected at load.
 
 cuBLASLt's heuristic picks a GEMM algorithm per M, so a row's result can change with
 the number of rows in the call: a prefix and its branch, run separately, round
@@ -30,6 +31,9 @@ M is and wherever the row sits. cuBLASLt doesn't document this property;
 on it (it passed on sm_89). It is slower for some shapes and faster for others: on an
 RTX 6000 Ada, the down and output projections take up to about 4 times as long at small
 M without split-K. `cs1_gemm_create` remains the default.
+See the
+[Cua-S1 resident-feature recipe](../../../../recipe/cua_s1/native_vision_graph.md#gpu-resident-vision-features)
+for the opt-in device feature path, lifetime contract and regression commands.
 
 Gated DeltaNet preparation stores converted TF32 operands in three-byte component planes, preserves the original four-term TF32 accumulation, and writes U/W fragments directly as bfloat16. Dynamic shared memory is 72 KiB per block. The [H200 comparison](../../../../benchmarks/gdn/README.md) records complete GDN call latency, numerical checks, and the small end-to-end change measured with the Open-Jev worker from PR #55.
 
@@ -44,9 +48,12 @@ and FP32 Gated DeltaNet state at 64-token chunk boundaries. It is used by the
 experimental JEV-VL worker and by the shared executor's `forward_shared`, which
 runs prompts that share prefixes once per prefix with the fixed-algorithm GEMM
 handle ([#85](https://github.com/ThinkFlowLab/system1-omni/issues/85)); existing
-full-prefill callers keep their own paths.
+full-prefill callers keep their own paths. Fixed/shared execution rejects
+unmerged adapters, reference arithmetic and FP32 GDN before allocating execution
+scratch or selecting the fixed GEMM handle.
 ABI 6 adds mandatory copy and prefix entry points after ABI 5 native vision,
-and ABI 7 adds the fixed-algorithm GEMM handle.
+and the original ABI 7 branch adds the fixed-algorithm GEMM handle. ABI 9
+combines this handle with the current ABI 8 device-feature contract.
 Rebuild the library and **all** Qwen worker binaries together; older libraries
 are rejected. Current-branch GPU regression is required before release.
 
@@ -58,3 +65,79 @@ The Rust loader checks ABI version before resolving required symbols, so older
 libraries report the rebuild requirement. Decider Graph statistics and synchronized
 stream disposal are preserved; device validation of this consolidated head remains
 unverified. Historical results retain their original implementation provenance.
+
+## Optional JEMM reference arithmetic
+
+JEMM enables the additive `cs1_reference_*` API group after model load and before
+any forward. It requires cuDNN 9; build with `CUDNN_INCLUDE_DIR` and
+`CUDNN_LIB_DIR`. Builds without those variables retain the current ABI-9 functions;
+JEMM reports a missing-capability error rather than silently selecting older numerics.
+
+The reference path uses a per-handle GEMM reduction policy, separate normalization,
+attention and GDN functions, and shape-owned cuDNN Conv3D plans. Attention and
+convolution workspaces allocate before capture and retire with their model/shape.
+The rotary entry point consumes FP32 angles and computes trigonometry on device;
+legacy rotary functions still consume cos/sin tables. Prefix caching is unsupported
+on this opt-in path. The shared workers' default arithmetic remains unchanged.
+
+The [JEMM numerical record](../../../../docs/benchmarks/jemm-reference-20261011/README.md)
+contains a frozen 1–4-image corpus and reproducible operator/HTTP checks.
+
+## Optional Cua-S1 no-FLA text arithmetic
+
+The unmerged Cua-S1 text export reuses the reference norm, attention and GEMM
+operations without requiring cuDNN. Norm additionally supports hidden size 2560.
+The additive `cs1_gdn_fp32_*` group owns a cuBLAS handle and 32 MiB internal
+workspace; the caller supplies shape-dependent FP32 buffers. It implements
+64-token chunked GDN, FP32 normalization, triangular solves and recurrent state,
+Torch 2.14 cumulative-decay association, and a final BF16 output cast. Each call
+starts with zero state; prefix continuation is rejected by the model adapter.
+The context drains its last stream before destruction, and is retired before
+that stream. Rebuild the library and all consuming workers together for the
+current ABI 9, including this optional group. The independent A800 qualification
+at `27f77e49868d84b091aa804f02ccb4d3474a9a00` used ABI 6; the earlier cumulative
+campaign used ABI 8. Neither campaign qualifies the current integrated source.
+Builds now link both cuBLAS and cuBLASLt. Every consumer of the rebuilt shared
+library must provide both runtime libraries (`libcublas.so` and
+`libcublasLt.so`), even when it does not enable the optional FP32 GDN group.
+An existing cuBLASLt-only deployment must add cuBLAS before upgrading.
+
+`tests/qwen3_5/test_gdn_fp32.py` compares against the pinned Transformers 5.17
+no-FLA implementation. On the cumulative A800 sm_80/CUDA 13.0/Torch 2.14 build, all 14 cases passed
+with identical BF16 outputs, covering chunk boundaries, grouped heads,
+changed-input replay/state reset, invalid dimensions/scales and context scratch
+release. The fixed relative-L2 gate is 1e-4. This does not qualify other GPUs or
+Torch versions; the original approximate GDN entry points remain available.
+
+## Shared vision cache and operator checks
+
+The generic shared vision constructor keeps a four-entry exact-grid FIFO for
+compatibility. Its cap counts entries, not device bytes; four large grids may
+retain substantially more memory than four small grids. A borrowed resident
+output prevents mutation or eviction until its consumer is finished.
+
+[Cua-S1's bounded-cache integration in PR #127](https://github.com/ThinkFlowLab/system1-omni/pull/127)
+uses a separate explicit policy: count/byte LRU limits, default one entry and
+256 MiB, with zero retention available. The Cua wrapper owns environment parsing;
+generic Qwen/JEMM users retain their existing policy. Retention-disabled or
+oversized Cua output stays model-owned through both producer and consumer stream
+drains. Graph enablement and scratch retention are separate policies: turning
+Graph off alone does not release retained scratch.
+
+The weight-free 27B operator regressions directly check 1152-wide positional
+interpolation, head-72 rotary pairing and noncausal attention, including strided
+V, non-tile-aligned row counts, changed inputs and poisoned padding workspace:
+
+```sh
+CUA_S1_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
+  cargo test --release --locked -p omni-qwen3-5-native --test kernels \
+  vision_v2:: -- --ignored --test-threads=1
+```
+
+Position/rotary assert exact BF16 readouts on dyadic inputs. Attention compares
+against a host float64 softmax reference with a fixed 0.004 absolute gate. These
+are explicit device tests; ordinary CPU CI compiles and skips them. Their addition
+does not establish a fresh device pass or whole-model 27B qualification.
+
+Shared preprocessing and vision adaptation notices accompany the Qwen crate in
+[THIRD_PARTY_NOTICES.md](../../../models/qwen3_5/native/THIRD_PARTY_NOTICES.md).

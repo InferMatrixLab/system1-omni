@@ -1,7 +1,7 @@
 # Native Decider-2B v11 text decisions
 
 Run these commands from the repository root on Linux with Rust, an NVIDIA GPU,
-CUDA toolkit/nvcc and cuBLASLt. Rebuild the library and every native Qwen consumer together for ABI **7**.
+CUDA toolkit/nvcc and cuBLASLt. Rebuild the library and every native Qwen consumer together for ABI **9**.
 The existing Qwen backend targets compute capability
 8.0 or newer; hardware validation is described in [validation.md](validation.md).
 The worker itself uses no Python/PyTorch serving process. Python 3.10+ is used only
@@ -102,8 +102,9 @@ The [2026-10-13 qualification](validation.md#current-qualification-on-2026-10-13
 records this standalone ABI 7 branch on RTX 4090: five frozen requests, 20 rows,
 all eager/packed/Graph/fixed/shared fidelity controls, real retirement and capture
 fallback, and selected GPU regressions. Its two timing samples per mode are
-only descriptive. Current main and #111/#112 require ABI 6; cumulative #135
-integration requires a separate ABI 8 rebuild and validation.
+only descriptive. This integrated branch combines current main and #112 and
+requires a separate ABI 9 rebuild and validation. Historical device results do
+not qualify this integrated source.
 
 ```sh
 cargo fmt --all --check
@@ -168,7 +169,7 @@ be measured separately from warm replay.
 ## Optional request-local shared prefixes (pending integration)
 
 This integration depends on the pending Qwen continuation/fixed-GEMM/executor
-stack (#98/#99). Build this complete branch with ABI7; ABI5 and ABI6 libraries are
+stack (#98/#99). Build this integrated branch with ABI9; older libraries are
 rejected. `DECIDER_PREFIX=1 DECIDER_GRAPH=0` plans exact shared token prefixes
 within the admitted request and restores attention KV, GDN recurrent state and
 three convolution-history rows for every branch. Contiguous rows for one question
