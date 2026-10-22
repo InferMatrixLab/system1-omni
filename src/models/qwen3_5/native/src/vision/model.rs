@@ -1,5 +1,8 @@
 //! GPU vision forward for the structurally validated, unmerged checkpoint.
-use super::{VisionCheckpoint, VisionConfig, geometry::VisionGeometry};
+use super::{
+    VisionCheckpoint, VisionConfig,
+    geometry::{BatchGeometry, VisionGeometry},
+};
 use crate::{
     cuda::{self, DeviceBf16Matrix, DeviceBuffer, Stream, api, check},
     image_preprocess::ProcessedImage,
@@ -40,10 +43,12 @@ pub struct VisionModel {
     transient: Option<Scratch>,
     // None preserves the legacy four-grid FIFO policy for generic consumers.
     cache_limits: Option<CacheLimits>,
+    batch_scratch: VecDeque<BatchScratch>,
     graph_enabled: bool,
     base: BTreeMap<String, DeviceBuffer>,
     lora: BTreeMap<String, DeviceBuffer>,
     gemm: Gemm,
+    reference: Option<&'static cuda::Reference>,
     stream: OwnedStream,
 }
 #[derive(Clone, Copy)]
@@ -71,6 +76,8 @@ impl VisionModel {
         Self::build(config, base, lora, library, None)
     }
     /// Explicit retained-byte/count LRU policy; environment settings belong to callers.
+    /// Reference numerics requires the generic FIFO constructor because the ABI does
+    /// not expose opaque cuDNN plan allocations for exact budget accounting.
     pub fn from_tensors_with_cache(
         config: VisionConfig,
         base: Vec<(String, TensorView<'_>)>,
@@ -157,11 +164,13 @@ impl VisionModel {
             scratch: VecDeque::new(),
             transient: None,
             cache_limits,
+            batch_scratch: VecDeque::new(),
             graph_enabled: std::env::var("CUA_S1_VISION_GRAPH").as_deref() == Ok("1"),
             base: BTreeMap::new(),
             lora: BTreeMap::new(),
             stream,
             gemm,
+            reference: None,
         };
         for (name, tensor) in base {
             model.base.insert(
@@ -183,6 +192,36 @@ impl VisionModel {
         );
         Ok(model)
     }
+    /// Select the JEMM 27B reference path before allocating shape buffers or graphs.
+    pub fn enable_reference_numerics(&mut self) -> Result<()> {
+        ensure!(
+            self.config.hidden_size == 1152 && self.lora.is_empty(),
+            "reference vision requires unadapted 27B vision"
+        );
+        ensure!(
+            self.scratch.is_empty() && self.batch_scratch.is_empty() && self.transient.is_none(),
+            "select reference vision before the first forward"
+        );
+        ensure!(
+            self.cache_limits.is_none(),
+            "reference vision uses the generic FIFO cache; bounded cache cannot account for opaque cuDNN workspace"
+        );
+        if self.reference.is_some() {
+            return Ok(());
+        }
+        cuda::set_device(0)?;
+        let reference = api().reference()?;
+        self.synchronize()?;
+        // SAFETY: allocation occurs before capture, and the old handle has no queued work.
+        let gemm = Gemm(unsafe { (reference.gemm_create)(32 << 20) });
+        ensure!(
+            !gemm.0.is_null(),
+            "cannot create reference vision GEMM handle"
+        );
+        self.gemm = gemm;
+        self.reference = Some(reference);
+        Ok(())
+    }
     fn upload(&self, bytes: &[u8]) -> Result<DeviceBuffer> {
         let buffer = DeviceBuffer::new(bytes.len())?;
         unsafe {
@@ -196,7 +235,9 @@ impl VisionModel {
     fn norm(&self, name: &str, x: &DeviceBuffer, y: &DeviceBuffer, rows: usize) -> Result<()> {
         unsafe {
             check(
-                (api().cs1_vision_norm)(
+                (self
+                    .reference
+                    .map_or(api().cs1_vision_norm, |r| r.vision_norm))(
                     x.at(0),
                     self.weight(&format!("{name}.weight")),
                     self.weight(&format!("{name}.bias")),
@@ -337,6 +378,107 @@ impl VisionModel {
     pub fn forward(&mut self, image: &ProcessedImage) -> Result<Vec<bf16>> {
         self.run(image, None)
     }
+    /// Project all unadapted 27B image rows together, with image-local attention.
+    /// Empty inputs do no device work; one image delegates the existing forward exactly.
+    /// Multi-image scratch/captures use a separate four-entry FIFO keyed by ordered grids.
+    pub fn forward_images(&mut self, images: &[ProcessedImage]) -> Result<Vec<bf16>> {
+        match images {
+            [] => return Ok(Vec::new()),
+            [image] => return self.forward(image),
+            _ => {}
+        }
+        ensure!(
+            self.lora.is_empty(),
+            "batched vision does not support vision adapters"
+        );
+        ensure!(
+            self.cache_limits.is_none(),
+            "batched vision requires the generic FIFO cache"
+        );
+        let grids: Vec<_> = images.iter().map(|image| image.image_grid_thw).collect();
+        let lengths = BatchGeometry::lengths(&grids, &self.config)?;
+        let n: usize = lengths.iter().sum();
+        for (image, &rows) in images.iter().zip(&lengths) {
+            ensure!(
+                image.pixel_values.len() == rows * 1536,
+                "vision pixel_values length does not match grid"
+            );
+            ensure!(
+                image.resized_height == image.image_grid_thw[1] * 16
+                    && image.resized_width == image.image_grid_thw[2] * 16,
+                "vision resized geometry does not match grid"
+            );
+            ensure!(
+                image.pixel_values.iter().all(|v| v.is_finite()),
+                "vision pixels must be finite"
+            );
+        }
+        let pixels: Vec<_> = images
+            .iter()
+            .flat_map(|image| image.pixel_values.iter())
+            .flat_map(|&value| bf16::from_f32(value).to_le_bytes())
+            .collect();
+        cuda::set_device(0)?;
+        let index = if let Some(index) = self.batch_scratch.iter().position(|s| s.grids == grids) {
+            index
+        } else {
+            let mut geometry = BatchGeometry::new(&grids, &self.config)?.geometry;
+            if self.reference.is_some() {
+                geometry.use_reference_angles(&grids, &self.config);
+            }
+            self.synchronize()?;
+            if self.batch_scratch.len() == 4 {
+                self.batch_scratch.pop_front();
+            }
+            let buffers = Buffers::new(self, n, *lengths.iter().max().unwrap(), geometry)?;
+            self.batch_scratch.push_back(BatchScratch {
+                graph: None,
+                grids: grids.clone(),
+                lengths,
+                buffers,
+            });
+            self.batch_scratch.len() - 1
+        };
+        let scratch = &self.batch_scratch[index];
+        // SAFETY: every image was validated, and the ordered key owns exactly n pixel rows.
+        unsafe {
+            cuda::upload(scratch.buffers.pixels.at(0), &pixels, self.stream.0)?;
+        }
+        if self.graph_enabled
+            && let Some(graph) = &scratch.graph
+        {
+            graph.launch(self.stream.0)?;
+            batch_graph_trace("replayed", &grids);
+            return self.read(&scratch.buffers.out, n / 4 * self.config.out_hidden_size);
+        }
+        self.enqueue(&scratch.buffers, n, &scratch.lengths, &mut None)?;
+        let result = self.read(&scratch.buffers.out, n / 4 * self.config.out_hidden_size)?;
+        if self.graph_enabled {
+            let captured = cuda::Graph::capture(self.stream.0, || {
+                self.enqueue(&scratch.buffers, n, &scratch.lengths, &mut None)
+            });
+            match captured {
+                Ok(graph) => {
+                    self.batch_scratch[index].graph = Some(graph);
+                    batch_graph_trace("captured", &grids);
+                }
+                Err(error) => {
+                    eprintln!("Vision CUDA Graph capture failed; using eager execution: {error:#}");
+                    self.graph_enabled = false;
+                    self.clear_graphs();
+                }
+            }
+        }
+        Ok(result)
+    }
+    fn clear_graphs(&mut self) {
+        for scratch in &mut self.scratch {
+            scratch.graph = None;
+        }
+        for scratch in &mut self.batch_scratch {
+            scratch.graph = None;
+        }
+    }
     /// Optional synchronized stage downloads for parity diagnosis; ordinary forward skips them.
     pub fn forward_with_trace(
         &mut self,
@@ -362,6 +504,7 @@ impl VisionModel {
         }
         let (n, index) = result?;
         self.scratch_at(index)
+            .buffers
             .out
             .bf16_matrix(n / 4, self.config.out_hidden_size)
     }
@@ -369,7 +512,7 @@ impl VisionModel {
         let result = (|| {
             let (n, index, capture) = self.enqueue_image(image, &mut callback)?;
             let output = self.read(
-                &self.scratch_at(index).out,
+                &self.scratch_at(index).buffers.out,
                 n / 4 * self.config.out_hidden_size,
             )?;
             if let Some(callback) = callback.as_mut() {
@@ -411,7 +554,10 @@ impl VisionModel {
     fn capture_current(&mut self, index: usize) {
         let scratch = &self.scratch[index];
         // The caller completes warmup before recording; capture never reruns math.
-        let captured = cuda::Graph::capture(self.stream.0, || self.enqueue(scratch, &mut None));
+        let n = scratch.grid[1] * scratch.grid[2];
+        let captured = cuda::Graph::capture(self.stream.0, || {
+            self.enqueue(&scratch.buffers, n, &[n], &mut None)
+        });
         match captured {
             Ok(graph) => {
                 let scratch = &mut self.scratch[index];
@@ -421,9 +567,7 @@ impl VisionModel {
             Err(error) => {
                 eprintln!("Vision CUDA Graph capture failed; using eager execution: {error:#}");
                 self.graph_enabled = false;
-                for scratch in &mut self.scratch {
-                    scratch.graph = None;
-                }
+                self.clear_graphs();
             }
         }
     }
@@ -439,7 +583,13 @@ impl VisionModel {
             .iter()
             .position(|s| s.grid == image.image_grid_thw);
         let geometry = if cached.is_none() {
-            Some(VisionGeometry::new(image.image_grid_thw, &self.config)?)
+            Some({
+                let mut geometry = VisionGeometry::new(image.image_grid_thw, &self.config)?;
+                if self.reference.is_some() {
+                    geometry.use_reference_angles(&[image.image_grid_thw], &self.config);
+                }
+                geometry
+            })
         } else {
             None
         };
@@ -510,7 +660,7 @@ impl VisionModel {
         let scratch = self.scratch_at(index);
         // SAFETY: the current image has the validated exact resident buffer size.
         unsafe {
-            cuda::upload(scratch.pixels.at(0), &pixels, self.stream.0)?;
+            cuda::upload(scratch.buffers.pixels.at(0), &pixels, self.stream.0)?;
         }
         if callback.is_none()
             && matches!(index, ScratchLocation::Retained(_))
@@ -521,7 +671,7 @@ impl VisionModel {
             graph_trace("replayed", scratch.grid);
             return Ok((n, index, false));
         }
-        self.enqueue(scratch, callback)?;
+        self.enqueue(&scratch.buffers, n, &[n], callback)?;
         Ok((
             n,
             index,
@@ -549,13 +699,18 @@ impl VisionModel {
             );
         }
     }
-    fn enqueue(&self, scratch: &Scratch, callback: &mut Trace<'_>) -> Result<()> {
-        let n = scratch.grid[1] * scratch.grid[2];
+    fn enqueue(
+        &self,
+        buffers: &Buffers,
+        n: usize,
+        lengths: &[usize],
+        callback: &mut Trace<'_>,
+    ) -> Result<()> {
         let h = self.config.hidden_size;
         let intermediate = self.config.intermediate_size;
         let merged = h * 4;
         let output = self.config.out_hidden_size;
-        let Scratch {
+        let Buffers {
             pixels,
             indices,
             weights,
@@ -573,8 +728,34 @@ impl VisionModel {
             mlp,
             out,
             ..
-        } = scratch;
-        self.linear("patch_embed.proj", pixels, x, n, h, 1536, w)?;
+        } = buffers;
+        if let Some(plan) = &buffers.patch {
+            let reference = self.reference.expect("reference patch plan");
+            // SAFETY: the plan and buffers have the same validated aggregate row count.
+            unsafe {
+                check(
+                    (reference.patch)(
+                        plan.0,
+                        pixels.at(0),
+                        self.weight("patch_embed.proj.weight"),
+                        x.at(0),
+                    ),
+                    "reference patch convolution",
+                )?;
+                check(
+                    (api().cs1_vision_bias)(
+                        x.at(0),
+                        self.weight("patch_embed.proj.bias"),
+                        n * h,
+                        h as i32,
+                        self.stream.0,
+                    ),
+                    "patch bias",
+                )?;
+            }
+        } else {
+            self.linear("patch_embed.proj", pixels, x, n, h, 1536, w)?;
+        }
         self.trace(callback, "patch_embed", x, n * h)?;
         unsafe {
             if h == 1024 {
@@ -637,7 +818,7 @@ impl VisionModel {
                 } else {
                     let v2 = api().vision_v2()?;
                     check(
-                        (v2.rope)(
+                        (self.reference.map_or(v2.rope, |r| r.vision_rope))(
                             qkv.at(0),
                             co.at(0).cast(),
                             si.at(0).cast(),
@@ -650,20 +831,24 @@ impl VisionModel {
                         ),
                         "vision rotary",
                     )?;
-                    check(
-                        (v2.attention)(
-                            q.at(0),
-                            k.at(0),
-                            qkv.at(h * 2 * 2),
-                            attn.at(0),
-                            n as i32,
-                            self.config.num_heads as i32,
-                            self.config.head_dim() as i32,
-                            attention_workspace.at(0),
-                            self.stream.0,
-                        ),
-                        "vision attention",
-                    )?;
+                    let mut row = 0;
+                    for &rows in lengths {
+                        check(
+                            (self.reference.map_or(v2.attention, |r| r.vision_attention))(
+                                q.at(row * h * 2),
+                                k.at(row * h * 2),
+                                qkv.at((row * h * 3 + h * 2) * 2),
+                                attn.at(row * h * 2),
+                                rows as i32,
+                                self.config.num_heads as i32,
+                                self.config.head_dim() as i32,
+                                attention_workspace.at(0),
+                                self.stream.0,
+                            ),
+                            "vision attention",
+                        )?;
+                        row += rows;
+                    }
                 }
             }
             self.linear(&format!("{p}.attn.proj"), attn, delta, n, h, h, w)?;
@@ -732,9 +917,38 @@ fn graph_trace(action: &str, grid: [usize; 3]) {
         eprintln!("Vision CUDA Graph {action} grid={grid:?}");
     }
 }
+fn batch_graph_trace(action: &str, grids: &[[usize; 3]]) {
+    if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
+        eprintln!("Vision CUDA Graph {action} grids={grids:?}");
+    }
+}
 struct Scratch {
     graph: Option<cuda::Graph>,
     grid: [usize; 3],
+    buffers: Buffers,
+}
+struct BatchScratch {
+    graph: Option<cuda::Graph>,
+    grids: Vec<[usize; 3]>,
+    lengths: Vec<usize>,
+    buffers: Buffers,
+}
+struct PatchPlan(*mut c_void);
+// SAFETY: the enclosing model serializes access and keeps the owning stream alive.
+unsafe impl Send for PatchPlan {}
+impl Drop for PatchPlan {
+    fn drop(&mut self) {
+        // SAFETY: the enclosing model synchronizes before retiring buffers.
+        unsafe {
+            (api()
+                .reference()
+                .expect("loaded reference API")
+                .patch_destroy)(self.0)
+        };
+    }
+}
+struct Buffers {
+    patch: Option<PatchPlan>,
     pixels: DeviceBuffer,
     indices: DeviceBuffer,
     weights: DeviceBuffer,
@@ -805,7 +1019,22 @@ impl Scratch {
         Self::layout(config, lora, grid).iter().sum()
     }
     fn new(model: &VisionModel, grid: [usize; 3], geo: VisionGeometry) -> Result<Self> {
-        let sizes = Self::layout(&model.config, !model.lora.is_empty(), grid);
+        let n = grid[1] * grid[2];
+        Ok(Self {
+            graph: None,
+            grid,
+            buffers: Buffers::new(model, n, n, geo)?,
+        })
+    }
+}
+impl Buffers {
+    fn new(
+        model: &VisionModel,
+        n: usize,
+        attention_rows: usize,
+        geo: VisionGeometry,
+    ) -> Result<Self> {
+        let mut sizes = Scratch::layout(&model.config, !model.lora.is_empty(), [1, 1, n]);
         ensure!(
             geo.indices.len() * 4 == sizes[1]
                 && geo.weights.len() * 4 == sizes[2]
@@ -813,9 +1042,36 @@ impl Scratch {
                 && geo.sin.len() * 4 == sizes[4],
             "vision geometry storage does not match layout"
         );
+        let patch = if let Some(reference) = model.reference {
+            // SAFETY: descriptors/workspace are allocated outside capture for validated rows.
+            let plan = PatchPlan(unsafe { (reference.patch_create)(n as i32, model.stream.0) });
+            ensure!(
+                !plan.0.is_null(),
+                "cannot prepare cuDNN reference patch convolution"
+            );
+            Some(plan)
+        } else {
+            None
+        };
+        sizes[8] = if let Some(reference) = model.reference {
+            let floats = unsafe {
+                (reference.vision_attention_workspace_floats)(
+                    attention_rows as i32,
+                    model.config.num_heads as i32,
+                )
+            };
+            ensure!(
+                floats > 0,
+                "cannot size reference vision attention workspace"
+            );
+            attention_rows * model.config.num_heads * 80 * 4 * 2 + floats * 4
+        } else if model.config.hidden_size == 1024 {
+            0
+        } else {
+            attention_rows * model.config.num_heads * 80 * 4 * 2
+        };
         Ok(Self {
-            graph: None,
-            grid,
+            patch,
             pixels: DeviceBuffer::new(sizes[0])?,
             indices: model.upload(
                 &geo.indices
@@ -874,3 +1130,7 @@ impl Work {
 #[cfg(test)]
 #[path = "../../../../../../tests/qwen3_5/vision_graph.rs"]
 mod vision_tests;
+
+#[cfg(test)]
+#[path = "../../../../../../tests/qwen3_5/vision_batch.rs"]
+mod batch_tests;

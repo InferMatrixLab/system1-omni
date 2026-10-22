@@ -31,8 +31,8 @@ review and automated review selection are outside this contributor gate.
 - Record the head and base commit IDs. Review the complete diff from their merge
   base, plus staged, unstaged, and relevant untracked changes. State which changes
   are not yet part of the PR. Disclose if the remote base could not be refreshed.
-- Count changed authored-code lines separately from total diff size using the
-  [contributor guide](../../../CONTRIBUTING.md#large-code-changes). Above 3,000,
+- Count changed authored-code lines separately from total diff size. Follow the
+  [contributor self-review guide](../../../CONTRIBUTING.md#self-review-before-requesting-review). Above 3,000,
   require a full self-review, the contributor's split rationale and review map,
   and component/integration validation; a quick precheck cannot establish readiness.
 - Read changed files and enough surrounding code and callers to understand the
@@ -104,3 +104,4 @@ keeping the PR in draft while blocking findings remain. The contributor should
 review the report, address findings, rerun affected checks after changes, and
 complete the PR template checklist. Do not check boxes on the contributor's
 behalf or claim that agent review replaces contributor or maintainer review.
+

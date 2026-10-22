@@ -356,20 +356,20 @@ fn vision_cache_capacity_lru_and_invalid_input() {
             expected[index]
         );
     }
-    let a = model.scratch.back().unwrap().pixels.at(0);
+    let a = model.scratch.back().unwrap().buffers.pixels.at(0);
     assert!(model.scratch.back().unwrap().graph.is_some());
     assert_eq!(
         model.scratch.front().unwrap().grid,
         inputs[1].image_grid_thw
     );
-    let b = model.scratch.front().unwrap().pixels.at(0);
+    let b = model.scratch.front().unwrap().buffers.pixels.at(0);
     let mut invalid = image([1, 16, 16], 31);
     invalid.pixel_values.pop();
     assert!(model.forward(&invalid).is_err());
     invalid = image([2, 8, 32], 30);
     assert!(model.forward(&invalid).is_err());
-    assert_eq!(model.scratch.back().unwrap().pixels.at(0), a);
-    assert_eq!(model.scratch.front().unwrap().pixels.at(0), b);
+    assert_eq!(model.scratch.back().unwrap().buffers.pixels.at(0), a);
+    assert_eq!(model.scratch.front().unwrap().buffers.pixels.at(0), b);
     assert_eq!(bits(&model.forward(&inputs[2]).unwrap()), expected[2]);
     assert_eq!(model.scratch.len(), 2);
     assert_eq!(
@@ -377,10 +377,10 @@ fn vision_cache_capacity_lru_and_invalid_input() {
         inputs[0].image_grid_thw,
         "B must be LRU victim after A/B/A/C"
     );
-    assert_eq!(model.scratch.front().unwrap().pixels.at(0), a);
+    assert_eq!(model.scratch.front().unwrap().buffers.pixels.at(0), a);
     assert_eq!(model.retained_bytes(), 512 * 64_096);
     assert_eq!(bits(&model.forward(&inputs[0]).unwrap()), expected[0]);
-    assert_eq!(model.scratch.back().unwrap().pixels.at(0), a);
+    assert_eq!(model.scratch.back().unwrap().buffers.pixels.at(0), a);
     drop(model);
 }
 
@@ -417,12 +417,12 @@ fn vision_cache_byte_eviction_and_transient_oversize() {
         model.scratch.front().unwrap().grid,
         inputs[2].image_grid_thw
     );
-    let a = model.scratch.back().unwrap().pixels.at(0);
-    let c = model.scratch.front().unwrap().pixels.at(0);
+    let a = model.scratch.back().unwrap().buffers.pixels.at(0);
+    let c = model.scratch.front().unwrap().buffers.pixels.at(0);
     for _ in 0..2 {
         assert_eq!(bits(&model.forward(&inputs[3]).unwrap()), expected[3]);
-        assert_eq!(model.scratch.back().unwrap().pixels.at(0), a);
-        assert_eq!(model.scratch.front().unwrap().pixels.at(0), c);
+        assert_eq!(model.scratch.back().unwrap().buffers.pixels.at(0), a);
+        assert_eq!(model.scratch.front().unwrap().buffers.pixels.at(0), c);
         assert_eq!(
             model.retained_bytes(),
             model.cache_limits.as_ref().unwrap().bytes
@@ -438,7 +438,7 @@ fn vision_cache_byte_eviction_and_transient_oversize() {
     model.cache_limits.as_mut().unwrap().bytes = 1;
     assert_eq!(bits(&model.forward(&inputs[0]).unwrap()), expected[0]);
     // Internal test-only budget changes may encounter an already resident same grid.
-    assert_eq!(model.scratch.back().unwrap().pixels.at(0), a);
+    assert_eq!(model.scratch.back().unwrap().buffers.pixels.at(0), a);
     clear_scratch(&mut model);
     model.cache_limits.as_mut().unwrap().entries = 0;
     assert_eq!(bits(&model.forward(&inputs[0]).unwrap()), expected[0]);
@@ -529,7 +529,7 @@ fn device_cache_transient_output_keeps_retained_entries_and_releases_after_consu
         model.transient.is_none(),
         "host transient must be released before return"
     );
-    let retained = model.scratch[0].pixels.at(0);
+    let retained = model.scratch[0].buffers.pixels.at(0);
     model.graph_enabled = true;
     for input in [&small, &large, &large, &small] {
         let observed = {
@@ -545,7 +545,7 @@ fn device_cache_transient_output_keeps_retained_entries_and_releases_after_consu
             }
             .clone()
         );
-        assert_eq!(model.scratch[0].pixels.at(0), retained);
+        assert_eq!(model.scratch[0].buffers.pixels.at(0), retained);
         assert_eq!(model.retained_bytes(), 256 * 64_096);
         if input.image_grid_thw == large.image_grid_thw {
             assert!(model.transient.as_ref().unwrap().graph.is_none());

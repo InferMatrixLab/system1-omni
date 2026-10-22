@@ -27,7 +27,12 @@ measure actual device memory separately.
 
 Both limits are read once by the Cua 4B wrapper when the model loads. Other shared
 vision consumers keep the existing four-grid FIFO policy unless they explicitly
-select the bounded cache constructor. Unset values use their defaults;
+select the bounded cache constructor. JEMM's reference execution retains its
+separate four-entry ordered multi-image FIFO and reference cuDNN/attention
+workspaces. Multi-image forwards require the generic constructor. Reference numerics also
+cannot be combined with the bounded constructor:
+ABI 8 does not expose the opaque cuDNN patch-plan workspace size, so it cannot
+be charged exactly to this budget. Unset values use their defaults;
 an explicitly invalid unsigned integer (including trailing whitespace or a
 negative value) logs a warning to stderr and uses that limit's default. The
 warning names the setting, supplied value and effective fallback, independently

@@ -3,7 +3,7 @@
 
 Run vision_cache_aba_probe with CUA_S1_VISION_CACHE_ENTRIES=4 and
 CUA_S1_GRAPH_TRACE=1, redirect both stdout and stderr, then pass that log here.
-The baseline single-grid implementation must fail this assertion.
+A one-entry cache must fail this four-entry reuse assertion.
 """
 import pathlib
 import sys

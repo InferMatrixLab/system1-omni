@@ -38,17 +38,63 @@ ABI 6 adds mandatory copy and prefix entry points after ABI 5 native vision.
 Rebuild the library and **all** Qwen worker binaries together; older libraries
 are rejected. Current-branch GPU regression is required before release.
 
+## Optional JEMM reference arithmetic
+
+JEMM enables the additive `cs1_reference_*` API group after model load and before
+any forward. It requires cuDNN 9; build with `CUDNN_INCLUDE_DIR` and
+`CUDNN_LIB_DIR`. Builds without those variables retain the current ABI-8 functions;
+JEMM reports a missing-capability error rather than silently selecting older numerics.
+
+The reference path uses a per-handle GEMM reduction policy, separate normalization,
+attention and GDN functions, and shape-owned cuDNN Conv3D plans. Attention and
+convolution workspaces allocate before capture and retire with their model/shape.
+The rotary entry point consumes FP32 angles and computes trigonometry on device;
+legacy rotary functions still consume cos/sin tables. Prefix caching is unsupported
+on this opt-in path. The shared workers' default arithmetic remains unchanged.
+
+The [JEMM numerical record](../../../../docs/benchmarks/jemm-reference-20261011/README.md)
+contains a frozen 1–4-image corpus and reproducible operator/HTTP checks.
+
+## Optional Cua-S1 no-FLA text arithmetic
+
+The unmerged Cua-S1 text export reuses the reference norm, attention and GEMM
+operations without requiring cuDNN. Norm additionally supports hidden size 2560.
+The additive `cs1_gdn_fp32_*` group owns a cuBLAS handle and 32 MiB internal
+workspace; the caller supplies shape-dependent FP32 buffers. It implements
+64-token chunked GDN, FP32 normalization, triangular solves and recurrent state,
+Torch 2.14 cumulative-decay association, and a final BF16 output cast. Each call
+starts with zero state; prefix continuation is rejected by the model adapter.
+The context drains its last stream before destruction, and is retired before
+that stream. Rebuild the library and all consuming workers together for the
+current ABI 8, including this optional group. The independent A800 qualification
+at `27f77e49868d84b091aa804f02ccb4d3474a9a00` used ABI 6; the earlier cumulative
+campaign used ABI 8. Neither campaign qualifies the current integrated source.
+Builds now link both cuBLAS and cuBLASLt. Every consumer of the rebuilt shared
+library must provide both runtime libraries (`libcublas.so` and
+`libcublasLt.so`), even when it does not enable the optional FP32 GDN group.
+An existing cuBLASLt-only deployment must add cuBLAS before upgrading.
+
+`tests/qwen3_5/test_gdn_fp32.py` compares against the pinned Transformers 5.17
+no-FLA implementation. On the cumulative A800 sm_80/CUDA 13.0/Torch 2.14 build, all 14 cases passed
+with identical BF16 outputs, covering chunk boundaries, grouped heads,
+changed-input replay/state reset, invalid dimensions/scales and context scratch
+release. The fixed relative-L2 gate is 1e-4. This does not qualify other GPUs or
+Torch versions; the original approximate GDN entry points remain available.
+
 ## Shared vision cache and operator checks
 
 The generic shared vision constructor keeps a four-entry exact-grid FIFO for
-compatibility. Its cap counts entries, not device bytes; four large grids may
+compatibility. JEMM also retains a separate four-entry FIFO keyed by the ordered
+multi-image grids. Their caps count entries, not device bytes; four large grids may
 retain substantially more memory than four small grids. A borrowed resident
 output prevents mutation or eviction until its consumer is finished.
 
 [Cua-S1's bounded-cache integration in PR #127](https://github.com/ThinkFlowLab/system1-omni/pull/127)
 uses a separate explicit policy: count/byte LRU limits, default one entry and
 256 MiB, with zero retention available. The Cua wrapper owns environment parsing;
-generic Qwen/JEMM users retain their existing policy. Retention-disabled or
+generic Qwen/JEMM users retain their existing policy. Multi-image and JEMM
+reference execution require the generic constructor: the bounded policy cannot
+account for opaque cuDNN patch-plan allocations through ABI 8. Retention-disabled or
 oversized Cua output stays model-owned through both producer and consumer stream
 drains. Graph enablement and scratch retention are separate policies: turning
 Graph off alone does not release retained scratch.

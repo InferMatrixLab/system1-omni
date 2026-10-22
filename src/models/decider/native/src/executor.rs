@@ -1,6 +1,7 @@
 //! Eager complete-row prefills and a selected tied-embedding CUDA readout.
 use crate::{
     Limits, RowInput,
+    batching::BatchLimits,
     checkpoint::{Checkpoint, HIDDEN, LABELS, PADDED_LABELS, VOCAB},
 };
 use anyhow::{Context, Result, ensure};
@@ -45,6 +46,7 @@ struct Head {
     weights: DeviceBuffer,
     input: DeviceBuffer,
     output: DeviceBuffer,
+    capacity: usize,
 }
 impl Drop for Head {
     fn drop(&mut self) {
@@ -53,7 +55,8 @@ impl Drop for Head {
     }
 }
 impl Head {
-    fn new(weights: &[u8]) -> Result<Self> {
+    fn new(weights: &[u8], capacity: usize) -> Result<Self> {
+        ensure!((1..=4).contains(&capacity), "invalid head batch capacity");
         ensure!(
             weights.len() == PADDED_LABELS * HIDDEN * 2,
             "invalid selected head buffer"
@@ -66,8 +69,9 @@ impl Head {
             stream,
             gemm,
             weights: DeviceBuffer::new(weights.len())?,
-            input: DeviceBuffer::new(HIDDEN * 2)?,
-            output: DeviceBuffer::new(PADDED_LABELS * 2)?,
+            input: DeviceBuffer::new(capacity * HIDDEN * 2)?,
+            output: DeviceBuffer::new(capacity * PADDED_LABELS * 2)?,
+            capacity,
         };
         // SAFETY: the device allocation has exactly weights.len() bytes.
         unsafe {
@@ -76,18 +80,27 @@ impl Head {
         Ok(head)
     }
     fn project(&self, hidden: &[f32], count: usize) -> Result<Vec<f32>> {
+        Ok(self.project_batch(&[hidden], &[count])?.pop().unwrap())
+    }
+    fn project_batch(&self, hidden: &[&[f32]], counts: &[usize]) -> Result<Vec<Vec<f32>>> {
+        let rows = hidden.len();
         ensure!(
-            hidden.len() == HIDDEN
-                && hidden.iter().all(|x| x.is_finite())
-                && (2..=LABELS).contains(&count),
-            "invalid hidden state/readout"
+            rows > 0
+                && rows <= self.capacity
+                && rows == counts.len()
+                && hidden
+                    .iter()
+                    .all(|h| h.len() == HIDDEN && h.iter().all(|x| x.is_finite()))
+                && counts.iter().all(|n| (2..=LABELS).contains(n)),
+            "invalid hidden batch/readout"
         );
         let input: Vec<u8> = hidden
             .iter()
+            .flat_map(|h| h.iter())
             .flat_map(|&x| bf16::from_f32(x).to_le_bytes())
             .collect();
-        // SAFETY: [1,HIDDEN] * [256,HIDDEN]^T -> [1,256]; allocated buffers match.
-        // The last weight row is zero padding and is never returned or normalized.
+        // SAFETY: [rows,HIDDEN] * [256,HIDDEN]^T -> [rows,256]; rows <= capacity.
+        // The final zero weight row is padding and never participates in normalization.
         unsafe {
             cuda::upload(self.input.at(0), &input, self.stream.0)?;
             cuda::check(
@@ -96,7 +109,7 @@ impl Head {
                     self.input.at(0),
                     self.weights.at(0),
                     self.output.at(0),
-                    1,
+                    rows as i32,
                     PADDED_LABELS as i32,
                     HIDDEN as i32,
                     PADDED_LABELS as i32,
@@ -105,36 +118,60 @@ impl Head {
                 "Decider label projection",
             )?;
         }
-        let mut output = vec![0; PADDED_LABELS * 2];
-        // SAFETY: download waits for GEMM and copies exactly the output allocation.
+        let mut output = vec![0; rows * PADDED_LABELS * 2];
+        // SAFETY: every returned row is inside the allocation; download synchronizes GEMM.
         unsafe {
             cuda::download(&mut output, self.output.at(0), self.stream.0)?;
         }
-        let logits: Vec<f32> = output.as_chunks::<2>().0[..count]
+        output
+            .as_chunks::<{ PADDED_LABELS * 2 }>()
+            .0
             .iter()
-            .map(|&b| bf16::from_le_bytes(b).to_f32())
-            .collect();
-        ensure!(
-            logits.iter().all(|x| x.is_finite()),
-            "nonfinite candidate logits"
-        );
-        Ok(logits)
+            .zip(counts)
+            .map(|(row, &count)| {
+                let logits: Vec<f32> = row.as_chunks::<2>().0[..count]
+                    .iter()
+                    .map(|&b| bf16::from_le_bytes(b).to_f32())
+                    .collect();
+                ensure!(
+                    logits.iter().all(|x| x.is_finite()),
+                    "nonfinite candidate logits"
+                );
+                Ok(logits)
+            })
+            .collect()
     }
 }
 struct Loaded {
     model: Model,
     head: Head,
+    batching: BatchLimits,
 }
 impl Loaded {
     fn execute(&mut self, rows: &[RowInput]) -> Result<Vec<Vec<f32>>> {
         cuda::set_device(0)?;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            rows.iter()
-                .map(|row| {
-                    let hidden = self.model.forward(&row.ids)?;
-                    self.head.project(&hidden, row.candidate_ids.len())
-                })
-                .collect::<Result<Vec<_>>>()
+            let lengths: Vec<usize> = rows.iter().map(|row| row.ids.len()).collect();
+            let mut logits = Vec::with_capacity(rows.len());
+            for range in self.batching.ranges(&lengths) {
+                let batch = &rows[range];
+                if batch.len() == 1 {
+                    let hidden = self.model.forward(&batch[0].ids)?;
+                    logits.push(self.head.project(&hidden, batch[0].candidate_ids.len())?);
+                } else {
+                    let inputs: Vec<&[u32]> = batch.iter().map(|row| row.ids.as_slice()).collect();
+                    let hidden = self.model.forward_batch(&inputs)?;
+                    ensure!(
+                        hidden.len() == batch.len(),
+                        "backbone batch output count mismatch"
+                    );
+                    let hidden: Vec<&[f32]> = hidden.iter().map(Vec::as_slice).collect();
+                    let counts: Vec<usize> =
+                        batch.iter().map(|row| row.candidate_ids.len()).collect();
+                    logits.extend(self.head.project_batch(&hidden, &counts)?);
+                }
+            }
+            Ok(logits)
         }))
         .map_err(|_| anyhow::anyhow!("Decider execution panicked"))
         .and_then(|result| result);
@@ -158,6 +195,7 @@ impl Executor {
         library: &Path,
         checkpoint: Checkpoint,
         labels: Vec<u32>,
+        batching: BatchLimits,
     ) -> Result<Self> {
         ensure!(
             std::env::var("CUA_S1_GRAPH").as_deref() != Ok("1"),
@@ -166,8 +204,12 @@ impl Executor {
         let (dir, library) = (dir.to_owned(), library.to_owned());
         let loaded = tokio::task::spawn_blocking(move || -> Result<Loaded> {
             let model = Model::load(&dir, &library)?;
-            let head = Head::new(&checkpoint.head)?;
-            Ok(Loaded { model, head })
+            let head = Head::new(&checkpoint.head, batching.max_rows())?;
+            Ok(Loaded {
+                model,
+                head,
+                batching,
+            })
         })
         .await??;
         Ok(Self {
