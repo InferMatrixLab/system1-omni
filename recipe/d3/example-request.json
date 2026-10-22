@@ -1,0 +1,27 @@
+{
+  "model": "d3",
+  "state": "The customer's card was charged twice for one order and they opened a support ticket reporting the duplicate charge.",
+  "questions": {
+    "refund": {
+      "type": "choice",
+      "instructions": "Decide the refund action.",
+      "criteria": {
+        "refund": "Refund the duplicate charge now",
+        "wait": "Wait for manual review"
+      }
+    },
+    "urgent": {
+      "type": "noul",
+      "instructions": "Is this urgent for the customer?",
+      "criteria": {
+        "false": "Routine duplicate charge",
+        "true": "Customer hardship reported"
+      }
+    },
+    "severity": {
+      "type": "score",
+      "instructions": "Rate the severity of the billing error.",
+      "criteria": ["minor", "moderate", "major", "critical"]
+    }
+  }
+}

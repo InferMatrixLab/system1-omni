@@ -14,17 +14,25 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
 - [Valen-Preview-0923 reference worker](valen/reference.md): prepare the pinned
   Preview checkpoint and Qwen base, start the text-or-image `choice` worker and verify the frontend.
 - [Cua-S1 4B 0.2 native text worker](cua_s1/native.md): build the CUDA library and
-  the Rust worker, export the merged weights and start the worker.
+  the Rust worker, export BF16 weights with the original FP32 adapter and start
+  the worker.
+- [Cua-S1 native screenshot worker](cua_s1/native_screenshot.md): export the
+  multimodal language checkpoint and serve one-image decisions with Rust/CUDA.
 - [Open-Jev native text worker](open_jev/native.md): export the merged text
   backbone and trained decision head of Open-Jev-27B-v1.1 or Open-Jev-9B, then
   serve with Rust and CUDA. [Open-Jev-9B validation](open_jev/validation-9b.md)
   compares the 9B worker with the reference.
+- [JEMM native worker](jemm/README.md): pinned text/image decisions and export;
+  known multi-image numerical limitation is documented in the model contract.
 - [JEV-27B-VL experimental worker](jev_vl/README.md): native text and preencoded
   image decisions; bounded H800 validation with explicit deployment limits.
 - [OmniJev-4B v1.1 preparation](omnijev/README.md): export the checkpoint and
   regenerate the CPU fixtures; the native worker is not available yet.
 - [CLM behind the frontend](clm/README.md): run CLM's own server behind the frontend on
   CPU with a stub encoder, and what the response comparison has to allow for.
+- [D3 reference worker](d3/reference.md): download the pinned vllm-sr/d3 package,
+  verify its runtime manifest, and serve `choice`/`noul`/`score` text decisions
+  through the Python worker and the Rust frontend (serving and parity validated on A100).
 
 - [LFM2.5-350M choice worker](lfm2/README.md): score text decisions with independent
   questions, hybrid cache branching and configurable candidate batches.
