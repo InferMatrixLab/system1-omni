@@ -6,3 +6,8 @@ pub mod model;
 pub mod structure;
 
 pub mod inputs;
+
+pub mod image_preprocess;
+pub mod vision;
+
+mod lora;

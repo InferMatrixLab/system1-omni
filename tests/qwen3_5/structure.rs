@@ -98,7 +98,7 @@ fn adapter_reads_the_checkpoint_and_records_provenance() {
     );
     assert_eq!(s.hidden_act.as_deref(), Some("silu"));
     assert_eq!(s.conv_kernel_dim, 4);
-    structure::check_abi6(&s).unwrap();
+    structure::check_abi(&s).unwrap();
 }
 
 #[test]
@@ -138,7 +138,7 @@ fn adapter_rejects_broken_sources() {
 #[test]
 fn the_frozen_gate_accepts_the_three_vela_hybrid_backbones() {
     for (name, s) in [("0.8B", vela_08b()), ("4B", vela_4b()), ("9B", vela_9b())] {
-        structure::check_abi6(&s).unwrap_or_else(|e| panic!("{name} rejected: {e}"));
+        structure::check_abi(&s).unwrap_or_else(|e| panic!("{name} rejected: {e}"));
     }
 }
 
@@ -191,12 +191,12 @@ fn the_frozen_gate_rejects_every_capability_violation() {
         let (_keep, path) = fixture_dir(default_config());
         let mut s = structure::read_structure(&path).unwrap();
         mutate(&mut s);
-        assert!(structure::check_abi6(&s).is_err(), "gate accepted {name}");
+        assert!(structure::check_abi(&s).is_err(), "gate accepted {name}");
     }
     let (_keep, path) = fixture_dir(default_config());
     let mut s = structure::read_structure(&path).unwrap();
     s.rope_type = "linear".into();
-    let message = structure::check_abi6(&s).unwrap_err().to_string();
+    let message = structure::check_abi(&s).unwrap_err().to_string();
     assert!(message.contains("\"linear\""), "{message}");
 }
 
@@ -215,7 +215,7 @@ fn the_open_jev_27b_checkpoint_passes_the_gate_unchanged() {
         "/../../../../tests/qwen3_5/data"
     ));
     let s = structure::read_structure(dir).unwrap();
-    structure::check_abi6(&s).unwrap();
+    structure::check_abi(&s).unwrap();
     assert_eq!(s.hidden, 5120);
     assert_eq!(s.layer_kinds.len(), 64);
     assert_eq!(s.full_attention_layers(), 16);
@@ -253,7 +253,7 @@ fn identity_is_stable_and_sensitive() {
     let a = structure::structure_identity(&vela_08b());
     let b = structure::structure_identity(&vela_08b());
     assert_eq!(a, b);
-    assert_eq!(a.abi_version, 6);
+    assert_eq!(a.abi_version, 8);
     assert_eq!(a.family, "qwen3_5_hybrid");
     assert_ne!(a, structure::structure_identity(&vela_4b()));
     let mut drifted = vela_08b();
