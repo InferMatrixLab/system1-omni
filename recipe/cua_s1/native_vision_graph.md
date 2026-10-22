@@ -33,7 +33,7 @@ Use the pinned base and multimodal adapter revisions listed in the
 [model contract](../../src/models/cua_s1/README.md#pinned-revisions), and the
 verified language export produced by `export_multimodal_language.py`. Keep all
 checkpoint files immutable during execution. Build the worker and the current
-CUDA library together for **ABI 8**. Resident feature validation adds
+CUDA library together for **ABI 9**. Resident feature validation adds
 `cs1_get_device` and `cs1_bf16_finite`; older libraries are rejected even when
 resident features are disabled.
 
