@@ -71,6 +71,21 @@ the token is not saved. Redirects, proxy environment variables and retries are
 disabled. `--timeout` is a total deadline for each HTTP exchange, including body
 receipt; response validation is included in recorded client latency.
 
+For Decider, pass `--score-decimals 2` in both feasibility and measured runs;
+its scalar Score is rounded to two decimals while probabilities use four.
+The default four-decimal Score contract can reject valid Decider responses,
+including during readiness and warmup. For example, with a ready native worker:
+
+```sh
+python benchmarks/bench.py run requests.jsonl \
+  --endpoint http://127.0.0.1:8000/v1/systemone --model decider \
+  --metadata run-metadata.json --phase feasibility --score-decimals 2 \
+  --concurrency 1 --output /tmp/decider-feasibility
+```
+
+Use the same flag for each measured run. See [Score wire precision](#score-wire-precision)
+for the validation rules and recorded precision metadata.
+
 Start with the weight-free preflight, then one feasibility run per configuration.
 Exclude feasibility from performance comparisons. Use two measured runs at each
 of concurrency 1, 8 and 16, with the same request ordering. Reuse the server;
@@ -182,7 +197,7 @@ metadata and environment-based bearer authentication.
 [Apple Silicon recipe](../recipe/laya/apple-silicon.md): in-process and HTTP latency, paired comparisons,
 profiling and the report with its output-parity section.
 
-### Score wire precision
+## Score wire precision
 
 `bench.py run --score-decimals {2,3,4}` declares the model's scalar Score
 rounding contract (default: four decimals; Decider: two). Probability precision
