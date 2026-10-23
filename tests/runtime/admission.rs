@@ -339,3 +339,32 @@ fn a_permit_can_be_moved_into_the_work_it_was_granted_for() {
     assert_eq!(admission.report().depth, 0, "the work released its slot");
     assert!(admission.try_admit(1).is_some(), "and it can be reused");
 }
+
+/// Regression: a request-only bound has no unit budget, so nothing is accumulated. Adding the
+/// caller's cost anyway overflowed for a cost near `usize::MAX`: debug builds panicked on
+/// admission, release builds wrapped the total and then panicked in `release`.
+#[test]
+fn a_request_only_bound_does_not_accumulate_units() {
+    for reverse in [false, true] {
+        let admission = BoundedAdmission::new(2, None);
+        let huge = admission.try_admit(usize::MAX).expect("one of two");
+        let one = admission.try_admit(1).expect("two of two");
+        assert_eq!(admission.report().depth, 2);
+        assert_eq!(huge.units(), usize::MAX, "the caller's cost is preserved");
+        assert_eq!(one.units(), 1, "and so is the small one's");
+
+        // Both drop orders have to release cleanly and leave the same depth.
+        if reverse {
+            drop(one);
+            drop(huge);
+        } else {
+            drop(huge);
+            drop(one);
+        }
+        assert_eq!(admission.report().depth, 0, "every admission came back");
+        assert!(
+            admission.try_admit(usize::MAX).is_some(),
+            "and the bound admits again afterwards"
+        );
+    }
+}
