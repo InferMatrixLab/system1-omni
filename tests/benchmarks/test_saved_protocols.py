@@ -268,7 +268,7 @@ class SavedProtocolTests(unittest.IsolatedAsyncioTestCase):
                 state = json.loads(state_bytes)
                 state["responses_sha256"] = bench.digest(path / "responses.jsonl")
                 bench.write_json(path / "completion.json", state)
-                with self.assertRaisesRegex(ValueError, "raw response checksum"):
+                with self.assertRaisesRegex(ValueError, "response text does not match its bytes"):
                     bench.summarize_saved(path)
                 (path / "responses.jsonl").write_bytes(responses + b'{"id":')
                 (path / "completion.json").write_bytes(state_bytes)

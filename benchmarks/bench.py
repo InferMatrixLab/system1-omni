@@ -3,6 +3,7 @@
 
 import argparse
 import asyncio
+import base64
 import hashlib
 import json
 import math
@@ -31,6 +32,43 @@ def response_digest(text):
     if not isinstance(text, str):
         raise ValueError("raw response must be text")
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+RESPONSE_FORMAT = "httpx-content-base64-utf8-v1"
+LEGACY_RESPONSE_FORMAT = "httpx-text-v1"
+
+
+def saved_response_format(config):
+    value = config.get("response_format", LEGACY_RESPONSE_FORMAT)
+    if value not in (RESPONSE_FORMAT, LEGACY_RESPONSE_FORMAT):
+        raise ValueError("unsupported saved response format")
+    return value
+
+
+def response_body(record, response_format):
+    if response_format == LEGACY_RESPONSE_FORMAT:
+        body = record["response"]
+        checksum = response_digest(body)
+    else:
+        encoded = record["response_bytes_base64"]
+        if encoded is not None and not isinstance(encoded, str):
+            raise ValueError("saved response base64 must be text")
+        body = base64.b64decode(encoded, validate=True) if encoded is not None else None
+        checksum = hashlib.sha256(body).hexdigest() if body is not None else None
+        text = body.decode("utf-8", errors="replace") if body is not None else None
+        if record["response"] != text:
+            raise ValueError("saved response text does not match its bytes")
+        if body is None and record["status"] is not None:
+            raise ValueError("HTTP response is missing its saved bytes")
+    if record["response_sha256"] != checksum:
+        raise ValueError("raw response checksum mismatch")
+    return body
+
+
+def response_payload(body):
+    if isinstance(body, bytes):
+        body = body.decode("utf-8")
+    return json.loads(body)
 
 
 def load_cases(path):
@@ -378,20 +416,24 @@ async def request_one(
         "error": None,
         "error_kind": None,
         "response": None,
+        "response_bytes_base64": None,
         "answers": {},
         "state": "completed",
     }
+    body = None
     try:
         async with asyncio.timeout(timeout):
             response = await client.post(
                 endpoint, json=wire_request(case, model, protocol)
             )
         record["status"] = response.status_code
-        record["response"] = response.text
+        body = response.content
+        record["response_bytes_base64"] = base64.b64encode(body).decode("ascii")
+        record["response"] = body.decode("utf-8", errors="replace")
         response.raise_for_status()
         record["answers"] = wire_answers(
             case,
-            json.loads(record["response"]),
+            response_payload(body),
             model,
             protocol,
             score_decimals,
@@ -417,7 +459,9 @@ async def request_one(
     record["latency_ms"] = duration if record["state"] == "completed" else None
     if record["state"] == "incomplete":
         record["elapsed_until_abort_ms"] = duration
-    record["response_sha256"] = response_digest(record["response"])
+    record["response_sha256"] = (
+        hashlib.sha256(body).hexdigest() if body is not None else None
+    )
     return record
 
 
@@ -575,6 +619,7 @@ async def run(args, cases):
             "validation_protocol": version,
             "score_decimals": score_decimals,
             "protocol": protocol,
+            "response_format": RESPONSE_FORMAT,
             "endpoint": args.endpoint,
             "model": args.model,
             "phase": args.phase,
@@ -670,6 +715,7 @@ def summarize_saved(path):
     ):
         raise ValueError("saved warmup checksum does not match completion")
     protocol, score_decimals, version = validation_settings(config)
+    response_format = saved_response_format(config)
     if config["latency_basis"] != "post_to_body_json_and_schema_validation":
         raise ValueError("unsupported saved latency basis")
     manifest_hash = digest(path / "requests.jsonl")
@@ -710,8 +756,7 @@ def summarize_saved(path):
         raise ValueError("duplicate, unknown or unattempted response ID")
     completed_ids = set()
     for record in records:
-        if record["response_sha256"] != response_digest(record["response"]):
-            raise ValueError("raw response checksum mismatch")
+        body = response_body(record, response_format)
         if record["state"] == "incomplete":
             if (
                 record["latency_ms"] is not None
@@ -754,7 +799,7 @@ def summarize_saved(path):
             try:
                 answers = wire_answers(
                     by_id[record["id"]],
-                    json.loads(record["response"]),
+                    response_payload(body),
                     config.get("model"),
                     protocol,
                     score_decimals,
@@ -811,6 +856,7 @@ def compare(args):
     ]
     for path, config in zip((args.reference, args.candidate), configs):
         validation_settings(config)
+        saved_response_format(config)
         if digest(path / "requests.jsonl") != config["manifest_sha256"]:
             raise ValueError("saved manifest checksum does not match config")
     if configs[0]["manifest_sha256"] != configs[1]["manifest_sha256"]:

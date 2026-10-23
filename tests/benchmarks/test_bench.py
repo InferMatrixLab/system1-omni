@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import base64
 import io
 import json
 import tempfile
@@ -46,6 +47,7 @@ def saved_inputs(path, cases=CASES):
             "manifest_sha256": bench.digest(path / "requests.jsonl"),
             "warmup_manifest_sha256": None,
             "latency_basis": "post_to_body_json_and_schema_validation",
+            "response_format": bench.RESPONSE_FORMAT,
         },
     )
 
@@ -381,11 +383,11 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PersistenceTests(unittest.IsolatedAsyncioTestCase):
-    async def test_bom_and_invalid_utf8_online_offline_text_decoding_agree(self):
+    async def test_bom_and_invalid_utf8_online_offline_rejection_agrees(self):
         valid = json.dumps(response_for(CASES[0])).encode("utf-8")
         for label, body, error_kind in (
             ("bom", b"\xef\xbb\xbf" + valid, "invalid_response"),
-            ("invalid-utf8", valid[:-1] + b', "unused": "\xff"}', None),
+            ("invalid-utf8", valid[:-1] + b', "unused": "\xff"}', "invalid_response"),
         ):
             with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
                 path = Path(directory) / "run"
@@ -398,6 +400,8 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
                         client, "http://localhost/v1/systemone", CASES[:1], "english", 1, 1, path
                     )
                 self.assertEqual(records[0]["response"], expected_text)
+                self.assertEqual(base64.b64decode(records[0]["response_bytes_base64"]), body)
+                self.assertEqual(records[0]["response_sha256"], bench.hashlib.sha256(body).hexdigest())
                 self.assertEqual(records[0]["error_kind"], error_kind)
                 self.assertTrue(expected_text.startswith("\ufeff") if label == "bom" else "\ufffd" in expected_text)
                 expected = bench.summarize(CASES[:1], records, elapsed)

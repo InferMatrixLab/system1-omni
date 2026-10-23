@@ -88,12 +88,12 @@ Use `--score-decimals 2`, `3` or `4` to match the model's scalar Score precision
 remain four-decimal wire values. Score validation bounds their independent
 rounding together with the scalar's rounding, and accepts Decider's all-zero
 Score distribution only with its complete isolated zero-fit metadata.
-Online validation and offline replay both parse the saved HTTPX-decoded
-`response.text` with `json.loads`. No BOM is stripped or missing field supplied.
-An initial U+FEFF is rejected by string JSON parsing. HTTPX may replace invalid
-encoded bytes with U+FFFD; if that exact saved text is valid JSON and passes the
-same schema checks, it is accepted. This is a decoded-text contract, not a
-claim that the original HTTP bytes were valid UTF-8.
+New runs preserve HTTPX `response.content` bytes and decode them as strict UTF-8
+before JSON/schema validation, both online and offline. Invalid UTF-8 is an
+`invalid_response`, even in an otherwise valid answer's unused field. HTTP charset
+headers do not override this JSON contract. No BOM is stripped or missing field
+supplied; an initial U+FEFF remains invalid. These bytes are HTTPX's body after
+HTTP content decoding, not compressed wire bytes or HTTP framing.
 
 For Decider, pass `--score-decimals 2` in both feasibility and measured runs;
 its scalar Score is rounded to two decimals while probabilities use four.
@@ -145,9 +145,11 @@ Outputs:
 - `responses.jsonl`: flushed after each request finishes, in completion order
   during replay, then atomically reordered to manifest input order for a complete
   traversal. Interrupted runs retain their actual saved completion order,
-  with the frozen request ID, original response text and its SHA256, HTTP status,
+  with the frozen request ID, lossless `response_bytes_base64`, its SHA256, HTTP status,
   validation result, client latency and any error. Join records to the manifest
-  by ID; `compare` accepts different completion orders.
+  by ID; `compare` accepts different completion orders. The `response` text is a
+  display copy decoded with replacement, never the new format's validation input.
+  No HTTP body is represented by null; an empty HTTP body has an empty base64 string.
 - `completion.json`: atomically replaced before each measured request starts and
   after it finishes. Contains attempted/completed/active IDs, input/config/response
   checksums, measured start, terminal stop reason and real measured wall time.
@@ -177,7 +179,7 @@ historical body-only client timing.
 
 A soft interruption saves finished samples and records cancelled requests as
 `incomplete`, with `elapsed_until_abort_ms` and no completed `latency_ms`. If a
-complete body was received before cancellation, its text remains available for
+complete body was received before cancellation, its bytes remain available for
 independent offline scoring. Abort durations do not enter latency percentiles.
 Cancellation of the client does not prove the server stopped processing.
 
@@ -197,7 +199,7 @@ python benchmarks/bench.py summary /tmp/laya-c1-run1
 
 This command makes no requests and prints the recomputed summary without changing
 saved files. It checks frozen IDs, duplicates and unknown entries, saved manifest,
-config, warmup and response checksums, and agreement between original response text and
+config, warmup and response checksums, and agreement between saved response bodies and
 normalized answers/validation. It requires the new `completion.json` evidence;
 older runs remain usable by `compare` but cannot acquire unrecorded timing or
 interruption boundaries through this command.
@@ -211,6 +213,15 @@ Offline replay validates these settings before interpreting response records.
 Unknown protocol/version values and unsupported or non-integer precisions are
 rejected, even if the config checksum matches. Missing protocol and precision
 selectors default to `systemone` and `4`.
+
+The independent `response_format=httpx-content-base64-utf8-v1` selector binds the
+new byte evidence and strict decoder to the config checksum. Offline replay
+checks base64, the original byte SHA256 and the display text's consistency before
+revalidating answers. Unknown response formats are rejected. Supported archives
+without this selector, or with `httpx-text-v1`, retain their original saved-text
+parsing and text SHA256 semantics, including HTTPX replacement decoding. Such
+archives cannot establish the validity of the original UTF-8 bytes. Do not add
+byte fields or rewrite old configs/hashes to make historical evidence look verified.
 
 For supported archives without `validation_protocol`, the reader uses
 `systemone-4dp-score-abs1e-4-v1`: the original typed System One validation and
@@ -342,6 +353,8 @@ rounding contract (default: four decimals; Decider: two). Probability precision
 remains four decimals. The validator bounds independent scalar and weighted
 probability rounding, requires the exact level range, and preserves wire values.
 The same optional `score_decimals` argument is accepted by `read_answers`,
-`request_one` and `replay`; run configuration records it for reproducibility.
+`request_one` and `replay`; pass it by keyword when calling the collector, since
+`replay` retains its positional `output` argument. Run configuration records it
+for reproducibility.
 Decider's isolated all-zero Score distribution requires complete consistent
 zero-fit metadata; other non-normalized distributions remain invalid.
