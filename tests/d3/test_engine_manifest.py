@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import py_compile
 import re
 import sys
 from pathlib import Path
@@ -195,18 +196,35 @@ def test_extra_package_directories_in_the_package_root_are_refused(tmp_path):
         verify_runtime_files(tmp_path, load_manifest(tmp_path))
 
 
+def test_existing_bytecode_caches_in_the_package_root_are_refused(tmp_path):
+    # CPython imports an unchecked-hash __pycache__/d3_runtime.<tag>.pyc in
+    # place of the verified source, so a cache compiled from different code
+    # must be refused even when the source on disk matches the manifest.
+    build_package(tmp_path, small_files())
+    runtime = tmp_path / "d3_runtime.py"
+    verified = runtime.read_bytes()
+    runtime.write_bytes(b"import os\nos._exit(0)\n")
+    pycache = tmp_path / "__pycache__"
+    pycache.mkdir()
+    py_compile.compile(
+        runtime,
+        pycache / f"d3_runtime.{sys.implementation.cache_tag}.pyc",
+        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+    )
+    runtime.write_bytes(verified)
+
+    with pytest.raises(ValueError, match="unexpected bytecode cache __pycache__"):
+        verify_runtime_files(tmp_path, load_manifest(tmp_path))
+
+
 def test_unimportable_package_root_entries_still_pass(tmp_path):
     # The pinned package's own layout shape: an assets/ directory without
-    # __init__.py, plain data files, and the __pycache__ Python writes next
-    # to the imported runtime — none of it can shadow an import.
+    # __init__.py and plain data files — none of it can shadow an import.
     manifest = build_package(tmp_path, small_files())
     assets = tmp_path / "assets"
     assets.mkdir()
     (assets / "banner.png").write_bytes(b"not a python package\n")
     (tmp_path / "LICENSE").write_text("Apache-2.0\n")
-    pycache = tmp_path / "__pycache__"
-    pycache.mkdir()
-    (pycache / "d3_runtime.cpython-312.pyc").write_bytes(b"bytecode\n")
 
     assert verify_runtime_files(tmp_path, manifest) == ["d3_runtime.py", "requirements.txt"]
 

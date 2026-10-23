@@ -12,9 +12,10 @@ the upstream default, whose ``verify_package`` walks only the 39-entry
 executor hashes every file of the manifest's ``runtime.files_sha256`` table
 in full before importing anything from the package directory, and refuses
 unlisted importable entries (an extra source, ``.pyc`` or extension module,
-or an ``__init__.py`` package) in the package root: that root goes first on
-``sys.path``, so such an entry would shadow a dependency the pinned runtime
-imports. Hash
+or an ``__init__.py`` package) and any ``__pycache__`` in the package root:
+that root goes first on ``sys.path``, so such an entry would shadow a
+dependency the pinned runtime imports, and a stale bytecode cache would
+execute in place of the verified source. Hash
 agreement proves only internal consistency — a later snapshot ships a
 self-consistent table of its own — so the gate first requires the manifest
 to carry exactly the repo id and runtime digests checked in for
@@ -110,7 +111,8 @@ def verify_runtime_files(root: Path, manifest: dict[str, Any]) -> list[str]:
     entries the table does not name — the package root is about to go first
     on ``sys.path``, where an extra source, ``.pyc`` or extension module,
     or an ``__init__.py`` package would shadow one of the pinned runtime's
-    dependencies.
+    dependencies — and any ``__pycache__``, whose cached bytecode could
+    execute in place of a verified source file.
     """
 
     table = (manifest.get("runtime") or {}).get("files_sha256")
@@ -129,7 +131,9 @@ def verify_runtime_files(root: Path, manifest: dict[str, Any]) -> list[str]:
     for entry in sorted(Path(root).iterdir()):
         if entry.name in table:
             continue
-        if entry.is_file() and entry.suffix in IMPORTABLE_FILE_SUFFIXES:
+        if entry.name == "__pycache__":
+            problems.append("unexpected bytecode cache __pycache__/ in the package root")
+        elif entry.is_file() and entry.suffix in IMPORTABLE_FILE_SUFFIXES:
             problems.append(f"unexpected importable file {entry.name} in the package root")
         elif entry.is_dir() and (entry / "__init__.py").is_file():
             problems.append(f"unexpected importable package {entry.name}/ in the package root")
@@ -180,9 +184,16 @@ class D3Executor:
         # Import the just-verified runtime the way upstream d3_server.py does:
         # the package directory goes first on sys.path so the flat runtime
         # modules (d3_runtime, d3_format, ...) resolve to the checkpoint's own
-        # copies. One worker process serves one package.
+        # copies. One worker process serves one package. The import runs with
+        # bytecode writing off: a __pycache__ it left next to the verified
+        # source is what the next gate run refuses.
         put_first_on_sys_path(root)
-        import d3_runtime
+        saved_dont_write_bytecode = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True
+        try:
+            import d3_runtime
+        finally:
+            sys.dont_write_bytecode = saved_dont_write_bytecode
 
         self.model = d3_runtime.D3.from_pretrained(
             root,

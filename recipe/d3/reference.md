@@ -114,8 +114,9 @@ different `repo_id` or runtime table), when any of the 9 runtime files
 fails its full-hash check, or when the package root holds an importable
 entry the runtime table does not name (an extra source, `.pyc` or
 extension module, or `__init__.py` package, which the `sys.path` setup
-would let shadow a dependency) — that gate runs before any package code
-is imported.
+would let shadow a dependency) or a `__pycache__` whose stale bytecode
+would execute in place of the verified source — that gate runs before any
+package code is imported.
 
 ## Start the worker
 

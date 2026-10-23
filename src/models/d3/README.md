@@ -28,8 +28,9 @@ This worker additionally hashes every file of
 serve packages without a manifest. It also rejects importable entries the
 runtime table does not name — an extra source, `.pyc` or extension module,
 or an `__init__.py` package in the package root — because that root is
-placed first on `sys.path`, where such an entry would shadow a dependency of
-the pinned runtime. Because hash
+placed first on `sys.path`, where such an entry would shadow a dependency
+of the pinned runtime, and any `__pycache__`, whose stale bytecode would
+execute in place of the verified source. Because hash
 agreement with a manifest
 proves only internal consistency — a later snapshot ships a self-consistent
 table of its own — the gate first requires the manifest to carry exactly
