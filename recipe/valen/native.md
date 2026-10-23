@@ -180,8 +180,9 @@ request is prepare → execute → finish under one admission.
 
   **Recorded verdict (RTX 5060 Laptop GPU, sm_120, BF16, torch
   2.11.0+cu128, eager, TF32 off, 2026-10-21; native: the same GPU, the
-  `libqwen3_5_cuda.so` built at ABI 8 for sm_120 by
-  `src/backends/cuda/qwen3_5/build.sh`):**
+  `libqwen3_5_cuda.so` built for sm_120 by
+  `src/backends/cuda/qwen3_5/build.sh` — measured at ABI 8 on the
+  pre-sync tree, re-verified at ABI 9 on ced49901, see below):**
 
   | Case | Answer | Max probability Δ | Max confidence Δ | Max score Δ |
   | --- | --- | --- | --- | --- |
@@ -220,6 +221,39 @@ request is prepare → execute → finish under one admission.
   `choice` answers only. On a deployment where a decision margin that thin
   matters, the component gates (N1/N2) are the levers, not this worker's
   plumbing.
+
+  **Re-verified on ced49901 at ABI 9 (2026-10-23, RTX 5060 Laptop GPU,
+  sm_120, `libqwen3_5_cuda.so` rebuilt from the synced source — 36
+  upstream commits, ABI 8 → 9 with #123/#98/#143 — by
+  `src/backends/cuda/qwen3_5/build.sh target/cuda-abi9 120`; all gates
+  re-run serially, eager, one model at a time). Every layer reproduced
+  its recorded figure verbatim, so no tolerance moved and nothing was
+  re-declared:**
+
+  | Case | Answer | Max probability Δ | Max confidence Δ | Max score Δ |
+  | --- | --- | --- | --- | --- |
+  | text choice (`which_passed`) | **exact** (`r1_and_r3`) | 8.713363e-3 | 1.742673e-2 | — |
+  | image choice (`color`) | the same declared near-tie flip (native `white`, reference `black`) | 7.628613e-2 | 6.348610e-2 | — |
+  | noul (`duplicate` + `authorized`) | floats gated | 2.852246e-3 | 5.704493e-3 | — |
+  | score (`severity`) | floats gated, legend exact | 2.453974e-2 | 3.680961e-2 | 1.511225e-2 |
+  | mixed | **exact** choice (`void`) | 2.453974e-2 | 3.680961e-2 | 1.511225e-2 |
+  | head probe | — | 4.529953e-6 max logit Δ | — | — |
+
+  The component gates re-verified with the same identity: the vision
+  tower max abs 1.03125 (3361/131072 bit-exact, mean abs 1.004489e-2)
+  under the declared 1.25; the end-to-end text hidden max abs 0.25
+  (1765/2048 elements differ) under 0.5; every projection family at its
+  recorded 0..1 BF16-ulp figure (in_proj_qkv 0.03125, q_proj 0.015625,
+  out_proj 0.007812, o_proj and down 0.000488, fused gate/up bit-exact
+  over 98304 elements) under 0.0625. The image decomposition diagnostic
+  repeats unchanged: pixel preprocessing bit-exact (0/393216 BF16
+  elements), tower drift 1.03125 over the 64 rows, language+head on the
+  *reference's* tower rows within 9.2e-3 of the reference logits, and
+  the same declared flip on the native rows — the flip mechanism and
+  its attribution carry over to ABI 9 as recorded. The shared backend's
+  eager numeric path (default `cs1_gemm_create`, no CUDA Graph, no
+  fixed-algorithm handle on this worker) is unchanged by the sync; the
+  ABI 9 additions sit on code paths this worker does not take.
 
 ### Known limitations (this milestone)
 
