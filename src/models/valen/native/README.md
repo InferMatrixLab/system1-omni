@@ -1,6 +1,6 @@
 # Valen-Preview-0923 native worker
 
-The native `/v1/systemone` worker for Valen-Preview-0923 (spec 03): the
+The native `/v1/systemone` worker for Valen-Preview-0923: the
 reference worker's HTTP contract, compiler-equivalent request processing, and
 eager execution on the shared Qwen3.5 native backends — no Python or PyTorch
 in the serving path. Startup, examples, validation scope and the declared
@@ -15,7 +15,7 @@ the reference worker's contract is documented in [`../README.md`](../README.md).
 | `protocol` | `/v1/systemone` wire validation (limits, acceptance order, 4xx bodies) |
 | `preprocess` | question records, chat-template-equivalent state rendering, image grid |
 | `compile` | the pinned compiler: branch suffixes, candidate/decision position capture, token accounting |
-| `text` | unmerged FP32 language-LoRA loading and export-policy validation (N2) |
+| `text` | unmerged FP32 language-LoRA loading and export-policy validation |
 | `head` | the CPU FP32 decision head from `head.safetensors` |
 | `engine` | execution orchestration: text/image paths, mrope positions, readout |
 | `finish` | response finishing with `json.dumps` byte parity (CPython float repr) |
@@ -33,11 +33,11 @@ concentration confidence). The types mix freely in one request.
 
 ## Tests
 
-- CPU, no GPU: `tests/valen/native.rs`, `native_tokenization.rs` (N3),
-  `worker.rs` (the N4 contract suite + the N5 noul/score finisher byte
+- CPU, no GPU: `tests/valen/native.rs`, `native_tokenization.rs`,
+  `worker.rs` (the contract suite + the noul/score finisher byte
   parity and mixed-type round trips), plus the frontend integration
   `tests/frontend/native_worker.rs`.
-- Env-gated GPU: `tests/valen/valen_vision.rs` (N1), `tests/valen/text.rs`,
-  `text_reference.rs` (N2), and `worker_gpu.rs` (the end-to-end parity gate
+- Env-gated GPU: `tests/valen/valen_vision.rs`, `tests/valen/text.rs`,
+  `text_reference.rs`, and `worker_gpu.rs` (the end-to-end parity gate
   for all three question types; run serially on one GPU — `--test-threads 1`
   — each test loads the model).

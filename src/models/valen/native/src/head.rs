@@ -1,4 +1,4 @@
-//! The learned decision head on CPU FP32 (spec 03, N4).
+//! The learned decision head on CPU FP32.
 //!
 //! `head.safetensors` from the five-file export carries two FP32 `(256, 2048)`
 //! projections, `head.candidate.weight` and `head.decision.weight`, applied

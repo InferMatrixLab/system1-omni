@@ -804,7 +804,7 @@ impl Model {
         Ok(())
     }
 
-    /// Valen's unmerged text path (spec 03, N2): the same numeric profile as
+    /// Valen's unmerged text path: the same numeric profile as
     /// [`Model::enable_reference_text_numerics`] over the 2B backbone — the
     /// framework norm/GEMM/attention selection, FP32 LoRA branches, FP32
     /// chunked GDN with the pinned Torch cumulative-decay association,

@@ -56,7 +56,7 @@ impl Encoder for &HFTokenizer {
 pub struct BaseSequence {
     pub input_ids: Vec<u32>,
     pub mm_token_type_ids: Vec<u8>,
-    /// The image layout the vision path consumes (N1); `None` for text.
+    /// The image layout the vision path consumes; `None` for text.
     pub image: Option<ImageLayout>,
 }
 
@@ -81,7 +81,7 @@ pub struct Branch {
     pub length: usize,
 }
 
-/// One compiled question, with the wire identity the finisher needs (N4/N5).
+/// One compiled question, with the wire identity the finisher needs.
 #[derive(Debug)]
 pub struct CompiledQuestion {
     pub qid: String,
@@ -92,7 +92,7 @@ pub struct CompiledQuestion {
     pub branches: Vec<Branch>,
 }
 
-/// The compiled request, the seam the native executor (N4) consumes.
+/// The compiled request, the seam the native executor consumes.
 #[derive(Debug)]
 pub struct Compiled {
     pub base: BaseSequence,

@@ -1,4 +1,4 @@
-//! The Valen-Preview unmerged adapter layout (spec 03, N2): the peft 0.18.1
+//! The Valen-Preview unmerged adapter layout: the peft 0.18.1
 //! checkpoint stores language adapters as
 //! `backbone.language_model.base_model.model.<target>.lora_{A,B}.default.weight`
 //! — a different prefix and a named-adapter suffix than the Cua-S1 export.

@@ -3,7 +3,7 @@
 This directory contains the System1-Omni integration for Valen-Preview-0923.
 The Python worker, processor, executor, and postprocessor are the reference
 serving boundary for the pinned text and single-image `choice`, `noul`, and
-`score` questions; the [`native/`](native/) subdirectory (spec 03) is the
+`score` questions; the [`native/`](native/) subdirectory is the
 native Rust/CUDA worker that serves the same contract on the shared Qwen3.5
 backends — startup, parity gates and recorded deviations in
 [recipe/valen/native.md](../../../recipe/valen/native.md).
@@ -180,7 +180,7 @@ every transformation recorded in a JSON
 manifest: see [recipe/valen/export.md](../../../recipe/valen/export.md).
 Consuming that export does not change this worker.
 
-## Native unmerged text path (spec 03, N2)
+## Native unmerged text path
 
 `native/src/text.rs` loads the five-file export (`valen-checkpoint-export/2`)
 onto the shared Qwen3.5 CUDA machinery: the manifest format, LoRA profile

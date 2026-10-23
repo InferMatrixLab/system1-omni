@@ -1,4 +1,4 @@
-//! Device-gated Valen text parity (spec 03, N2).
+//! Device-gated Valen text parity.
 //!
 //! The reference fixture is recorded by `recipe/valen/dump_text_reference.py`
 //! from the pinned reference stack (Valen @ 750bfcf, Preview checkpoint
@@ -61,7 +61,7 @@ fn env_path(name: &str) -> PathBuf {
 /// inventory gates and reports the pinned census (372 FP32 tensors over 186
 /// targets, scale 2).
 #[test]
-#[ignore = "requires VALEN_EXPORT pointing at the spec-02 export directory"]
+#[ignore = "requires VALEN_EXPORT pointing at the five-file export directory"]
 fn valen_text_export_validates_the_pinned_inventory() {
     let policy = omni_valen_native::text::validate_export(&env_path("VALEN_EXPORT")).unwrap();
     assert_eq!(

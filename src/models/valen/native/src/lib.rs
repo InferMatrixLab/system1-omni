@@ -4,7 +4,7 @@
 //! `valen.data.compiler.Compiler` (revision 750bfcf).
 //!
 //! Layering mirrors the reference worker and leaves seams for the executor
-//! (ticket N4):
+//! and the HTTP worker:
 //!
 //! - [`wire`]: the JSON body decode with the reference's exact rejection
 //!   bodies, plus the small Python-behaviour helpers (repr, trim).
@@ -23,7 +23,7 @@
 //! question types' finishing variants — `choice`, `noul` (P(true) + the full
 //! pair) and `score` (cross-branch softmax → expected level + legend +
 //! concentration confidence). The unmerged text-path LoRA application
-//! (spec 03, N2) is [`text`]: export-policy validation over the five-file
+//! is [`text`]: export-policy validation over the five-file
 //! export plus the shared `#143` machinery.
 
 pub mod compile;

@@ -1,10 +1,10 @@
-//! Device-gated native worker checks (spec 03, N4 choice + N5 noul/score).
+//! Device-gated native worker checks.
 //!
 //! The parity fixture is recorded by `recipe/valen/dump_choice_parity.py`
 //! from the pinned reference stack (Valen @ 750bfcf, Preview checkpoint
 //! 81b9c63 sha256-pinned, Qwen3.5-2B base 15852e8c, peft 0.18.1 unmerged
 //! FP32 adapters, eager attention, TF32 off, BF16) over five fixtures: the
-//! N2 hidden fixture's text choice state, the example image choice request,
+//! hidden fixture's text choice state, the example image choice request,
 //! the example noul request (plain + custom wording), the example score
 //! request (3 levels, one branch per level), and one mixed-type body —
 //! committed as `recipe/valen/fixtures/choice-parity-reference.json`.
@@ -16,9 +16,9 @@
 //! score questions' expected level carries its own declared tolerance
 //! (an aggregate of the gated probabilities). The native stack runs its own
 //! kernels over the same numeric profile — cross-kernel BF16 drift
-//! accumulates over 24 language layers (N2 measured 0.5 max-abs on the
+//! accumulates over 24 language layers (measured 0.5 max-abs on the
 //! final hidden at scale 50) and, on the image path, the vision tower adds
-//! its own declared drift (N1 measured 1.03 max-abs on a 2.5-scale output)
+//! its own declared drift (measured 1.03 max-abs on a 2.5-scale output)
 //! — so the probability-level tolerance quantifies end-to-end divergence
 //! instead of demanding bit equality. A `null` tolerance refuses to pass:
 //! measure the native deltas first, then declare them in the fixture.
@@ -341,7 +341,7 @@ fn native_image_choice_matches_the_recorded_reference() {
     );
 }
 
-/// GPU parity for the noul fixture (N5): one plain noul question (the
+/// GPU parity for the noul fixture: one plain noul question (the
 /// reference's native noul record) and one with custom true/false wording
 /// (compiled as a choice record, finished as noul) — both answer `type: noul`
 /// with the reference's field semantics.
@@ -369,7 +369,7 @@ fn native_noul_matches_the_recorded_reference() {
     );
 }
 
-/// GPU parity for the score fixture (N5): three levels, one branch per level,
+/// GPU parity for the score fixture: three levels, one branch per level,
 /// cross-branch softmax → expected level + legend + concentration confidence.
 /// The expected-level scalar carries its own declared tolerance.
 #[test]
@@ -402,7 +402,7 @@ fn native_score_matches_the_recorded_reference() {
     );
 }
 
-/// GPU parity for the mixed fixture (N5): choice + noul + score in one body,
+/// GPU parity for the mixed fixture: choice + noul + score in one body,
 /// one admission, per-kind execution and finishing in request order.
 #[test]
 #[ignore = "requires CUDA, VALEN_EXPORT, VALEN_BASE and VALEN_CUDA_LIB"]
@@ -510,7 +510,7 @@ fn native_head_matches_the_reference_probe() {
 
 /// The serving surface over a real socket with the real engine: health after
 /// warmup is the main binary's job; here one admitted mixed-type request
-/// round-trips (N5: all three finishing variants over one HTTP response).
+/// round-trips, exercising all three finishing variants over one HTTP response.
 #[tokio::test]
 #[ignore = "requires CUDA, VALEN_EXPORT, VALEN_BASE and VALEN_CUDA_LIB"]
 async fn native_worker_serves_one_request_over_http() {
@@ -559,7 +559,7 @@ async fn native_worker_serves_one_request_over_http() {
     );
 }
 
-/// Decomposition diagnostic for the image path, on the N1 vision fixture's
+/// Decomposition diagnostic for the image path, on the vision fixture's
 /// image (the recipe example): (1) the native pixel preprocessing vs the
 /// recorded HF-processed BF16 pixel bits, (2) the native tower rows vs the
 /// recorded reference tower rows, (3) the native language+head readout fed
@@ -662,7 +662,7 @@ fn image_path_decomposition_diagnostic() {
         tower_max = tower_max.max((a.to_f32() - b.to_f32()).abs());
     }
     eprintln!(
-        "(2) tower output: max abs delta {tower_max:.6} over {} rows (N1 declared 1.25)",
+        "(2) tower output: max abs delta {tower_max:.6} over {} rows (declared 1.25)",
         native_rows.len() / 2048
     );
 

@@ -1,4 +1,4 @@
-//! CPU-only worker tests (spec 03, N4 + N5): the finishing layer's byte
+//! CPU-only worker tests: the finishing layer's byte
 //! parity with the Python reference postprocessor for all three question
 //! types (recorded once from `models.valen.postprocess` in the pinned venv
 //! and pinned here), the head readout's formula on a deterministic synthetic
@@ -446,7 +446,7 @@ mod http {
         br#"{"model": "valen-preview-0923", "state": "The card was charged twice.", "questions": {"move": {"type": "choice", "instructions": "Close it?", "criteria": {"down": "Close", "wait": "Wait"}}}}"#.to_vec()
     }
 
-    /// A choice + noul + score body (the N5 all-types round trip): the same
+    /// A choice + noul + score body (the all-types round trip): the same
     /// stub-logits convention, so the response is the recorded reference body.
     fn mixed_body() -> Vec<u8> {
         br#"{"model": "valen-preview-0923", "state": "The card was charged twice.", "questions": {"move": {"type": "choice", "instructions": "Close it?", "criteria": {"down": "Close", "wait": "Wait"}}, "dup": {"type": "noul", "instructions": "Was it duplicated?"}, "sev": {"type": "score", "instructions": "How severe?", "criteria": ["No error", "A minor error", "A major error"]}}}"#.to_vec()
@@ -566,7 +566,7 @@ mod http {
             b"{\"detail\": \"model must be valen-preview-0923\"}"[..]
         );
 
-        // N5 removed the N4 milestone guard: all three question types serve.
+        // The interim milestone guard is removed: all three question types serve.
         // A malformed noul still gets the wire layer's 422, byte-identical to
         // the reference's validation order.
         let bad_noul = br#"{"model": "valen-preview-0923", "state": "x", "questions": {"n": {"type": "noul", "instructions": "i", "criteria": {"maybe": "Neither"}}}}"#.to_vec();

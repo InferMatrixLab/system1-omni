@@ -72,7 +72,7 @@ fn text_choice(state: &str) -> Vec<u8> {
     .into_bytes()
 }
 
-/// All three question types in one body (N5): the forwarded bytes must stay
+/// All three question types in one body: the forwarded bytes must stay
 /// byte-identical whichever finishing variant answered.
 fn mixed_types() -> Vec<u8> {
     br#"{"model": "valen-preview-0923", "state": "The card was charged twice.", "questions": {"move": {"type": "choice", "instructions": "Close it?", "criteria": {"down": "Close", "wait": "Wait"}}, "dup": {"type": "noul", "instructions": "Was it duplicated?"}, "sev": {"type": "score", "instructions": "How severe?", "criteria": ["No error", "A minor error", "A major error"]}}}"#.to_vec()

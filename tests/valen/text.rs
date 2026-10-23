@@ -1,4 +1,4 @@
-//! The unmerged Valen text path (spec 03, N2): export-policy validation and
+//! The unmerged Valen text path: export-policy validation and
 //! the loading seam over the shared #143 machinery.
 //!
 //! CPU-only tests build synthetic export directories and pin the validation

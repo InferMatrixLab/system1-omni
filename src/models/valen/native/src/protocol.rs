@@ -34,7 +34,8 @@ pub const DEFAULT_SPECIAL_TOKENS: [&str; 4] = [
 ];
 
 /// The three wire question types. `noul` and `score` finishing variations are
-/// N5; the wire shape and the compiled branch structure carry them already.
+/// later layers; the wire shape and the compiled branch structure carry them
+/// already.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Choice,

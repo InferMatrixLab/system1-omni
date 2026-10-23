@@ -1,5 +1,5 @@
-//! CPU tests for the Valen export-manifest vision checks (spec 03, N1;
-//! ported to the shared Qwen vision executor).
+//! CPU tests for the Valen export-manifest vision checks, ported to the
+//! shared Qwen vision executor.
 //!
 //! The pure manifest validation runs without weights: it pins the export
 //! format, the checkpoint/base provenance and the trained vision-top +

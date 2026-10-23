@@ -1,6 +1,6 @@
 //! Manifest-verified vision weights from the Valen checkpoint export.
 //!
-//! The spec-02 export (`valen-checkpoint-export/2`, `valen_export.json`) is
+//! The five-file export (`valen-checkpoint-export/2`, `valen_export.json`) is
 //! the only weight source: the base's `model.visual.*` tensors with the
 //! trained vision-top blocks and merger substituted as plain replacements.
 //! Validation follows the export-policy style used across the native workers —

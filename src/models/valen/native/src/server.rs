@@ -1,4 +1,4 @@
-//! The native `/v1/systemone` HTTP surface (spec 03, N4), contract-identical
+//! The native `/v1/systemone` HTTP surface, contract-identical
 //! to the reference worker `frontend/valen.py`: the same route set, the same
 //! header/body gate order (411 chunked, 411 single Content-Length, 400 invalid
 //! length, 413 size limit, 415 media type, 503 busy, 400 incomplete body, 408

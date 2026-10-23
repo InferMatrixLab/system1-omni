@@ -1,4 +1,4 @@
-//! Device-gated layer-level Valen text parity (spec 03, N2): the base GEMM +
+//! Device-gated layer-level Valen text parity: the base GEMM +
 //! unmerged FP32 LoRA application of the shared machinery against the pinned
 //! reference's own projections, on the reference's recorded activations.
 //!

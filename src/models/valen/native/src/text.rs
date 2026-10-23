@@ -1,5 +1,5 @@
 //! The unmerged text-path LoRA application for the Valen five-file export
-//! (spec 03, ticket N2).
+//! .
 //!
 //! The export (`valen-checkpoint-export/2`, `recipe/valen/export_checkpoint.py`)
 //! serves the FP32 language adapters separately from the BF16 base; this module
@@ -23,7 +23,7 @@ use omni_qwen3_5_native::model::{Config, Model};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-/// The spec-02 export manifest name and format.
+/// The five-file export manifest name and format.
 const MANIFEST: &str = "valen_export.json";
 const FORMAT: &str = "valen-checkpoint-export/2";
 /// The pinned adapter profile: peft rank 32, alpha 64 (`scaling = alpha/rank`).
@@ -277,7 +277,7 @@ impl TextModel {
 
     /// The final-norm hidden states at the given ascending positions of one
     /// prompt, as FP32 — the candidate-end and decision-end rows the decision
-    /// head reads (N4). The forward itself is [`TextModel::forward`]'s.
+    /// head reads. The forward itself is [`TextModel::forward`]'s.
     pub fn forward_positions(&mut self, ids: &[u32], positions: &[usize]) -> Result<Vec<Vec<f32>>> {
         self.model.forward_positions(ids, positions)
     }
@@ -287,7 +287,7 @@ impl TextModel {
         self.model.synchronize()
     }
 
-    /// The wrapped language model, for the multimodal boundary (N4): the
+    /// The wrapped language model, for the multimodal boundary: the
     /// same unmerged backbone and numerics, fed already-adapted image rows.
     pub fn language(&mut self) -> &mut Model {
         &mut self.model

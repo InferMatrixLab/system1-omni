@@ -1,4 +1,4 @@
-//! Execution orchestration (spec 03, N4): compiled branch → hidden states →
+//! Execution orchestration: compiled branch → hidden states →
 //! CPU FP32 head → logits, one question at a time over the shared backends.
 //!
 //! The two modality paths converge at the language boundary exactly as the

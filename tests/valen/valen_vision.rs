@@ -1,5 +1,5 @@
-//! Device-gated Valen vision checks (spec 03, N1; ported to the shared Qwen
-//! vision executor that PR #117 introduced).
+//! Device-gated Valen vision checks on the shared Qwen vision executor
+//! that PR #117 introduced.
 //!
 //! The reference fixture is recorded by
 //! `recipe/valen/dump_vision_reference.py` from the pinned reference tower
@@ -28,7 +28,7 @@
 //! order of magnitude (block 10, scale 7 -> 120). The declared tolerance
 //! 1.25 sits above the measured native maximum with ~20% headroom and above
 //! the reference's own kernel-choice spread. It gates the tower output only;
-//! the end-to-end native probability gate is N4's separate measured
+//! the end-to-end native probability gate is separate measured
 //! declaration.
 use super::*;
 use crate::vision::ValenVisionCheckpoint;
@@ -66,7 +66,7 @@ fn env_path(name: &str) -> PathBuf {
 /// CPU-only: the real export passes the manifest, hash and provenance gates
 /// and yields the 2B inventory (297 visual tensors, merger width 2048).
 #[test]
-#[ignore = "requires VALEN_EXPORT pointing at the spec-02 export directory"]
+#[ignore = "requires VALEN_EXPORT pointing at the five-file export directory"]
 fn valen_vision_checkpoint_loads_from_the_verified_export() {
     let checkpoint = ValenVisionCheckpoint::load(env_path("VALEN_EXPORT")).unwrap();
     let config = checkpoint.vision_config();

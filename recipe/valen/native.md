@@ -1,9 +1,9 @@
-# Valen-Preview-0923 native worker (spec 03)
+# Valen-Preview-0923 native worker
 
 The native worker ([`src/models/valen/native/`](../../src/models/valen/native/))
 serves Valen's `choice`, `noul` and `score` questions on the shared Qwen3.5
 native backends — the unmerged 2B language model with the FP32 LoRA of the
-spec-02 export, the manifest-verified vision tower, and a CPU FP32 decision
+five-file export, the manifest-verified vision tower, and a CPU FP32 decision
 head — with no Python or PyTorch in the serving path. It speaks the reference
 worker's `/v1/systemone` contract ([`reference.md`](reference.md)) byte for
 byte.
@@ -23,7 +23,7 @@ src/backends/cuda/qwen3_5/build.sh target/cuda 120   # needs nvcc, cuBLAS and cu
 cargo build --release --locked -p omni-valen-native
 ```
 
-Artifacts: the spec-02 export (five files under `weights/valen-export/`, see
+Artifacts: the export (five files under `weights/valen-export/`, see
 [`export.md`](export.md)) and the pinned Qwen3.5-2B base directory (the
 tokenizer source). The worker validates the export policy — manifest format,
 LoRA profile (rank 32 / alpha 64 / scale 2 / FP32 / 186 targets / 372
@@ -128,14 +128,14 @@ of the three types, up to 8 questions) answer in request order.
 | `noul` | **served** | fixed `true`/`false` candidates; optional custom wording compiles as the equivalent choice record and still answers `type: noul` with `P(true)` |
 | `score` | **served** | 2–10 ordered levels; one isolated branch per level, cross-branch softmax, expected level + legend + concentration confidence |
 
-All three types mix freely in one request. The N4 milestone rejection (a
+All three types mix freely in one request. The interim milestone rejection (a
 deterministic 422 for `noul`/`score`) is gone; the wire layer's validation
 422s are unchanged.
 
 ## Execution shape
 
 `choice` and `noul` compile one branch per question over the chat-template
-state (N3's compiler-equivalent processing); `score` compiles one isolated
+state (the compiler-equivalent processing layer); `score` compiles one isolated
 branch per level, and the K branches' logits are concatenated before the
 cross-branch softmax. A text state runs the branch tokens through the
 unmerged 2B language model; an image state decodes and preprocesses the wire
@@ -158,14 +158,14 @@ request is prepare → execute → finish under one admission.
 ## Validation scope and gates
 
 - **CPU (CI, no GPU)**: compiler equivalence (token ids, branch plans,
-  positions, rejection corpus — N3's `tests/valen/native*.rs`), the finisher
+  positions, rejection corpus — `tests/valen/native*.rs`), the finisher
   byte parity and the HTTP contract over a stub inference
   (`tests/valen/worker.rs`), the head's readout formula on a deterministic
   synthetic head (`tests/valen/data/head-readout.json`), and the frontend's
   byte-forwarding against the native worker (`tests/frontend/native_worker.rs`).
 - **GPU (env-gated)**: the vision tower vs the recorded reference output
-  (N1, declared max-abs 1.25, measured 1.03125), the unmerged text forward's
-  final hidden state (N2, declared 0.5, measured 0.25), and the end-to-end
+  (declared max-abs 1.25, measured 1.03125), the unmerged text forward's
+  final hidden state (declared 0.5, measured 0.25), and the end-to-end
   parity for all three question types vs the pinned reference — recorded in
   `fixtures/choice-parity-reference.json` by `dump_choice_parity.py`
   (usage: like `dump_text_reference.py`; `--tolerance-probability`,
@@ -182,7 +182,7 @@ request is prepare → execute → finish under one admission.
   2.11.0+cu128, eager, TF32 off, 2026-10-21; native: the same GPU, the
   `libqwen3_5_cuda.so` built for sm_120 by
   `src/backends/cuda/qwen3_5/build.sh` — measured at ABI 8 on the
-  pre-sync tree, re-verified at ABI 9 on ced49901, see below):**
+  pre-sync tree, re-verified at ABI 9 after the upstream sync, see below):**
 
   | Case | Answer | Max probability Δ | Max confidence Δ | Max score Δ |
   | --- | --- | --- | --- | --- |
@@ -197,7 +197,7 @@ request is prepare → execute → finish under one admission.
   confidence 0.1, score 0.05, head probe 1e-4. The text/noul/score/mixed
   cases sit at the predicted 0.02 class (max 2.5e-2 probability, 1.5e-2
   score — the noul text path is the tightest at 2.9e-3); the image case adds
-  the vision tower's own declared drift (N1: 1.03125 max-abs measured, 1.25
+  the vision tower's own declared drift (1.03125 max-abs measured, 1.25
   declared, on this very fixture), which raises the combined end-to-end
   figure. The score tolerance is declared at 0.05 over the 1.5e-2 measured
   maximum (3.3× headroom): the expected level is a probability-weighted
@@ -219,10 +219,10 @@ request is prepare → execute → finish under one admission.
   gated. `noul` and `score` answers carry no discrete answer field — a mode
   flip there moves only gated floats — so the flip mechanism applies to
   `choice` answers only. On a deployment where a decision margin that thin
-  matters, the component gates (N1/N2) are the levers, not this worker's
+  matters, the component gates (vision tower, text path) are the levers, not this worker's
   plumbing.
 
-  **Re-verified on ced49901 at ABI 9 (2026-10-23, RTX 5060 Laptop GPU,
+  **Re-verified at ABI 9 after the upstream sync (2026-10-23, RTX 5060 Laptop GPU,
   sm_120, `libqwen3_5_cuda.so` rebuilt from the synced source — 36
   upstream commits, ABI 8 → 9 with #123/#98/#143 — by
   `src/backends/cuda/qwen3_5/build.sh target/cuda-abi9 120`; all gates
@@ -274,7 +274,7 @@ authoring host (scratch, not part of the repo).
 
 ### Known limitations (this milestone)
 
-- Video and multi-image states are out of scope (spec 04 contract pending);
+- Video and multi-image states are out of scope (the video contract is pending);
   the wire rejects them as text states containing control tokens or as
   invalid image states, as the reference does.
 - Performance is **not** characterized here — no throughput, latency or
@@ -328,10 +328,10 @@ authoring host (scratch, not part of the repo).
 
 ## Contract table (RFC-style, for promotion)
 
-Extracted from spec 03 and the reference worker; the promotion tracker's
+Extracted from the implementation and the reference worker; this is the
 material.
 
-| Area | Contract | Native status (N5) |
+| Area | Contract | Native status |
 | --- | --- | --- |
 | Route | `POST /v1/systemone`, `GET /health` | identical |
 | Unknown route/method | `404 {"detail": "unknown route"}` | identical (GET/POST; other methods differ, see below) |
@@ -344,11 +344,11 @@ material.
 | Incomplete body | `400 {"detail": "incomplete body"}` | identical |
 | Slow body (> 15 s) | `408 {"detail": "request body timed out"}` | identical for a stalled body; a drip-fed body under the reference's per-recv timeout is read indefinitely there but hits the native total 15 s budget (see limitations) |
 | Body > 8 MiB at parse | `413 {"detail": "request body exceeds 8 MiB"}` | identical |
-| Malformed JSON / non-object / duplicates / non-finite | `400 {"detail": …}` (N3 wire layer corpus, 70 cases) | identical |
+| Malformed JSON / non-object / duplicates / non-finite | `400 {"detail": …}` (70-case rejection corpus) | identical |
 | Non-finite constant in a body that is also malformed elsewhere | the scanner errors at the first constant it reaches — the specific non-finite detail even when what follows is garbage (a duplicate-key object closing earlier wins instead) | generic malformed-JSON detail unless the whole body with constants substituted is well-formed; the earlier-closed-duplicate ordering is reversed (recorded deviation; the status is 400 either way, only the detail text differs, and only on doubly-invalid bodies) |
-| Wire validation (model/state/questions) | `422 {"detail": …}` (N3 corpus) | identical |
+| Wire validation (model/state/questions) | `422 {"detail": …}` (rejection corpus) | identical |
 | Token budget (max_length 8192) | `422 "request rejected by the pinned compiler: …"` | identical |
-| `noul` / `score` questions | served by the reference | identical (N5; finishing byte-identical for equal logits) |
+| `noul` / `score` questions | served by the reference | identical (finishing byte-identical for equal logits) |
 | Inference failure | `500 {"detail": "inference failed"}` | identical (no internal detail leaks) |
 | Health body | `{"status": "ready", "model": "valen-preview-0923", "modality": "multimodal"}` | identical bytes |
 | Readiness | ready only after real warmup (image + text) before the listener binds | identical |
@@ -364,7 +364,7 @@ material.
 `recipe/valen/dump_choice_parity.py` rebuilds the pinned reference stack
 (Valen @ 750bfcf, checkpoint sha256 `836622ef…`, base 15852e8c, eager BF16,
 TF32 off) exactly as the worker does, serves the five parity fixtures — the
-N2 text choice state, the example image choice request, the example noul
+recorded text choice state, the example image choice request, the example noul
 request, the example score request and the mixed-type body — through
 `frontend.valen.decide` with a recording executor, and also records the
 reference head's readout rows and logits (the head probe). Re-run it on the

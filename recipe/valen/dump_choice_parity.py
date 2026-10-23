@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Record the pinned reference's end-to-end answers for the N4/N5 gates.
+"""Record the pinned reference's end-to-end answers for the end-to-end gates.
 
-Serves the five parity fixtures — the text state of the N2 hidden fixture and
+Serves the five parity fixtures — the recorded text choice state and
 the example image request (both ``choice``), the example ``noul`` request,
 the example ``score`` request, and one mixed-type body — through the
 production reference worker pipeline (``frontend.valen.decide``: protocol,
@@ -68,7 +68,7 @@ TEXT_REQUEST = {
     },
 }
 
-# The N5 mixed body: one question of each wire type over the example noul
+# The mixed body: one question of each wire type over the example noul
 # state, so the all-types chain (compile → execute → finish per kind) is one
 # recorded round trip.
 MIXED_REQUEST = {
@@ -308,8 +308,8 @@ def main(argv):
             "note": (
                 "the reference's own decision margin on this case is near a tie "
                 f"({', '.join(f'{k}: {v:.6f}' for k, v in case['reference_decision_margins'].items())}); "
-                "the declared component tolerances (vision tower 1.25 per N1, language "
-                "hidden state 0.5 per N2) close it, so answer equality is not gatable "
+                "the declared component tolerances (vision tower 1.25, language "
+                "hidden state 0.5) close it, so answer equality is not gatable "
                 "there — the flip is recorded here and the Rust gate accepts exactly "
                 "this declaration while still gating every probability and confidence "
                 "delta"

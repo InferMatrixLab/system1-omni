@@ -1,6 +1,6 @@
-//! Valen-Preview-0923 native `/v1/systemone` worker (spec 03, N4).
+//! Valen-Preview-0923 native `/v1/systemone` worker.
 //!
-//!     VALEN_MODEL=<spec-02 export> VALEN_BASE=<Qwen3.5-2B base> omni-valen-native
+//!     VALEN_MODEL=<five-file export> VALEN_BASE=<Qwen3.5-2B base> omni-valen-native
 //!
 //! `VALEN_CUDA_LIB` (default: next to this executable), `VALEN_HOST` and
 //! `VALEN_PORT` are optional; see recipe/valen/native.md. The worker binds
@@ -34,7 +34,7 @@ fn main() -> Result<()> {
 async fn run() -> Result<()> {
     let export = PathBuf::from(
         std::env::var_os("VALEN_MODEL")
-            .context("set VALEN_MODEL to the spec-02 export directory")?,
+            .context("set VALEN_MODEL to the five-file export directory")?,
     );
     let base = PathBuf::from(
         std::env::var_os("VALEN_BASE")

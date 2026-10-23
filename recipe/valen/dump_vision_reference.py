@@ -12,7 +12,7 @@ own record rules, and records, bit for bit:
 - the tower output (the merged ``pooler_output``, width 2048) that the
   language model consumes,
 - the grid, the provenance (device, versions, revisions) and a tolerance
-  slot for the native parity gate (spec 03, N1).
+  slot for the native parity gate.
 
 The output is the committed fixture consumed by the env-gated Rust test
 ``tests/cua_s1/valen_vision.rs``; it is a reproducible command output, never
