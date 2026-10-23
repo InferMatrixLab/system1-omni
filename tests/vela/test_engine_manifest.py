@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import py_compile
 import re
 import sys
 from pathlib import Path
@@ -185,19 +186,38 @@ def test_extra_package_directories_in_the_package_root_are_refused(tmp_path):
 
 def test_unimportable_package_root_entries_still_pass(tmp_path):
     # The pinned package's own layout shape: onnx/, assets/, LICENSES/ and
-    # figures/ directories without __init__.py, markdown and license files,
-    # and the __pycache__ Python writes next to the imported runtime.
+    # figures/ directories without __init__.py, and markdown and license
+    # files. An existing __pycache__ is refused separately: the gate below
+    # cannot verify cached bytecode against the pin.
     table = build_package(tmp_path, small_files())
     for directory in ("onnx", "assets", "LICENSES", "figures"):
         (tmp_path / directory).mkdir()
         (tmp_path / directory / "file.bin").write_bytes(b"not a python package\n")
     (tmp_path / "README.md").write_text("# Vela 2.0 0.3B\n")
     (tmp_path / "LICENSE").write_text("Apache-2.0\n")
-    pycache = tmp_path / "__pycache__"
-    pycache.mkdir()
-    (pycache / "vela2_inference.cpython-312.pyc").write_bytes(b"bytecode\n")
 
     assert verify_files(tmp_path, table) == sorted(table)
+
+
+def test_an_existing_pycache_of_different_code_is_refused(tmp_path):
+    # The bypass the gate must close: Python reads a matching unchecked-hash
+    # .pyc from __pycache__ in place of the verified source, so a cache
+    # compiled from different code would execute unverified bytecode after
+    # a clean verify_files pass. Compile the poison, restore the
+    # manifest-matching source, and the directory itself must be refused.
+    files = small_files()
+    table = build_package(tmp_path, files)
+    poisoned = tmp_path / "vela2_inference.py"
+    poisoned.write_text("POISONED_MARKER = 'not the pinned runtime'\n", encoding="utf-8")
+    py_compile.compile(
+        poisoned,
+        cfile=tmp_path / "__pycache__" / f"vela2_inference.{sys.implementation.cache_tag}.pyc",
+        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+    )
+    poisoned.write_bytes(files["vela2_inference.py"])
+
+    with pytest.raises(ValueError, match="__pycache__"):
+        verify_files(tmp_path, table)
 
 
 def test_no_foreign_runtime_import_is_clean(tmp_path):

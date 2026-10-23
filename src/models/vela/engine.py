@@ -135,7 +135,8 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
     table does not name — the package root is about to go first on
     ``sys.path``, where an extra module file (source, sourceless or
     extension) or ``__init__.py`` package would shadow one of the pinned
-    runtime's dependencies.
+    runtime's dependencies — and any ``__pycache__``, whose existing
+    bytecode is not verifiable against the pin.
     """
 
     table = dict(table or PINNED_FILES_SHA256)
@@ -152,7 +153,11 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
     for entry in sorted(Path(root).iterdir()):
         if entry.name in table:
             continue
-        if entry.is_file() and entry.suffix in IMPORTABLE_FILE_SUFFIXES:
+        if entry.name == "__pycache__":
+            problems.append(
+                f"existing bytecode cache {entry.name}/ in the package root is not verifiable against the pin"
+            )
+        elif entry.is_file() and entry.suffix in IMPORTABLE_FILE_SUFFIXES:
             problems.append(f"unexpected importable file {entry.name} in the package root")
         elif entry.is_dir() and (entry / "__init__.py").is_file():
             problems.append(f"unexpected importable package {entry.name}/ in the package root")
@@ -240,7 +245,15 @@ class Vela2Executor:
         # runtime.
         verify_no_foreign_runtime(root)
         put_first_on_sys_path(root)
-        import vela2_inference
+        # Import with bytecode writing off: the gate refuses existing
+        # bytecode caches, so a __pycache__ this import wrote would fail
+        # every later gate run of the same package.
+        previous_dont_write_bytecode = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True
+        try:
+            import vela2_inference
+        finally:
+            sys.dont_write_bytecode = previous_dont_write_bytecode
 
         self.SystemOneError = vela2_inference.SystemOneError
         self._system_one_request = vela2_inference.system_one_request
