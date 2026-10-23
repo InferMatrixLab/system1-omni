@@ -21,10 +21,11 @@ rows from the untied LM head are extracted without merging adapter weights.
 `jemm_export.json` records every exported file's SHA-256 and the adapter contract.
 Startup verifies original shard and adapter pins before CUDA initialization;
 legacy premerged `jemm-native/1` exports are explicitly rejected. Keep files immutable
-while serving. This head requires the pinned temperatures 1.3480874159655591
-(text), 1.3954832341582943 (images) and threshold 0.9872681877423998. Follow-up
-#122 loads validated calibration from the checksum-covered decision config;
-its calibration policy is a separate change. The threshold is provenance and
+while serving. Calibration loads from checksum-covered `decision_config.json`;
+temperatures must be finite and positive, threshold finite and within [0,1],
+and all values must agree with the export manifest. The pinned artifact values
+are 1.3480874159655591 (text), 1.3954832341582943 (images) and
+0.9872681877423998 (threshold). The threshold is provenance and
 does not gate SystemOne responses.
 
 ## Request and response contract
@@ -82,9 +83,54 @@ covers the entire request. Both streams synchronize before resource release;
 caught execution errors/panics clear atomic readiness and retire loaded state.
 There is no cross-request batching or prefix cache.
 
+## Optional CUDA Graph replay
+
+`CUA_S1_GRAPH=1` enables language replay, with separate 64-entry FIFO caches
+for text ordered lengths and multimodal `[tokens]`. `CUA_S1_VISION_GRAPH=1`
+independently enables vision replay. Vision retains separate four-slot FIFO
+caches for single-image `[T,H,W]` grids and ordered multi-image grid lists.
+Both switches default off. Current IDs/features/positions/pixels are uploaded
+before replay. An eager miss completes before recording, preserving its answer.
+Capture failure logs unconditionally, disables that graph path and keeps the
+eager result. Scratch growth and model retirement synchronize, destroy both
+language graph caches, and then release their referenced buffers and owned stream.
+
+Vision scratch persists even with graphs disabled. These limits bound grid
+slots, not weights or GEMM plan memory. Startup's image warmup can capture its own
+shape when enabled; it does not prewarm every user grid. Graph replay does not
+establish lower latency on every workload.
+
+The 2026-10-11 v2 HTTP campaign used text-language and vision graphs with
+multimodal language eager. The separate 2026-10-21 ABI 8 campaign below exercised
+combined text, multimodal-language and vision replay at its exact source pin.
+CPU checks compile the graph regressions but do not execute device replay.
+
 ## Validation
 
-The unmerged FP32-adapter v2 path passes the frozen **16 requests / 25 questions**
+### Source-pinned ABI 8 qualification — 2026-10-21
+
+The [public report and raw evidence](https://github.com/Levius-Fubuki/system1-omni/releases/tag/jemm-abi8-5bdd625b-20261021)
+qualify source `5bdd625b4c27efb02f43a1f71150e1a7d7c0f071` on one A800 80 GB
+PCIe (`sm_80`), using a cuDNN-enabled ABI 8 library and a fresh pinned FLA
+reference. Reference, native eager and combined Graph each completed two passes
+of **28 requests / 49 questions**, including the original 16/25 subset.
+Maximum probability drift was **0.0166172279642417**, below 0.02; maximum Score
+drift was **7.638334409421077e-14**, below 0.1, with no decision changes.
+Eager/Graph semantic responses matched after excluding only `usage.latency_ms`.
+
+The campaign covered text and 1–4 images, changed pixels/geometry/order,
+1240-token multimodal and 2282-token text scratch growth, and invalid-input
+recovery. All three Graph paths captured and replayed without fallback;
+11 reference operators and one selected-head device test passed. The release
+includes raw responses, logs, failed bootstrap attempts, source hashes and an
+offline audit. It does not qualify resident-device image embeddings, the
+separate cache or Cua-S1 precision increments, broader task accuracy, other
+hardware, latency, throughput or peak memory. Later integration checks must
+retain this source boundary rather than claim a fresh full-model GPU run.
+
+### Historical v2 qualification — 2026-10-11
+
+The unmerged FP32-adapter v2 path passed the frozen **16 requests / 25 questions**
 covering text and 1–4 images on A800. Maximum probability drift is
 **0.0166172279642417**, under the unchanged 0.02 gate. Score tolerance remains
 0.1 and winner agreement is required at reference margins of at least 0.05;
@@ -110,4 +156,6 @@ resource boundary, response math, image decoding/positions, tokenizer and token
 budgets, export integrity, BF16 head padding, error-envelope bounds, warmup image
 decoding and synchronized retirement. The real CUDA head test is ignored in CPU
 CI. CPU tests do not prove full-model parity or execute the startup image forward.
-No fresh GPU campaign or performance claim accompanies the review fixes.
+The calibration-loading review fixes are covered by host/export tests; the GPU
+campaigns above retain their own source pins and do not constitute a fresh
+device run of those fixes. No performance claim accompanies them.

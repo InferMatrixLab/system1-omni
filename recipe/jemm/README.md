@@ -71,9 +71,11 @@ curl --fail http://127.0.0.1:8080/v1/systemone \
 ```
 
 Optional `images` contains up to four base64 PNG/JPEG/WebP strings; images precede
-text and are shared across questions. The frozen 16-request / 25-question corpus
-passes the original numerical gates, including 2/3/4-image cases. See the
-[validation scope and evidence](../../docs/benchmarks/jemm-reference-20261011/README.md).
+text and are shared across questions. The source-pinned 2026-10-21 ABI 8 campaign
+covered two passes of 28 requests / 49 questions in reference, eager and combined
+Graph modes, including the original 16/25 corpus. See the
+[dated validation scope and evidence](../../src/models/jemm/README.md#validation)
+and the [historical corpus](../../docs/benchmarks/jemm-reference-20261011/README.md).
 Native CPU/Metal execution is unsupported.
 
 ## Checks and reference
