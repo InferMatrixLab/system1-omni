@@ -1,0 +1,36 @@
+[package]
+name = "omni-omnijev-native"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "OmniJev-4B v1.1 request contract, preparation, heads and finishing"
+
+[dependencies]
+anyhow = "1.0.100"
+base64 = "0.22.1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+libm = "0.2"
+omni-qwen3-5-native = { path = "../../qwen3_5/native" }
+safetensors = "0.8.0"
+serde_json = { version = "1.0.149", features = ["float_roundtrip", "preserve_order"] }
+# the onig regex backend, as in the Python tokenizers wheel
+tokenizers = { version = "=0.22.2", default-features = false, features = ["onig"] }
+
+[[test]]
+name = "contract"
+path = "../../../../tests/omnijev/contract.rs"
+
+[[test]]
+name = "processing"
+path = "../../../../tests/omnijev/processing.rs"
+
+[[test]]
+name = "finish"
+path = "../../../../tests/omnijev/finish.rs"
+
+[[test]]
+name = "heads"
+path = "../../../../tests/omnijev/heads.rs"
+
+[dev-dependencies]
+sha2 = "0.10"

@@ -12,12 +12,14 @@
 use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value as Json;
 
 use crate::cuda::{self, DeviceBuffer, Stream, check};
-use crate::inputs::{MultimodalInput, rotary_tables};
+use crate::inputs::{DeviceMultimodalInput, MultimodalInput, rotary_tables};
+use crate::lora::{self, Group};
 
 const ALIGN: usize = 256;
 const BF16: usize = 2;
@@ -438,10 +440,18 @@ struct Scratch {
     sin: usize,
     custom_cos: usize,
     custom_sin: usize,
+    lora: Option<lora::Work>,
 }
 
 impl Scratch {
-    fn new(cfg: &Config, cap: usize, stream: Stream) -> Result<Self> {
+    fn new(
+        cfg: &Config,
+        cap: usize,
+        stream: Stream,
+        lora: Option<&lora::Lora>,
+        reference: Option<&cuda::Reference>,
+        fp32_gdn: Option<&cuda::Fp32Gdn>,
+    ) -> Result<Self> {
         let (h, kd, vd, hv) = (cfg.hidden, cfg.key_dim(), cfg.value_dim(), cfg.lin_v_heads);
         let (hq, hk, hd) = (cfg.heads, cfg.kv_heads, cfg.head_dim);
         let w = Widths::of(cfg);
@@ -452,7 +462,23 @@ impl Scratch {
             off
         };
         // SAFETY: pure function of its arguments.
-        let ws_floats = unsafe { (cuda::api().cs1_gdn_workspace_floats)(cap as i32, hv as i32) };
+        let ws_floats = if let Some(reference) = reference {
+            // SAFETY: capacity and heads derive from validated architecture/request limits.
+            unsafe {
+                let gdn = (reference.gdn_workspace_floats)(cap as i32, hv as i32);
+                let attention =
+                    (reference.language_attention_workspace_floats)(cap as i32, hq as i32);
+                ensure!(attention > 0, "cannot size reference attention workspace");
+                gdn.max(attention)
+            }
+        } else {
+            unsafe { (cuda::api().cs1_gdn_workspace_floats)(cap as i32, hv as i32) }
+        };
+        let ws_floats = if let Some(gdn) = fp32_gdn {
+            ws_floats.max(gdn.workspace_floats(cap, hv)?)
+        } else {
+            ws_floats
+        };
         let offsets = [
             take(cap * 4),
             take(cap * h * BF16),
@@ -545,6 +571,9 @@ impl Scratch {
             sin,
             custom_cos,
             custom_sin,
+            lora: lora
+                .map(|adapter| adapter.work(cap.min(cfg.max_positions)))
+                .transpose()?,
         })
     }
 
@@ -553,28 +582,86 @@ impl Scratch {
     }
 }
 
+/// The cached device-side state of one token prefix (rows `[0, len)`) for the R2d
+/// hybrid path: per full-attention layer the post-prep K rows plus the pre-GEMM V
+/// rows, per Gated DeltaNet layer the float32 recurrent state and the three
+/// pre-conv projection columns feeding the conv window. States belong to the
+/// prefix itself; a continuation seeds its own scratch from them, read-only.
+pub struct PrefixState {
+    owner: Arc<()>,
+    initialized: bool,
+    /// Tokens this prefix covers; always a multiple of 64 (the GDN chunk length),
+    /// which also aligns the flash-attention key tiles of the one-shot pass.
+    len: usize,
+    /// Post-prep K [len, Hk*Dh] and raw V [len, Hk*Dh] rows per full-attention layer.
+    attn_kv: Vec<(DeviceBuffer, DeviceBuffer)>,
+    /// Float32 [H, K, V] recurrent states, one per Gated DeltaNet layer.
+    gdn_state: Vec<DeviceBuffer>,
+    /// Three pre-conv projection columns [3, gdn_in width], one per Gated DeltaNet layer.
+    conv_tail: Vec<DeviceBuffer>,
+    /// Total device bytes, for cache-budget accounting by the caller.
+    bytes: usize,
+}
+
+impl PrefixState {
+    /// Number of tokens covered by this nonempty prefix.
+    pub fn token_count(&self) -> usize {
+        self.len
+    }
+
+    /// Device allocation size used by cache-budget accounting.
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+}
+
 pub struct Model {
     pub cfg: Config,
+    prefix_owner: Arc<()>,
     _weights: Weights,
     embed: Tensor,
     final_norm: Tensor,
     layers: Vec<Layer>,
+    lora: Option<lora::Lora>,
     stream: Stream,
     gemm: *mut c_void,
+    reference: Option<&'static cuda::Reference>,
+    fp32_gdn: Option<cuda::Fp32Gdn>,
     /// Buffers for the largest packed token count so far; grows as needed.
     scratch: Option<Scratch>,
-    /// Opt-in replay with at most 64 captures keyed by ordered sequence lengths.
+    /// Opt-in replay with at most 64 captures per mode, keyed by sequence lengths.
     graph_enabled: bool,
     graphs: VecDeque<(Vec<usize>, cuda::Graph)>,
+    mm_graphs: VecDeque<(Vec<usize>, cuda::Graph)>,
+    // The opt-in adapter path owns its stream; it retires after every device allocation.
+    _lora_stream: Option<LoraStream>,
 }
 
 // SAFETY: the raw pointers are device addresses and a cuBLASLt handle owned by the
 // model; the engine runs one forward pass at a time behind a mutex.
 unsafe impl Send for Model {}
 
+struct LoraStream(Stream);
+impl Drop for LoraStream {
+    fn drop(&mut self) {
+        // SAFETY: the adapter Model owns this stream, and has retired all allocations.
+        unsafe { (cuda::api().cs1_stream_destroy)(self.0) };
+    }
+}
+
 impl Drop for Model {
     fn drop(&mut self) {
+        if self.lora.is_some() {
+            let _ = cuda::set_device(0);
+            let _ = cuda::synchronize(self.stream);
+        }
         self.graphs.clear();
+        self.mm_graphs.clear();
+        if self.lora.is_some() {
+            self.scratch = None;
+        }
+        // Retire the FP32 cuBLAS context while its last stream is still valid.
+        self.fp32_gdn = None;
         // SAFETY: created by cs1_gemm_create and not destroyed before.
         unsafe { (cuda::api().cs1_gemm_destroy)(self.gemm) };
     }
@@ -584,10 +671,37 @@ impl Model {
     /// Load the CUDA library and the weights.
     pub fn load(dir: &Path, library: &Path) -> Result<Self> {
         let cfg = Config::load(dir)?;
+        Self::load_checkpoint(dir, library, cfg, None)
+    }
+
+    /// Load an immutable FP32 PEFT language adapter without merging it into BF16 weights.
+    /// `adapter_path` names one safetensors file; partial paired targets and ranks 1..=128
+    /// are supported. Validate the pinned full inventory separately when required.
+    pub fn load_with_lora(
+        dir: &Path,
+        library: &Path,
+        adapter_path: &Path,
+        scale: f32,
+    ) -> Result<Self> {
+        let cfg = Config::load(dir)?;
+        let adapter = lora::Checkpoint::load(&cfg, adapter_path, scale)?;
+        Self::load_checkpoint(dir, library, cfg, Some(adapter))
+    }
+
+    fn load_checkpoint(
+        dir: &Path,
+        library: &Path,
+        cfg: Config,
+        adapter: Option<lora::Checkpoint>,
+    ) -> Result<Self> {
         cuda::load(library)?;
         cuda::set_device(0)?;
         let stream = cuda::new_stream()?;
+        let stream_owner = adapter.as_ref().map(|_| LoraStream(stream));
         let weights = Weights::load(dir, stream)?;
+        let lora = adapter
+            .map(|source| source.upload(cfg.full_attention.len(), stream))
+            .transpose()?;
         let (h, kd, vd) = (cfg.hidden, cfg.key_dim(), cfg.value_dim());
         let embed = weights
             .tensors
@@ -647,17 +761,78 @@ impl Model {
         ensure!(!gemm.is_null(), "cuBLASLt setup failed");
         let model = Self {
             cfg,
+            prefix_owner: Arc::new(()),
             _weights: weights,
             embed,
             final_norm,
             layers,
+            lora,
             stream,
             gemm,
+            reference: None,
+            fp32_gdn: None,
             scratch: None,
             graph_enabled: std::env::var("CUA_S1_GRAPH").as_deref() == Ok("1"),
             graphs: VecDeque::new(),
+            _lora_stream: stream_owner,
+            mm_graphs: VecDeque::new(),
         };
         Ok(model)
+    }
+
+    /// Cua-S1's unmerged text path: framework norm/GEMM/attention plus FP32 GDN.
+    pub fn enable_reference_text_numerics(&mut self) -> Result<()> {
+        ensure!(
+            self.cfg.hidden == 2560 && self.lora.is_some(),
+            "reference text numerics require an unmerged 4B language model"
+        );
+        ensure!(
+            self.scratch.is_none() && self.reference.is_none() && self.fp32_gdn.is_none(),
+            "select reference text numerics before the first forward"
+        );
+        cuda::set_device(0)?;
+        let gdn = cuda::api().fp32_gdn()?;
+        let reference = cuda::api().language_reference()?;
+        cuda::synchronize(self.stream)?;
+        // SAFETY: both handles are model-owned; no queued work or captures exist.
+        let gemm = unsafe { (reference.gemm_create)(GEMM_WORKSPACE) };
+        ensure!(!gemm.is_null(), "reference text cuBLASLt setup failed");
+        unsafe { (cuda::api().cs1_gemm_destroy)(self.gemm) };
+        self.gemm = gemm;
+        self.reference = Some(reference);
+        self.fp32_gdn = Some(gdn);
+        Ok(())
+    }
+
+    /// Select JEMM's pinned framework arithmetic before the first forward.
+    /// Prefix caching is outside this execution contract.
+    pub fn enable_reference_numerics(&mut self) -> Result<()> {
+        ensure!(
+            self.fp32_gdn.is_none(),
+            "cannot combine JEMM reference numerics with FP32 GDN"
+        );
+        ensure!(
+            self.cfg.hidden == 5120 && self.cfg.head_dim == 256 && self.lora.is_some(),
+            "reference numerics require the unmerged JEMM 27B model"
+        );
+        ensure!(
+            self.scratch.is_none() && self.graphs.is_empty() && self.mm_graphs.is_empty(),
+            "select reference numerics before the first forward"
+        );
+        if self.reference.is_some() {
+            return Ok(());
+        }
+        cuda::set_device(0)?;
+        let reference = cuda::api().reference()?;
+        cuda::synchronize(self.stream)?;
+        // SAFETY: the model owns both handles, with no queued work or captured graphs.
+        let gemm = unsafe { (reference.gemm_create)(GEMM_WORKSPACE) };
+        ensure!(!gemm.is_null(), "reference cuBLASLt setup failed");
+        unsafe { (cuda::api().cs1_gemm_destroy)(self.gemm) };
+        self.gemm = gemm;
+        self.reference = Some(reference);
+        self.prefix_owner = Arc::new(());
+        Ok(())
     }
 
     fn gemm(&self, s: &Scratch, x: usize, w: &Tensor, y: usize, m: usize) -> Result<()> {
@@ -679,6 +854,73 @@ impl Model {
             },
             "gemm",
         )
+    }
+
+    #[allow(clippy::too_many_arguments)] // Base projection coordinates and sequence shape.
+    fn gemm_group(
+        &self,
+        s: &Scratch,
+        x: usize,
+        w: &Tensor,
+        y: usize,
+        m: usize,
+        lengths: &[usize],
+        group: Group,
+    ) -> Result<()> {
+        if self.lora.is_none() {
+            return self.gemm(s, x, w, y, m);
+        }
+        let components = lora::component_rows(&self.cfg, group)?;
+        ensure!(
+            components.iter().sum::<usize>() == w.shape[0],
+            "base component weight shape"
+        );
+        let work = s.lora.as_ref().context("missing base component work")?;
+        // SAFETY: stacked() validated contiguous component weights; scratch holds the
+        // complete packed input/output rows, and work belongs to this serialized Model.
+        unsafe {
+            lora::project_components(
+                s.at(x),
+                w.ptr,
+                s.at(y),
+                lengths,
+                w.shape[1],
+                &components,
+                work,
+                self.gemm,
+                self.stream,
+            )
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)] // Layer projection coordinates in shared scratch.
+    fn apply_lora(
+        &self,
+        layer: usize,
+        group: Group,
+        s: &Scratch,
+        input: usize,
+        output: usize,
+        lengths: &[usize],
+    ) -> Result<()> {
+        let Some(adapter) = &self.lora else {
+            return Ok(());
+        };
+        let work = s.lora.as_ref().context("missing language LoRA work")?;
+        // SAFETY: caller passes the validated projection's input/output ranges in scratch;
+        // per-sequence row counts are bounded by config, and work/weights belong to this Model.
+        unsafe {
+            adapter.apply(
+                layer,
+                group,
+                s.at(input),
+                s.at(output),
+                lengths,
+                work,
+                self.gemm,
+                self.stream,
+            )
+        }
     }
 
     /// Preserve each prompt's output/down GEMM shape and split-K reduction order.
@@ -708,12 +950,19 @@ impl Model {
     fn prepare_scratch(&mut self, t: usize) -> Result<()> {
         cuda::set_device(0)?;
         if self.scratch.as_ref().is_none_or(|s| t > s.cap) {
+            if self.lora.is_some() {
+                cuda::synchronize(self.stream)?;
+            }
             self.graphs.clear();
+            self.mm_graphs.clear();
             self.scratch = None;
             self.scratch = Some(Scratch::new(
                 &self.cfg,
                 t.next_multiple_of(1024),
                 self.stream,
+                self.lora.as_ref(),
+                self.reference,
+                self.fp32_gdn.as_ref(),
             )?);
         }
         Ok(())
@@ -757,28 +1006,21 @@ impl Model {
         if self.graph_enabled {
             if let Some((_, graph)) = self.graphs.iter().find(|(shape, _)| *shape == lengths) {
                 graph.launch(self.stream)?;
+                if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
+                    eprintln!("CUA_S1_GRAPH mode=text event=replay tokens={t}");
+                }
             } else {
                 // Warm plans and keep the eager result: run() advances the residual
                 // in place, so replaying on this cache miss would advance it twice.
                 self.run(s, &lengths, false)?;
                 cuda::synchronize(self.stream)?;
-                match cuda::Graph::capture(self.stream, || self.run(s, &lengths, false)) {
-                    Ok(graph) => {
-                        if self.graphs.len() == 64 {
-                            self.graphs.pop_front();
-                        }
-                        self.graphs.push_back((lengths.clone(), graph));
-                    }
-                    Err(error) => {
-                        eprintln!("CUDA Graph capture failed; using eager execution: {error:#}");
-                        self.graph_enabled = false;
-                        self.graphs.clear();
-                    }
-                }
+                let captured = cuda::Graph::capture(self.stream, || self.run(s, &lengths, false));
+                self.cache_graph(&lengths, false, captured);
             }
         } else {
             self.run(s, &lengths, false)?;
         }
+        let s = self.scratch.as_ref().unwrap();
         let mut end = 0;
         lengths
             .iter()
@@ -808,33 +1050,113 @@ impl Model {
         let s = self.scratch.as_ref().unwrap();
         self.upload_positions(s, input.position_ids)?;
         self.embed_tokens(s, input.token_ids)?;
-        let bytes: Vec<u8> = input
-            .image_embeddings
-            .iter()
-            .flat_map(|x| x.to_le_bytes())
-            .collect();
-        // Coalesce adjacent placeholders. Text rows remain those of embed_tokens.
-        let indices = input.image_token_indices;
-        let mut begin = 0;
-        while begin < indices.len() {
-            let mut end = begin + 1;
-            while end < indices.len() && indices[end] == indices[end - 1] + 1 {
-                end += 1;
+        self.overwrite_image_rows(s, input, 0)?;
+        if self.graph_enabled {
+            if let Some((_, graph)) = self
+                .mm_graphs
+                .iter()
+                .find(|(shape, _)| shape.as_slice() == [t])
+            {
+                graph.launch(self.stream)?;
+                if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
+                    eprintln!("CUA_S1_GRAPH mode=multimodal event=replay tokens={t}");
+                }
+            } else {
+                // Uploads and embedding are outside capture. Keep the warmed eager
+                // result; launching now would advance the residual a second time.
+                self.run(s, &[t], true)?;
+                cuda::synchronize(self.stream)?;
+                let captured = cuda::Graph::capture(self.stream, || self.run(s, &[t], true));
+                self.cache_graph(&[t], true, captured);
             }
-            let row_bytes = self.cfg.hidden * BF16;
-            // SAFETY: validated indices lie in the t-row residual buffer, and
-            // features contain exactly one hidden-size BF16 row per placeholder.
-            unsafe {
-                cuda::upload(
-                    s.at(s.res + indices[begin] * row_bytes),
-                    &bytes[begin * row_bytes..end * row_bytes],
-                    self.stream,
-                )?;
-            }
-            begin = end;
+        } else {
+            self.run(s, &[t], true)?;
         }
-        self.run(s, &[t], true)?;
-        self.last_hidden(s, t)
+        self.last_hidden(self.scratch.as_ref().unwrap(), t)
+    }
+
+    /// Both modes retain the eager miss result; capture records without executing.
+    fn cache_graph(&mut self, lengths: &[usize], multimodal: bool, captured: Result<cuda::Graph>) {
+        let mode = if multimodal { "multimodal" } else { "text" };
+        match captured {
+            Ok(graph) => {
+                let cache = if multimodal {
+                    &mut self.mm_graphs
+                } else {
+                    &mut self.graphs
+                };
+                if cache.len() == 64 {
+                    cache.pop_front();
+                }
+                cache.push_back((lengths.to_vec(), graph));
+                if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
+                    let t: usize = lengths.iter().sum();
+                    eprintln!("CUA_S1_GRAPH mode={mode} event=capture tokens={t}");
+                }
+            }
+            Err(error) => {
+                eprintln!(
+                    "CUDA Graph capture failed in {mode} mode; using eager execution: {error:#}"
+                );
+                self.graph_enabled = false;
+                self.graphs.clear();
+                self.mm_graphs.clear();
+            }
+        }
+    }
+
+    /// Eager multimodal execution using borrowed device-resident image rows.
+    /// The producer must finish writes before entry. All queued consumer work is
+    /// completed on every exit path, before the external allocation can be reused.
+    pub fn forward_multimodal_device(
+        &mut self,
+        input: &DeviceMultimodalInput<'_>,
+    ) -> Result<Vec<f32>> {
+        let result = (|| {
+            cuda::set_device(0)?;
+            let image_token = self
+                .cfg
+                .image_token_id
+                .context("checkpoint has no image_token_id")?;
+            input.validate(
+                self.cfg.hidden,
+                self.embed.shape[0],
+                image_token,
+                self.cfg.max_positions,
+                0,
+            )?;
+            input.image_embeddings.validate_finite(self.stream)?;
+            let t = input.token_ids.len();
+            self.prepare_scratch(t)?;
+            let s = self.scratch.as_ref().unwrap();
+            self.upload_positions(s, input.position_ids)?;
+            self.embed_tokens(s, input.token_ids)?;
+            let indices = input.image_token_indices;
+            let row_bytes = self.cfg.hidden * BF16;
+            let mut begin = 0;
+            while begin < indices.len() {
+                let mut end = begin + 1;
+                while end < indices.len() && indices[end] == indices[end - 1] + 1 {
+                    end += 1;
+                }
+                // SAFETY: metadata validates source rows, device and allocation
+                // extent and indices exactly match placeholders inside s.res.
+                unsafe {
+                    cuda::copy_dd(
+                        s.at(s.res + indices[begin] * row_bytes),
+                        input.image_embeddings.at(begin * row_bytes),
+                        (end - begin) * row_bytes,
+                        self.stream,
+                    )?;
+                }
+                begin = end;
+            }
+            self.run(s, &[t], true)?;
+            self.last_hidden(s, t)
+        })();
+        let synced = self.synchronize();
+        synced?;
+        result
     }
 
     fn upload_positions(&self, s: &Scratch, positions: [&[i64]; 3]) -> Result<()> {
@@ -852,16 +1174,190 @@ impl Model {
         Ok(())
     }
 
+    /// Overwrite the residual rows of validated image placeholders with the adapted
+    /// image embeddings. `qb` is the absolute row base of the passed slice inside
+    /// the residual buffer (0 for a full prompt, the cached prefix length for a
+    /// continuation — indices are local to the slice in both cases).
+    fn overwrite_image_rows(
+        &self,
+        s: &Scratch,
+        input: &MultimodalInput<'_>,
+        qb: usize,
+    ) -> Result<()> {
+        let bytes: Vec<u8> = input
+            .image_embeddings
+            .iter()
+            .flat_map(|x| x.to_le_bytes())
+            .collect();
+        // Coalesce adjacent placeholders. Text rows remain those of embed_tokens.
+        let indices = input.image_token_indices;
+        let mut begin = 0;
+        while begin < indices.len() {
+            let mut end = begin + 1;
+            while end < indices.len() && indices[end] == indices[end - 1] + 1 {
+                end += 1;
+            }
+            let row_bytes = self.cfg.hidden * BF16;
+            // SAFETY: validated indices lie in the residual buffer, and features
+            // contain exactly one hidden-size BF16 row per placeholder.
+            unsafe {
+                cuda::upload(
+                    s.at(s.res + (qb + indices[begin]) * row_bytes),
+                    &bytes[begin * row_bytes..end * row_bytes],
+                    self.stream,
+                )?;
+            }
+            begin = end;
+        }
+        Ok(())
+    }
+
+    /// Allocate an uninitialized prefix of `len` tokens (a multiple of 64).
+    /// Capture must finish successfully on this model before continuation.
+    pub fn alloc_prefix(&self, len: usize) -> Result<PrefixState> {
+        ensure!(
+            self.fp32_gdn.is_none(),
+            "FP32 GDN does not support prefix caching"
+        );
+        ensure!(
+            self.reference.is_none(),
+            "JEMM reference numerics do not support prefix caching"
+        );
+        ensure!(
+            len >= 64 && len.is_multiple_of(64),
+            "cached prefix length must be a positive multiple of 64"
+        );
+        ensure!(
+            len <= self.cfg.max_positions,
+            "cached prefix exceeds the configured maximum length"
+        );
+        let kvrow = self.cfg.kv_heads * self.cfg.head_dim * BF16;
+        let w = Widths::of(&self.cfg);
+        let nfull = self.cfg.full_attention.iter().filter(|&&f| f).count();
+        let ngdn = self.cfg.full_attention.len() - nfull;
+        let mut bytes = 0usize;
+        let mut attn_kv = Vec::with_capacity(nfull);
+        for _ in 0..nfull {
+            let k = DeviceBuffer::new(len * kvrow)?;
+            let v = DeviceBuffer::new(len * kvrow)?;
+            bytes += 2 * len * kvrow;
+            attn_kv.push((k, v));
+        }
+        let state_floats = self.cfg.lin_v_heads * self.cfg.lin_k_dim * self.cfg.lin_v_dim;
+        let tail_bytes = 3 * w.gdn_in * BF16;
+        let mut gdn_state = Vec::with_capacity(ngdn);
+        let mut conv_tail = Vec::with_capacity(ngdn);
+        for _ in 0..ngdn {
+            gdn_state.push(DeviceBuffer::new(state_floats * F32)?);
+            conv_tail.push(DeviceBuffer::new(tail_bytes)?);
+            bytes += state_floats * F32 + tail_bytes;
+        }
+        Ok(PrefixState {
+            owner: Arc::clone(&self.prefix_owner),
+            initialized: false,
+            len,
+            attn_kv,
+            gdn_state,
+            conv_tail,
+            bytes,
+        })
+    }
+
+    /// Run the rows `[0, state.len)` of one prompt, collecting the per-layer
+    /// prefix state (post-prep K/V columns, float32 GDN states, conv tails) into
+    /// `state`. Synchronize before marking the state ready for continuation.
+    /// The hidden states of these rows are computed but not returned.
+    pub fn forward_multimodal_capture(
+        &mut self,
+        input: &MultimodalInput<'_>,
+        state: &mut PrefixState,
+    ) -> Result<()> {
+        ensure!(
+            Arc::ptr_eq(&self.prefix_owner, &state.owner),
+            "prefix state belongs to a different model instance"
+        );
+        let t = input.token_ids.len();
+        ensure!(
+            t == state.len,
+            "capture input must cover the cached prefix exactly"
+        );
+        state.initialized = false;
+        let image_token = self
+            .cfg
+            .image_token_id
+            .context("checkpoint has no image_token_id")?;
+        input.validate(
+            self.cfg.hidden,
+            self.embed.shape[0],
+            image_token,
+            self.cfg.max_positions,
+        )?;
+        self.prepare_scratch(t)?;
+        let s = self.scratch.as_ref().unwrap();
+        self.upload_positions(s, input.position_ids)?;
+        self.embed_tokens(s, input.token_ids)?;
+        self.overwrite_image_rows(s, input, 0)?;
+        self.run_window(s, 0, t, true, Some(state), None)?;
+        self.synchronize()?;
+        state.initialized = true;
+        Ok(())
+    }
+
+    /// Run rows `[prefix.len, prefix.len + input.len)` of one prompt seeded from a
+    /// captured prefix; returns the final-norm hidden state at the last position.
+    pub fn forward_multimodal_continue(
+        &mut self,
+        input: &MultimodalInput<'_>,
+        prefix: &PrefixState,
+    ) -> Result<Vec<f32>> {
+        ensure!(
+            Arc::ptr_eq(&self.prefix_owner, &prefix.owner),
+            "prefix state belongs to a different model instance"
+        );
+        ensure!(prefix.initialized, "prefix state has not completed capture");
+        let image_token = self
+            .cfg
+            .image_token_id
+            .context("checkpoint has no image_token_id")?;
+        input.validate(
+            self.cfg.hidden,
+            self.embed.shape[0],
+            image_token,
+            self.cfg.max_positions,
+        )?;
+        let rows = input.token_ids.len();
+        let tend = prefix
+            .len
+            .checked_add(rows)
+            .context("cached prompt length overflow")?;
+        ensure!(
+            tend <= self.cfg.max_positions,
+            "cached prompt exceeds the configured maximum length"
+        );
+        self.prepare_scratch(tend)?;
+        let s = self.scratch.as_ref().unwrap();
+        self.upload_positions(s, input.position_ids)?;
+        self.embed_tokens_at(s, input.token_ids, prefix.len)?;
+        self.overwrite_image_rows(s, input, prefix.len)?;
+        self.run_window(s, prefix.len, tend, true, None, Some(prefix))?;
+        self.last_hidden(s, tend)
+    }
+
     fn embed_tokens(&self, s: &Scratch, ids: &[u32]) -> Result<()> {
+        self.embed_tokens_at(s, ids, 0)
+    }
+
+    /// Embed `ids` into the residual buffer rows starting at absolute row `qb`.
+    fn embed_tokens_at(&self, s: &Scratch, ids: &[u32], qb: usize) -> Result<()> {
         let ids32: Vec<u8> = ids.iter().flat_map(|&i| (i as i32).to_le_bytes()).collect();
-        // SAFETY: IDs were checked against the vocabulary; scratch holds t rows.
+        // SAFETY: IDs were checked against the vocabulary; scratch holds qb + t rows.
         unsafe {
             cuda::upload(s.at(s.ids), &ids32, self.stream)?;
             check(
                 (cuda::api().cs1_embed)(
                     s.at(s.ids).cast(),
                     self.embed.ptr,
-                    s.at(s.res),
+                    s.at(s.res + qb * self.cfg.hidden * BF16),
                     ids.len() as i32,
                     self.cfg.hidden as i32,
                     self.stream,
@@ -918,7 +1414,9 @@ impl Model {
         // scratch buffers laid out for at least t tokens with the widths used here.
         unsafe {
             check(
-                (cuda::api().cs1_rms_norm)(
+                (self
+                    .reference
+                    .map_or(cuda::api().cs1_rms_norm, |r| r.rms_norm))(
                     p(s.res),
                     self.layers[0].input_norm.ptr,
                     p(s.x),
@@ -933,7 +1431,16 @@ impl Model {
         for (i, layer) in self.layers.iter().enumerate() {
             match &layer.mixer {
                 Mixer::Linear(la) => {
-                    self.gemm(s, s.x, &la.in_proj, s.gdn_in, t)?;
+                    self.gemm_group(
+                        s,
+                        s.x,
+                        &la.in_proj,
+                        s.gdn_in,
+                        t,
+                        lengths,
+                        Group::LinearInput,
+                    )?;
+                    self.apply_lora(i, Group::LinearInput, s, s.x, s.gdn_in, lengths)?;
                     let ld = w.gdn_in as i32;
                     let z = s.gdn_in + w.conv * BF16;
                     let b = z + vd * BF16;
@@ -973,20 +1480,39 @@ impl Model {
                         )?;
                         for &(offset, length) in &sequences {
                             check(
-                                (cuda::api().cs1_gdn_prefill)(
-                                    p(s.lq + offset * kd * BF16),
-                                    p(s.lk + offset * kd * BF16),
-                                    p(s.lv + offset * vd * BF16),
-                                    p(s.g + offset * hv * F32).cast(),
-                                    p(s.beta + offset * hv * BF16),
-                                    p(s.lo + offset * vd * BF16),
-                                    p(s.workspace).cast(),
-                                    length,
-                                    hv as i32,
-                                    cfg.lin_k_heads as i32,
-                                    (cfg.lin_k_dim as f32).powf(-0.5),
-                                    st,
-                                ),
+                                if let Some(gdn) = &self.fp32_gdn {
+                                    gdn.run(
+                                        p(s.lq + offset * kd * BF16),
+                                        p(s.lk + offset * kd * BF16),
+                                        p(s.lv + offset * vd * BF16),
+                                        p(s.g + offset * hv * F32).cast(),
+                                        p(s.beta + offset * hv * BF16),
+                                        p(s.lo + offset * vd * BF16),
+                                        p(s.workspace).cast(),
+                                        length,
+                                        hv as i32,
+                                        cfg.lin_k_heads as i32,
+                                        (cfg.lin_k_dim as f32).powf(-0.5),
+                                        st,
+                                    )
+                                } else {
+                                    (self
+                                        .reference
+                                        .map_or(cuda::api().cs1_gdn_prefill, |r| r.gdn_prefill))(
+                                        p(s.lq + offset * kd * BF16),
+                                        p(s.lk + offset * kd * BF16),
+                                        p(s.lv + offset * vd * BF16),
+                                        p(s.g + offset * hv * F32).cast(),
+                                        p(s.beta + offset * hv * BF16),
+                                        p(s.lo + offset * vd * BF16),
+                                        p(s.workspace).cast(),
+                                        length,
+                                        hv as i32,
+                                        cfg.lin_k_heads as i32,
+                                        (cfg.lin_k_dim as f32).powf(-0.5),
+                                        st,
+                                    )
+                                },
                                 "gdn prefill",
                             )?;
                         }
@@ -1007,16 +1533,28 @@ impl Model {
                         )?;
                     }
                     self.gemm_sequences(s, s.ln, &la.out, s.delta, lengths)?;
+                    self.apply_lora(i, Group::LinearOutput, s, s.ln, s.delta, lengths)?;
                 }
                 Mixer::Full(fa) => {
-                    self.gemm(s, s.x, &fa.qkv, s.attn_in, t)?;
+                    self.gemm_group(
+                        s,
+                        s.x,
+                        &fa.qkv,
+                        s.attn_in,
+                        t,
+                        lengths,
+                        Group::AttentionInput,
+                    )?;
+                    self.apply_lora(i, Group::AttentionInput, s, s.x, s.attn_in, lengths)?;
                     let ld = w.attn_in as i32;
                     let k = s.attn_in + w.attn_q * BF16;
                     let v = k + cfg.kv_heads * cfg.head_dim * BF16;
                     unsafe {
                         for &(offset, length) in &sequences {
                             check(
-                                (cuda::api().cs1_attn_prep)(
+                                (self
+                                    .reference
+                                    .map_or(cuda::api().cs1_attn_prep, |r| r.attn_prep))(
                                     p(s.attn_in + offset * w.attn_in * BF16),
                                     p(k + offset * w.attn_in * BF16),
                                     ld,
@@ -1038,30 +1576,50 @@ impl Model {
                                 "attention prep",
                             )?;
                             check(
-                                (cuda::api().cs1_attention_gated)(
-                                    p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
-                                    p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
-                                    p(v + offset * w.attn_in * BF16),
-                                    ld,
-                                    p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
-                                    p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
-                                    length,
-                                    hq,
-                                    hk,
-                                    hd,
-                                    (cfg.head_dim as f32).powf(-0.5),
-                                    st,
-                                ),
+                                if let Some(reference) = self.reference {
+                                    (reference.attention)(
+                                        p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
+                                        p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
+                                        p(v + offset * w.attn_in * BF16),
+                                        ld,
+                                        p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
+                                        p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
+                                        length,
+                                        hq,
+                                        hk,
+                                        (cfg.head_dim as f32).powf(-0.5),
+                                        p(s.workspace),
+                                        st,
+                                    )
+                                } else {
+                                    (cuda::api().cs1_attention_gated)(
+                                        p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
+                                        p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
+                                        p(v + offset * w.attn_in * BF16),
+                                        ld,
+                                        p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
+                                        p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
+                                        length,
+                                        hq,
+                                        hk,
+                                        hd,
+                                        (cfg.head_dim as f32).powf(-0.5),
+                                        st,
+                                    )
+                                },
                                 "gated attention",
                             )?;
                         }
                     }
                     self.gemm_sequences(s, s.ao, &fa.o, s.delta, lengths)?;
+                    self.apply_lora(i, Group::AttentionOutput, s, s.ao, s.delta, lengths)?;
                 }
             }
             unsafe {
                 check(
-                    (cuda::api().cs1_add_rms_norm)(
+                    (self
+                        .reference
+                        .map_or(cuda::api().cs1_add_rms_norm, |r| r.add_rms_norm))(
                         p(s.res),
                         p(s.delta),
                         layer.post_norm.ptr,
@@ -1074,7 +1632,8 @@ impl Model {
                     "post-attention norm",
                 )?;
             }
-            self.gemm(s, s.x, &layer.gate_up, s.gate_up, t)?;
+            self.gemm_group(s, s.x, &layer.gate_up, s.gate_up, t, lengths, Group::GateUp)?;
+            self.apply_lora(i, Group::GateUp, s, s.x, s.gate_up, lengths)?;
             unsafe {
                 check(
                     (cuda::api().cs1_silu_mul)(
@@ -1089,13 +1648,16 @@ impl Model {
                 )?;
             }
             self.gemm_sequences(s, s.act, &layer.down, s.delta, lengths)?;
+            self.apply_lora(i, Group::Down, s, s.act, s.delta, lengths)?;
             let next = self
                 .layers
                 .get(i + 1)
                 .map_or(&self.final_norm, |l| &l.input_norm);
             unsafe {
                 check(
-                    (cuda::api().cs1_add_rms_norm)(
+                    (self
+                        .reference
+                        .map_or(cuda::api().cs1_add_rms_norm, |r| r.add_rms_norm))(
                         p(s.res),
                         p(s.delta),
                         next.ptr,
@@ -1111,4 +1673,385 @@ impl Model {
         }
         Ok(())
     }
+
+    /// The R2d prefix-cache pass: run rows `[qb, tend)` of one prompt with
+    /// explicit positions, touching per-layer buffers only for those rows.
+    ///
+    /// `capture` (qb must be 0): collect post-prep K and pre-GEMM V columns of each
+    /// full-attention layer plus the float32 GDN state and the three pre-conv
+    /// projection columns of each Gated DeltaNet layer. `prefix` (qb = prefix.len):
+    /// seed the window from a captured entry — the conv tail columns are copied
+    /// back into place before the convolution, and the prefix K/V columns before
+    /// the attention. Everything else is `run()` with shifted row bases, so a
+    /// captured+continued pass repeats the one-shot arithmetic token for token
+    /// (qb is a multiple of the 64-row GDN chunk; the only remaining divergence
+    /// is cuBLASLt's M-shaped plan choice, an f32-accumulation-order ulp).
+    fn run_window(
+        &self,
+        s: &Scratch,
+        qb: usize,
+        tend: usize,
+        custom_positions: bool,
+        capture: Option<&mut PrefixState>,
+        prefix: Option<&PrefixState>,
+    ) -> Result<()> {
+        ensure!(
+            self.fp32_gdn.is_none(),
+            "FP32 GDN does not support prefix continuation"
+        );
+        ensure!(
+            qb <= tend && (qb == 0) == prefix.is_none() && (qb == 0 || capture.is_none()),
+            "prefix window shape"
+        );
+        let cfg = &self.cfg;
+        let st = self.stream;
+        let rows = tend - qb;
+        let (ti, hi, eps) = (rows as i32, cfg.hidden as i32, cfg.eps);
+        let (kd, vd, hv) = (cfg.key_dim(), cfg.value_dim(), cfg.lin_v_heads);
+        let (hq, hk, hd) = (cfg.heads as i32, cfg.kv_heads as i32, cfg.head_dim as i32);
+        let w = Widths::of(cfg);
+        let p = |off: usize| s.at(off);
+        let (cos, sin) = if custom_positions {
+            (s.custom_cos, s.custom_sin)
+        } else {
+            (s.cos, s.sin)
+        };
+        let hb = cfg.hidden * BF16;
+        let ob = cfg.heads * cfg.head_dim * BF16; // post-prep q/gate and ao row bytes
+        let kvb = cfg.kv_heads * cfg.head_dim * BF16; // k and v row bytes
+        let ldb = w.gdn_in; // gdn_in row, elements
+        let ldbb = ldb * BF16;
+        let ab = w.attn_in * BF16; // attn_in row bytes
+        let kb = kd * BF16; // linear q/k row bytes
+        let vb = vd * BF16; // linear v row bytes
+        let scale = (cfg.head_dim as f32).powf(-0.5);
+        let mut fa_i = 0usize;
+        let mut la_i = 0usize;
+        // SAFETY (every kernel call below): pointers are weights in the arena or
+        // scratch buffers laid out for tend tokens at the widths used here; prefix
+        // buffers hold exactly the shapes allocated by alloc_prefix(qb).
+        unsafe {
+            check(
+                (self
+                    .reference
+                    .map_or(cuda::api().cs1_rms_norm, |r| r.rms_norm))(
+                    p(s.res + qb * hb),
+                    self.layers[0].input_norm.ptr,
+                    p(s.x + qb * hb),
+                    ti,
+                    hi,
+                    eps,
+                    st,
+                ),
+                "input norm",
+            )?;
+        }
+        for (i, layer) in self.layers.iter().enumerate() {
+            match &layer.mixer {
+                Mixer::Linear(la) => {
+                    self.gemm_group(
+                        s,
+                        s.x + qb * hb,
+                        &la.in_proj,
+                        s.gdn_in + qb * ldbb,
+                        rows,
+                        &[rows],
+                        Group::LinearInput,
+                    )?;
+                    self.apply_lora(
+                        i,
+                        Group::LinearInput,
+                        s,
+                        s.x + qb * hb,
+                        s.gdn_in + qb * ldbb,
+                        &[rows],
+                    )?;
+                    let ld = ldb as i32;
+                    let z = s.gdn_in + w.conv * BF16;
+                    let b = z + vd * BF16;
+                    let a = b + hv * BF16;
+                    let (s_in, s_out): (*const c_void, *mut c_void) =
+                        match (&prefix, capture.as_deref()) {
+                            (Some(pre), _) => {
+                                (pre.gdn_state[la_i].at(0).cast_const(), std::ptr::null_mut())
+                            }
+                            (None, Some(cap)) => (std::ptr::null(), cap.gdn_state[la_i].at(0)),
+                            (None, None) => (std::ptr::null(), std::ptr::null_mut()),
+                        };
+                    unsafe {
+                        if let Some(cap) = capture.as_deref() {
+                            // conv window tail: the last three pre-conv columns.
+                            cuda::copy_dd(
+                                cap.conv_tail[la_i].at(0),
+                                p(s.gdn_in + (rows - 3) * ldbb),
+                                3 * ldbb,
+                                st,
+                            )?;
+                        }
+                        if qb > 0 {
+                            cuda::copy_dd(
+                                p(s.gdn_in + (qb - 3) * ldbb),
+                                prefix.unwrap().conv_tail[la_i].at(0),
+                                3 * ldbb,
+                                st,
+                            )?;
+                        }
+                        // The conv kernel zero-pads its local first three rows.
+                        // Include the restored history in its input and discard
+                        // those three outputs so continuation rows see all taps.
+                        let conv_start = qb.saturating_sub(3);
+                        check(
+                            (cuda::api().cs1_gdn_conv)(
+                                p(s.gdn_in + conv_start * ldbb),
+                                ld,
+                                la.conv.ptr,
+                                p(s.lq + conv_start * kb),
+                                p(s.lk + conv_start * kb),
+                                p(s.lv + conv_start * vb),
+                                (tend - conv_start) as i32,
+                                kd as i32,
+                                vd as i32,
+                                st,
+                            ),
+                            "gdn conv",
+                        )?;
+                        check(
+                            (cuda::api().cs1_gdn_gates)(
+                                p(b + qb * ldbb),
+                                p(a + qb * ldbb),
+                                ld,
+                                la.a_log.ptr,
+                                la.dt_bias.ptr,
+                                p(s.beta + qb * hv * BF16),
+                                p(s.g + qb * hv * F32).cast(),
+                                ti,
+                                hv as i32,
+                                st,
+                            ),
+                            "gdn gates",
+                        )?;
+                        check(
+                            (cuda::api().cs1_gdn_prefill_x)(
+                                p(s.lq + qb * kb),
+                                p(s.lk + qb * kb),
+                                p(s.lv + qb * vb),
+                                p(s.g + qb * hv * F32).cast(),
+                                p(s.beta + qb * hv * BF16),
+                                p(s.lo + qb * vb),
+                                p(s.workspace).cast(),
+                                ti,
+                                hv as i32,
+                                cfg.lin_k_heads as i32,
+                                (cfg.lin_k_dim as f32).powf(-0.5),
+                                s_in,
+                                s_out,
+                                st,
+                            ),
+                            "gdn prefill",
+                        )?;
+                        check(
+                            (cuda::api().cs1_gated_rms_norm)(
+                                p(s.lo + qb * vb),
+                                p(z + qb * ldbb),
+                                ld,
+                                la.norm.ptr,
+                                p(s.ln + qb * vb),
+                                ti,
+                                hv as i32,
+                                cfg.lin_v_dim as i32,
+                                eps,
+                                st,
+                            ),
+                            "gated norm",
+                        )?;
+                    }
+                    self.gemm(s, s.ln + qb * vb, &la.out, s.delta + qb * hb, rows)?;
+                    self.apply_lora(
+                        i,
+                        Group::LinearOutput,
+                        s,
+                        s.ln + qb * vb,
+                        s.delta + qb * hb,
+                        &[rows],
+                    )?;
+                    la_i += 1;
+                }
+                Mixer::Full(fa) => {
+                    self.gemm_group(
+                        s,
+                        s.x + qb * hb,
+                        &fa.qkv,
+                        s.attn_in + qb * ab,
+                        rows,
+                        &[rows],
+                        Group::AttentionInput,
+                    )?;
+                    self.apply_lora(
+                        i,
+                        Group::AttentionInput,
+                        s,
+                        s.x + qb * hb,
+                        s.attn_in + qb * ab,
+                        &[rows],
+                    )?;
+                    let k = s.attn_in + w.attn_q * BF16;
+                    let v = k + kvb;
+                    let (q_base, t_flash) = (qb as i32, tend as i32);
+                    unsafe {
+                        if qb > 0 {
+                            let pre = prefix.unwrap();
+                            // Restore the prefix V columns and post-prep K rows in place;
+                            // the windowed flash then sees the identical k/v layout.
+                            cuda::copy2d(p(v), ab, pre.attn_kv[fa_i].1.at(0), kvb, kvb, qb, st)?;
+                            cuda::copy_dd(p(s.ak), pre.attn_kv[fa_i].0.at(0), qb * kvb, st)?;
+                        }
+                        check(
+                            (self
+                                .reference
+                                .map_or(cuda::api().cs1_attn_prep, |r| r.attn_prep))(
+                                p(s.attn_in + qb * ab),
+                                p(k + qb * ab),
+                                w.attn_in as i32,
+                                fa.q_norm.ptr,
+                                fa.k_norm.ptr,
+                                p(cos),
+                                p(sin),
+                                p(s.aq + qb * ob),
+                                p(s.agate + qb * ob),
+                                p(s.ak + qb * kvb),
+                                ti,
+                                hq,
+                                hk,
+                                hd,
+                                cfg.rotary_half as i32,
+                                eps,
+                                st,
+                            ),
+                            "attention prep",
+                        )?;
+                        if let Some(cap) = capture.as_deref() {
+                            // K must be post-prep (normed + rotary); V is the raw column.
+                            cuda::copy_dd(cap.attn_kv[fa_i].0.at(0), p(s.ak), tend * kvb, st)?;
+                            cuda::copy2d(cap.attn_kv[fa_i].1.at(0), kvb, p(v), ab, kvb, tend, st)?;
+                        }
+                        check(
+                            (cuda::api().cs1_attention_gated_prefix)(
+                                p(s.aq),
+                                p(s.ak),
+                                p(v),
+                                w.attn_in as i32,
+                                p(s.agate),
+                                p(s.ao),
+                                t_flash,
+                                hq,
+                                hk,
+                                hd,
+                                scale,
+                                q_base,
+                                st,
+                            ),
+                            "gated attention",
+                        )?;
+                    }
+                    self.gemm(s, s.ao + qb * ob, &fa.o, s.delta + qb * hb, rows)?;
+                    self.apply_lora(
+                        i,
+                        Group::AttentionOutput,
+                        s,
+                        s.ao + qb * ob,
+                        s.delta + qb * hb,
+                        &[rows],
+                    )?;
+                    fa_i += 1;
+                }
+            }
+            unsafe {
+                check(
+                    (self
+                        .reference
+                        .map_or(cuda::api().cs1_add_rms_norm, |r| r.add_rms_norm))(
+                        p(s.res + qb * hb),
+                        p(s.delta + qb * hb),
+                        layer.post_norm.ptr,
+                        p(s.x + qb * hb),
+                        ti,
+                        hi,
+                        eps,
+                        st,
+                    ),
+                    "post-attention norm",
+                )?;
+            }
+            self.gemm_group(
+                s,
+                s.x + qb * hb,
+                &layer.gate_up,
+                s.gate_up + qb * 2 * cfg.intermediate * BF16,
+                rows,
+                &[rows],
+                Group::GateUp,
+            )?;
+            self.apply_lora(
+                i,
+                Group::GateUp,
+                s,
+                s.x + qb * hb,
+                s.gate_up + qb * 2 * cfg.intermediate * BF16,
+                &[rows],
+            )?;
+            unsafe {
+                check(
+                    (cuda::api().cs1_silu_mul)(
+                        p(s.gate_up + qb * 2 * cfg.intermediate * BF16),
+                        (2 * cfg.intermediate) as i32,
+                        p(s.act + qb * cfg.intermediate * BF16),
+                        ti,
+                        cfg.intermediate as i32,
+                        st,
+                    ),
+                    "silu mul",
+                )?;
+            }
+            self.gemm(
+                s,
+                s.act + qb * cfg.intermediate * BF16,
+                &layer.down,
+                s.delta + qb * hb,
+                rows,
+            )?;
+            self.apply_lora(
+                i,
+                Group::Down,
+                s,
+                s.act + qb * cfg.intermediate * BF16,
+                s.delta + qb * hb,
+                &[rows],
+            )?;
+            let next = self
+                .layers
+                .get(i + 1)
+                .map_or(&self.final_norm, |l| &l.input_norm);
+            unsafe {
+                check(
+                    (self
+                        .reference
+                        .map_or(cuda::api().cs1_add_rms_norm, |r| r.add_rms_norm))(
+                        p(s.res + qb * hb),
+                        p(s.delta + qb * hb),
+                        next.ptr,
+                        p(s.x + qb * hb),
+                        ti,
+                        hi,
+                        eps,
+                        st,
+                    ),
+                    "input norm",
+                )?;
+            }
+        }
+        Ok(())
+    }
 }
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/multimodal_graph.rs"]
+mod graph_tests;

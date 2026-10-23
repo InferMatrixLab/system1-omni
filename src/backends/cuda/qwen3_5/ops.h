@@ -13,7 +13,7 @@
 #include <stdint.h>
 
 // Bumped whenever the required interface below changes.
-#define CS1_ABI_VERSION 5
+#define CS1_ABI_VERSION 9
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,6 +24,9 @@ extern "C" {
 uint32_t cs1_abi_version(void);
 const char* cs1_error_string(int code);
 int cs1_set_device(int device);
+int cs1_get_device(int* device);
+// Set flag to zero, then atomically set to one if any BF16 value is non-finite.
+int cs1_bf16_finite(const void* x, size_t n, uint32_t* flag, void* stream);
 int cs1_malloc(void** ptr, size_t bytes);
 int cs1_free(void* ptr);
 int cs1_stream_create(void** stream);
@@ -36,6 +39,11 @@ int cs1_graph_destroy(void* exec);
 // Copy and wait for the copy.
 int cs1_upload(void* dst, const void* src, size_t bytes, void* stream);
 int cs1_download(void* dst, const void* src, size_t bytes, void* stream);
+// Device-to-device copy of `bytes` (queue-only completion).
+int cs1_copy_dd(void* dst, const void* src, size_t bytes, void* stream);
+// Pitched copy both ways (default direction = device-to-device):
+// height rows of `width`, output pitch dpitch, input pitch spitch, in bytes.
+int cs1_copy2d(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, void* stream);
 
 // ---- operations ----
 
@@ -67,8 +75,25 @@ int cs1_gdn_gates(const void* b, const void* a, int ld, const void* A_log, const
 // Chunked gated delta rule, q and k L2-normalized inside, q scaled by `scale`.
 // q, k [T, HK, 128], v [T, H, 128], g float [T, H], beta [T, H], o [T, H, 128].
 size_t cs1_gdn_workspace_floats(int T, int H);
+// Optional no-FLA text precision mode: FP32 normalized Q/K and recurrent state,
+// BF16 output. Context and scratch remain model-owned; prefix continuation is unsupported.
+void* cs1_gdn_fp32_create(size_t workspace_bytes);
+void cs1_gdn_fp32_destroy(void* context);
+size_t cs1_gdn_fp32_workspace_floats(int T,int H);
+int cs1_gdn_prefill_fp32(void* context,const void* q, const void* k, const void* v, const float* g,
+                       const void* beta, void* o, float* workspace,
+                       int T, int H, int HK, float scale, void* stream);
 int cs1_gdn_prefill(const void* q, const void* k, const void* v, const float* g, const void* beta,
                     void* o, float* workspace, int T, int H, int HK, float scale, void* stream);
+
+// Same scan with an explicit state: s_in is the [H, K, V] float32 state before
+// this window (null = zero), s_out receives the [H, K, V] float32 state after
+// it (null = skip). The float32 state makes a continuation starting exactly at
+// a chunk boundary repeat the arithmetic of one full pass bit for bit. Used
+// for the cached-prefix continuation and for its capture.
+int cs1_gdn_prefill_x(const void* q, const void* k, const void* v, const float* g, const void* beta,
+                      void* o, float* workspace, int T, int H, int HK, float scale,
+                      const void* s_in, void* s_out, void* stream);
 
 // Attention inputs: q and gate from qg [T, Hq, 2*Dh], k from kr [T, Hk, Dh], both in rows
 // of ld; per-head zero-centred RMSNorm, then rotary embedding on the first 2*half dims
@@ -88,6 +113,13 @@ int cs1_attention(const void* q, const void* k, const void* v, int ldv, void* ou
 int cs1_attention_gated(const void* q, const void* k, const void* v, int ldv, const void* gate,
                         void* out, int T, int Hq, int Hk, int Dh, float scale, void* stream);
 
+// Windowed variant for the cached prefix: k and v cover rows [0, T) (the cached
+// prefix must already be in place); q, gate and out cover rows [q_base, T) only.
+// q_base must be a multiple of 64; q_base = 0 reduces to cs1_attention_gated.
+int cs1_attention_gated_prefix(const void* q, const void* k, const void* v, int ldv, const void* gate,
+                               void* out, int T, int Hq, int Hk, int Dh, float scale, int q_base,
+                               void* stream);
+
 // x = x * sigmoid(gate), n elements.
 int cs1_sigmoid_gate(void* x, const void* gate, size_t n, void* stream);
 
@@ -97,6 +129,12 @@ int cs1_silu_mul(const void* gate_up, int ld, void* out, int T, int I, void* str
 // y [M, N] (rows of ldy) = x [M, K] * w [N, K]^T through cuBLASLt, float32 accumulation,
 // with cuBLASLt's first heuristic choice for each shape (see gemm.cu).
 void* cs1_gemm_create(size_t workspace_bytes);
+// A handle that keeps one algorithm per weight shape (N, K, ldy) for every M, chosen at
+// reference_m rows among algorithms without split-K, so that a row's result depends
+// neither on M nor on its row index (checked by tests/qwen3_5/kernels.rs on the GPU it
+// runs on). Null if reference_m <= 0 or setup fails. cs1_gemm with this handle returns a
+// cuBLAS status for an M the algorithm cannot serve, rather than switching algorithms.
+void* cs1_gemm_create_fixed(size_t workspace_bytes, int reference_m);
 void cs1_gemm_destroy(void* gemm);
 int cs1_gemm(void* gemm, const void* x, const void* w, void* y, int M, int N, int K, int ldy,
              void* stream);
@@ -110,11 +148,44 @@ int cs1_vision_position(void* x, const void* table, const int* indices, const fl
 int cs1_vision_rope(const void* qkv, const float* co, const float* si, void* q, void* k, int n, void* stream);
 // q/k [N,1024], V is a slice in qkv [N,3072]. No causal mask, O(N) memory.
 int cs1_vision_attention(const void* q, const void* k, const void* v, void* out, int n, void* stream);
+// Additive vision endpoints, optional within the required CUDA ABI. Supports the exact 4B/27B layouts.
+// Rotary cos/sin [N,head_dim/2]. Attention workspace: 4*N*16*80 BF16 elements for head72.
+int cs1_vision_position_v2(void* x, const void* table, const int* indices, const float* weights, int n, int hidden, void* stream);
+int cs1_vision_rope_v2(const void* qkv, const float* co, const float* si, void* q, void* k, int n, int hidden, int head_dim, void* stream);
+int cs1_vision_attention_v2(const void* q, const void* k, const void* v, void* out, int n, int heads, int head_dim, void* workspace, void* stream);
 int cs1_vision_bias(void* x, const void* bias, size_t n, int d, void* stream);
 int cs1_vision_gelu(void* x, size_t n, int exact, void* stream);
 int cs1_vision_add(void* x, const void* delta, size_t n, void* stream);
 int cs1_vision_to_float(const void* x, float* out, size_t n, void* stream);
 int cs1_vision_lora_add(void* x, const float* delta, size_t n, float scale, void* stream);
+
+
+// ---- Optional JEMM framework numerics (ABI 6 additive) ----
+void* cs1_reference_gemm_create(size_t workspace_bytes);
+int cs1_reference_rms_norm(const void* x, const void* w, void* out, int rows, int D, float eps, void* stream);
+int cs1_reference_add_rms_norm(void* residual, const void* delta, const void* w, void* out, int rows, int D,
+                     float eps, void* stream);
+size_t cs1_reference_gdn_workspace_floats(int T, int H);
+int cs1_reference_gdn_prefill(const void* q, const void* k, const void* v, const float* g, const void* beta,
+                    void* o, float* workspace, int T, int H, int HK, float scale, void* stream);
+int cs1_reference_attn_prep(const void* qg, const void* kr, int ld, const void* qw, const void* kw,
+                  const void* cos, const void* sin, void* q, void* gate, void* k, int T, int Hq, int Hk,
+                  int Dh, int half, float eps, void* stream);
+int cs1_reference_vision_norm(const void* x, const void* w, const void* b, void* y, int rows, int d, void* stream);
+int cs1_reference_vision_rope(const void* qkv, const float* co, const float* si, void* q, void* k, int n, int hidden, int head_dim, void* stream);
+int cs1_reference_vision_attention(const void* q, const void* k, const void* v, void* out, int n, int heads, int head_dim, void* workspace, void* stream);
+// Rotary's co parameter is FP32 angles, si is unused; unlike the legacy cos/sin API.
+// Language workspace is measured in FP32 elements and covers every length <= capacity.
+// Vision workspace adds 4*capacity*16*80 BF16 padding elements before that FP32 region.
+int cs1_reference_available(void);
+size_t cs1_reference_language_attention_workspace_floats(int capacity,int heads);
+size_t cs1_reference_vision_attention_workspace_floats(int capacity,int heads);
+int cs1_reference_attention(const void* q,const void* k,const void* v,int ldv,const void* gate,void* out,int tokens,int heads,int kv_heads,float scale,void* workspace,void* stream);
+int cs1_reference_vision_attention_padded(const void* q,const void* k,const void* v,void* out,int tokens,int heads,void* workspace,void* stream);
+// Create/destroy outside capture, on the owning device. The caller synchronizes before destroy.
+void* cs1_reference_patch_create(int rows,void* stream);
+int cs1_reference_patch(void* plan,const void* x,const void* weight,void* out);
+void cs1_reference_patch_destroy(void* plan);
 
 #ifdef __cplusplus
 }
