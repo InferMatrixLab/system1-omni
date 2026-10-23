@@ -155,14 +155,14 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
     );
     let allocations = metric(b"loading_live\0");
     let error = model.forward_fixed(&[0]).unwrap_err();
-    assert!(error.to_string().contains("require merged weights"));
+    assert!(error.to_string().contains("only merged weights"));
     let error = model
         .forward_shared(&SharedPrompts {
             prefix: &[],
             groups: vec![],
         })
         .unwrap_err();
-    assert!(error.to_string().contains("require merged weights"));
+    assert!(error.to_string().contains("only merged weights"));
     assert_eq!(
         metric(b"loading_live\0"),
         allocations,

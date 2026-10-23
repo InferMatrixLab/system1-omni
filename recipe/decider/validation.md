@@ -205,7 +205,8 @@ the same shape, scratch growth, replay and FIFO eviction beyond 64 shapes. Run:
 ```sh
 DECIDER_MODEL=/path/to/models/decider-2b-v11 \
 DECIDER_CUDA_LIB="$PWD/target/release/libqwen3_5_cuda.so" CUA_S1_GRAPH=1 \
-  cargo test --release --locked -p omni-qwen3-5-native --test graph -- --ignored --test-threads=1
+  cargo test --release --locked -p omni-qwen3-5-native --test graph \
+    ordered_shape_replay_current_ids_growth_and_bounded_cache -- --ignored --test-threads=1
 ```
 
 Set `require_replays: true` on each Graph mode in the comparison plan to require
