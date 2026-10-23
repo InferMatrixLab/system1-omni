@@ -67,10 +67,10 @@ struct Held {
 
 /// One admitted piece of work's reservation, released when its [`Permit`] drops.
 ///
-/// A permit stores the units it *actually* reserved rather than the units its caller asked for.
-/// The two differ only when the request was clamped to the ceiling, and storing the clamped
-/// value is what makes the counter self-balancing: what goes in is exactly what comes out, so no
-/// sequence of admissions and releases can drive the counter below zero.
+/// `units` preserves the caller's original cost, as reported by [`Permit::units`]. `charged`
+/// records the amount added to the shared unit total: the same cost when a unit budget is
+/// configured, or zero when only requests are bounded. Release subtracts exactly `charged`.
+/// Requests exceeding the unit ceiling are refused rather than clamped.
 #[derive(Clone, Copy, Debug)]
 pub struct Reservation {
     /// The cost the work was admitted at, which is what [`Permit::units`] reports.
