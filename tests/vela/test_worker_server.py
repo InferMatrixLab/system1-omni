@@ -292,3 +292,51 @@ def test_the_correct_bearer_answers_normally(keyed_server):
         headers=(("Authorization", "Bearer secret-key"),),
     )
     assert status == 200 and json.loads(raw)["answers"]["billing"] == {"type": "noul", "noul": 0.75}
+
+
+@pytest.fixture()
+def hybrid_server():
+    from .test_hybrid import FakeVela2Hybrid, hybrid_body
+
+    instance = start(FakeVela2Hybrid())
+    yield instance, hybrid_body()
+    stop(instance)
+
+
+def test_the_hybrid_member_serves_its_own_models_entry(hybrid_server):
+    server, _ = hybrid_server
+    status, _, raw = request(server, "GET", "/v1/models")
+    assert status == 200
+    assert json.loads(raw) == {
+        "models": [
+            {
+                "name": "vllm-sr/Vela-2.0-0.8B",
+                "release_date": "",
+                "description": (
+                    "Vela 2.0 0.8B: SystemOne Choice / Noul / Score "
+                    "with span and set extensions, 16,384-token input"
+                ),
+            }
+        ]
+    }
+
+
+def test_the_hybrid_member_answers_all_five_kinds_with_span_heads(hybrid_server):
+    server, hybrid_body = hybrid_server
+    status, ctype, raw = post(server, json.dumps(hybrid_body).encode("utf-8"))
+    assert status == 200 and ctype == "application/json"
+    response = json.loads(raw)
+    assert response["model"] == "vllm-sr/Vela-2.0-0.8B"
+    assert set(response) == {
+        "model", "answers", "usage", "spans", "sets", "thresholds", "span_heads"
+    }
+    assert list(response["span_heads"]) == ["unsupported"]
+    assert response["answers"]["unsupported"] == {"type": "noul", "noul": 0.9}
+
+
+def test_the_hybrid_member_rejects_another_model_name(hybrid_server):
+    server, _ = hybrid_server
+    wrong = body(model="vllm-sr/Vela-2.0-0.3B")
+    status, _, raw = post(server, json.dumps(wrong).encode("utf-8"))
+    assert status == 422
+    assert json.loads(raw)["detail"][0]["type"] == "value_error.model"

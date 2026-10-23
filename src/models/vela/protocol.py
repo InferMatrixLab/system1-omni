@@ -24,10 +24,10 @@ from typing import Any
 # hybrid members serve their config.json "model_name" instead.
 MODEL_NAME = "vllm-sr/Vela-2.0-0.3B"
 # Slice-scoped transport cap. Upstream vela2_serve.py sets no total-body
-# limit (its only size boundary is the 8,192-token input window); a text
-# request bounded by that window is orders of magnitude smaller, so this
-# cap never binds a valid request. A deliberate difference recorded with
-# the integration.
+# limit (its only size boundary is the member's token input window); a
+# text request bounded by that window is orders of magnitude smaller, so
+# this cap never binds a valid request. A deliberate difference recorded
+# with the integration.
 MAX_BODY = 8 * 1024 * 1024
 # The envelope fields, in upstream's missing-field check order.
 REQUEST_FIELDS = ("state", "model", "questions")
