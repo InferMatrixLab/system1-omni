@@ -35,8 +35,8 @@ struct Gemm {
     cublasLtHandle_t handle = nullptr;
     void* workspace = nullptr;
     size_t workspace_bytes = 0;
-    int reference_m = 0;  // > 0: one algorithm per weight shape, chosen at this M
     bool reference = false;
+    int reference_m = 0;  // > 0: one algorithm per weight shape, chosen at this M
     std::map<Key, Plan> plans;
     std::map<std::tuple<int, int, int, bool, bool>, cublasLtMatmulAlgo_t> fixed;  // N, K, ldy, FP32, bias
 };
@@ -75,7 +75,6 @@ int first_choice(Gemm& g, Plan& p, uint32_t schemes) {
     if (s != CUBLAS_STATUS_SUCCESS) return status(s);
     cublasLtMatmulPreferenceSetAttribute(pref, CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &g.workspace_bytes,
                                          sizeof(g.workspace_bytes));
-    if (g.reference) schemes = CUBLASLT_REDUCTION_SCHEME_MASK;
     cublasLtMatmulPreferenceSetAttribute(pref, CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK, &schemes,
                                          sizeof(schemes));
     cublasLtMatmulHeuristicResult_t r{};
@@ -135,10 +134,13 @@ int plan_for(Gemm& g, int M, int N, int K, int ldy, Plan*& out, bool fp32 = fals
     if (rc == 0 && g.reference_m > 0) {
         rc = fixed_choice(g, N, K, ldy, fp32, bias, p);
     } else if (rc == 0) {
-        // Vision's FP32 and biased GEMMs exclude all split-K to avoid BF16 intermediate
-        // reductions; the language GEMMs exclude only in-place reductions.
-        rc = first_choice(g, p, fp32 || bias ? CUBLASLT_REDUCTION_SCHEME_NONE
-                                             : CUBLASLT_REDUCTION_SCHEME_MASK & ~CUBLASLT_REDUCTION_SCHEME_INPLACE);
+        // The reference handle allows every reduction scheme. Otherwise vision's FP32 and
+        // biased GEMMs exclude all split-K to avoid BF16 intermediate reductions, and the
+        // language GEMMs exclude only in-place reductions.
+        const uint32_t schemes = g.reference    ? CUBLASLT_REDUCTION_SCHEME_MASK
+                                 : fp32 || bias ? CUBLASLT_REDUCTION_SCHEME_NONE
+                                                : CUBLASLT_REDUCTION_SCHEME_MASK & ~CUBLASLT_REDUCTION_SCHEME_INPLACE;
+        rc = first_choice(g, p, schemes);
     }
     if (rc != 0) {
         destroy(p);

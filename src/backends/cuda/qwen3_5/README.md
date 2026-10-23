@@ -17,9 +17,12 @@ The norm, elementwise and q/k preparation kernels round to bfloat16 where Transf
 the BF16 rounding of both attention and sigmoid before multiplication. The native
 workers use this entry point; the separate operations remain available for kernel
 comparisons. Rebuild the library and all native Rust consumers together for
-**ABI version 9**. This union retains ABI 8 device-feature entry points and the
-fixed-algorithm GEMM handle, alongside the optional reference and FP32 GDN profiles.
-Older libraries are rejected at load.
+**ABI version 9**, even with resident features disabled. ABI 9 retains the vision,
+CUDA Graph, gated attention and prefix-continuation entry points and ABI 8's
+`cs1_get_device` and `cs1_bf16_finite` for device feature validation, and adds the
+fixed-algorithm GEMM handle below. Older libraries are rejected at load. See the
+[Cua-S1 resident-feature recipe](../../../../recipe/cua_s1/native_vision_graph.md#gpu-resident-vision-features)
+for the opt-in device feature path, lifetime contract and regression commands.
 
 cuBLASLt's heuristic picks a GEMM algorithm per M, so a row's result can change with
 the number of rows in the call: a prefix and its branch, run separately, round
@@ -31,9 +34,6 @@ M is and wherever the row sits. cuBLASLt doesn't document this property;
 on it (it passed on sm_89). It is slower for some shapes and faster for others: on an
 RTX 6000 Ada, the down and output projections take up to about 4 times as long at small
 M without split-K. `cs1_gemm_create` remains the default.
-See the
-[Cua-S1 resident-feature recipe](../../../../recipe/cua_s1/native_vision_graph.md#gpu-resident-vision-features)
-for the opt-in device feature path, lifetime contract and regression commands.
 
 Gated DeltaNet preparation stores converted TF32 operands in three-byte component planes, preserves the original four-term TF32 accumulation, and writes U/W fragments directly as bfloat16. Dynamic shared memory is 72 KiB per block. The [H200 comparison](../../../../benchmarks/gdn/README.md) records complete GDN call latency, numerical checks, and the small end-to-end change measured with the Open-Jev worker from PR #55.
 
