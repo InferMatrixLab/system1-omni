@@ -28,7 +28,7 @@ The export refuses an existing output directory. Keep the export and original
 weights immutable while serving. `89` targets the validated RTX 4090; choose your
 device's supported compute capability when building. Rebuild the CUDA library
 and every native consumer together when the ABI changes. This branch requires
-ABI 8, including the default host-feature path.
+ABI 9, including the default host-feature path.
 
 ## Start the worker and frontend
 
