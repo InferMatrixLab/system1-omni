@@ -35,6 +35,7 @@ import argparse
 import glob
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -143,8 +144,14 @@ def build_all(repo_root, out_dir):
         # Keyed by position as well as name: two manifests may declare the same
         # backend name and the same library filename, and neither may be credited
         # with the other's artifact.
+        #
+        # Cleared first, because the directory belongs to this tool. Reusing an
+        # existing `--out` would otherwise leave the previous invocation's library
+        # in place, and a build that produces nothing would be reported as having
+        # produced it.
         target = os.path.join(out_dir, "%03d-%s" % (index, _safe(label)))
-        os.makedirs(target, exist_ok=True)
+        shutil.rmtree(target, ignore_errors=True)
+        os.makedirs(target)
         print("== %s: %s -> %s (sm_%s)" % (shown, script_name, output, arch), flush=True)
         try:
             code = subprocess.run([script, target, str(arch)], cwd=directory).returncode

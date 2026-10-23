@@ -179,6 +179,19 @@ class BuildSweepTest(unittest.TestCase):
 
     # -- identities must not collide --------------------------------------
 
+    def test_reusing_the_output_directory_does_not_reuse_a_library(self):
+        # The same --out twice: the first build writes the library, the second
+        # writes nothing. Keeping the directory would credit the second with the
+        # first one's file and report a build that never happened.
+        directory = self.backend("", "flat")
+        built, _, failed = self.sweep()
+        self.assertEqual(self.labels(built), ["flat"])
+        self.script(directory, "true\n")
+        built, _, failed = self.sweep()
+        self.assertEqual(built, [], "a build that produced nothing must not be reported as built")
+        self.assertEqual(self.labels(failed), ["flat"])
+        self.assertIn("was not produced", failed[0].detail)
+
     def test_a_duplicate_name_cannot_be_credited_with_the_other_artifact(self):
         # Same backend name, same output filename. The first produces the
         # library; the second does not. A shared output directory would let the
