@@ -255,6 +255,23 @@ request is prepare → execute → finish under one admission.
   fixed-algorithm handle on this worker) is unchanged by the sync; the
   ABI 9 additions sit on code paths this worker does not take.
 
+### Live worker A/B (2026-10-23, both processes serving)
+
+Both workers were run for real, one after the other, on the RTX 5060 Laptop
+host: the Python reference worker (`frontend.valen`, cuda, bf16, port 8017)
+and this release binary (port 8018, the ABI 9 library), each answering the
+same four request bodies over real HTTP — the recipe text example, the 2×2
+PNG `example-request.json`, `example-noul-request.json` and
+`example-score-request.json`. Every case returned 200 from both workers with
+equal token counts (48 / 108 / 109 / 107). Deltas: text choice probability
+6.95e-3, image choice probability 7.63e-2, noul 2.3e-3 and 2.9e-3, score
+1.51e-2 with identical legends — all inside the declared tolerances, and the
+image case reproduced exactly the declared near-tie flip (`black` vs
+`white`, reference margin 0.108) recorded in the fixture. The numbers match
+the fixture-gate measurements, which is expected: both sides are
+deterministic. Raw responses: `/tmp/valen_ab/{ref,native}.json` on the
+authoring host (scratch, not part of the repo).
+
 ### Known limitations (this milestone)
 
 - Video and multi-image states are out of scope (spec 04 contract pending);
