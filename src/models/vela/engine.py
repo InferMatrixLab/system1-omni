@@ -139,9 +139,11 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
     of the pinned runtime's dependencies. A directory without
     ``__init__.py`` can shadow the same way as a namespace package, so
     any directory carrying importable code at any depth is refused too;
-    ``__pycache__`` bytecode is the interpreter's cache for the sources
-    beside it, never reached by ``import`` by name, and a directory of
-    pure data assets cannot execute; both are left alone.
+    a ``__pycache__`` entry is refused as well — an existing bytecode
+    cache cannot be verified against the pin, and an unchecked-hash
+    cache is imported without consulting the source it was compiled
+    from. A directory of pure data assets cannot execute and is left
+    alone.
     """
 
     def carries_code(entry: Path) -> bool:
@@ -166,7 +168,12 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
     for entry in sorted(Path(root).iterdir()):
         if entry.name in table:
             continue
-        if entry.is_file() and entry.suffix in IMPORTABLE_SUFFIXES:
+        if entry.name == "__pycache__":
+            problems.append(
+                "unexpected __pycache__ in the package root: "
+                "an existing bytecode cache is not verifiable against the pin"
+            )
+        elif entry.is_file() and entry.suffix in IMPORTABLE_SUFFIXES:
             problems.append(f"unexpected importable file {entry.name} in the package root")
         elif entry.is_dir() and (entry / "__init__.py").is_file():
             problems.append(f"unexpected importable package {entry.name}/ in the package root")
@@ -265,7 +272,16 @@ class Vela2Executor:
         # runtime.
         verify_no_foreign_runtime(root)
         put_first_on_sys_path(root)
-        import vela2_inference
+        # Bytecode writing is off for the import itself: a __pycache__
+        # written beside the just-verified sources could not be verified
+        # against the pin, and the gate above would refuse it on every
+        # later run against this same package.
+        dont_write_bytecode = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True
+        try:
+            import vela2_inference
+        finally:
+            sys.dont_write_bytecode = dont_write_bytecode
 
         self.SystemOneError = vela2_inference.SystemOneError
         self._system_one_request = vela2_inference.system_one_request

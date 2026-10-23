@@ -37,10 +37,11 @@ config's structural identity (model type, architecture, `max_length`
 or executes — the four runtime modules, `config.json`,
 `calibration.json` and `tokenizer.json` — against the table checked in
 for the pinned revision, before anything is imported, and refuses
-importable entries the table does not name (`model.safetensors` is
-checked by exact size; the runtime's strict safetensors load rejects
-truncated or structurally mismatched weights, but not same-size
-bit-level corruption).
+importable entries the table does not name as well as any existing
+`__pycache__` bytecode cache, which cannot be verified against the pin
+(`model.safetensors` is checked by exact size; the runtime's strict
+safetensors load rejects truncated or structurally mismatched weights,
+but not same-size bit-level corruption).
 A later self-consistent snapshot rewrites its own files and fails the
 checked-in pin.
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 import types
 import hashlib
 import json
+import py_compile
 import re
 import sys
 from pathlib import Path
@@ -207,19 +208,40 @@ def test_namespace_directories_with_extension_modules_are_refused(tmp_path):
         verify_files(tmp_path, table)
 
 
+def test_an_existing_bytecode_cache_cannot_bypass_the_gate(tmp_path):
+    # A __pycache__ entry with an unchecked hash is imported without
+    # consulting the source it claims to be compiled from, so a poisoned
+    # cache would run even beside sources that hash to the table; the
+    # gate refuses the cache itself, as bytecode cannot be verified
+    # against the pin.
+    table = build_package(tmp_path, small_files())
+    assert verify_files(tmp_path, table) == sorted(table)
+
+    victim = tmp_path / "vela2_inference.py"
+    real = victim.read_bytes()
+    victim.write_bytes(b"import os\nos.system('poisoned by cache')\n")
+    cache_dir = tmp_path / "__pycache__"
+    cfile = cache_dir / f"vela2_inference.{sys.implementation.cache_tag}.pyc"
+    py_compile.compile(
+        str(victim),
+        cfile=str(cfile),
+        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+    )
+    victim.write_bytes(real)
+
+    with pytest.raises(ValueError, match="__pycache__"):
+        verify_files(tmp_path, table)
+
+
 def test_unimportable_package_root_entries_still_pass(tmp_path):
     # The pinned package's own layout shape: onnx/, assets/, LICENSES/ and
-    # figures/ directories without __init__.py, markdown and license files,
-    # and the __pycache__ Python writes next to the imported runtime.
+    # figures/ directories without __init__.py, markdown and license files.
     table = build_package(tmp_path, small_files())
     for directory in ("onnx", "assets", "LICENSES", "figures"):
         (tmp_path / directory).mkdir()
         (tmp_path / directory / "file.bin").write_bytes(b"not a python package\n")
     (tmp_path / "README.md").write_text("# Vela 2.0 0.3B\n")
     (tmp_path / "LICENSE").write_text("Apache-2.0\n")
-    pycache = tmp_path / "__pycache__"
-    pycache.mkdir()
-    (pycache / "vela2_inference.cpython-312.pyc").write_bytes(b"bytecode\n")
 
     assert verify_files(tmp_path, table) == sorted(table)
 
