@@ -23,5 +23,13 @@ name = "kernels"
 path = "../../../../tests/qwen3_5/kernels.rs"
 
 [[test]]
+name = "graph"
+path = "../../../../tests/qwen3_5/graph.rs"
+
+[[test]]
+name = "graph_loading"
+path = "../../../../tests/qwen3_5/graph_loading.rs"
+
+[[test]]
 name = "device_features"
 path = "../../../../tests/qwen3_5/device_features.rs"

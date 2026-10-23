@@ -582,6 +582,18 @@ impl Scratch {
     }
 }
 
+/// Cumulative backbone capture/replay evidence, distinct from the decision response.
+#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
+pub struct GraphStats {
+    pub requested: bool,
+    pub enabled: bool,
+    pub captures: u64,
+    pub replays: u64,
+    pub fallbacks: u64,
+    pub invalidations: u64,
+    pub cached_shapes: usize,
+}
+
 /// The cached device-side state of one token prefix (rows `[0, len)`) for the R2d
 /// hybrid path: per full-attention layer the post-prep K rows plus the pre-GEMM V
 /// rows, per Gated DeltaNet layer the float32 recurrent state and the three
@@ -631,35 +643,32 @@ pub struct Model {
     scratch: Option<Scratch>,
     /// Opt-in replay with at most 64 captures per mode, keyed by sequence lengths.
     graph_enabled: bool,
+    graph_stats: GraphStats,
     graphs: VecDeque<(Vec<usize>, cuda::Graph)>,
     mm_graphs: VecDeque<(Vec<usize>, cuda::Graph)>,
-    // The opt-in adapter path owns its stream; it retires after every device allocation.
-    _lora_stream: Option<LoraStream>,
+    // The stream retires after every model allocation, including adapter resources.
+    _stream_owner: ModelStream,
 }
 
 // SAFETY: the raw pointers are device addresses and a cuBLASLt handle owned by the
 // model; the engine runs one forward pass at a time behind a mutex.
 unsafe impl Send for Model {}
 
-struct LoraStream(Stream);
-impl Drop for LoraStream {
+struct ModelStream(Stream);
+impl Drop for ModelStream {
     fn drop(&mut self) {
-        // SAFETY: the adapter Model owns this stream, and has retired all allocations.
+        // SAFETY: the Model owns this stream, and has retired all allocations.
         unsafe { (cuda::api().cs1_stream_destroy)(self.0) };
     }
 }
 
 impl Drop for Model {
     fn drop(&mut self) {
-        if self.lora.is_some() {
-            let _ = cuda::set_device(0);
-            let _ = cuda::synchronize(self.stream);
-        }
+        let _ = cuda::set_device(0);
+        let _ = cuda::synchronize(self.stream);
         self.graphs.clear();
         self.mm_graphs.clear();
-        if self.lora.is_some() {
-            self.scratch = None;
-        }
+        self.scratch = None;
         // Retire the FP32 cuBLAS context while its last stream is still valid.
         self.fp32_gdn = None;
         // SAFETY: created by cs1_gemm_create and not destroyed before.
@@ -670,8 +679,17 @@ impl Drop for Model {
 impl Model {
     /// Load the CUDA library and the weights.
     pub fn load(dir: &Path, library: &Path) -> Result<Self> {
+        Self::load_with_graph(
+            dir,
+            library,
+            std::env::var("CUA_S1_GRAPH").as_deref() == Ok("1"),
+        )
+    }
+
+    /// Explicit mode for model adapters; does not read another worker's switch.
+    pub fn load_with_graph(dir: &Path, library: &Path, graph: bool) -> Result<Self> {
         let cfg = Config::load(dir)?;
-        Self::load_checkpoint(dir, library, cfg, None)
+        Self::load_checkpoint(dir, library, cfg, None, graph)
     }
 
     /// Load an immutable FP32 PEFT language adapter without merging it into BF16 weights.
@@ -685,7 +703,13 @@ impl Model {
     ) -> Result<Self> {
         let cfg = Config::load(dir)?;
         let adapter = lora::Checkpoint::load(&cfg, adapter_path, scale)?;
-        Self::load_checkpoint(dir, library, cfg, Some(adapter))
+        Self::load_checkpoint(
+            dir,
+            library,
+            cfg,
+            Some(adapter),
+            std::env::var("CUA_S1_GRAPH").as_deref() == Ok("1"),
+        )
     }
 
     fn load_checkpoint(
@@ -693,11 +717,12 @@ impl Model {
         library: &Path,
         cfg: Config,
         adapter: Option<lora::Checkpoint>,
+        graph: bool,
     ) -> Result<Self> {
         cuda::load(library)?;
         cuda::set_device(0)?;
         let stream = cuda::new_stream()?;
-        let stream_owner = adapter.as_ref().map(|_| LoraStream(stream));
+        let stream_owner = ModelStream(stream);
         let weights = Weights::load(dir, stream)?;
         let lora = adapter
             .map(|source| source.upload(cfg.full_attention.len(), stream))
@@ -772,12 +797,24 @@ impl Model {
             reference: None,
             fp32_gdn: None,
             scratch: None,
-            graph_enabled: std::env::var("CUA_S1_GRAPH").as_deref() == Ok("1"),
+            graph_enabled: graph,
+            graph_stats: GraphStats {
+                requested: graph,
+                ..GraphStats::default()
+            },
             graphs: VecDeque::new(),
-            _lora_stream: stream_owner,
+            _stream_owner: stream_owner,
             mm_graphs: VecDeque::new(),
         };
         Ok(model)
+    }
+
+    pub fn graph_stats(&self) -> GraphStats {
+        GraphStats {
+            enabled: self.graph_enabled,
+            cached_shapes: self.graphs.len() + self.mm_graphs.len(),
+            ..self.graph_stats
+        }
     }
 
     /// Cua-S1's unmerged text path: framework norm/GEMM/attention plus FP32 GDN.
@@ -950,8 +987,9 @@ impl Model {
     fn prepare_scratch(&mut self, t: usize) -> Result<()> {
         cuda::set_device(0)?;
         if self.scratch.as_ref().is_none_or(|s| t > s.cap) {
-            if self.lora.is_some() {
-                cuda::synchronize(self.stream)?;
+            cuda::synchronize(self.stream)?;
+            if !self.graphs.is_empty() || !self.mm_graphs.is_empty() {
+                self.graph_stats.invalidations += 1;
             }
             self.graphs.clear();
             self.mm_graphs.clear();
@@ -1006,6 +1044,7 @@ impl Model {
         if self.graph_enabled {
             if let Some((_, graph)) = self.graphs.iter().find(|(shape, _)| *shape == lengths) {
                 graph.launch(self.stream)?;
+                self.graph_stats.replays += 1;
                 if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
                     eprintln!("CUA_S1_GRAPH mode=text event=replay tokens={t}");
                 }
@@ -1015,7 +1054,7 @@ impl Model {
                 self.run(s, &lengths, false)?;
                 cuda::synchronize(self.stream)?;
                 let captured = cuda::Graph::capture(self.stream, || self.run(s, &lengths, false));
-                self.cache_graph(&lengths, false, captured);
+                self.cache_graph(&lengths, false, captured)?;
             }
         } else {
             self.run(s, &lengths, false)?;
@@ -1058,6 +1097,7 @@ impl Model {
                 .find(|(shape, _)| shape.as_slice() == [t])
             {
                 graph.launch(self.stream)?;
+                self.graph_stats.replays += 1;
                 if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
                     eprintln!("CUA_S1_GRAPH mode=multimodal event=replay tokens={t}");
                 }
@@ -1067,7 +1107,7 @@ impl Model {
                 self.run(s, &[t], true)?;
                 cuda::synchronize(self.stream)?;
                 let captured = cuda::Graph::capture(self.stream, || self.run(s, &[t], true));
-                self.cache_graph(&[t], true, captured);
+                self.cache_graph(&[t], true, captured)?;
             }
         } else {
             self.run(s, &[t], true)?;
@@ -1076,16 +1116,23 @@ impl Model {
     }
 
     /// Both modes retain the eager miss result; capture records without executing.
-    fn cache_graph(&mut self, lengths: &[usize], multimodal: bool, captured: Result<cuda::Graph>) {
+    fn cache_graph(
+        &mut self,
+        lengths: &[usize],
+        multimodal: bool,
+        captured: Result<cuda::Graph>,
+    ) -> Result<()> {
         let mode = if multimodal { "multimodal" } else { "text" };
         match captured {
             Ok(graph) => {
+                self.graph_stats.captures += 1;
                 let cache = if multimodal {
                     &mut self.mm_graphs
                 } else {
                     &mut self.graphs
                 };
                 if cache.len() == 64 {
+                    cuda::synchronize(self.stream)?;
                     cache.pop_front();
                 }
                 cache.push_back((lengths.to_vec(), graph));
@@ -1098,11 +1145,13 @@ impl Model {
                 eprintln!(
                     "CUDA Graph capture failed in {mode} mode; using eager execution: {error:#}"
                 );
+                self.graph_stats.fallbacks += 1;
                 self.graph_enabled = false;
                 self.graphs.clear();
                 self.mm_graphs.clear();
             }
         }
+        Ok(())
     }
 
     /// Eager multimodal execution using borrowed device-resident image rows.
