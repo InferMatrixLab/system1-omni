@@ -225,13 +225,13 @@ fn score_responses_are_byte_identical_to_the_reference() {
         // from the f32-rounded values.
         Case {
             levels: THREE,
-            logits: &[1.9459101490553132, 0.6931471805599453, 0.0],
+            logits: &[1.9459101, std::f32::consts::LN_2, 0.0], // recorded values; the middle one is exactly ln 2 in f32
             body: "{\"type\": \"score\", \"probabilities\": {\"0\": 0.6999999886271213, \"1\": 0.20000000770889612, \"2\": 0.10000000366398262}, \"score\": 0.40000001503686133, \"legend\": {\"0\": \"No error\", \"1\": \"A minor error\", \"2\": \"A major error\"}, \"confidence\": 0.39999997744470794}",
         },
         // Mass split across the endpoints clamps confidence to 0.
         Case {
             levels: THREE,
-            logits: &[0.4054651081081644, -50.0, 0.0],
+            logits: &[0.4054651, -50.0, 0.0], // f32-shortest of the recorded values,
             body: "{\"type\": \"score\", \"probabilities\": {\"0\": 0.5999999971505067, \"1\": 7.714999446815271e-23, \"2\": 0.4000000028494934}, \"score\": 0.8000000056989868, \"legend\": {\"0\": \"No error\", \"1\": \"A minor error\", \"2\": \"A major error\"}, \"confidence\": 0.0}",
         },
         // Two levels are the noul pair in score clothing: expected level is

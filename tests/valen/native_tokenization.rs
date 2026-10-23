@@ -51,27 +51,27 @@ fn jpeg_url(width: u32, height: u32, colour: [u8; 3]) -> String {
 
 fn case_body(case: &Value) -> Vec<u8> {
     let mut body: Value = serde_json::from_str(case["body"].as_str().unwrap()).unwrap();
-    if let Some(image) = case.get("image") {
-        if image["kind"] == "generated" {
-            let size = image["size"].as_array().unwrap();
-            let colour = image["colour"].as_array().unwrap();
-            let rgb = [0, 1, 2].map(|i| colour[i].as_u64().unwrap() as u8);
-            let url = if image["format"] == "png" {
-                png_url(
-                    size[0].as_u64().unwrap() as u32,
-                    size[1].as_u64().unwrap() as u32,
-                    rgb,
-                )
-            } else {
-                jpeg_url(
-                    size[0].as_u64().unwrap() as u32,
-                    size[1].as_u64().unwrap() as u32,
-                    rgb,
-                )
-            };
-            body["state"]["image"] = Value::String(url);
-            return serde_json::to_vec(&body).unwrap();
-        }
+    if let Some(image) = case.get("image")
+        && image["kind"] == "generated"
+    {
+        let size = image["size"].as_array().unwrap();
+        let colour = image["colour"].as_array().unwrap();
+        let rgb = [0, 1, 2].map(|i| colour[i].as_u64().unwrap() as u8);
+        let url = if image["format"] == "png" {
+            png_url(
+                size[0].as_u64().unwrap() as u32,
+                size[1].as_u64().unwrap() as u32,
+                rgb,
+            )
+        } else {
+            jpeg_url(
+                size[0].as_u64().unwrap() as u32,
+                size[1].as_u64().unwrap() as u32,
+                rgb,
+            )
+        };
+        body["state"]["image"] = Value::String(url);
+        return serde_json::to_vec(&body).unwrap();
     }
     case["body"].as_str().unwrap().as_bytes().to_vec()
 }

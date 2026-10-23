@@ -203,10 +203,10 @@ fn image_state(value: &Value) -> Result<ImageData, RequestError> {
 fn state(value: &Value, special: &[String]) -> Result<State, RequestError> {
     // A dict carrying an "image" key always enters image validation, so a
     // mistyped image request fails loudly instead of silently becoming text.
-    if let Value::Object(map) = value {
-        if map.contains_key("image") {
-            return image_state(value).map(State::Image);
-        }
+    if let Value::Object(map) = value
+        && map.contains_key("image")
+    {
+        return image_state(value).map(State::Image);
     }
     let text = match value {
         Value::String(_) | Value::Object(_) | Value::Array(_) => text(value, "state", special)?,

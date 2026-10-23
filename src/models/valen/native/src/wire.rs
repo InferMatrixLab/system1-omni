@@ -132,13 +132,12 @@ fn nonfinite_spans(raw: &[u8]) -> Vec<(usize, usize)> {
                 value_position = false;
             }
             _ => {
-                if value_position {
-                    if let Some(length) = CONSTANTS
+                if value_position
+                    && let Some(length) = CONSTANTS
                         .iter()
-                        .find_map(|c| raw[i..].starts_with(c).then(|| c.len()))
-                    {
-                        spans.push((i, i + length));
-                    }
+                        .find_map(|c| raw[i..].starts_with(c).then_some(c.len()))
+                {
+                    spans.push((i, i + length));
                 }
                 value_position = false;
             }
