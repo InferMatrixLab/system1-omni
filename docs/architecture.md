@@ -52,9 +52,10 @@ synchronizes its stream before returning, also on error. Its GEMMs keep one
 algorithm per weight shape, so on GPUs where that keeps rows independent of M
 (checked by `fixed_gemm_rows_do_not_depend_on_m`, so far on sm_89) each result equals
 `forward_fixed` on the full prompt bit for bit; it differs from `forward` by
-rounding. Each prefix state takes about 50 MiB on Qwen3.5-4B and 9B, plus 32 KiB per
-position of its prefix rounded up to 1,024 positions, and the GEMM handle a 32 MiB
-workspace.
+rounding. Both take merged weights with the default numerics only, and refuse an
+unmerged adapter, reference numerics or FP32 GDN before any device work. Each
+prefix state takes about 50 MiB on Qwen3.5-4B and 9B, plus 32 KiB per position of
+its prefix rounded up to 1,024 positions, and the GEMM handle a 32 MiB workspace.
 
 ## Native worker boundaries
 

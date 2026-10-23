@@ -51,7 +51,7 @@ manifest or a device-qualification claim. Read that backend's checked-in
 ```json
 {
   "name": "qwen3_5",
-  "abi_version": 7,
+  "abi_version": 4,
   "status": "validated",
   "sources": ["common.cuh", "mma.cuh", "ops.h", "norm.cu", "elementwise.cu",
               "attention.cu", "gdn_prefill.cu", "gemm.cu", "runtime.cu"],
