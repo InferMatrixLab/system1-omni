@@ -259,6 +259,64 @@ def main() -> None:
         "\n".join(lines),
     )
 
+    # 6b. Non-finite probabilities fail before any delta or argmax work.
+    # A NaN difference would keep the previous finite maximum and the argmax
+    # would silently keep a NaN-free first candidate, so both sides are
+    # rejected up front instead of compared.
+    lines, ok = tool.compare_case(
+        "text",
+        worker_response(
+            {"move": choice_answer({"up": float("nan"), "down": 0.4}, "up", 0.5)}
+        ),
+        REFERENCE,
+        {"move": "choice"},
+    )
+    check(
+        "worker NaN probability fails",
+        not ok
+        and "non-finite probability" in "\n".join(lines)
+        and "decision agreement: FAIL" in "\n".join(lines),
+        "\n".join(lines),
+    )
+
+    nan_reference = {
+        "keys": {"move": ["up", "down"]},
+        "probabilities": {"move": [float("nan"), 0.75]},
+        "logical_tokens": 17,
+        "compute_tokens": 17,
+    }
+    lines, ok = tool.compare_case(
+        "text",
+        worker_response({"move": choice_answer({"up": 0.25, "down": 0.75}, "down", 0.5)}),
+        nan_reference,
+        {"move": "choice"},
+    )
+    check(
+        "reference NaN probability fails",
+        not ok and "non-finite probability" in "\n".join(lines),
+        "\n".join(lines),
+    )
+
+    inf_reference = {
+        "keys": {"move": ["up", "down"]},
+        "probabilities": {"move": [float("inf"), 0.0]},
+        "logical_tokens": 17,
+        "compute_tokens": 17,
+    }
+    lines, ok = tool.compare_case(
+        "text",
+        worker_response(
+            {"move": choice_answer({"up": float("inf"), "down": 0.0}, "up", 0.5)}
+        ),
+        inf_reference,
+        {"move": "choice"},
+    )
+    check(
+        "matching infinities on both sides still fail",
+        not ok and "non-finite probability" in "\n".join(lines),
+        "\n".join(lines),
+    )
+
     # 7. noul answers compare P(true) with tolerance.
     noul_reference = {
         "keys": {"ask": ["true", "false"]},

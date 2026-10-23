@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -100,6 +101,20 @@ def compare_case(case, original, exported, tolerance=PROBABILITY_TOLERANCE):
                 f"{qid}: {len(record['probabilities'])} original and "
                 f"{len(other['probabilities'])} exported probabilities "
                 f"for {len(keys)} candidates"
+            )
+            exact = False
+            continue
+        # A NaN difference keeps the previous finite maximum and a NaN-free
+        # argmax list silently keeps its first candidate, so a non-finite
+        # probability on either side fails the case before any comparison.
+        if any(
+            not math.isfinite(value)
+            for values in (record["probabilities"], other["probabilities"])
+            for value in values
+        ):
+            problems.append(
+                f"{qid}: non-finite probability (NaN or infinity) on the "
+                "original or exported side"
             )
             exact = False
             continue
@@ -192,7 +207,8 @@ def fill_parity_slot(manifest_path, record, *, force=False):
         )
     manifest["parity"] = record
     manifest_path.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n",
+        encoding="utf-8",
     )
     return manifest
 
@@ -413,7 +429,8 @@ def run_stage(args):
                 "hardware": hardware,
                 "torch": torch.__version__,
                 "cases": cases,
-            }
+            },
+            allow_nan=False,
         )
     )
     return 0

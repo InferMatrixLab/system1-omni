@@ -94,6 +94,30 @@ def test_compare_case_probability_length_mismatch_fails():
     assert any("probabilities" in problem for problem in verdict["problems"])
 
 
+def test_compare_case_exported_nan_probability_fails():
+    """A NaN difference keeps the previous finite maximum and the argmax
+    keeps a NaN-free first candidate, so a non-finite probability on either
+    side must fail the case before any delta or argmax work."""
+
+    original = case_side([0.6, 0.4])
+    poisoned = case_side([float("nan"), 0.4])
+    verdict = tool.compare_case("text", original, poisoned)
+    assert verdict["passed"] is False
+    assert verdict["exact_answer_agreement"] is False
+    assert any("non-finite probability" in problem for problem in verdict["problems"])
+
+
+def test_compare_case_matching_infinities_fail():
+    """Identical infinities on both sides would delta to NaN or agree on the
+    argmax; the case still fails because the probabilities are non-finite."""
+
+    infinite = case_side([float("inf"), 0.0])
+    verdict = tool.compare_case("text", infinite, case_side([float("inf"), 0.0]))
+    assert verdict["passed"] is False
+    assert verdict["exact_answer_agreement"] is False
+    assert any("non-finite probability" in problem for problem in verdict["problems"])
+
+
 def test_compare_case_missing_question_fails():
     original = case_side([0.5159631, 0.4840369])
     emptied = case_side([0.5159631, 0.4840369])

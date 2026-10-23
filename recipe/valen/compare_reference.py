@@ -29,6 +29,7 @@ import argparse
 import base64
 import hashlib
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -226,6 +227,19 @@ def compare_case(
             decision_exact = False
             continue
         ref_probs = reference["probabilities"][qid]
+        # A NaN difference keeps the previous finite maximum and a NaN-free
+        # argmax list silently keeps its first candidate, so a non-finite
+        # probability on either side fails the case before any comparison.
+        if any(
+            not math.isfinite(value)
+            for value in list(answer["probabilities"].values()) + list(ref_probs)
+        ):
+            problems.append(
+                f"{qid}: non-finite probability (NaN or infinity) on the "
+                "worker or reference side"
+            )
+            decision_exact = False
+            continue
         for key, worker_p, ref_p in zip(ref_keys, answer["probabilities"].values(), ref_probs):
             max_prob_delta = max(max_prob_delta, abs(worker_p - ref_p))
         # The pinned reference decode when the harness ran with the pinned
