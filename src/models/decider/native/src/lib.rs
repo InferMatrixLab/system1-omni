@@ -31,6 +31,7 @@ pub const MODEL_ID: &str = "decider-2b-v11";
 pub const RUNTIME_REVISION: &str = "50d0be0d7cb43d2066965ce5fa7f3fe4e489a60f";
 pub const CHECKPOINT_REVISION: &str = "533964dae8be954c5b5e19fa4948e48408094c1e";
 
+pub mod batching;
 mod checkpoint;
 pub mod engine;
 pub mod executor;
