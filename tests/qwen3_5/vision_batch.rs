@@ -62,6 +62,12 @@ fn cpu_batch_uses_aggregate_gemms_and_image_local_attention() {
         "cs1_gemm_create",
         "cs1_gemm_destroy",
         "cs1_vision_linear",
+        "cs1_vision_position",
+        "cs1_vision_rope",
+        "cs1_vision_attention",
+        "cs1_vision_to_float",
+        "cs1_gemm_f32",
+        "cs1_vision_lora_add",
         "cs1_vision_norm",
         "cs1_vision_bias",
         "cs1_vision_gelu",
@@ -180,6 +186,21 @@ fn cpu_batch_uses_aggregate_gemms_and_image_local_attention() {
             .get::<unsafe extern "C" fn() -> i32>(b"batch_live\0")
             .unwrap()
     };
+    let live_bytes = unsafe {
+        *metrics
+            .get::<unsafe extern "C" fn() -> usize>(b"batch_live_bytes\0")
+            .unwrap()
+    };
+    let unsafe_frees = unsafe {
+        *metrics
+            .get::<unsafe extern "C" fn() -> i32>(b"batch_unsafe_frees\0")
+            .unwrap()
+    };
+    let fail_download = unsafe {
+        *metrics
+            .get::<unsafe extern "C" fn(i32)>(b"batch_fail_download\0")
+            .unwrap()
+    };
     let config = config();
     let mut base = BTreeMap::new();
     for name in config.inventory().keys() {
@@ -192,6 +213,8 @@ fn cpu_batch_uses_aggregate_gemms_and_image_local_attention() {
     let mut model = VisionModel {
         config,
         scratch: VecDeque::new(),
+        transient: None,
+        cache_limits: None,
         batch_scratch: VecDeque::new(),
         graph_enabled: false,
         reference: None,
@@ -297,6 +320,126 @@ fn cpu_batch_uses_aggregate_gemms_and_image_local_attention() {
     model.forward_images(&images).unwrap();
     assert_eq!(unsafe { captures() }, capture_count);
 
+    // Cua's explicit policy uses the same Buffers owner as the generic/batch path.
+    // Retire generic state before measuring exact requested activation bytes.
+    model.synchronize().unwrap();
+    model.scratch.clear();
+    model.batch_scratch.clear();
+    assert_eq!(unsafe { live_bytes() }, 0);
+    model.cache_limits = Some(CacheLimits {
+        entries: 2,
+        bytes: 32 * 47_168,
+    });
+    model.graph_enabled = true;
+    let a = image([1, 2, 4]);
+    let b = image([1, 4, 2]);
+    let c = image([1, 2, 8]);
+    for input in [&a, &b, &a] {
+        model.forward(input).unwrap();
+        assert_eq!(unsafe { live_bytes() }, model.retained_bytes());
+    }
+    let a_pixels = model.scratch.back().unwrap().buffers.pixels.at(0);
+    model.forward(&c).unwrap();
+    assert_eq!(model.scratch.len(), 2);
+    assert_eq!(
+        model.scratch.front().unwrap().buffers.pixels.at(0),
+        a_pixels
+    );
+    assert_eq!(model.scratch.back().unwrap().grid, c.image_grid_thw);
+    assert_eq!(unsafe { live_bytes() }, 24 * 47_168);
+    assert_eq!(model.retained_bytes(), unsafe { live_bytes() });
+    // This image exceeds the budget: retained captures/addresses survive it.
+    let large = image([1, 4, 16]);
+    model.forward(&large).unwrap();
+    assert!(model.transient.is_none());
+    assert_eq!(unsafe { live_bytes() }, model.retained_bytes());
+    {
+        let output = model.forward_device(&large).unwrap();
+        assert_eq!(output.download().unwrap().len(), 16 * 5120);
+    }
+    assert!(model.transient.as_ref().unwrap().graph.is_none());
+    assert_eq!(
+        unsafe { live_bytes() },
+        model.retained_bytes() + 64 * 47_168
+    );
+    model.release_transient().unwrap();
+    assert_eq!(unsafe { live_bytes() }, model.retained_bytes());
+    assert!(
+        model
+            .forward_with_trace(&large, |_, _| anyhow::bail!("trace failure"))
+            .is_err()
+    );
+    assert!(model.transient.is_none());
+    assert_eq!(unsafe { live_bytes() }, model.retained_bytes());
+    // A failed download can leave work queued: synchronization must precede release.
+    unsafe {
+        fail_download(1);
+    }
+    assert!(model.forward(&large).is_err());
+    assert!(model.transient.is_none());
+    assert_eq!(unsafe { live_bytes() }, model.retained_bytes());
+    unsafe {
+        fail_download(0);
+    }
+    model.forward(&a).unwrap();
+    assert_eq!(model.scratch.back().unwrap().buffers.pixels.at(0), a_pixels);
+    model.synchronize().unwrap();
+    model.scratch.clear();
+    model.cache_limits = Some(CacheLimits {
+        entries: 0,
+        bytes: usize::MAX,
+    });
+    model.forward_device(&a).unwrap();
+    assert!(
+        model
+            .forward_images(&[image([1, 2, 4]), image([1, 4, 2])])
+            .is_err()
+    );
+    assert!(model.batch_scratch.is_empty());
+    assert!(model.scratch.is_empty());
+    assert!(model.transient.is_some());
+    // Reference numerics cannot be enabled over an existing transient allocation.
+    assert!(
+        model
+            .enable_reference_numerics()
+            .unwrap_err()
+            .to_string()
+            .contains("before the first forward")
+    );
+    model.release_transient().unwrap();
+    // Opaque cuDNN workspaces cannot satisfy this explicit byte budget.
+    assert!(
+        model
+            .enable_reference_numerics()
+            .unwrap_err()
+            .to_string()
+            .contains("bounded cache")
+    );
+    assert_eq!(unsafe { live_bytes() }, 0);
+    // The Cua 4B adapted layout additionally retains all three FP32 LoRA work buffers.
+    let mut cua_config = serde_json::to_value(&model.config).unwrap();
+    cua_config["depth"] = 24.into();
+    cua_config["hidden_size"] = 1024.into();
+    cua_config["intermediate_size"] = 4096.into();
+    cua_config["out_hidden_size"] = 2560.into();
+    model.config = VisionConfig::from_value(cua_config).unwrap();
+    for suffix in ["lora_A.weight", "lora_B.weight"] {
+        model.lora.insert(
+            format!("blocks.0.mlp.linear_fc1.{suffix}"),
+            DeviceBuffer::new(0).unwrap(),
+        );
+    }
+    model.cache_limits = Some(CacheLimits {
+        entries: 1,
+        bytes: 8 * 64_096,
+    });
+    model.forward(&a).unwrap();
+    assert_eq!(model.retained_bytes(), 8 * 64_096);
+    assert_eq!(unsafe { live_bytes() }, model.retained_bytes());
+    model.forward(&large).unwrap();
+    assert!(model.transient.is_none());
+    assert_eq!(unsafe { live_bytes() }, model.retained_bytes());
+    assert_eq!(unsafe { unsafe_frees() }, 0);
     drop(model);
     assert_eq!(unsafe { live() }, 0);
     drop(metrics);

@@ -96,14 +96,17 @@ Torch versions; the original approximate GDN entry points remain available.
 ## Shared vision cache and operator checks
 
 The generic shared vision constructor keeps a four-entry exact-grid FIFO for
-compatibility. Its cap counts entries, not device bytes; four large grids may
+compatibility. JEMM also retains a separate four-entry FIFO keyed by the ordered
+multi-image grids. Their caps count entries, not device bytes; four large grids may
 retain substantially more memory than four small grids. A borrowed resident
 output prevents mutation or eviction until its consumer is finished.
 
 [Cua-S1's bounded-cache integration in PR #127](https://github.com/ThinkFlowLab/system1-omni/pull/127)
 uses a separate explicit policy: count/byte LRU limits, default one entry and
 256 MiB, with zero retention available. The Cua wrapper owns environment parsing;
-generic Qwen/JEMM users retain their existing policy. Retention-disabled or
+generic Qwen/JEMM users retain their existing policy. Multi-image and JEMM
+reference execution require the generic constructor: the bounded policy cannot
+account for opaque cuDNN patch-plan allocations through ABI 8. Retention-disabled or
 oversized Cua output stays model-owned through both producer and consumer stream
 drains. Graph enablement and scratch retention are separate policies: turning
 Graph off alone does not release retained scratch.
