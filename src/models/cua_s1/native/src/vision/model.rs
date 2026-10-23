@@ -9,13 +9,11 @@ impl VisionModel {
     pub fn load(base: impl AsRef<Path>, adapter: impl AsRef<Path>, library: &Path) -> Result<Self> {
         let checkpoint = VisionCheckpoint::load(base, adapter)?;
         let c = checkpoint.config();
-        let config = omni_qwen3_5_native::vision::VisionConfig::from_value(serde_json::json!({
-            "depth":c.depth,"hidden_size":c.hidden_size,"intermediate_size":c.intermediate_size,
-            "num_heads":c.num_heads,"num_position_embeddings":c.num_position_embeddings,
-            "out_hidden_size":c.out_hidden_size,"in_channels":c.in_channels,"patch_size":c.patch_size,
-            "temporal_patch_size":c.temporal_patch_size,"spatial_merge_size":c.spatial_merge_size,
-            "hidden_act":c.hidden_act,"deepstack_visual_indexes":c.deepstack_visual_indexes,"model_type":c.model_type
-        }))?;
+        // Serialize the parsed struct instead of re-listing its fields: a member
+        // added to VisionConfig can no longer be silently dropped from the
+        // shared model configuration.
+        let config =
+            omni_qwen3_5_native::vision::VisionConfig::from_value(serde_json::to_value(c)?)?;
         let base = checkpoint
             .base_names()
             .map(|n| Ok((n.to_owned(), checkpoint.base_tensor(n)?)))
