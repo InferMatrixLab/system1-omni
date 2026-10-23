@@ -10,8 +10,8 @@ int cs1_gemm(void* handle, const void* x, const void* w, void* y,
     static unsigned projection_calls;
     gemm_fn original = (gemm_fn)dlsym(RTLD_NEXT, "cs1_gemm");
     if (!original) return 999;
-    if (m == 1 && n == 256 && k == 2048) {
-        fprintf(stderr, "Decider test projection %u\n", ++projection_calls);
+    if (m >= 1 && m <= 16 && n == 256 && k == 2048) {
+        fprintf(stderr, "Decider test projection %u rows %d\n", ++projection_calls, m);
         if (projection_calls == 2) return 2;
     }
     return original(handle, x, w, y, m, n, k, ldy, stream);

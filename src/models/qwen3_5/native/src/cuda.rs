@@ -8,8 +8,11 @@ use std::sync::OnceLock;
 
 use anyhow::{Context, Result, bail, ensure};
 
+mod reference;
+pub use reference::Reference;
+
 /// `CS1_ABI_VERSION` in ops.h.
-const ABI_VERSION: u32 = 6;
+const ABI_VERSION: u32 = 9;
 pub const LIBRARY: &str = "libqwen3_5_cuda.so";
 
 /// A `cudaStream_t`.
@@ -21,15 +24,76 @@ pub struct Stream(*mut c_void);
 // from one thread at a time.
 unsafe impl Send for Stream {}
 
+/// Additive dimension-aware vision entry points. Libraries at the required ABI may omit these optional symbols.
+pub struct VisionV2 {
+    pub position: unsafe extern "C" fn(
+        *mut c_void,
+        *const c_void,
+        *const i32,
+        *const f32,
+        c_int,
+        c_int,
+        Stream,
+    ) -> c_int,
+    pub rope: unsafe extern "C" fn(
+        *const c_void,
+        *const f32,
+        *const f32,
+        *mut c_void,
+        *mut c_void,
+        c_int,
+        c_int,
+        c_int,
+        Stream,
+    ) -> c_int,
+    pub attention: unsafe extern "C" fn(
+        *const c_void,
+        *const c_void,
+        *const c_void,
+        *mut c_void,
+        c_int,
+        c_int,
+        c_int,
+        *mut c_void,
+        Stream,
+    ) -> c_int,
+}
+impl VisionV2 {
+    fn resolve(lib: &libloading::Library) -> Option<Self> {
+        // SAFETY: additive signatures are declared alongside legacy entry points in ops.h.
+        unsafe {
+            Some(Self {
+                position: *lib.get(b"cs1_vision_position_v2\0").ok()?,
+                rope: *lib.get(b"cs1_vision_rope_v2\0").ok()?,
+                attention: *lib.get(b"cs1_vision_attention_v2\0").ok()?,
+            })
+        }
+    }
+}
 macro_rules! api {
     ($($name:ident($($arg:ident: $ty:ty),* $(,)?) $(-> $ret:ty)?;)*) => {
         /// The functions of the library, as declared in ops.h.
         pub struct Api {
             _lib: libloading::Library,
+            vision_v2: Option<VisionV2>,
+            reference: Option<Reference>,
             $(pub $name: unsafe extern "C" fn($($ty),*) $(-> $ret)?,)*
         }
 
         impl Api {
+            /// Language arithmetic does not require cuDNN patch convolution.
+            pub fn language_reference(&self) -> Result<&Reference> {
+                self.reference.as_ref().context("missing framework language CUDA symbols; rebuild the library")
+            }
+            pub fn reference(&self) -> Result<&Reference> {
+                let reference=self.reference.as_ref().context("JEMM requires the optional reference CUDA symbols; rebuild libqwen3_5_cuda.so")?;
+                // SAFETY: this capability query takes no arguments.
+                ensure!(unsafe { (reference.available)() } == 1, "JEMM reference numerics require a cuDNN 9 build; set CUDNN_INCLUDE_DIR and CUDNN_LIB_DIR");
+                Ok(reference)
+            }
+            pub fn vision_v2(&self) -> Result<&VisionV2> {
+                self.vision_v2.as_ref().context("27B vision needs additive v2 CUDA symbols; rebuild libqwen3_5_cuda.so")
+            }
             fn resolve(lib: libloading::Library) -> Result<Self> {
                 $(
                     // SAFETY: the signature is the one ops.h declares for this symbol.
@@ -41,7 +105,9 @@ macro_rules! api {
                     }
                     .with_context(|| format!("{} has no {}", LIBRARY, stringify!($name)))?;
                 )*
-                Ok(Self { _lib: lib, $($name,)* })
+                let vision_v2=VisionV2::resolve(&lib);
+                let reference=Reference::resolve(&lib);
+                Ok(Self { _lib: lib, vision_v2, reference, $($name,)* })
             }
         }
     };
@@ -62,6 +128,8 @@ api! {
     cs1_abi_version() -> u32;
     cs1_error_string(code: c_int) -> *const c_char;
     cs1_set_device(device: c_int) -> c_int;
+    cs1_get_device(device: *mut c_int) -> c_int;
+    cs1_bf16_finite(x: *const c_void, n: usize, flag: *mut u32, stream: Stream) -> c_int;
     cs1_malloc(ptr: *mut *mut c_void, bytes: usize) -> c_int;
     cs1_free(ptr: *mut c_void) -> c_int;
     cs1_stream_create(stream: *mut Stream) -> c_int;
@@ -125,6 +193,7 @@ api! {
     cs1_sigmoid_gate(x: *mut c_void, gate: *const c_void, n: usize, stream: Stream) -> c_int;
     cs1_silu_mul(gate_up: *const c_void, ld: c_int, out: *mut c_void, t: c_int, i: c_int, stream: Stream) -> c_int;
     cs1_gemm_create(workspace_bytes: usize) -> *mut c_void;
+    cs1_gemm_create_fixed(workspace_bytes: usize, reference_m: c_int) -> *mut c_void;
     cs1_gemm_destroy(gemm: *mut c_void);
     cs1_gemm(
         gemm: *mut c_void, x: *const c_void, w: *const c_void, y: *mut c_void, m: c_int, n: c_int, k: c_int,
@@ -133,6 +202,112 @@ api! {
 }
 
 static API: OnceLock<Api> = OnceLock::new();
+
+type Fp32GdnRun = unsafe extern "C" fn(
+    *mut c_void,
+    *const c_void,
+    *const c_void,
+    *const c_void,
+    *const f32,
+    *const c_void,
+    *mut c_void,
+    *mut f32,
+    c_int,
+    c_int,
+    c_int,
+    f32,
+    Stream,
+) -> c_int;
+/// Model-owned FP32 chunk solver. Destruction drains its last producer stream.
+pub struct Fp32Gdn {
+    handle: *mut c_void,
+    run: Fp32GdnRun,
+    destroy: unsafe extern "C" fn(*mut c_void),
+    size: unsafe extern "C" fn(c_int, c_int) -> usize,
+}
+impl Fp32Gdn {
+    pub fn workspace_floats(&self, tokens: usize, heads: usize) -> Result<usize> {
+        ensure!(tokens <= 65536 && heads <= 256, "FP32 GDN shape limit");
+        // SAFETY: this getter does not dereference memory.
+        let size = unsafe { (self.size)(tokens as c_int, heads as c_int) };
+        ensure!(size > 0, "cannot size FP32 GDN workspace");
+        Ok(size)
+    }
+    /// # Safety
+    /// All pointers hold the documented complete tensors; workspace has at least
+    /// workspace_floats(tokens,heads) entries. Serialize this context and retain
+    /// every allocation until stream completion.
+    #[allow(clippy::too_many_arguments)] // Exact CUDA operation boundary.
+    pub unsafe fn run(
+        &self,
+        q: *const c_void,
+        k: *const c_void,
+        v: *const c_void,
+        g: *const f32,
+        beta: *const c_void,
+        out: *mut c_void,
+        workspace: *mut f32,
+        tokens: c_int,
+        heads: c_int,
+        key_heads: c_int,
+        scale: f32,
+        stream: Stream,
+    ) -> c_int {
+        unsafe {
+            (self.run)(
+                self.handle,
+                q,
+                k,
+                v,
+                g,
+                beta,
+                out,
+                workspace,
+                tokens,
+                heads,
+                key_heads,
+                scale,
+                stream,
+            )
+        }
+    }
+}
+impl Drop for Fp32Gdn {
+    fn drop(&mut self) {
+        // SAFETY: this object exclusively owns the context; the backend drains before freeing it.
+        unsafe { (self.destroy)(self.handle) };
+    }
+}
+impl Api {
+    pub fn fp32_gdn(&self) -> Result<Fp32Gdn> {
+        // SAFETY: these optional signatures match ops.h; the library lives in static API.
+        let (create, destroy, run, size) = unsafe {
+            (
+                *self
+                    ._lib
+                    .get::<unsafe extern "C" fn(usize) -> *mut c_void>(b"cs1_gdn_fp32_create\0")?,
+                *self
+                    ._lib
+                    .get::<unsafe extern "C" fn(*mut c_void)>(b"cs1_gdn_fp32_destroy\0")?,
+                *self._lib.get::<Fp32GdnRun>(b"cs1_gdn_prefill_fp32\0")?,
+                *self
+                    ._lib
+                    .get::<unsafe extern "C" fn(c_int, c_int) -> usize>(
+                        b"cs1_gdn_fp32_workspace_floats\0",
+                    )?,
+            )
+        };
+        // SAFETY: creation owns an independent cuBLAS handle and workspace.
+        let handle = unsafe { create(32 << 20) };
+        ensure!(!handle.is_null(), "FP32 GDN cuBLAS initialization failed");
+        Ok(Fp32Gdn {
+            handle,
+            run,
+            destroy,
+            size,
+        })
+    }
+}
 
 /// The library next to the running executable.
 pub fn default_library() -> Result<PathBuf> {
@@ -195,6 +370,7 @@ pub fn set_device(device: i32) -> Result<()> {
 pub struct DeviceBuffer {
     ptr: *mut c_void,
     bytes: usize,
+    device: i32,
 }
 
 // SAFETY: the pointer is a device address; access is serialized by the owner.
@@ -203,12 +379,23 @@ unsafe impl Sync for DeviceBuffer {}
 
 impl DeviceBuffer {
     pub fn new(bytes: usize) -> Result<Self> {
+        let device = current_device()?;
         let mut ptr = std::ptr::null_mut();
         if bytes > 0 {
             // SAFETY: `ptr` is a valid out-pointer.
             check(unsafe { (api().cs1_malloc)(&mut ptr, bytes) }, "cudaMalloc")?;
         }
-        Ok(Self { ptr, bytes })
+        Ok(Self { ptr, bytes, device })
+    }
+
+    /// Borrow an exact contiguous row-major BF16 matrix. No raw pointer constructor
+    /// is exposed; the allocation must outlive all consumers. The producer must
+    /// finish writes before passing the view to a different stream.
+    pub fn bf16_matrix(&self, rows: usize, columns: usize) -> Result<DeviceBf16Matrix<'_>> {
+        Ok(DeviceBf16Matrix {
+            buffer: self,
+            layout: DeviceFeatureLayout::new(rows, columns, self.bytes, self.device)?,
+        })
     }
 
     /// The device address `offset` bytes into the buffer.
@@ -216,6 +403,112 @@ impl DeviceBuffer {
         debug_assert!(offset <= self.bytes);
         self.ptr.wrapping_byte_add(offset)
     }
+}
+
+/// Checked metadata; constructing metadata alone never creates a device view.
+#[derive(Clone, Copy, Debug)]
+pub struct DeviceFeatureLayout {
+    rows: usize,
+    columns: usize,
+    device: i32,
+}
+
+impl DeviceFeatureLayout {
+    pub fn new(rows: usize, columns: usize, bytes: usize, device: i32) -> Result<Self> {
+        ensure!(rows > 0 && columns > 0, "empty device feature matrix");
+        ensure!(device >= 0, "invalid feature device");
+        ensure!(
+            rows.checked_mul(columns).and_then(|n| n.checked_mul(2)) == Some(bytes),
+            "device feature allocation/shape mismatch"
+        );
+        Ok(Self {
+            rows,
+            columns,
+            device,
+        })
+    }
+
+    pub fn validate(&self, rows: usize, columns: usize, device: i32) -> Result<()> {
+        ensure!(
+            self.rows == rows && self.columns == columns,
+            "image embedding shape mismatch"
+        );
+        ensure!(
+            self.device == device,
+            "image features belong to a different CUDA device"
+        );
+        Ok(())
+    }
+}
+
+/// Borrowed resident image features. Mutation and reclamation of the producer
+/// allocation are prevented while this view is alive.
+#[derive(Clone, Copy)]
+pub struct DeviceBf16Matrix<'a> {
+    buffer: &'a DeviceBuffer,
+    layout: DeviceFeatureLayout,
+}
+
+impl DeviceBf16Matrix<'_> {
+    pub fn layout(&self) -> DeviceFeatureLayout {
+        self.layout
+    }
+    pub(crate) fn at(&self, offset: usize) -> *const c_void {
+        self.buffer.at(offset)
+    }
+    pub(crate) fn validate_finite(&self, stream: Stream) -> Result<()> {
+        let flag = DeviceBuffer::new(4)?;
+        // SAFETY: the checked allocation contains rows*columns BF16 elements;
+        // the kernel initializes its flag and download waits for all prior work.
+        let result = (|| unsafe {
+            check(
+                (api().cs1_bf16_finite)(
+                    self.at(0),
+                    self.layout.rows * self.layout.columns,
+                    flag.at(0).cast(),
+                    stream,
+                ),
+                "BF16 feature finite check",
+            )?;
+            let mut bytes = [0; 4];
+            download(&mut bytes, flag.at(0), stream)?;
+            ensure!(u32::from_le_bytes(bytes) == 0, "non-finite image embedding");
+            Ok(())
+        })();
+        let synced = synchronize(stream);
+        synced?;
+        result
+    }
+
+    /// Diagnostic readback; serving does not download the full feature matrix.
+    /// The producer must have completed writes before calling this method.
+    pub fn download(&self) -> Result<Vec<half::bf16>> {
+        set_device(self.layout.device)?;
+        let stream = new_stream()?;
+        let mut bytes = vec![0; self.layout.rows * self.layout.columns * 2];
+        // SAFETY: the view validates the allocation's exact byte extent.
+        let result = unsafe { download(&mut bytes, self.at(0), stream) };
+        let synced = synchronize(stream);
+        unsafe { (api().cs1_stream_destroy)(stream) };
+        synced?;
+        result?;
+        Ok(bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&b| half::bf16::from_le_bytes(b))
+            .collect())
+    }
+}
+
+pub fn current_device() -> Result<i32> {
+    let mut device = -1;
+    // SAFETY: valid out-pointer, plain runtime call.
+    check(
+        unsafe { (api().cs1_get_device)(&mut device) },
+        "cudaGetDevice",
+    )?;
+    Ok(device)
 }
 
 impl Drop for DeviceBuffer {
@@ -351,3 +644,7 @@ impl Drop for Graph {
         unsafe { (api().cs1_graph_destroy)(self.exec) };
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/device_cuda.rs"]
+mod device_tests;
