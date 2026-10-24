@@ -36,6 +36,9 @@ Worker terminal:
 
 ```sh
 DECIDER_GRAPH=0 \
+DECIDER_MAX_PENDING_REQUESTS=8 \
+DECIDER_MAX_PENDING_TOKENS=1048576 \
+DECIDER_REQUEST_TIMEOUT_MS=5000 \
 DECIDER_MODEL=/path/to/models/decider-2b-v11 \
 DECIDER_CUDA_LIB="$PWD/target/release/libqwen3_5_cuda.so" \
 DECIDER_HOST=127.0.0.1 DECIDER_PORT=8000 \
@@ -85,9 +88,9 @@ with empty answers and zero input/output usage. No partial answers are returned.
 Supported inputs are plain text/JSON state, independent Choice (2–255 options),
 Noul and isolated Score (2–10 levels). State-prefix truncation is 32,768 tokens;
 complete rows can include question suffixes up to 36,864 tokens. At most 1,024
-expanded rows and 1,048,576 processed tokens are accepted per request. These bounds
-do not bound all waiting requests together; runtime pending-queue limits and
-cross-request batching remain separate work.
+expanded rows and 1,048,576 processed tokens are accepted per request. These processor bounds
+are separate from the optional pending-request, processed-token and deadline
+controls described below. Cross-request batching remains unsupported.
 
 The pinned worker requires released calibration. Images, video, chat/schema-first,
 packed questions, cross-request prefix caching and quantized/CPU/Metal execution
@@ -166,7 +169,7 @@ worker lifetime and keeps the completed eager result; health then reports `eager
 Launch/inference failures still retire the worker. Capture and startup costs must
 be measured separately from warm replay.
 
-## Optional request-local shared prefixes (pending integration)
+## Optional request-local shared prefixes
 
 This integration depends on the pending Qwen continuation/fixed-GEMM/executor
 stack (#98/#99). Build this integrated branch with ABI9; older libraries are
@@ -218,3 +221,85 @@ DECIDER_MODEL=/path/to/models/decider-2b-v11 \
 DECIDER_CUDA_LIB="$PWD/target/release/libqwen3_5_cuda.so" \
   target/release/omni-decider
 ```
+
+## Capacity and deadline semantics
+
+These optional HTTP limits apply to eager, packed, Graph, fixed, shared and auto
+execution. They do not apply to startup warmup or direct `Engine::predict` calls.
+The example values in the startup command are independent configuration examples,
+not measured deployment recommendations. Omit a value to leave that limit unset;
+explicit values must be positive integers and invalid values fail before loading.
+Graph remains incompatible with fixed/shared/auto; these limits do not change
+that mode constraint.
+
+| Variable | What it bounds |
+| --- | --- |
+| `DECIDER_MAX_PENDING_REQUESTS` | Outstanding HTTP requests, including body upload, preparation, execution queueing, execution and response reconstruction. A slot is reserved before reading the body. |
+| `DECIDER_MAX_PENDING_TOKENS` | The sum of complete prepared-row token lengths across admitted requests. Reservation follows preprocessing; repeated state and isolated Score rows count in full. This differs from API `usage.input_tokens` and does not change it. |
+| `DECIDER_REQUEST_TIMEOUT_MS` | One absolute deadline from request admission through response reconstruction, including slow body upload and waiting. It does not cover startup, `/health` or network delivery of the response. |
+
+Request/token capacity uses shared
+[`BoundedAdmission`](../../src/runtime/README.md#optional-request-capacity-and-execution-control).
+The separate FIFO scheduler still admits one complete Decider execution request
+at a time. Request capacity also bounds preprocessing; a token-only deployment
+must prepare a request before it can determine its token cost.
+
+Temporary request/token contention returns `503`, `Content-Type: application/json`,
+`Retry-After: 1`, and `{"detail":"inference capacity exhausted"}`. Use bounded
+retries with backoff and an overall client deadline for this response.
+
+A single request whose processed-token cost exceeds the entire token ceiling
+returns JSON `422` with `{"detail":"request exceeds processed-token capacity"}`
+and no `Retry-After` header. It is rejected before execution and cannot succeed
+unchanged under that configuration: reduce its prepared work or raise the
+configured budget and restart the worker. A request costing exactly the ceiling
+is accepted when that token capacity is free.
+
+Deadline expiry returns JSON `504` with `{"detail":"request timed out"}`.
+The deadline is strict: work that completes after it may still yield `504`
+instead of a successful response. Timeout/disconnect signals cancellation and
+prevents work that has not started from running at the next context check;
+it does not preempt already-running CPU/CUDA work. Detached preparation and
+execution retain their capacity until they finish, and submitted device work
+must synchronize before its resources are released. A `504` therefore does
+not imply an immediately free request slot.
+
+Existing content-type, payload and validation checks remain in force: JSON is
+required (`415` otherwise), the request body limit is 8 MiB (`413`), and processor
+validation errors return `422`. A not-ready worker returns `503` with
+`{"detail":"model unavailable"}` rather than the capacity-refusal response.
+
+Within-request packing is configured separately with `DECIDER_BATCH_MAX_ROWS`
+(default `1`, allowed `1..=4`) and `DECIDER_BATCH_MAX_TOKENS` (default `4096`,
+allowed `1..=4096`). These select packed groups within an admitted request;
+they do not replace the outstanding-token budget. Rows above the packing token
+budget run alone, subject to the processor/executor's separate input limits.
+
+## Health and validation
+
+`GET /health` is outside request admission and returns `200` for a ready
+executor or `503` for an unavailable one. Existing model, checkpoint, execution,
+batch and calibration metadata remain present. When any HTTP runtime limit is
+set, `runtime_limits` reports `requests`, `processed_tokens` and `timeout_ms`;
+unset members are `null`.
+
+Only a configured request-count bound adds top-level `depth`, `capacity` and
+`rejected`. `depth` includes all outstanding request reservations, including
+blocking work retained after a timeout; `capacity` is the request-count ceiling.
+`rejected` counts request-capacity and token-capacity refusals, including requests
+larger than the entire token ceiling. It excludes timeouts and processor
+validation failures. Token-only or timeout-only deployments do not publish
+these three fields. Token occupancy is not exposed by this health interface.
+
+The configuration and HTTP control checks use no checkpoint or GPU:
+
+```sh
+cargo test --locked -p omni-runtime
+cargo test --locked -p omni-decider-native --test runtime
+cargo test --locked -p omni-decider-native --lib serve::runtime_tests
+```
+
+These checks cover admission, cancellation, capacity retention and synthetic
+HTTP deadlines. They do not establish model parity, performance, GPU-memory
+limits or other-hardware support. Device/checkpoint qualification remains a
+separate check with the pinned artifacts and matching rebuilt CUDA library.
