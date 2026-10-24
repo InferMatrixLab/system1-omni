@@ -5,7 +5,8 @@ encoder, including all 24 blocks, unmerged FP32 LoRA branches and the merger.
 Set `CUA_S1_VISION_GRAPH=1` before loading the worker to enable it. Leave it
 unset or set it to `0` for eager execution. This switch is independent of
 `CUA_S1_GRAPH`, which controls text and multimodal language execution. Enable
-each switch separately; keep both unset for eager execution.
+each switch separately; keep both unset for eager execution. Enabling vision
+Graph alone does not enable language Graph replay.
 
 Both modes use the shared Qwen vision executor and retain at most four exact
 [T,H,W] scratch/Graph pairs in FIFO order. Equal patch counts with different

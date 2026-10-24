@@ -17,6 +17,9 @@ const MERGE_SIZE: usize = 2;
 const FACTOR: usize = PATCH_SIZE * MERGE_SIZE;
 const PATCH_VALUES: usize = 3 * 2 * PATCH_SIZE * PATCH_SIZE;
 /// Source validation and upstream smart-resize limits. Prompt budgeting belongs to callers.
+///
+/// Shared by the cua-s1 and jemm consumers, so the limit surface stays
+/// single-sourced through [`preprocess_rgb8`].
 #[derive(Clone, Copy, Debug)]
 pub struct ImageLimits {
     pub max_source_side: usize,
@@ -55,7 +58,7 @@ impl ProcessedImage {
     }
 }
 
-/// Preprocess a decoded RGB8 image using the fixed 4B processor settings.
+/// Preprocess a decoded RGB8 image with CUA source and patch limits.
 ///
 /// Rejects empty dimensions, sides over 2048, area over 1,048,576 pixels,
 /// aspect ratios over 200, and buffers whose length is not `width * height * 3`.
