@@ -32,11 +32,23 @@ import json
 import math
 import subprocess
 import sys
+from importlib.machinery import BYTECODE_SUFFIXES, EXTENSION_SUFFIXES, SOURCE_SUFFIXES
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 HERE = Path(__file__).resolve().parent
 PROBABILITY_TOLERANCE = 1e-6
+
+# A sourceless bytecode or extension module imports exactly like its .py
+# source would, so every importable suffix is swept, not just source files.
+IMPORTABLE_SUFFIXES = tuple(
+    suffix.lower()
+    for suffix in sorted(
+        set(SOURCE_SUFFIXES) | set(BYTECODE_SUFFIXES) | set(EXTENSION_SUFFIXES),
+        key=len,
+        reverse=True,
+    )
+)
 
 DEFAULT_TEXT_BODY = {
     "model": "valen-preview-0923",
@@ -418,6 +430,21 @@ def run_reference(model, base_processor, record, media_root, max_length, media_k
     }
 
 
+def _importable_stray(entry):
+    """Whether an untracked or ignored path could be imported by name.
+
+    Only a module sitting where its .py would be can shadow a dependency:
+    a sourceless `peft.pyc` or an extension `peft.so` imports just like
+    `peft.py`. Bytecode under `__pycache__` is the cache of a real import
+    and is not importable on its own, so re-runs after a first import stay
+    clean.
+    """
+
+    if "__pycache__" in Path(entry).parts:
+        return False
+    return entry.lower().endswith(IMPORTABLE_SUFFIXES)
+
+
 def _verify_clean_checkout(source):
     """Reject a dirty pinned checkout before it can produce evidence.
 
@@ -428,7 +455,15 @@ def _verify_clean_checkout(source):
     """
 
     status = subprocess.run(
-        ["git", "-C", str(source), "status", "--porcelain", "--untracked-files=all"],
+        [
+            "git",
+            "-C",
+            str(source),
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--ignored=matching",
+        ],
         check=True,
         capture_output=True,
         text=True,
@@ -436,11 +471,13 @@ def _verify_clean_checkout(source):
     problems = []
     for line in status.stdout.splitlines():
         entry = line[3:]
-        if line.startswith("??"):
-            # Untracked non-code cannot change what gets imported; a stray
-            # .py on the package path can.
-            if entry.endswith(".py"):
-                problems.append(f"untracked python file {entry}")
+        if line.startswith(("??", "!!")):
+            # Untracked or ignored non-code cannot change what gets
+            # imported; a stray importable module on the package path can,
+            # and an ignored one hides from plain `status`.
+            if _importable_stray(entry):
+                state = "untracked" if line.startswith("??") else "ignored"
+                problems.append(f"{state} importable file {entry}")
         else:
             problems.append(f"locally changed {entry}")
     if problems:

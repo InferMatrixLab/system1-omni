@@ -369,6 +369,104 @@ def test_tracked_modification_is_rejected(tmp_path):
         reference._verify_clean_checkout(repo)
 
 
+def test_sourceless_bytecode_module_is_rejected(tmp_path):
+    """A standalone .pyc imports by name exactly like its .py source would,
+    and the checked-out directory is prepended to sys.path, so a sourceless
+    module can shadow a dependency while the gate still reports a clean
+    pinned checkout unless bytecode suffixes are swept too."""
+
+    import py_compile
+
+    import pytest
+
+    repo = fresh_checkout(tmp_path / "valen-src")
+    source = repo / "peft.py"
+    source.write_text(
+        "REVIEW_MARKER = 'unverified module imported'\n", encoding="utf-8"
+    )
+    py_compile.compile(str(source), cfile=str(repo / "peft.pyc"), doraise=True)
+    source.unlink()
+    with pytest.raises(SystemExit, match=r"peft\.pyc"):
+        reference._verify_clean_checkout(repo)
+
+
+def test_ignored_importable_module_is_rejected(tmp_path):
+    """A git-ignored module hides from plain `git status`, so the sweep must
+    include ignored entries or a checkout-local ignore rule reopens the
+    shadowing path the untracked check closes."""
+
+    import subprocess
+
+    import pytest
+
+    repo = fresh_checkout(tmp_path / "valen-src")
+    (repo / ".gitignore").write_text("*.pyc\n", encoding="utf-8")
+    (repo / "README.md").write_text("fixture\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(repo), "add", ".gitignore", "README.md"], check=True
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        check=True,
+    )
+    (repo / "peft.pyc").write_bytes(b"bytecode placeholder\n")
+    assert (
+        subprocess.run(
+            ["git", "-C", str(repo), "check-ignore", "-q", "peft.pyc"]
+        ).returncode
+        == 0
+    ), "fixture setup: peft.pyc must be ignored"
+    with pytest.raises(SystemExit, match=r"ignored importable file peft\.pyc"):
+        reference._verify_clean_checkout(repo)
+
+
+def test_extension_module_is_rejected(tmp_path):
+    """An extension module (`peft.so` and its interpreter-tagged variants)
+    imports like `peft.py`, so it falls under the same gate."""
+
+    import pytest
+
+    repo = fresh_checkout(tmp_path / "valen-src")
+    (repo / "peft.cpython-312-x86_64-linux-gnu.so").write_bytes(b"stub\n")
+    with pytest.raises(SystemExit, match=r"peft\.cpython-312"):
+        reference._verify_clean_checkout(repo)
+
+
+def test_bytecode_cache_directory_is_allowed(tmp_path):
+    """`__pycache__` bytecode is the cache of a real import and is not
+    importable on its own, so a re-run after a first import must stay
+    clean instead of failing on its own cache."""
+
+    repo = fresh_checkout(tmp_path / "valen-src")
+    cache = repo / "__pycache__"
+    cache.mkdir()
+    (cache / "peft.cpython-312.pyc").write_bytes(b"cache placeholder\n")
+    reference._verify_clean_checkout(repo)
+
+
+def test_export_parity_shares_the_clean_checkout_gate():
+    """Both evidence entrypoints must run the same corrected gate: the
+    export harness stages its environment through the comparison tool's
+    `_verify_clean_checkout`, not a private copy."""
+
+    import inspect
+
+    assert "reference._verify_clean_checkout" in inspect.getsource(
+        tool.stage_environment
+    )
+
+
 # --- the full parity gate against the real pinned artifacts ---
 # Set VALEN_CKPT, VALEN_BASE and VALEN_SRC (the recipe reference.md artifact
 # exports) on a CUDA host to run: it exports a fresh artifact set, then runs
