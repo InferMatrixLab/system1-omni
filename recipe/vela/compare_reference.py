@@ -291,8 +291,16 @@ def main(argv=None):
     from models.vela.engine import Vela2Executor
 
     executor = Vela2Executor(args.model, device=args.device)
-    import vela2_inference
-    import vela2_serve
+    # Both runtime imports stay inside a no-bytecode window: the package
+    # gate refuses existing caches, and vela2_serve is a fresh import that
+    # would otherwise write the __pycache__ the next worker start rejects.
+    dont_write_bytecode = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        import vela2_inference
+        import vela2_serve
+    finally:
+        sys.dont_write_bytecode = dont_write_bytecode
 
     from frontend.vela import HEALTH_BODY, MODELS_ENTRY, READY_BODY, UNAUTHORIZED_BODY
 
