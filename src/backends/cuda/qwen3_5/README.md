@@ -44,7 +44,10 @@ entry points. Open-Jev uses this path within requests; Cua-S1 keeps single-promp
 
 Prefix continuation retains full-attention KV, three convolution input rows,
 and FP32 Gated DeltaNet state at 64-token chunk boundaries. It is used by the
-experimental JEV-VL worker; existing full-prefill callers keep their own paths.
+experimental JEV-VL worker and by the shared executor's `forward_shared`, which
+runs prompts that share prefixes once per prefix with the fixed-algorithm GEMM
+handle ([#85](https://github.com/ThinkFlowLab/system1-omni/issues/85)); existing
+full-prefill callers keep their own paths.
 ABI 6 adds mandatory copy and prefix entry points after ABI 5 native vision,
 and ABI 9 adds the fixed-algorithm GEMM handle.
 Rebuild the library and **all** Qwen worker binaries together; older libraries
