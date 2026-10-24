@@ -260,6 +260,84 @@ def main() -> None:
         "\n".join(lines),
     )
 
+    # 6b. Non-finite probabilities fail before any delta or argmax work.
+    # A NaN difference would keep the previous finite maximum and the argmax
+    # would silently keep a NaN-free first candidate, so both sides are
+    # rejected up front instead of compared.
+    lines, ok = tool.compare_case(
+        "text",
+        worker_response(
+            {"move": choice_answer({"up": float("nan"), "down": 0.4}, "up", 0.5)}
+        ),
+        REFERENCE,
+        {"move": "choice"},
+    )
+    check(
+        "worker NaN probability fails",
+        not ok
+        and "non-finite probability" in "\n".join(lines)
+        and "decision agreement: FAIL" in "\n".join(lines),
+        "\n".join(lines),
+    )
+
+    nan_reference = {
+        "keys": {"move": ["up", "down"]},
+        "probabilities": {"move": [float("nan"), 0.75]},
+        "logical_tokens": 17,
+        "compute_tokens": 17,
+    }
+    lines, ok = tool.compare_case(
+        "text",
+        worker_response({"move": choice_answer({"up": 0.25, "down": 0.75}, "down", 0.5)}),
+        nan_reference,
+        {"move": "choice"},
+    )
+    check(
+        "reference NaN probability fails",
+        not ok and "non-finite probability" in "\n".join(lines),
+        "\n".join(lines),
+    )
+
+    inf_reference = {
+        "keys": {"move": ["up", "down"]},
+        "probabilities": {"move": [float("inf"), 0.0]},
+        "logical_tokens": 17,
+        "compute_tokens": 17,
+    }
+    lines, ok = tool.compare_case(
+        "text",
+        worker_response(
+            {"move": choice_answer({"up": float("inf"), "down": 0.0}, "up", 0.5)}
+        ),
+        inf_reference,
+        {"move": "choice"},
+    )
+    check(
+        "matching infinities on both sides still fail",
+        not ok and "non-finite probability" in "\n".join(lines),
+        "\n".join(lines),
+    )
+
+    # 6c. Non-finite scalar answers and confidences fail the same way: the
+    # per-type branches fold them into running maxima, and max() keeps its
+    # first argument against a NaN difference, so a NaN delta would
+    # otherwise leave the tolerance verdicts passing.
+    lines, ok = tool.compare_case(
+        "text",
+        worker_response(
+            {"move": choice_answer({"up": 0.25, "down": 0.75}, "down", float("nan"))}
+        ),
+        REFERENCE,
+        {"move": "choice"},
+    )
+    check(
+        "worker NaN confidence fails",
+        not ok
+        and "non-finite scalar answer or confidence" in "\n".join(lines)
+        and "decision agreement: FAIL" in "\n".join(lines),
+        "\n".join(lines),
+    )
+
     # 7. noul answers compare P(true) with tolerance.
     noul_reference = {
         "keys": {"ask": ["true", "false"]},
@@ -303,6 +381,23 @@ def main() -> None:
     check(
         "noul answer drift beyond tolerance fails",
         not ok and "answer tolerance <= 1e-06: FAIL" in "\n".join(lines),
+        "\n".join(lines),
+    )
+
+    # A NaN P(true) with finite probabilities must fail instead of being
+    # swallowed by the answer-delta maximum.
+    nan_noul = {
+        "type": "noul",
+        "noul": float("nan"),
+        "probabilities": {"true": 0.75, "false": 0.25},
+        "confidence": 0.5,
+    }
+    lines, ok = tool.compare_case(
+        "noul", worker_response({"ask": nan_noul}), noul_reference, {"ask": "noul"}
+    )
+    check(
+        "worker NaN noul answer fails",
+        not ok and "non-finite scalar answer or confidence" in "\n".join(lines),
         "\n".join(lines),
     )
 
@@ -432,6 +527,34 @@ def main() -> None:
         not ok
         and "decision agreement: FAIL" in "\n".join(lines)
         and "answer type 'choice' != requested 'score'" in "\n".join(lines),
+        "\n".join(lines),
+    )
+
+    # A NaN confidence carried by the reference decode must fail instead of
+    # being swallowed by the confidence-delta maximum.
+    nan_conf_reference = {
+        "keys": {"grade": ["0", "1", "2"]},
+        "probabilities": {"grade": [0.7, 0.2, 0.1]},
+        "answers": {
+            "grade": {
+                "type": "score",
+                "score": 0.4,
+                "legend": legend,
+                "confidence": float("nan"),
+            }
+        },
+        "logical_tokens": 17,
+        "compute_tokens": 51,
+    }
+    lines, ok = tool.compare_case(
+        "score",
+        worker_response({"grade": score_answer(0.4, legend, 0.4)}, compute_tokens=51),
+        nan_conf_reference,
+        {"grade": "score"},
+    )
+    check(
+        "reference NaN confidence fails",
+        not ok and "non-finite scalar answer or confidence" in "\n".join(lines),
         "\n".join(lines),
     )
 

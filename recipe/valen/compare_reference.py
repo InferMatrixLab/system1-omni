@@ -29,6 +29,7 @@ import argparse
 import base64
 import hashlib
 import json
+import math
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -176,6 +177,30 @@ def reference_confidence(probabilities):
     return max(0.0, (max(probabilities) - 1 / count) / (1 - 1 / count))
 
 
+def scalar_answer_fields(answer, expected_type, ref_answer):
+    """Every scalar the per-type branches fold into a running maximum.
+
+    max() keeps its first argument against a NaN difference, so each field
+    here is swept for finiteness before those branches run. Reference values
+    derived from the probabilities (the choice-shaped noul decode, the
+    fallback score) are already covered by the probability gate.
+    """
+
+    fields = [answer["confidence"]]
+    if expected_type == "noul":
+        fields.append(answer["noul"])
+    elif expected_type == "score":
+        fields.append(answer["score"])
+    if ref_answer is not None:
+        if expected_type == "noul" and "noul" in ref_answer:
+            fields.append(ref_answer["noul"])
+        elif expected_type == "score" and "score" in ref_answer:
+            fields.append(ref_answer["score"])
+        if "confidence" in ref_answer:
+            fields.append(ref_answer["confidence"])
+    return fields
+
+
 def compare_case(
     name, worker_response, reference, expected_types, tolerance=PROBABILITY_TOLERANCE
 ):
@@ -215,12 +240,39 @@ def compare_case(
             decision_exact = False
             continue
         ref_probs = reference["probabilities"][qid]
+        # A NaN difference keeps the previous finite maximum and a NaN-free
+        # argmax list silently keeps its first candidate, so a non-finite
+        # probability on either side fails the case before any comparison.
+        if any(
+            not math.isfinite(value)
+            for value in list(answer["probabilities"].values()) + list(ref_probs)
+        ):
+            problems.append(
+                f"{qid}: non-finite probability (NaN or infinity) on the "
+                "worker or reference side"
+            )
+            decision_exact = False
+            continue
         for key, worker_p, ref_p in zip(ref_keys, answer["probabilities"].values(), ref_probs):
             max_prob_delta = max(max_prob_delta, abs(worker_p - ref_p))
         # The pinned reference decode when the harness ran with the pinned
         # source; synthetic references may omit it and fall back to the
         # shared probabilities and formulas.
         ref_answer = reference.get("answers", {}).get(qid)
+        # The scalar deltas below fold into running maxima, and max() keeps
+        # its first argument against a NaN difference, so a non-finite
+        # scalar field on either side fails the case before any tolerance
+        # verdict.
+        if any(
+            not math.isfinite(value)
+            for value in scalar_answer_fields(answer, expected_type, ref_answer)
+        ):
+            problems.append(
+                f"{qid}: non-finite scalar answer or confidence (NaN or "
+                "infinity) on the worker or reference side"
+            )
+            decision_exact = False
+            continue
         if expected_type == "noul":
             scalar_answers = True
             if ref_answer is not None and "noul" in ref_answer:

@@ -426,8 +426,12 @@ criteria are exact discrete agreement (candidate order, the requested answer
 type, chosen key, score legend), equal token accounting, and the declared
 tolerance (default `1e-6`, `--tolerance` to override) on probabilities,
 confidences and the scalar answer fields (`noul` P(true), `score` expected
-level). An answer whose public `type` drifts from the requested question
-type fails the run instead of skipping the noul/score checks:
+level). A non-finite probability, scalar answer or confidence on either side
+fails the run before any tolerance verdict: `max()` keeps its previous finite
+maximum against a NaN difference, so a NaN delta would otherwise leave every
+tolerance check passing. An answer whose public `type` drifts from the
+requested question type fails the run instead of skipping the noul/score
+checks:
 
 ~~~sh
 PYTHONPATH=src .venv/bin/python recipe/valen/compare_reference.py \
