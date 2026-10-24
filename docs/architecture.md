@@ -37,7 +37,9 @@ before FP32 calibration and CPU response assembly. Laya computes its scorer and
 action head on CUDA. Its fixed-shape
 Graph captures Encoder/Decision; gather, scorer/action head and synchronized
 readback remain outside capture. Native Metal remains planned; Python workers
-retain their documented reference/serving roles.
+retain their documented reference/serving roles. The Clef reference worker
+is one of those Python paths: it loads the checkpoint's joint schema head
+on a Qwen3.5 backbone and does not use the shared Qwen CUDA executor.
 
 The Qwen executor's `forward_shared` takes a request prefix, group prefixes and
 branches, ends each prefix at its last multiple of 64 tokens, and returns one final

@@ -27,6 +27,8 @@ Models that are being added are also tracked in issues labeled [new model](https
 | CLM-v0.1-8B | [Native Rust engine](../src/models/clm/README.md), `clm-run`, in front of a Qwen3-8B `/v1/embeddings` server | Engine-only agreement **4.5e-06** on identical vectors ([#29](https://github.com/ThinkFlowLab/system1-omni/pull/29), [validation](../recipe/clm/native/VALIDATION.md)); contract checks documented ([#23](https://github.com/ThinkFlowLab/system1-omni/pull/23)) | **Validated on compute capability 8.9** ([#29](https://github.com/ThinkFlowLab/system1-omni/pull/29), [validation](../recipe/clm/native/VALIDATION.md)) | Unverified | Rust to build and a separate Qwen3-8B `/v1/embeddings` server for the encoder; the engine itself has no device-specific code |
 | OmniJev-4B v1.1 | None yet: [checkpoint export and CPU contract](../recipe/omnijev/README.md); the native worker is in progress ([#114](https://github.com/ThinkFlowLab/system1-omni/issues/114)) | Request contract, preparation, heads and finishing checked against the reference ([#120](https://github.com/ThinkFlowLab/system1-omni/pull/120)); no inference | Not yet | Not supported | Python 3.10 reference environment for the export and fixtures |
 | D3 (Decision 3.0) | [Python reference worker](../recipe/d3/reference.md) on the checkpoint's pinned runtime — text, image and video state over `choice`/`noul`/`score`, with the deliberate transport differences documented in the recipe; the native worker is in progress ([#136](https://github.com/ThinkFlowLab/system1-omni/issues/136)) | Unverified | Author-run on NVIDIA A100 (sm_80): serving smoke and reference parity for text and media (exact decisions, max delta 0.0); evidence in the integration and media PRs. Owner: @MrDongsls. | Unverified | Python 3.12, the [pinned runtime requirements](../recipe/d3/requirements.txt), the [pinned package](https://huggingface.co/vllm-sr/d3) (~52 GB); [media budgets and the 64 MiB total request cap](../recipe/d3/reference.md) |
+| Clef-flash (9B) | [Python reference worker](../recipe/clef/reference.md); text `choice`/`noul`/`score`; non-thinking prompt; 16384-token refusal | Contract tests only; no inference | Not run. The operator checklist targets lab NVIDIA L20X at compute capability 8.9 and does not record a result | Not supported | Python 3.12, [card-tested torch 2.11 and transformers 5.10.2](../recipe/clef/requirements.txt), pinned `Cloudflare/clef-flash` snapshot (~19.1 GB) |
+| Clef (27B) | Same worker and text contract as Clef-flash, selected with `--variant clef` | Contract tests only; no inference | Not run | Not supported | Same stack; pinned `Cloudflare/clef` snapshot (~55.0 GB). Weights and joint-head config differ from flash |
 
 - **Validated:** covered by the recipe on `main` or by the checks in the linked merged pull request.
 - **Author-run:** recorded by the recipe author on the stated hardware and not independently reproduced; the row names its owner.
@@ -38,6 +40,10 @@ LAYA's English worker, Open-Jev and CLM support `choice`, `score`, and `noul` te
 D3's reference worker serves the same three kinds for text, image and video
 state (inline base64 media under the pinned runtime's per-item budgets);
 its media serving evidence is author-run on the A100 above.
+Clef-flash and Clef serve the same three kinds for text only. The worker
+refuses image and video inputs. No CUDA timing is recorded; the recipe's
+Public231 concurrency-1 checklist is for a lab NVIDIA L20X at compute
+capability 8.9 and is not a result.
 CLM has a row per path: the merged `clm-serve` recipe exercises those answer shapes with stub
 embeddings and says nothing about decision quality, while the native engine's CUDA row is the
 path through a real Qwen3-8B encoder. Its engine-only figure comes from the same comparison run
