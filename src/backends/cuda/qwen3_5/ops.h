@@ -113,6 +113,13 @@ int cs1_attention(const void* q, const void* k, const void* v, int ldv, void* ou
 int cs1_attention_gated(const void* q, const void* k, const void* v, int ldv, const void* gate,
                         void* out, int T, int Hq, int Hk, int Dh, float scale, void* stream);
 
+// Additive, optional at ABI 9. Same tensors as cs1_attention_gated, but every query
+// reads every key in the prompt. Missing on libraries built before this entry point;
+// causal callers do not resolve it. q_base-style prefix continuation is not supported.
+int cs1_attention_gated_bidirectional(const void* q, const void* k, const void* v, int ldv,
+                                      const void* gate, void* out, int T, int Hq, int Hk, int Dh,
+                                      float scale, void* stream);
+
 // Windowed variant for the cached prefix: k and v cover rows [0, T) (the cached
 // prefix must already be in place); q, gate and out cover rows [q_base, T) only.
 // q_base must be a multiple of 64; q_base = 0 reduces to cs1_attention_gated.

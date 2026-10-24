@@ -1322,6 +1322,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "omni-startlux-native"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "half",
+ "memmap2",
+ "omni-qwen3-5-native",
+ "omni-runtime",
+ "safetensors 0.8.0",
+ "serde_json",
+ "tokenizers 0.22.2",
+ "tokio",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

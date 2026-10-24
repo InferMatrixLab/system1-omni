@@ -19,6 +19,7 @@ Models that are being added are also tracked in issues labeled [new model](https
 | Valen-Preview-0923 | [Python reference worker](../recipe/valen/reference.md); text state or one inline PNG/JPEG image; `choice` questions | Not supported | Author-run on RTX 5060 Laptop (sm_120, WSL2): one text and one 2×2 PNG request; input and readout parity ≤1e-6 against reference (model outputs not compared). Owner: community. | Not supported | Python 3.12, pinned Valen source/checkpoint, Qwen3.5-2B base, BF16 CUDA |
 | Open-Jev-27B-v1.1 | [Native Rust/CUDA worker](../recipe/open_jev/native.md) on the shared Qwen3.5/3.8 executor | Not supported | Validated on H200 (sm_90) for the [74 single-candidate workload](../recipe/open_jev/validation.md) | Not supported | Compute capability 8.0 or newer, CUDA toolkit to build, exported merged weights and trained head |
 | Open-Jev-9B | The same [native Rust/CUDA worker](../recipe/open_jev/native.md) | Not supported | Validated on compute capability 8.9 against the reference for [253 requests](../recipe/open_jev/validation-9b.md) | Not supported | Compute capability 8.0 or newer, CUDA toolkit to build, exported merged weights and trained head |
+| StartLux-Decision v1.1 4B Instant | [Native Rust/CUDA worker](../recipe/startlux/README.md) | Contract checks only; no CPU inference | Unverified. Build target is L20X / Ada sm_89. The [latency recipe](../recipe/startlux/latency.md) is not a result | Not supported | Pinned CC BY-NC 4.0 Instant 4B checkpoint; rebuilt ABI 9 library with `cs1_attention_gated_bidirectional`. Instant only: AutoThink and 27B are refused |
 | Decider-2B v11 | [Native Rust/CUDA worker](../recipe/decider/README.md) | Contract checks only; no CPU inference | RTX 4090 (`sm_89`) synthetic parity corpus; [limits and provenance](../recipe/decider/validation.md) | Not supported | Pinned original BF16 checkpoint; ABI 9 library and consumers rebuilt together |
 | JEMM / Qwen3.8-27B | [Native Rust/CUDA worker](../recipe/jemm/README.md) | Host checks only; no CPU inference | A800 (`sm_80`) [text and 1–4-image frozen corpus](../src/models/jemm/README.md#validation) | Not supported | Pinned `jemm-native/2` export with BF16 base and unmerged FP32 LoRA, selected untied LM head, cuDNN 9 and additive reference CUDA symbols |
 | autotrust/JEV-27B-VL | [Experimental native worker](../recipe/jev_vl/README.md), single-question API | Contract tests only; no CPU inference | H800 frozen-corpus check; [experimental scope and limits](../recipe/jev_vl/validation.md) | Not supported | Pinned merged checkpoint, rebuilt ABI 9 CUDA library; image inputs require offline Transformers preencoding |
@@ -34,7 +35,8 @@ Models that are being added are also tracked in issues labeled [new model](https
 - **Planned:** not implemented yet; the linked issue tracks it.
 
 The Cua-S1 workers answer `choice` questions only.
-LAYA's English worker, Open-Jev and CLM support `choice`, `score`, and `noul` text questions.
+LAYA's English worker, Open-Jev, CLM, and StartLux Instant 4B support `choice`, `score`, and `noul` text questions.
+StartLux serves Instant only; AutoThink is not implemented, and the weights are CC BY-NC 4.0.
 D3's reference worker serves the same three kinds for text, image and video
 state (inline base64 media under the pinned runtime's per-item budgets);
 its media serving evidence is author-run on the A100 above.
