@@ -62,6 +62,16 @@ impl Bundle {
                 "{name} does not match the manifest SHA-256"
             );
         }
+        // The uniform-BF16 backbone the executor runs is pinned too.
+        if manifest["files_sha256"]
+            .get("bf16/model.safetensors")
+            .is_some()
+        {
+            ensure!(
+                dir.join("bf16/model.safetensors").is_file(),
+                "the manifest pins bf16/model.safetensors but the file is missing; re-export"
+            );
+        }
         ensure!(
             manifest["max_length"].as_u64() == Some(16_384)
                 && manifest["model_name"].as_str() == Some(MODEL_ID),

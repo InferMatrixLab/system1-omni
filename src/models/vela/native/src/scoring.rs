@@ -642,7 +642,6 @@ pub fn system_one_response(
     plan: &[Value],
     predict_answers: &[Value],
     span_word_probabilities: &std::collections::HashMap<String, Vec<f32>>,
-    _span_word_offsets: &std::collections::HashMap<String, Vec<(usize, usize)>>,
     part_texts: &std::collections::HashMap<String, String>,
     input_tokens: usize,
 ) -> Value {

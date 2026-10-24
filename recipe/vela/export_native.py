@@ -136,15 +136,6 @@ def main(argv=None) -> int:
         },
         "files_sha256": {},
     }
-    for name in [
-        "backbone.safetensors", "heads.safetensors", "config.json",
-        "calibration.json", "tokenizer.json", "tokenizer_config.json",
-    ]:
-        manifest["files_sha256"][name] = sha256(out / name)
-    (out / "vela_native_manifest.json").write_text(
-        json.dumps(manifest, indent=1, sort_keys=True) + "\n", encoding="utf-8"
-    )
-
     if args.bf16_out:
         # Uniform-BF16 re-save for the family crate's loader: every
         # backbone tensor rounds to bfloat16 once, at export (the
@@ -156,6 +147,18 @@ def main(argv=None) -> int:
         save_file(uniform, str(bf16_dir / "model.safetensors"))
         (bf16_dir / "config.json").write_text(json.dumps(backbone_config, indent=1) + "\n", encoding="utf-8")
         print(f"bf16 backbone: {len(uniform)} tensors -> {bf16_dir}")
+
+    for name in [
+        "backbone.safetensors", "heads.safetensors", "config.json",
+        "calibration.json", "tokenizer.json", "tokenizer_config.json",
+    ]:
+        manifest["files_sha256"][name] = sha256(out / name)
+    if args.bf16_out:
+        for name in ("model.safetensors", "config.json"):
+            manifest["files_sha256"][f"bf16/{name}"] = sha256(bf16_dir / name)
+    (out / "vela_native_manifest.json").write_text(
+        json.dumps(manifest, indent=1, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     print(f"export ok: {out}")
     print(f"  backbone: {len(backbone)} tensors ({bf16} bf16, {fp32} fp32), re-keyed {BACKBONE_PREFIX} -> model.")

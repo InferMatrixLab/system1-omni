@@ -10,15 +10,15 @@ question kinds (`choice`, `noul`, `score`, `span`, `set`) on
 `/v1/systemone`, one pinned member per worker process. The 0.3B
 worker's contract freezes the text/token_ids input, the
 position-level final-hidden readout contract, the error/length
-boundaries and the parity baseline.
+boundaries and the parity baseline; see [Native path](#native-path-08b)
+for the native library.
 
 The shared Vela 2.0 wire module is deliberately shaped for the family:
 the envelope admission (`protocol`), the pinned-runtime error mapping
 (`preprocess`) and response finishing (`postprocess`) are member-neutral;
 this directory ships the 0.3B pinned executor (`engine`) and the 0.8B
 hybrid executor (`hybrid`). The worker picks the executor from the
-package's declared `model_type`. The 4B/9B members are not
-implemented.
+package's declared `model_type`. The 4B/9B members are not implemented.
 
 ## Pinned artifacts
 
@@ -39,16 +39,15 @@ structural identity (model type, architecture, `max_length` 8,192, the
 executes — the four runtime modules, `config.json`, `calibration.json`
 and `tokenizer.json` — against the table checked in for the pinned
 revision, before anything is imported, and refuses importable entries
-the table does not name plus any existing `__pycache__` bytecode cache
-(`model.safetensors` is checked by exact size; the runtime's strict
-safetensors load rejects truncated or structurally mismatched weights,
-but not same-size bit-level corruption). The 0.8B gate mirrors this
-with a 10-file table — the same four runtime modules, `config.json`
-(identity includes the served `model_name`, so a 4B or 9B package fails
-with its own name), `calibration.json`, `tokenizer.json`,
-`tokenizer_config.json`, `model.safetensors.index.json` (the shard map)
-and the hashed `broad_head.safetensors` — with the 2 GB shard checked
-by exact size.
+the table does not name (`model.safetensors` is checked by exact size;
+the runtime's strict safetensors load rejects truncated or structurally
+mismatched weights, but not same-size bit-level corruption). The 0.8B
+gate mirrors this with a 10-file table — the same four runtime modules,
+`config.json` (identity includes the served `model_name`, so a 4B or 9B
+package fails with its own name), `calibration.json`,
+`tokenizer.json`, `tokenizer_config.json`,
+`model.safetensors.index.json` (the shard map) and the hashed
+`broad_head.safetensors` — with the 2 GB shard checked by exact size.
 A later self-consistent snapshot rewrites its own files and fails the
 checked-in pin.
 
@@ -240,7 +239,8 @@ The native implementation lives in [`native/`](native/) as the
   `backbone_config` at the config root, calibration and tokenizer
   copied, and a manifest pinning the source revision, the worker
   gate's own file table, the tensor inventory and every bundle file's
-  SHA-256.
+  SHA-256. `--bf16-out` additionally writes the uniform-BF16 backbone
+  the shared qwen3_5 loader consumes.
 - `native/src/bundle.rs` re-verifies that manifest (revision,
   inventory counts, per-file hashes) before anything loads it.
 - `native/src/contract.rs` is the wire admission, mirroring
@@ -257,26 +257,33 @@ The native implementation lives in [`native/`](native/) as the
   word positions, the truncation budget, the 16,384-window 413) and
   the long-target window rows. All five frozen token plans
   (`tests/vela/fixtures/native-plan-*.json`) match field-for-field.
-
 - `native/src/{heads,scoring}.rs` are the F32 heads and the scoring
   path: CandidateHead, both SpanHeadV2 heads, `set_bias`, the
   per-type temperatures, set thresholds, the PII length rule and
   sparse gate, `span_decode_r4` (word units, unit vote, fill,
   edge/URL trimming), label aliasing, score normalization and the
-  window aggregation. Replaying the recorded head-input fixtures
+  window aggregation — then `system_one_response` finishes the
+  SystemOne envelope (Noul views with the range-filtered max word
+  probability and set fan-out, span clipping to the plan's field
+  ranges with re-trim, `span_heads`, thresholds, confidence formulas,
+  usage). Replaying the recorded head-input fixtures
   (`tests/vela/fixtures/head-input-*`): head-logit drift ≤ 3.8e-5,
-  predict-answer drift ≤ 7.3e-7, discrete picks and span structures
-  equal on all five cases.
+  predict-answer drift ≤ 7.3e-7, and the finished responses match the
+  frozen oracles within 1.5e-6 on four cases.
+- `native/src/executor.rs` runs the backbone on CUDA through the
+  shared qwen3_5 crate: the family `Model` exposes only last-position
+  hidden states, so every readout position runs as its own full
+  sequence — `[parts .. position]` — which causality makes identical
+  to the reference's in-tree readout, packed into `forward_batch`.
+  The backbone runs from the uniform-BF16 export (the shared loader's
+  format); the heads stay F32 on the faithful tensors. Recorded
+  execution on sm_120 (RTX 5060, CUDA 13.1): the four small frozen
+  cases replay the recorded reference logits with a worst drift of
+  0.285 — the bf16-vs-FP32-reference scale (gate 0.35).
 
-- `scoring.rs system_one_response` finishes the SystemOne envelope
-  from the predict answers and the response plan: Noul views (span =
-  the range-filtered max word probability, set fan-out
-  `<qid>.<label>`), span clipping to the plan's field ranges with
-  re-trim, `span_heads`, thresholds, the confidence formulas and
-  usage. Replaying the recorded reference logits into the frozen
-  oracle responses matches within 1.5e-6 on the four oracle cases.
-
-Backbone execution and an HTTP worker are not implemented. Checks:
-`cargo test -p omni-vela-native` (28 tests, no weights, no GPU;
-render, head and response parity opt-in with `VELA_NATIVE_BUNDLE`;
-see [recipe/vela/native.md](../../recipe/vela/native.md)).
+The crate is a library; the HTTP worker around `Processor` +
+`Executor` is not part of it. Long-span GPU parity and measured
+latency are not recorded. Checks: `cargo test -p omni-vela-native`
+(29 tests, no weights, no GPU; render, head and response parity are
+opt-in with `VELA_NATIVE_BUNDLE`, executor parity additionally with
+`VELA_CUDA_LIB`; see [recipe/vela/native.md](../../recipe/vela/native.md)).

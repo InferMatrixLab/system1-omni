@@ -98,7 +98,6 @@ fn the_systemone_finishing_matches_the_frozen_oracles() {
         let mut span_index = 0usize;
         let mut answers: Vec<Value> = Vec::new();
         let mut span_probs: HashMap<String, Vec<f32>> = HashMap::new();
-        let mut span_offs_map: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
         for (row_index, row) in plan["rows"].as_array().unwrap().iter().enumerate() {
             let q_blocks: Vec<&Value> = row["blocks"]
                 .as_array()
@@ -229,7 +228,6 @@ fn the_systemone_finishing_matches_the_frozen_oracles() {
                     _ => probs,
                 };
                 span_probs.insert(qid.clone(), filtered);
-                span_offs_map.insert(qid.clone(), w_offs.clone());
                 span_out = Some(SpanOut {
                     qid: qid.clone(),
                     over,
@@ -291,7 +289,6 @@ fn the_systemone_finishing_matches_the_frozen_oracles() {
             plan["plan"].as_array().unwrap(),
             &answers,
             &span_probs,
-            &span_offs_map,
             &part_texts,
             input_tokens,
         );
