@@ -2,8 +2,9 @@
 
 The native implementation for
 [vllm-sr/Vela-2.0-0.8B](https://huggingface.co/vllm-sr/Vela-2.0-0.8B):
-the exported-bundle gate and the wire contract, mirrored from the
-pinned runtime. This is a library; serving runs through the
+the exported-bundle gate, the wire contract, and the token-level
+processing — all mirrored from the pinned runtime and checked against
+frozen fixtures. This is a library; serving runs through the
 [reference recipe](reference.md)'s Python worker.
 
 Run the commands from the repository root with the same `.venv` and
@@ -28,22 +29,45 @@ tokenizer, and `vela_native_manifest.json` pinning the source
 revision, the gate's file table, the tensor inventory and every file's
 SHA-256.
 
+## Freeze the token-plan fixtures (opt-in, needs the package)
+
+~~~sh
+PYTHONPATH=src .venv/bin/python recipe/vela/export_token_plan.py \
+  --model weights/vela-2.0-0.8b --out tests/vela/fixtures/
+~~~
+
+The token plans record what the pinned runtime feeds the backbone (the
+predict mapping, the per-row decomposition, the rendered `p_ids`,
+blocks and readout positions, truncation, a windowed long-span case).
+The example-request token plan totals 1,041 tokens, matching the
+oracle fixture's `usage.input_tokens`.
+
 ## Checks
 
 ~~~sh
 cargo test -p omni-vela-native
 cargo fmt --all --check
 cargo clippy -p omni-vela-native --all-targets -- -D warnings
+VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
+  cargo test -p omni-vela-native --test vela_native_processing -- --nocapture
 ~~~
 
-15 tests, no weights, no GPU: the wire contract against the pinned
-runtime's 422/400 bodies and the bundle manifest gate against a
-synthetic bundle.
+26 tests run everywhere with no weights and no GPU: the wire contract
+against the pinned runtime's 422/400 bodies, the bundle manifest gate,
+and the predict-mapping/plan parity on every frozen fixture. The
+opt-in render check replays the five token plans through the Rust
+processing field-for-field. For a field-level diff of one case:
+
+~~~sh
+VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
+  cargo run -p omni-vela-native --example parity -- example-request
+~~~
 
 ## Scope and limits
 
-- Implemented: the bundle export + manifest gate and the wire
-  admission.
-- Not implemented: token-level processing, the F32 heads, scoring,
-  backbone execution, and an HTTP worker. No performance claims are
-  made.
+- Implemented: the bundle export + manifest gate, the wire admission,
+  and the token-level processing (state mapping, predict mapping with
+  the validation triples, word units, span-head dispatch, the DEV2.0
+  rendering, the truncation budget, window rows).
+- Not implemented: the F32 heads, scoring and span decoding, backbone
+  execution, and an HTTP worker. No performance claims are made.
