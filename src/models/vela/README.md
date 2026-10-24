@@ -246,8 +246,19 @@ The native implementation lives in [`native/`](native/) as the
 - `native/src/contract.rs` is the wire admission, mirroring
   `protocol.py` and the pinned runtime's preamble with byte-equal
   422/400 bodies.
+- `native/src/{state,questions,words,render,processing}.rs` are the
+  token-level processing: the state → parts mapping, the SystemOne →
+  predict mapping with the pinned runtime's validation triples (Noul
+  folded into a two-option choice; choice renders `[ABS]`, the
+  reference's abstain default), the GLiNER2/CJK word splitter, the
+  six-rule span-head dispatch with the hallucination-alias label
+  replacement, the DEV2.0 prompt rendering (parts pass, question
+  blocks with option end and query positions, span layout a/c with
+  word positions, the truncation budget, the 16,384-window 413) and
+  the long-target window rows. All five frozen token plans
+  (`tests/vela/fixtures/native-plan-*.json`) match field-for-field.
 
-Token-level processing, the F32 heads, backbone execution and an HTTP
-worker are not implemented. Checks: `cargo test -p omni-vela-native`
-(15 tests, no weights, no GPU; see
+The F32 heads, scoring, backbone execution and an HTTP worker are not
+implemented. Checks: `cargo test -p omni-vela-native` (26 tests, no
+weights, no GPU; render parity opt-in with `VELA_NATIVE_BUNDLE`; see
 [recipe/vela/native.md](../../recipe/vela/native.md)).
