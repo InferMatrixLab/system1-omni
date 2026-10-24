@@ -116,7 +116,14 @@ class Handler(BaseHTTPRequestHandler):
         if not key:
             return False
         got = self.headers.get("authorization", "")
-        if hmac.compare_digest(got, f"Bearer {key}"):
+        try:
+            authorized = hmac.compare_digest(got, f"Bearer {key}")
+        except TypeError:
+            # Header bytes outside ASCII (a raw 0xff, say) decode to
+            # non-ASCII text, which compare_digest refuses to compare; a
+            # value that cannot be compared cannot equal the key either.
+            authorized = False
+        if authorized:
             return False
         self.send_json(401, UNAUTHORIZED_BODY)
         return True

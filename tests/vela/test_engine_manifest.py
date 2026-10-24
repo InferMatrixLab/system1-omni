@@ -184,6 +184,34 @@ def test_extra_package_directories_in_the_package_root_are_refused(tmp_path):
         verify_files(tmp_path, table)
 
 
+@pytest.mark.parametrize(
+    "init_name",
+    ["__init__.pyc", "__init__.abi3.so"],
+)
+def test_sourceless_and_extension_package_inits_are_refused(tmp_path, init_name):
+    # A directory whose __init__ is bytecode or an extension — no source at
+    # all — still imports as a regular package once the package root goes
+    # first on sys.path, executing bytes the pin never hashed: the review's
+    # torch/__init__.pyc bypass.
+    table = build_package(tmp_path, small_files())
+    torch = tmp_path / "torch"
+    torch.mkdir()
+    (torch / init_name).write_bytes(b"unverified module bytes\n")
+    with pytest.raises(ValueError, match="unexpected importable package torch/"):
+        verify_files(tmp_path, table)
+
+
+def test_a_namespace_directory_with_nested_modules_is_refused(tmp_path):
+    # Even without any __init__, a directory imports as a namespace package
+    # whose nested modules execute on import the same way.
+    table = build_package(tmp_path, small_files())
+    fla = tmp_path / "fla"
+    fla.mkdir()
+    (fla / "ops.py").write_text("unverified module\n")
+    with pytest.raises(ValueError, match="unexpected importable package fla/"):
+        verify_files(tmp_path, table)
+
+
 def test_unimportable_package_root_entries_still_pass(tmp_path):
     # The pinned package's own layout shape: onnx/, assets/, LICENSES/ and
     # figures/ directories without __init__.py, and markdown and license

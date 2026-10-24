@@ -134,9 +134,11 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
     there is no size shortcut. It also refuses importable entries the
     table does not name — the package root is about to go first on
     ``sys.path``, where an extra module file (source, sourceless or
-    extension) or ``__init__.py`` package would shadow one of the pinned
-    runtime's dependencies — and any ``__pycache__``, whose existing
-    bytecode is not verifiable against the pin.
+    extension) or a directory carrying any importable entry — an
+    ``__init__`` in every module form, or a namespace package's nested
+    modules — would shadow one of the pinned runtime's dependencies —
+    and any ``__pycache__``, whose existing bytecode is not verifiable
+    against the pin.
     """
 
     table = dict(table or PINNED_FILES_SHA256)
@@ -159,7 +161,14 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
             )
         elif entry.is_file() and entry.suffix in IMPORTABLE_FILE_SUFFIXES:
             problems.append(f"unexpected importable file {entry.name} in the package root")
-        elif entry.is_dir() and (entry / "__init__.py").is_file():
+        elif entry.is_dir() and any(
+            child.is_file() and child.suffix in IMPORTABLE_FILE_SUFFIXES
+            for child in entry.rglob("*")
+        ):
+            # Any importable file at any depth makes the directory an
+            # importable package: through an __init__ in source, sourceless
+            # or extension form, or as a namespace package whose nested
+            # modules import directly.
             problems.append(f"unexpected importable package {entry.name}/ in the package root")
     if problems:
         raise ValueError("package verification failed: " + "; ".join(problems[:8]))

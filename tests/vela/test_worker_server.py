@@ -266,6 +266,18 @@ def test_a_missing_or_wrong_bearer_is_rejected_with_upstreams_401(keyed_server):
     assert status == 200 and json.loads(raw)["models"][0]["name"] == "vllm-sr/Vela-2.0-0.3B"
 
 
+def test_a_non_ascii_bearer_header_is_answered_with_the_upstream_401(keyed_server):
+    # A bearer carrying bytes outside ASCII (a raw 0xff) decodes to
+    # non-ASCII text, which hmac.compare_digest refuses to compare; the
+    # comparison failure must answer the JSON 401, not drop the connection.
+    status, _, raw = post(
+        keyed_server,
+        json.dumps(body()).encode("utf-8"),
+        headers=(("Authorization", b"Bearer \xff"),),
+    )
+    assert status == 401 and json.loads(raw) == {"detail": "Missing or invalid API key"}
+
+
 def test_health_stays_open_behind_the_api_key(keyed_server):
     status, _, raw = request(keyed_server, "GET", "/health")
     assert status == 200 and json.loads(raw) == {"status": "ok"}
