@@ -113,26 +113,67 @@ fn text(value: &Value, field: &str, special: &[String]) -> Result<String, Reques
     Ok(result)
 }
 
-/// A PNG reports more than one frame through its `acTL` animation chunk; PIL
-/// surfaces the same fact as `n_frames != 1` and the wire rejects it.
-fn png_is_animated(data: &[u8]) -> bool {
+/// A PNG's frame count as PIL reports it. PIL's header scan reads chunks only
+/// up to the first `IDAT`/`fdAT`, so an `acTL` after the pixel data is never
+/// seen. A first `acTL` of at least 8 bytes declares `num_frames`; a count of
+/// 0 or above 2^31 makes PIL fall back to the default image (`n_frames` 1),
+/// and a second `acTL` invalidates a recorded one the same way. A truncated
+/// `acTL` fails `Image.open` itself, which the reference answers as its
+/// generic invalid-image-data 422. When pixel data arrives with no `fcTL`
+/// after the `acTL`, PIL counts the default image separately (`n_frames+1`);
+/// the reference rejects any `n_frames != 1` as multi-frame.
+enum PngFrameCount {
+    Still,
+    Multi,
+    Invalid,
+}
+
+fn png_frame_count(data: &[u8]) -> PngFrameCount {
     if data.len() < 8 || &data[..8] != b"\x89PNG\r\n\x1a\n" {
-        return false;
+        return PngFrameCount::Still;
     }
+    let mut declared: Option<u32> = None;
+    let mut frame_control = false;
+    let mut pixels = false;
     let mut at = 8;
     while at + 8 <= data.len() {
         let length =
             u32::from_be_bytes([data[at], data[at + 1], data[at + 2], data[at + 3]]) as usize;
         let kind = &data[at + 4..at + 8];
-        if kind == b"acTL" {
-            return true;
+        let end = at.saturating_add(12 + length);
+        match kind {
+            b"acTL" => {
+                if length < 8 || end > data.len() {
+                    // PIL's truncated-acTL check fails Image.open itself.
+                    return PngFrameCount::Invalid;
+                }
+                let count =
+                    u32::from_be_bytes([data[at + 8], data[at + 9], data[at + 10], data[at + 11]]);
+                declared = match declared {
+                    Some(_) => None, // a second acTL drops the animation
+                    None if count == 0 || count > 0x8000_0000 => None,
+                    None => Some(count),
+                };
+            }
+            b"fcTL" => frame_control = true,
+            b"IDAT" | b"fdAT" => {
+                pixels = true; // PIL stops its header scan at the pixel data
+                break;
+            }
+            b"IEND" => break,
+            _ => {}
         }
-        if kind == b"IEND" {
-            return false;
-        }
-        at += 12 + length; // length + type + data + crc
+        at = end;
     }
-    false
+    let Some(count) = declared else {
+        return PngFrameCount::Still;
+    };
+    let frames = count + u32::from(pixels && !frame_control);
+    if frames == 1 {
+        PngFrameCount::Still
+    } else {
+        PngFrameCount::Multi
+    }
 }
 
 fn image_state(value: &Value) -> Result<ImageData, RequestError> {
@@ -171,6 +212,16 @@ fn image_state(value: &Value) -> Result<ImageData, RequestError> {
     if identified != format {
         return Err(error(422, "image format does not match its MIME type"));
     }
+    let frame_count = if format == image::ImageFormat::Png {
+        png_frame_count(&data)
+    } else {
+        PngFrameCount::Still
+    };
+    if matches!(frame_count, PngFrameCount::Invalid) {
+        // The truncated-acTL failure happens inside PIL's Image.open, before
+        // any size or frame checks.
+        return Err(error(422, "invalid image data"));
+    }
     let reader = image::ImageReader::with_format(std::io::Cursor::new(&data), format);
     let (width, height) = reader
         .into_dimensions()
@@ -182,7 +233,7 @@ fn image_state(value: &Value) -> Result<ImageData, RequestError> {
             format!("image aspect ratio must not exceed {MAX_ASPECT_RATIO}:1"),
         ));
     }
-    let animated = format == image::ImageFormat::Png && png_is_animated(&data);
+    let animated = matches!(frame_count, PngFrameCount::Multi);
     if width.max(height) > MAX_SIDE || width * height > MAX_PIXELS || animated {
         return Err(error(
             422,

@@ -145,7 +145,9 @@ positions (the HF `get_rope_index` port the `jev_vl` worker gates). Both
 paths read the final-norm hidden state at the compiler's captured
 candidate-end and decision-end positions and hand those rows to the CPU FP32
 head: `logit_k = (W_cand·h_cand_k) · (W_dec·h_dec) / 16`. The finisher is
-the reference postprocessor: FP64 softmax, Valen's per-type confidence
+the reference postprocessor: FP64 softmax with CPython 3.12's compensated
+float `sum()` (Neumaier accumulation, not the naive left fold of earlier
+versions), Valen's per-type confidence
 formulas (choice/noul: `(max(p) - 1/n)/(1 - 1/n)` clamped; score:
 `1 - MAD(p)/MAD(uniform)` clamped), the score questions' expected level
 `sum(i·p)`, and `json.dumps` byte semantics (CPython `repr` floats) so
@@ -318,6 +320,18 @@ authoring host (scratch, not part of the repo).
   compiled text (and therefore the tokens) silently differ on such states.
   Inherited from the shared #143 JSON layer (`src/models/qwen3_5/native/src/json.rs`),
   which this worker reuses verbatim; not fixed here per the shared-code scope.
+- JSON container nesting below the root object above 2048 levels: the
+  reference's own ceiling is CPython's recursion budget, whose RecursionError
+  `parse_body` reports as the same malformed-JSON 400 — under 1000 levels on
+  3.11 (`sys.setrecursionlimit`) and ~1490 on 3.12+ (the fixed
+  `Py_C_RECURSION_LIMIT` of 1500). The native wire enforces the documented
+  limit of 2048 (`MAX_NESTING_DEPTH` in `src/models/valen/native/src/wire.rs`),
+  which sits above every stock CPython's acceptance, so a body any supported
+  reference build admits also parses natively; only CPython builds running
+  with enlarged C stacks (newer distributions raise the budget to ~10 000)
+  accept deeper nesting than the native worker, which answers the reference's
+  generic malformed-JSON 400 there. The boundary is pinned in
+  `tests/valen/native.rs` at 2047/2048.
 - Image decoding: PNG (all colour modes PIL supports) decodes
   deterministically across stacks; JPEG baseline decode differences between
   libjpeg-turbo and the Rust decoder are not gated — the parity fixtures are
@@ -345,6 +359,7 @@ material.
 | Slow body (> 15 s) | `408 {"detail": "request body timed out"}` | identical for a stalled body; a drip-fed body under the reference's per-recv timeout is read indefinitely there but hits the native total 15 s budget (see limitations) |
 | Body > 8 MiB at parse | `413 {"detail": "request body exceeds 8 MiB"}` | identical |
 | Malformed JSON / non-object / duplicates / non-finite | `400 {"detail": …}` (70-case rejection corpus) | identical |
+| JSON nesting below the root > 2048 containers | CPython recursion budget rejects deeper nesting (RecursionError → the same 400): <1000 on 3.11, ~1490 on 3.12+ | identical within every stock build's budget; explicit 2048-level API limit beyond it (recorded deviation) |
 | Non-finite constant in a body that is also malformed elsewhere | the scanner errors at the first constant it reaches — the specific non-finite detail even when what follows is garbage (a duplicate-key object closing earlier wins instead) | generic malformed-JSON detail unless the whole body with constants substituted is well-formed; the earlier-closed-duplicate ordering is reversed (recorded deviation; the status is 400 either way, only the detail text differs, and only on doubly-invalid bodies) |
 | Wire validation (model/state/questions) | `422 {"detail": …}` (rejection corpus) | identical |
 | Token budget (max_length 8192) | `422 "request rejected by the pinned compiler: …"` | identical |

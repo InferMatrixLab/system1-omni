@@ -52,8 +52,29 @@ pub fn json_string(value: &str) -> String {
     out
 }
 
-/// `_probabilities(logits, temperature=1.0)`: FP64 softmax with Python's
-/// sequential `sum`, as the reference computes it. The worker's wire contract
+/// CPython 3.12+'s `sum()` over floats: the improved Kahan–Babuška (Neumaier)
+/// accumulation `builtin_sum_impl` runs — a running compensated total whose
+/// correction is summed in at the end — with the int start folded into the
+/// initial 0.0. Earlier CPython left-folded, so on those versions the
+/// reference bytes differ for the same logits; the pinned reference is 3.12.
+/// Every reduction the reference finishes an answer with goes through here.
+fn python_sum(values: impl Iterator<Item = f64>) -> f64 {
+    let mut total = 0.0;
+    let mut compensation = 0.0;
+    for value in values {
+        let next = total + value;
+        if total.abs() >= value.abs() {
+            compensation += (total - next) + value;
+        } else {
+            compensation += (value - next) + total;
+        }
+        total = next;
+    }
+    total + compensation
+}
+
+/// `_probabilities(logits, temperature=1.0)`: FP64 softmax with CPython 3.12's
+/// compensated `sum`, as the reference computes it. The worker's wire contract
 /// carries no temperature, so the reference default 1.0 is the only value.
 pub fn probabilities(logits: &[f32]) -> Result<Vec<f64>, Invalid> {
     if logits.is_empty() || logits.iter().any(|v| !v.is_finite()) {
@@ -62,7 +83,7 @@ pub fn probabilities(logits: &[f32]) -> Result<Vec<f64>, Invalid> {
     let scaled: Vec<f64> = logits.iter().map(|&v| v as f64).collect();
     let maximum = scaled.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let exponentials: Vec<f64> = scaled.iter().map(|&v| (v - maximum).exp()).collect();
-    let total: f64 = exponentials.iter().sum();
+    let total: f64 = python_sum(exponentials.iter().copied());
     Ok(exponentials.iter().map(|&e| e / total).collect())
 }
 
@@ -135,9 +156,9 @@ pub fn noul_answer(keys: &[String], logits: &[f32]) -> Result<String, Invalid> {
 }
 
 /// One serialized `score` answer object (`_score_answer`): the K level
-/// probabilities, the expected level `sum(i * p)` (Python's sequential
-/// `sum`, i.e. left-to-right from 0), the static legend keyed `"0"`…, and
-/// the distribution-concentration confidence
+/// probabilities, the expected level `sum(i * p)` (CPython 3.12's compensated
+/// `sum`, as above), the static legend keyed `"0"`…, and the
+/// distribution-concentration confidence
 /// `max(0, 1 - distance / uniform_mad)` where `distance` is the probability-
 /// weighted absolute deviation from the first argmax level and
 /// `uniform_mad` the mean absolute deviation of the uniform distribution
@@ -154,20 +175,21 @@ pub fn score_answer(
     let probabilities = probabilities(logits)?;
     let mode = argmax(&probabilities);
     let count = probabilities.len();
-    let distance: f64 = probabilities
-        .iter()
-        .enumerate()
-        .map(|(index, &value)| value * (index as f64 - mode as f64).abs())
-        .sum();
-    let uniform_mad: f64 = (0..count)
-        .map(|index| (index as f64 - (count - 1) as f64 / 2.0).abs())
-        .sum::<f64>()
-        / count as f64;
-    let expected_level: f64 = probabilities
-        .iter()
-        .enumerate()
-        .map(|(index, &value)| index as f64 * value)
-        .sum();
+    let distance: f64 = python_sum(
+        probabilities
+            .iter()
+            .enumerate()
+            .map(|(index, &value)| value * (index as f64 - mode as f64).abs()),
+    );
+    let uniform_mad: f64 =
+        python_sum((0..count).map(|index| (index as f64 - (count - 1) as f64 / 2.0).abs()))
+            / count as f64;
+    let expected_level: f64 = python_sum(
+        probabilities
+            .iter()
+            .enumerate()
+            .map(|(index, &value)| index as f64 * value),
+    );
     let pairs: Vec<String> = keys
         .iter()
         .zip(&probabilities)

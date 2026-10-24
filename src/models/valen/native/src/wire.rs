@@ -187,6 +187,14 @@ impl<'de> Visitor<'de> for PythonValue<'_> {
     }
 }
 
+/// The JSON container nesting the wire accepts below the root object. The
+/// reference's own ceiling is CPython's recursion budget — below 1000 levels
+/// on 3.11 and ~1490 on 3.12+ (Py_C_RECURSION_LIMIT 1500) — and its
+/// RecursionError surfaces as the same generic malformed-JSON 400, so this
+/// bound sits above every stock CPython's acceptance and is the documented
+/// API limit for deeper nesting (recipe/valen/native.md records it).
+const MAX_NESTING_DEPTH: usize = 2048;
+
 fn parse_raw(
     raw: &RawValue,
     depth: usize,
@@ -209,9 +217,16 @@ fn parse_raw(
         }
         return Ok(value);
     }
-    if depth >= 127 {
-        // Python raises RecursionError, which parse_body reports as malformed.
-        return Err(de::Error::custom("recursion limit exceeded"));
+    if depth >= MAX_NESTING_DEPTH {
+        // The reference's own boundary is CPython's recursion budget, which
+        // RecursionError-fails parse_body into the same generic 400 body:
+        // under 1000 levels on 3.11 (sys.setrecursionlimit) and ~1490 on
+        // 3.12+ (the fixed C recursion limit of 1500). MAX_NESTING_DEPTH sits
+        // above both, so a body every stock CPython reference accepts parses
+        // here too; deeper nesting than that is the documented API limit
+        // (recorded in recipe/valen/native.md), and only CPython builds with
+        // enlarged C stacks accept more.
+        return Err(de::Error::custom("nesting depth exceeds the API limit"));
     }
     serde_json::Deserializer::from_str(text).deserialize_any(PythonValue { depth, duplicate })
 }

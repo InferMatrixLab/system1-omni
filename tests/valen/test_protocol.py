@@ -289,3 +289,55 @@ def test_parse_accepts_mixed_type_questions_in_request_order():
         ("score", "grade"),
         ("choice", "act"),
     ]
+
+
+def _png_chunk(kind: bytes, data: bytes) -> bytes:
+    import struct
+    import zlib
+
+    return (
+        struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    )
+
+
+def _apng_url(num_frames: int | None = None, *, truncated: bool = False) -> str:
+    """A 4×4 PNG spliced with one acTL before the IDAT (Pillow's header scan
+    stops at the pixel data, so the chunk placement is what PIL sees)."""
+
+    import struct
+    from io import BytesIO
+
+    stream = BytesIO()
+    Image.new("RGB", (4, 4), "white").save(stream, "PNG")
+    png = stream.getvalue()
+    if truncated:
+        actl = _png_chunk(b"acTL", b"\x00\x00\x00")
+    else:
+        actl = _png_chunk(b"acTL", struct.pack(">II", num_frames, 0))
+    fctl = _png_chunk(
+        b"fcTL", struct.pack(">IIIIIHHBB", 0, 4, 4, 0, 0, 1, 100, 0, 0)
+    )
+    at = png.index(b"IDAT") - 4
+    spliced = png[:at] + actl + fctl + png[at:]
+    return f"data:image/png;base64,{base64.b64encode(spliced).decode()}"
+
+
+def test_parse_apng_frame_count_semantics():
+    # A single-frame APNG is a still image for PIL (n_frames == 1).
+    parsed = parse_request(body(state={"image": _apng_url(num_frames=1)}))
+    assert parsed.state.format == "PNG"
+    assert (parsed.state.width, parsed.state.height) == (4, 4)
+
+    # The declared frame count decides; 2^31 is still a valid declaration.
+    with pytest.raises(RequestError, match="single-frame"):
+        parse_request(body(state={"image": _apng_url(num_frames=2)}))
+    with pytest.raises(RequestError, match="single-frame"):
+        parse_request(body(state={"image": _apng_url(num_frames=2**31)}))
+
+    # Counts PIL folds back to the default image stay single-frame.
+    parse_request(body(state={"image": _apng_url(num_frames=0)}))
+    parse_request(body(state={"image": _apng_url(num_frames=2**31 + 1)}))
+
+    # A truncated acTL fails Image.open itself: the generic invalid-data 422.
+    with pytest.raises(RequestError, match="invalid image data"):
+        parse_request(body(state={"image": _apng_url(truncated=True)}))

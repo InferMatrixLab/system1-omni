@@ -23,15 +23,7 @@ fn fixture() -> Value {
 }
 
 fn png_url(width: u32, height: u32, colour: [u8; 3]) -> String {
-    let image = image::RgbImage::from_pixel(width, height, image::Rgb(colour));
-    let mut bytes = Vec::new();
-    image
-        .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
-        .unwrap();
-    format!(
-        "data:image/png;base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    )
+    image_url(&png_bytes(width, height, colour))
 }
 
 fn jpeg_url(width: u32, height: u32, colour: [u8; 3]) -> String {
@@ -43,6 +35,91 @@ fn jpeg_url(width: u32, height: u32, colour: [u8; 3]) -> String {
     format!(
         "data:image/jpeg;base64,{}",
         base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
+}
+
+fn png_bytes(width: u32, height: u32, colour: [u8; 3]) -> Vec<u8> {
+    let image = image::RgbImage::from_pixel(width, height, image::Rgb(colour));
+    let mut bytes = Vec::new();
+    image
+        .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .unwrap();
+    bytes
+}
+
+fn crc32(data: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    for &byte in data {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+/// One PNG chunk: big-endian length, type, data, CRC.
+fn png_chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+    let mut chunk = (data.len() as u32).to_be_bytes().to_vec();
+    chunk.extend_from_slice(kind);
+    chunk.extend_from_slice(data);
+    let crc = crc32(&chunk[4..]);
+    chunk.extend_from_slice(&crc.to_be_bytes());
+    chunk
+}
+
+/// Extra chunks spliced after the first chunk of `kind`, keeping the rest of
+/// the encoded PNG (and its CRCs) untouched.
+fn png_splice_after(png: &[u8], kind: &[u8; 4], extras: &[Vec<u8>]) -> Vec<u8> {
+    let mut at = 8;
+    let mut split = png.len();
+    while at + 8 <= png.len() {
+        let length = u32::from_be_bytes([png[at], png[at + 1], png[at + 2], png[at + 3]]) as usize;
+        if &png[at + 4..at + 8] == kind {
+            split = at + 12 + length;
+            break;
+        }
+        at += 12 + length;
+    }
+    let mut out = png[..split].to_vec();
+    for extra in extras {
+        out.extend_from_slice(extra);
+    }
+    out.extend_from_slice(&png[split..]);
+    out
+}
+
+/// An `acTL` animation chunk declaring `num_frames` and zero plays — the
+/// eight bytes PIL's chunk handler requires.
+fn actl(num_frames: u32) -> Vec<u8> {
+    let mut data = num_frames.to_be_bytes().to_vec();
+    data.extend_from_slice(&0u32.to_be_bytes()); // num_plays
+    png_chunk(b"acTL", &data)
+}
+
+/// A first-frame `fcTL` for the base image's geometry.
+fn fctl(width: u32, height: u32) -> Vec<u8> {
+    let mut data = Vec::new();
+    data.extend_from_slice(&0u32.to_be_bytes()); // sequence number
+    data.extend_from_slice(&width.to_be_bytes());
+    data.extend_from_slice(&height.to_be_bytes());
+    data.extend_from_slice(&0u32.to_be_bytes()); // x offset
+    data.extend_from_slice(&0u32.to_be_bytes()); // y offset
+    data.extend_from_slice(&1u16.to_be_bytes()); // delay numerator
+    data.extend_from_slice(&100u16.to_be_bytes()); // delay denominator
+    data.push(0); // dispose op
+    data.push(0); // blend op
+    png_chunk(b"fcTL", &data)
+}
+
+fn image_url(png: &[u8]) -> String {
+    format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png)
     )
 }
 
@@ -395,4 +472,172 @@ fn branch_layout_positions_and_budget_match_the_compiler_plan() {
         compiled.logical_tokens,
         base_len + 2 * (compiled.questions[0].branches[0].length - base_len)
     );
+}
+
+// ---------------------------------------------------------------------------
+// Wire admission the review reproduced: deep JSON nesting and APNG frames.
+// ---------------------------------------------------------------------------
+
+/// A request body whose `state` is a `depth`-level nested array around `0`.
+fn nested_state_body(depth: usize) -> Vec<u8> {
+    format!(
+        "{{\"model\":\"valen-preview-0923\",\"state\":{}0{},\"questions\":{{\"q\":{{\"type\":\
+         \"choice\",\"instructions\":\"i\",\"criteria\":{{\"a\":\"A\"}}}}}}}}",
+        "[".repeat(depth),
+        "]".repeat(depth),
+    )
+    .into_bytes()
+}
+
+/// CPython's own nesting ceiling is its recursion budget (RecursionError,
+/// which parse_body reports as the same malformed-JSON 400): under 1000
+/// levels on 3.11 and ~1490 on 3.12+ (Py_C_RECURSION_LIMIT 1500). A 127-level
+/// nested state — the review's reproduced request — parses and validates on
+/// the reference, so the wire admits it and every level the reference's stock
+/// builds do.
+#[test]
+fn deeply_nested_states_stay_inside_the_reference_recursion_range() {
+    let raw = nested_state_body(127);
+    let body = omni_valen_native::wire::parse_body(&raw).unwrap();
+    let request = protocol::parse_request(&body, &protocol::default_special_tokens()).unwrap();
+    let State::Text(text) = &request.state else {
+        panic!("a nested array state renders as text");
+    };
+    assert_eq!(text, &format!("{}0{}", "[".repeat(127), "]".repeat(127)));
+}
+
+/// The documented limit's boundary (wire.rs `MAX_NESTING_DEPTH`): 2047
+/// levels — above every stock CPython's own recursion budget — parse and
+/// validate, and the next level answers the reference's generic
+/// malformed-JSON 400. The deepest descent runs in an explicit thread sized
+/// to the serving threads' conservative 2 MiB stack in release builds (the
+/// debug profile's larger frames get proportionally more), so the recursive
+/// descent stays bounded with margin at the deepest accepted level.
+#[test]
+fn nesting_deeper_than_the_documented_limit_keeps_the_reference_body() {
+    // 2047 levels parse and admit as a text state.
+    let raw = nested_state_body(2047);
+    let outcome = std::thread::Builder::new()
+        .stack_size(if cfg!(debug_assertions) {
+            8 * 1024 * 1024
+        } else {
+            2 * 1024 * 1024
+        })
+        .spawn(move || {
+            let body = omni_valen_native::wire::parse_body(&raw).unwrap();
+            protocol::parse_request(&body, &protocol::default_special_tokens()).is_ok()
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    assert!(outcome, "depth 2047 must parse and validate");
+
+    // The next level keeps the reference's malformed-JSON body.
+    let raw = nested_state_body(2048);
+    let outcome = std::thread::Builder::new()
+        .stack_size(if cfg!(debug_assertions) {
+            8 * 1024 * 1024
+        } else {
+            2 * 1024 * 1024
+        })
+        .spawn(move || omni_valen_native::wire::parse_body(&raw))
+        .unwrap()
+        .join()
+        .unwrap();
+    let error = outcome.unwrap_err();
+    assert_eq!(error.status, 400);
+    assert_eq!(
+        error.message,
+        "request body must contain valid JSON and UTF-8 text"
+    );
+}
+
+/// The review's synthetic single-frame APNG request, verbatim: a 32×32 PNG
+/// with `acTL num_frames=1` and a frame control before the pixel data loads
+/// in Pillow with `n_frames=1, is_animated=False`, and the reference accepts
+/// it — no model needed to exercise the wire validators.
+#[test]
+fn the_review_single_frame_apng_request_parses_end_to_end() {
+    let raw = br#"{"model":"valen-preview-0923","state":{"image":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAACGFjVEwAAAABAAAAALQt6aAAAAAaZmNUTAAAAAAAAAAgAAAAIAAAAAAAAAAAAAEAZAAA2G7FwAAAAClJREFUeJztzTEBAAAIwzDAv+dhAr5UQNNJ6rN5vQMAAAAAAAAAAIDDFsfxAz0uGANjAAAAAElFTkSuQmCC"},"questions":{"q":{"type":"choice","instructions":"i","criteria":{"a":"A"}}}}"#;
+    let body = omni_valen_native::wire::parse_body(raw).unwrap();
+    let request = protocol::parse_request(&body, &protocol::default_special_tokens()).unwrap();
+    let State::Image(image) = &request.state else {
+        panic!("the single-frame APNG state parses as an image");
+    };
+    assert_eq!((image.width, image.height), (32, 32));
+}
+
+/// PIL's frame-count semantics, reproduced case by case beside the corpus's
+/// two-frame rejection: the declared `acTL` count decides, a count of 0 or
+/// above 2^31 falls back to the default image, a second `acTL` drops the
+/// animation, the header scan stops at the pixel data, and a frame control
+/// before the pixel data keeps the IDAT from counting as a separate default
+/// image. Recorded from the reference worker and Pillow 12 on this matrix.
+#[test]
+fn apng_frame_count_admission_matches_the_reference() {
+    let special = protocol::default_special_tokens();
+    let base = png_bytes(4, 4, [10, 20, 30]);
+    let question =
+        serde_json::json!({"type": "choice", "instructions": "i", "criteria": {"a": "A"}});
+    let admit = |png: &[u8]| {
+        let body = serde_json::json!({
+            "model": "valen-preview-0923",
+            "state": {"image": image_url(png)},
+            "questions": {"q": question},
+        });
+        omni_valen_native::wire::parse_body(&serde_json::to_vec(&body).unwrap())
+            .and_then(|body| protocol::parse_request(&body, &special))
+    };
+    let single_frame_detail =
+        "image must be single-frame, at most 2048 per side and 1048576 pixels";
+
+    // A declared single frame with its frame control: a still image.
+    admit(&png_splice_after(&base, b"IHDR", &[actl(1), fctl(4, 4)])).unwrap();
+    // The corpus's two-frame rejection, in the same terms.
+    let error = admit(&png_splice_after(&base, b"IHDR", &[actl(2), fctl(4, 4)])).unwrap_err();
+    assert_eq!(error.status, 422);
+    assert_eq!(error.message, single_frame_detail);
+    // No frame control: the pixel data counts as a separate default image.
+    let error = admit(&png_splice_after(&base, b"IHDR", &[actl(1)])).unwrap_err();
+    assert_eq!(error.status, 422);
+    assert_eq!(error.message, single_frame_detail);
+    // A frame count of 0 (and above 2^31) falls back to the default image;
+    // exactly 2^31 is a valid multi-frame declaration.
+    admit(&png_splice_after(&base, b"IHDR", &[actl(0), fctl(4, 4)])).unwrap();
+    admit(&png_splice_after(
+        &base,
+        b"IHDR",
+        &[actl(0x8000_0001), fctl(4, 4)],
+    ))
+    .unwrap();
+    let error = admit(&png_splice_after(
+        &base,
+        b"IHDR",
+        &[actl(0x8000_0000), fctl(4, 4)],
+    ))
+    .unwrap_err();
+    assert_eq!(error.status, 422);
+    assert_eq!(error.message, single_frame_detail);
+    // The header scan stops at the pixel data: a later acTL is never seen.
+    admit(&png_splice_after(&base, b"IDAT", &[actl(2)])).unwrap();
+    // A frame control first does not hide a later acTL.
+    let error = admit(&png_splice_after(&base, b"IHDR", &[fctl(4, 4), actl(2)])).unwrap_err();
+    assert_eq!(error.status, 422);
+    assert_eq!(error.message, single_frame_detail);
+    // A second acTL drops the animation entirely.
+    admit(&png_splice_after(
+        &base,
+        b"IHDR",
+        &[actl(2), actl(2), fctl(4, 4)],
+    ))
+    .unwrap();
+    // A truncated acTL fails Image.open itself: the invalid-image-data 422.
+    let error = admit(&png_splice_after(
+        &base,
+        b"IHDR",
+        &[png_chunk(b"acTL", &[0, 0, 0])],
+    ))
+    .unwrap_err();
+    assert_eq!(error.status, 422);
+    assert_eq!(error.message, "invalid image data");
 }
