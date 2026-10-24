@@ -47,7 +47,7 @@ def main():
             files[name] = hashlib.sha256(data).hexdigest()
 
     metadata = {
-        "abi": 1,
+        "abi": 2,
         "laya": "0.3.20",
         "hidden_size": 1024,
         "head_dim": 64,
