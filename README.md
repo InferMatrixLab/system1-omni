@@ -169,6 +169,7 @@ pinned runtime for text, image and video state:
 | Model | Status |
 | --- | --- |
 | LAYA | [External worker](recipe/laya/README.md); [Python worker on Apple Silicon (MPS) and CPU](recipe/laya/apple-silicon.md); [CPU checkpoint reader](src/models/laya/README.md); [native Rust/CUDA worker on Hopper](recipe/laya/native/README.md) |
+| Decider-2B v11 | [Native Rust/CUDA text worker](recipe/decider/README.md); Choice/Noul/isolated Score; opt-in batching, Graph and request-local prefixes; [validation scope](recipe/decider/validation.md) |
 | Cua-S1 4B 0.2 (`text` adapter) | [Python worker](recipe/cua_s1/text.md); [native worker](recipe/cua_s1/native.md), CUDA; unmerged profile validated on the cumulative A800 sm_80 build, earlier merged path on sm_89 |
 | Cua-S1 4B 0.2 (`multimodal` adapter) | [Python CUDA reference](src/frontend/cua_s1.py) and [native Rust/CUDA screenshot worker](recipe/cua_s1/native_screenshot.md); one PNG/JPEG image, `choice`; scoped RTX 4090 validation |
 | JEMM (Qwen3.8-27B) | [Native Rust/CUDA worker](recipe/jemm/README.md); [text and 1–4-image frozen-corpus parity on A800](src/models/jemm/README.md#validation) |
