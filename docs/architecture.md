@@ -24,6 +24,10 @@ per loaded executor. The [Decider native worker](../recipe/decider/README.md)
 also uses this runtime and can opt into outstanding-request and processed-token
 budgets plus HTTP request deadlines. Shared processing orchestration,
 cross-request batch assembly, compatibility grouping and dynamic batching are planned.
+The pplx-decider reference worker runs the checkpoint's own loader instead of
+this shared Qwen executor: the checkpoint's full-attention layers are
+noncausal, and the language kernels in `src/backends/cuda/qwen3_5/attention.cu`
+are causal. Its readout is a separate 255-row tensor.
 
 Cua-S1 and Open-Jev compute their decision heads on the CPU after downloading
 the final hidden state. Decider projects its selected LM-head rows on CUDA.

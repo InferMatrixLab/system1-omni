@@ -82,5 +82,7 @@ boundaries, and ticket episode duration is not request latency.
 Append a dated campaign and auditable evidence without replacing prior results.
 Compare new deployments with a reference measured in the same campaign. Different
 hardware, workloads, precision, concurrency, clocks or quantile methods need
-separate groups. Image replacement, repeated-image/cache workloads and higher
+separate groups. The [pplx-decider recipe](../recipe/pplx_decider/README.md)
+describes a Public231 concurrency-1 procedure for an sm_89 device. That
+procedure has no measured samples, and it does not enter the H800 table above. Image replacement, repeated-image/cache workloads and higher
 concurrency have not been measured here; add their own frozen inputs before ranking.
