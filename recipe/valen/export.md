@@ -206,7 +206,7 @@ PYTHONPATH=src .venv/bin/python -m pytest tests/valen -q
 python recipe/valen/test_export_reference.py
 ~~~
 
-The first is the CPU-only suite (108 tests passed, 2 artifact-gated skips
+The first is the CPU-only suite (110 tests passed, 2 artifact-gated skips
 at the time of writing). The second chains that suite's export battery plus
 the env-gated real-artifact determinism gate — set `VALEN_CKPT` and
 `VALEN_BASE` to run it; it exports twice and compares every byte — and,

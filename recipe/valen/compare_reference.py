@@ -188,6 +188,30 @@ def reference_score_confidence(probabilities):
     return max(0.0, 1.0 - distance / uniform_mad)
 
 
+def scalar_answer_fields(answer, expected_type, ref_answer):
+    """Every scalar the per-type branches fold into a running maximum.
+
+    max() keeps its first argument against a NaN difference, so each field
+    here is swept for finiteness before those branches run. Reference values
+    derived from the probabilities (the choice-shaped noul decode, the
+    fallback score) are already covered by the probability gate.
+    """
+
+    fields = [answer["confidence"]]
+    if expected_type == "noul":
+        fields.append(answer["noul"])
+    elif expected_type == "score":
+        fields.append(answer["score"])
+    if ref_answer is not None:
+        if expected_type == "noul" and "noul" in ref_answer:
+            fields.append(ref_answer["noul"])
+        elif expected_type == "score" and "score" in ref_answer:
+            fields.append(ref_answer["score"])
+        if "confidence" in ref_answer:
+            fields.append(ref_answer["confidence"])
+    return fields
+
+
 def compare_case(
     name, worker_response, reference, expected_types, tolerance=PROBABILITY_TOLERANCE
 ):
@@ -246,6 +270,20 @@ def compare_case(
         # source; synthetic references may omit it and fall back to the
         # shared probabilities and formulas.
         ref_answer = reference.get("answers", {}).get(qid)
+        # The scalar deltas below fold into running maxima, and max() keeps
+        # its first argument against a NaN difference, so a non-finite
+        # scalar field on either side fails the case before any tolerance
+        # verdict.
+        if any(
+            not math.isfinite(value)
+            for value in scalar_answer_fields(answer, expected_type, ref_answer)
+        ):
+            problems.append(
+                f"{qid}: non-finite scalar answer or confidence (NaN or "
+                "infinity) on the worker or reference side"
+            )
+            decision_exact = False
+            continue
         if expected_type == "noul":
             scalar_answers = True
             if ref_answer is not None and "noul" in ref_answer:
