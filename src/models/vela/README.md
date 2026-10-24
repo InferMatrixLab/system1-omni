@@ -258,7 +258,17 @@ The native implementation lives in [`native/`](native/) as the
   the long-target window rows. All five frozen token plans
   (`tests/vela/fixtures/native-plan-*.json`) match field-for-field.
 
-The F32 heads, scoring, backbone execution and an HTTP worker are not
-implemented. Checks: `cargo test -p omni-vela-native` (26 tests, no
-weights, no GPU; render parity opt-in with `VELA_NATIVE_BUNDLE`; see
+- `native/src/{heads,scoring}.rs` are the F32 heads and the scoring
+  path: CandidateHead, both SpanHeadV2 heads, `set_bias`, the
+  per-type temperatures, set thresholds, the PII length rule and
+  sparse gate, `span_decode_r4` (word units, unit vote, fill,
+  edge/URL trimming), label aliasing, score normalization and the
+  window aggregation. Replaying the recorded head-input fixtures
+  (`tests/vela/fixtures/head-input-*`): head-logit drift ≤ 3.8e-5,
+  predict-answer drift ≤ 7.3e-7, discrete picks and span structures
+  equal on all five cases.
+
+Backbone execution and an HTTP worker are not implemented. Checks:
+`cargo test -p omni-vela-native` (27 tests, no weights, no GPU;
+render and head parity opt-in with `VELA_NATIVE_BUNDLE`; see
 [recipe/vela/native.md](../../recipe/vela/native.md)).
