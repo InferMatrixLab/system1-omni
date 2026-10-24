@@ -9,6 +9,12 @@ The [latency leaderboard](latency-leaderboard.md) records the five-model H800
 comparison and its timing rules. Its historical body-receipt clock is kept
 separate from this runner's body/JSON/schema-validation clock.
 
+The [hk2 nightly harness](nightly/README.md) runs this same client on a local
+GPU host. It is not a GitHub Actions GPU job. Required headline rows are
+Open-Jev-9B and Open-Jev-27B-v1.1 at concurrency 1. Intern-Decision is opt-in.
+C8/C16 and the packing probe are labeled so a dashboard does not treat them as
+headline numbers.
+
 The runner is an HTTP client: it neither launches models nor reserves or accesses
 a GPU. Start each server separately through the host's verified GPU scheduler,
 using the same exact reserved device and pinned Laya checkpoint. Verify CUDA

@@ -84,3 +84,12 @@ Compare new deployments with a reference measured in the same campaign. Differen
 hardware, workloads, precision, concurrency, clocks or quantile methods need
 separate groups. Image replacement, repeated-image/cache workloads and higher
 concurrency have not been measured here; add their own frozen inputs before ranking.
+
+## hk2 nightly trend
+
+The tables above are frozen campaigns. The [hk2 nightly harness](nightly/README.md)
+does not rewrite them. It records a separate `bench.py` clock (body, JSON and
+schema validation; nearest-rank p95) for Open-Jev-9B and Open-Jev-27B-v1.1 at
+concurrency 1 on the host GPU. Do not compute a speedup between those summary
+files and the H800 body-receipt numbers on this page. Optional Intern-Decision
+rows, the packing probe, and C8/C16 gates stay out of that headline pair.
