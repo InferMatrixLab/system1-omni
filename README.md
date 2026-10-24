@@ -183,7 +183,7 @@ extensions) on each checkpoint's own pinned runtime:
 | OmniJev-4B v1.1 | [Checkpoint export and CPU contract](recipe/omnijev/README.md) only; the native worker is in progress ([#114](https://github.com/ThinkFlowLab/system1-omni/issues/114)) |
 | D3 (Decision 3.0) | [Python reference worker](recipe/d3/reference.md) on the checkpoint's pinned runtime; `choice`/`noul`/`score` text state, media inputs refused; author-run on A100 (evidence in the integration PR) |
 | Vela 2.0 0.3B | [Python reference worker](recipe/vela/reference.md) on the checkpoint's pinned runtime; all five kinds (`choice`/`noul`/`score`/`span`/`set`) for text state; CPU FP32 validated (author-run, evidence in the integration PR) |
-| Vela 2.0 0.8B hybrid | [Python reference worker](recipe/vela/reference.md) on the checkpoint's pinned runtime; same surface plus `span_heads`; [native library](recipe/vela/native.md) (bundle export, wire contract, token-level processing); CPU FP32 parity recorded in the integration PR |
+| Vela 2.0 0.8B hybrid | [Python reference worker](recipe/vela/reference.md) on the checkpoint's pinned runtime; same surface plus `span_heads`; [native library](recipe/vela/native.md) (bundle export, wire contract, processing, F32 heads); CPU FP32 parity recorded in the integration PR |
 
 [Supported models and hardware](docs/supported-models.md) lists the devices
 and where each worker has been run.

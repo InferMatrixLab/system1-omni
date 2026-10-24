@@ -3,10 +3,12 @@ name = "omni-vela-native"
 version = "0.1.0"
 edition = "2024"
 publish = false
-description = "Native library for vllm-sr/Vela-2.0-0.8B: bundle gate, wire contract and token-level processing"
+description = "Native library for vllm-sr/Vela-2.0-0.8B: bundle gate, wire contract, processing, F32 heads and scoring"
 
 [dependencies]
 anyhow = "1.0.100"
+libm = "0.2"
+safetensors = "0.8.0"
 onig = { package = "onig", version = "6", default-features = false }
 omni-qwen3-5-native = { path = "../../qwen3_5/native" }
 serde = { version = "1", features = ["derive"] }
@@ -35,3 +37,7 @@ path = "../../../../tests/vela/native_processing.rs"
 [[test]]
 name = "vela_native_units"
 path = "../../../../tests/vela/native_units.rs"
+
+[[test]]
+name = "vela_native_heads"
+path = "../../../../tests/vela/native_heads.rs"

@@ -1294,8 +1294,10 @@ name = "omni-vela-native"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "libm",
  "omni-qwen3-5-native",
  "onig",
+ "safetensors 0.8.0",
  "serde",
  "serde_json",
  "sha2 0.11.1",

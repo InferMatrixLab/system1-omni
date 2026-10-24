@@ -6,8 +6,10 @@
 
 pub mod bundle;
 pub mod contract;
+pub mod heads;
 pub mod processing;
 pub mod questions;
 pub mod render;
+pub mod scoring;
 pub mod state;
 pub mod words;
