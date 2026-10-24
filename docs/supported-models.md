@@ -28,6 +28,10 @@ Models that are being added are also tracked in issues labeled [new model](https
 | OmniJev-4B v1.1 | None yet: [checkpoint export and CPU contract](../recipe/omnijev/README.md); the native worker is in progress ([#114](https://github.com/ThinkFlowLab/system1-omni/issues/114)) | Request contract, preparation, heads and finishing checked against the reference ([#120](https://github.com/ThinkFlowLab/system1-omni/pull/120)); no inference | Not yet | Not supported | Python 3.10 reference environment for the export and fixtures |
 | D3 (Decision 3.0) | [Python reference worker](../recipe/d3/reference.md) on the checkpoint's pinned runtime — text, image and video state over `choice`/`noul`/`score`, with the deliberate transport differences documented in the recipe; the native worker is in progress ([#136](https://github.com/ThinkFlowLab/system1-omni/issues/136)) | Unverified | Author-run on NVIDIA A100 (sm_80): serving smoke and reference parity for text and media (exact decisions, max delta 0.0); evidence in the integration and media PRs. Owner: @MrDongsls. | Unverified | Python 3.12, the [pinned runtime requirements](../recipe/d3/requirements.txt), the [pinned package](https://huggingface.co/vllm-sr/d3) (~52 GB); [media budgets and the 64 MiB total request cap](../recipe/d3/reference.md) |
 
+Kev-4B has [CPU checkpoint preparation and a Rust pointer head](../recipe/kev/README.md)
+only. No Kev worker, backbone parity, GPU serving or full-model accuracy is
+established by that preparation slice; native integration remains [#27](https://github.com/InferMatrixLab/system1-omni/issues/27).
+
 - **Validated:** covered by the recipe on `main` or by the checks in the linked merged pull request.
 - **Author-run:** recorded by the recipe author on the stated hardware and not independently reproduced; the row names its owner.
 - **Unverified:** the worker accepts this device, but no recipe or merged pull request covers it.

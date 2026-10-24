@@ -32,6 +32,8 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   image decisions; bounded H800 validation with explicit deployment limits.
 - [OmniJev-4B v1.1 preparation](omnijev/README.md): export the checkpoint and
   regenerate the CPU fixtures; the native worker is not available yet.
+- [Kev-4B preparation](kev/README.md): export all LoRA projections and validate
+  the Rust FP32 pointer head on CPU; worker integration remains pending.
 - [CLM behind the frontend](clm/README.md): run CLM's own server behind the frontend on
   CPU with a stub encoder, and what the response comparison has to allow for.
 - [D3 reference worker](d3/reference.md): download the pinned vllm-sr/d3 package,

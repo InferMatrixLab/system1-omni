@@ -46,6 +46,21 @@ jobs:
       - name: Decider validation helpers
         run: python -m unittest discover -s tests/decider -p 'test_*.py' -v
 
+  kev-export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: CPU-only export dependencies
+        run: |
+          python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r recipe/kev/requirements.txt
+      - name: Export contract tests (no weights or GPU)
+        run: python -m unittest discover -s tests/kev -p 'test_*.py' -v
+
   cuda-contract:
     # The CUDA backend contract and its checker. No CUDA toolkit and no GPU: both
     # read files as text.
