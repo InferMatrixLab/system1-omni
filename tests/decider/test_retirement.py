@@ -87,6 +87,17 @@ class WorkerLaunch(unittest.TestCase):
         for name in ("CUA_S1_GRAPH", "DECIDER_PREFIX", "DECIDER_FIXED"):
             self.assertEqual(env[name], "0", name)
 
+    def test_explicit_prefix_mode_overrides_inherited_graph_and_fixed(self):
+        health = {"status": "unavailable", "execution": "unavailable",
+                  "prefix_mode": "shared", "prefix": {"shared_requests": 1, "saved_tokens": 1}}
+        env = self.run_cli(True, {"DECIDER_GRAPH": "1", "DECIDER_FIXED": "1"},
+                           options=["--prefix"], retired_health=health)
+        self.assertEqual(env["DECIDER_PREFIX"], "1")
+        self.assertEqual(env["DECIDER_BATCH_MAX_ROWS"], "2")
+        self.assertEqual(env["DECIDER_BATCH_MAX_TOKENS"], "4096")
+        for name in ("CUA_S1_GRAPH", "DECIDER_GRAPH", "DECIDER_FIXED"):
+            self.assertEqual(env[name], "0", name)
+
 
 if __name__ == "__main__":
     unittest.main()

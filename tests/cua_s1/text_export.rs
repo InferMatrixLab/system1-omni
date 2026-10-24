@@ -3,6 +3,7 @@ use serde_json::json;
 use std::{
     fs,
     path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -13,8 +14,16 @@ impl Directory {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("cua-text-export-{}-{nonce}", std::process::id()));
+        Self::with_nonce(marker, nonce)
+    }
+
+    fn with_nonce(marker: serde_json::Value, nonce: u128) -> Self {
+        static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+        let sequence = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "cua-text-export-{}-{nonce}-{sequence}",
+            std::process::id()
+        ));
         fs::create_dir(&path).unwrap();
         fs::write(path.join("cua_s1_export.json"), marker.to_string()).unwrap();
         Self(path)
@@ -59,4 +68,31 @@ async fn reference_export_rejects_changed_adapter_bytes_before_cuda_loading() {
         .err()
         .expect("must reject changed adapter");
     assert!(error.to_string().contains("adapter checksum"), "{error}");
+}
+
+#[test]
+fn text_export_fixture_directories_are_unique_with_a_shared_clock_tick() {
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let workers: Vec<_> = (0..8)
+        .map(|_| {
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                Directory::with_nonce(json!({"format":"fixture"}), nonce)
+            })
+        })
+        .collect();
+    let directories: Vec<_> = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect();
+    let unique: std::collections::HashSet<_> = directories.iter().map(|dir| &dir.0).collect();
+    assert_eq!(unique.len(), directories.len());
+    for directory in &directories {
+        assert!(directory.0.join("cua_s1_export.json").is_file());
+    }
 }

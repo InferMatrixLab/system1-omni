@@ -19,4 +19,5 @@ int cs1_stream_sync(void* stream) { (void)stream; return 0; }
 int cs1_stream_destroy(void* stream) { (void)stream; ++destroyed; if (live || gemms) ++early; return 0; }
 int cs1_upload(void* dst, const void* src, size_t n, void* stream) { (void)stream; memcpy(dst,src,n); return 0; }
 void* cs1_gemm_create(size_t n) { (void)n; ++gemms; return (void*)2; }
+void* cs1_gemm_create_fixed(size_t n, int m) { (void)n; if(m<=0) return NULL; ++gemms; return (void*)3; }
 void cs1_gemm_destroy(void* p) { (void)p; --gemms; }

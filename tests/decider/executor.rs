@@ -92,6 +92,7 @@ fn graph_snapshot_does_not_wait_for_model_lock_and_survives_retirement() {
         loaded: Arc::new(Mutex::new(None)),
         labels: vec![],
         ready: Arc::new(AtomicBool::new(false)),
+        prefix_stats: Arc::new(Mutex::new(PrefixStats::default())),
         graph_stats: Arc::new(Mutex::new(GraphStats {
             requested: true,
             captures: 2,

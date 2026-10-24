@@ -1,6 +1,6 @@
 //! Real model constructors through a host boundary: no checkpoint download or GPU.
 #![cfg(unix)]
-use omni_qwen3_5_native::model::Model;
+use omni_qwen3_5_native::model::{Model, SharedPrompts};
 use safetensors::{Dtype, tensor::TensorView};
 use std::{path::Path, process::Command};
 
@@ -90,6 +90,7 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
         "cs1_stream_destroy",
         "cs1_upload",
         "cs1_gemm_create",
+        "cs1_gemm_create_fixed",
         "cs1_gemm_destroy",
     ];
     let api = cuda
@@ -130,9 +131,13 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
     let metric =
         |name: &[u8]| unsafe { metrics.get::<unsafe extern "C" fn() -> i32>(name).unwrap()() };
     for graph in [false, true] {
-        let model = Model::load_with_graph(&directory, &library, graph).unwrap();
+        let mut model = Model::load_with_graph(&directory, &library, graph).unwrap();
         assert_eq!(model.graph_stats().requested, graph);
         assert_eq!(model.graph_stats().enabled, graph);
+        // The fake has no arithmetic kernels. The fixed handle and scratch are
+        // created before this deliberate dispatch error and must retire safely.
+        assert!(model.forward_fixed(&[0]).is_err());
+        assert_eq!(metric(b"loading_gemms\0"), 2);
         drop(model);
         assert_eq!(metric(b"loading_streams\0"), metric(b"loading_destroyed\0"));
         assert_eq!(metric(b"loading_live\0"), 0);
@@ -143,10 +148,30 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
             "stream destroyed before model allocations"
         );
     }
-    let model = Model::load_with_lora(&directory, &library, &adapter, 2.0).unwrap();
+    let mut model = Model::load_with_lora(&directory, &library, &adapter, 2.0).unwrap();
     assert_eq!(
         model.graph_stats().requested,
         std::env::var("CUA_S1_GRAPH").as_deref() == Ok("1")
+    );
+    let allocations = metric(b"loading_live\0");
+    let error = model.forward_fixed(&[0]).unwrap_err();
+    assert!(error.to_string().contains("only merged weights"));
+    let error = model
+        .forward_shared(&SharedPrompts {
+            prefix: &[],
+            groups: vec![],
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("only merged weights"));
+    assert_eq!(
+        metric(b"loading_live\0"),
+        allocations,
+        "reject before scratch allocation"
+    );
+    assert_eq!(
+        metric(b"loading_gemms\0"),
+        1,
+        "reject before fixed handle creation"
     );
     drop(model);
     assert_eq!(metric(b"loading_streams\0"), 3);

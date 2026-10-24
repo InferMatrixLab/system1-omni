@@ -16,11 +16,13 @@ pub struct Engine {
 }
 impl Engine {
     pub async fn load(dir: &Path, library: &Path) -> Result<Self> {
-        Self::load_with_options(
+        let graph = crate::options::graph_env()?;
+        Self::load_with_modes(
             dir,
             library,
             BatchLimits::from_env()?,
-            crate::options::graph_env()?,
+            graph,
+            crate::options::prefix_env(graph)?,
         )
         .await
     }
@@ -37,6 +39,26 @@ impl Engine {
         batching: BatchLimits,
         graph: bool,
     ) -> Result<Self> {
+        Self::load_with_modes(
+            dir,
+            library,
+            batching,
+            graph,
+            crate::prefix::PrefixMode::Off,
+        )
+        .await
+    }
+    pub async fn load_with_modes(
+        dir: &Path,
+        library: &Path,
+        batching: BatchLimits,
+        graph: bool,
+        prefix_mode: crate::prefix::PrefixMode,
+    ) -> Result<Self> {
+        anyhow::ensure!(
+            !graph || prefix_mode == crate::prefix::PrefixMode::Off,
+            "shared/fixed execution requires Graph off"
+        );
         let directory = dir.to_owned();
         let (processor,checkpoint,mut metadata) = tokio::task::spawn_blocking(move || -> Result<_> {
             let processor = Processor::load(&directory,Limits::default())?;
@@ -47,9 +69,19 @@ impl Engine {
             Ok((processor,checkpoint,metadata))
         }).await??;
         let labels = processor.labels().iter().map(|label| label.id).collect();
-        let executor = Executor::load(dir, library, checkpoint, labels, batching, graph).await?;
+        let executor = Executor::load(
+            dir,
+            library,
+            checkpoint,
+            labels,
+            batching,
+            graph,
+            prefix_mode,
+        )
+        .await?;
         metadata["batch_limits"] =
             json!({"rows":batching.max_rows(),"tokens":batching.max_tokens()});
+        metadata["prefix_mode"] = json!(prefix_mode.name());
         let engine = Self {
             processor: Arc::new(processor),
             executor,
@@ -79,6 +111,10 @@ impl Engine {
             "eager"
         });
         metadata["graph"] = json!(stats);
+        metadata["prefix"] = json!(self.executor.prefix_stats());
+        if self.executor.is_ready() && metadata["prefix_mode"] != "off" {
+            metadata["execution"] = metadata["prefix_mode"].clone();
+        }
         metadata["status"] = json!(if self.executor.is_ready() {
             "ready"
         } else {

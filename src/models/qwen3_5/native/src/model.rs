@@ -701,10 +701,10 @@ pub struct Model {
     lora: Option<lora::Lora>,
     stream: Stream,
     gemm: *mut c_void,
-    reference: Option<&'static cuda::Reference>,
-    fp32_gdn: Option<cuda::Fp32Gdn>,
     /// One GEMM algorithm per weight shape for `forward_shared`; created on first use.
     fixed_gemm: *mut c_void,
+    reference: Option<&'static cuda::Reference>,
+    fp32_gdn: Option<cuda::Fp32Gdn>,
     /// Buffers for the largest packed token count so far; grows as needed.
     scratch: Option<Scratch>,
     /// The request and group prefix states of `forward_shared`; grow as needed.
@@ -737,9 +737,10 @@ impl Drop for Model {
         self.graphs.clear();
         self.mm_graphs.clear();
         self.scratch = None;
+        self.shared = [None, None];
         // Retire the FP32 cuBLAS context while its last stream is still valid.
         self.fp32_gdn = None;
-        // SAFETY: created by cs1_gemm_create(_fixed) and not destroyed before.
+        // SAFETY: both GEMM handles are owned by this model and destroyed once.
         unsafe {
             (cuda::api().cs1_gemm_destroy)(self.gemm);
             if !self.fixed_gemm.is_null() {
@@ -867,9 +868,9 @@ impl Model {
             lora,
             stream,
             gemm,
+            fixed_gemm: std::ptr::null_mut(),
             reference: None,
             fp32_gdn: None,
-            fixed_gemm: std::ptr::null_mut(),
             scratch: None,
             shared: [None, None],
             graph_enabled: graph,
