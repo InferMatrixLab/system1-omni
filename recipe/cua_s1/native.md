@@ -104,7 +104,7 @@ not substitute for the full 139-request legacy upgrade and unmerged-reference
 comparisons. See the [four-case diagnosis and retest scope](../../docs/benchmarks/cua-s1-text-parity-20261013/README.md#legacy-merged-upgrade-regression).
 
 For the screenshot worker, [the vision Graph recipe](native_vision_graph.md)
-documents `CUA_S1_VISION_GRAPH`, retained four-grid FIFO scratch, memory/lifetime
+documents `CUA_S1_VISION_GRAPH`, bounded exact-grid scratch, memory/lifetime
 limits and the real CUDA capture-failure wrapper build and test commands.
 
 The ABI-8 parent synchronization preserves the unmerged precision profile.

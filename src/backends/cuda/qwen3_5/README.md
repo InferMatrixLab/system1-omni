@@ -44,7 +44,10 @@ entry points. Open-Jev uses this path within requests; Cua-S1 keeps single-promp
 
 Prefix continuation retains full-attention KV, three convolution input rows,
 and FP32 Gated DeltaNet state at 64-token chunk boundaries. It is used by the
-experimental JEV-VL worker; existing full-prefill callers keep their own paths.
+experimental JEV-VL worker and by the shared executor's `forward_shared`, which
+runs prompts that share prefixes once per prefix with the fixed-algorithm GEMM
+handle ([#85](https://github.com/ThinkFlowLab/system1-omni/issues/85)); existing
+full-prefill callers keep their own paths.
 ABI 6 adds mandatory copy and prefix entry points after ABI 5 native vision,
 and ABI 9 adds the fixed-algorithm GEMM handle.
 Rebuild the library and **all** Qwen worker binaries together; older libraries
@@ -96,14 +99,17 @@ Torch versions; the original approximate GDN entry points remain available.
 ## Shared vision cache and operator checks
 
 The generic shared vision constructor keeps a four-entry exact-grid FIFO for
-compatibility. Its cap counts entries, not device bytes; four large grids may
+compatibility. JEMM also retains a separate four-entry FIFO keyed by the ordered
+multi-image grids. Their caps count entries, not device bytes; four large grids may
 retain substantially more memory than four small grids. A borrowed resident
 output prevents mutation or eviction until its consumer is finished.
 
 [Cua-S1's bounded-cache integration in PR #127](https://github.com/ThinkFlowLab/system1-omni/pull/127)
 uses a separate explicit policy: count/byte LRU limits, default one entry and
 256 MiB, with zero retention available. The Cua wrapper owns environment parsing;
-generic Qwen/JEMM users retain their existing policy. Retention-disabled or
+generic Qwen/JEMM users retain their existing policy. Multi-image and JEMM
+reference execution require the generic constructor: the bounded policy cannot
+account for opaque cuDNN patch-plan allocations through ABI 8. Retention-disabled or
 oversized Cua output stays model-owned through both producer and consumer stream
 drains. Graph enablement and scratch retention are separate policies: turning
 Graph off alone does not release retained scratch.
