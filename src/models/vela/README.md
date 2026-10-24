@@ -268,7 +268,15 @@ The native implementation lives in [`native/`](native/) as the
   predict-answer drift ≤ 7.3e-7, discrete picks and span structures
   equal on all five cases.
 
+- `scoring.rs system_one_response` finishes the SystemOne envelope
+  from the predict answers and the response plan: Noul views (span =
+  the range-filtered max word probability, set fan-out
+  `<qid>.<label>`), span clipping to the plan's field ranges with
+  re-trim, `span_heads`, thresholds, the confidence formulas and
+  usage. Replaying the recorded reference logits into the frozen
+  oracle responses matches within 1.5e-6 on the four oracle cases.
+
 Backbone execution and an HTTP worker are not implemented. Checks:
-`cargo test -p omni-vela-native` (27 tests, no weights, no GPU;
-render and head parity opt-in with `VELA_NATIVE_BUNDLE`; see
-[recipe/vela/native.md](../../recipe/vela/native.md)).
+`cargo test -p omni-vela-native` (28 tests, no weights, no GPU;
+render, head and response parity opt-in with `VELA_NATIVE_BUNDLE`;
+see [recipe/vela/native.md](../../recipe/vela/native.md)).

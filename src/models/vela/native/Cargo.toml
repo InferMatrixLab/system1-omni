@@ -41,3 +41,7 @@ path = "../../../../tests/vela/native_units.rs"
 [[test]]
 name = "vela_native_heads"
 path = "../../../../tests/vela/native_heads.rs"
+
+[[test]]
+name = "vela_native_response"
+path = "../../../../tests/vela/native_response.rs"

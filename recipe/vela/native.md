@@ -64,14 +64,16 @@ VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
     --test vela_native_heads -- --nocapture
 ~~~
 
-27 tests run everywhere with no weights and no GPU: the wire contract
+28 tests run everywhere with no weights and no GPU: the wire contract
 against the pinned runtime's 422/400 bodies, the bundle manifest gate,
 and the predict-mapping/plan parity on every frozen fixture. The
 opt-in checks replay the fixtures through the Rust implementation:
 
 - render parity — the token plans match field-for-field (5/5);
 - head parity — head-logit drift <= 3.8e-5, predict-answer drift
-  <= 7.3e-7, discrete picks and span structures equal (5/5). For a field-level diff of one case:
+  <= 7.3e-7, discrete picks and span structures equal (5/5);
+- response parity — the finished SystemOne envelopes match the frozen
+  oracles within 1.5e-6 (4/4). For a field-level diff of one case:
 
 ~~~sh
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
@@ -86,6 +88,8 @@ VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
   rendering, the truncation budget, window rows), and the F32 heads
   with scoring and span decoding (CandidateHead, both SpanHeadV2
   heads, set_bias, temperatures, the PII length rule and sparse gate,
-  `span_decode_r4`, label aliasing, window aggregation).
+  `span_decode_r4`, label aliasing, window aggregation), and the
+  SystemOne response finishing (Noul views, set fan-out, span
+  clipping with re-trim, thresholds, confidence formulas, usage).
 - Not implemented: backbone execution and an HTTP worker. No
   performance claims are made.

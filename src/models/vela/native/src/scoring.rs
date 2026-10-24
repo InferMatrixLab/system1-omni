@@ -629,3 +629,214 @@ pub fn aggregate_windows(
         })
         .collect()
 }
+
+// ---------------------------------------------------- SystemOne finishing
+
+/// `system_one_response`: predict answers + the response plan -> the
+/// SystemOne envelope (model, answers, usage, spans/span_heads,
+/// sets, thresholds), with the span Noul view = the max word
+/// probability (pre-decode, range-filtered) and field-clipped spans.
+#[allow(clippy::too_many_arguments)]
+pub fn system_one_response(
+    model_name: &str,
+    plan: &[Value],
+    predict_answers: &[Value],
+    span_word_probabilities: &std::collections::HashMap<String, Vec<f32>>,
+    _span_word_offsets: &std::collections::HashMap<String, Vec<(usize, usize)>>,
+    part_texts: &std::collections::HashMap<String, String>,
+    input_tokens: usize,
+) -> Value {
+    let by_id: std::collections::HashMap<&str, &Value> = predict_answers
+        .iter()
+        .map(|a| (a["id"].as_str().unwrap_or(""), a))
+        .collect();
+    let mut answers = serde_json::Map::new();
+    let mut spans = serde_json::Map::new();
+    let mut span_heads = serde_json::Map::new();
+    let mut sets = serde_json::Map::new();
+    let mut thresholds = serde_json::Map::new();
+    for entry in plan {
+        let qid = entry["qid"].as_str().unwrap_or("");
+        let Some(answer) = by_id.get(qid) else {
+            continue;
+        };
+        match entry["type"].as_str().unwrap_or("") {
+            "noul" => {
+                answers.insert(
+                    qid.to_string(),
+                    serde_json::json!({"type": "noul", "noul": answer["probabilities"]["yes"]}),
+                );
+            }
+            "choice" => {
+                let names: Vec<&str> = entry["criteria"]
+                    .as_object()
+                    .map(|c| c.keys().map(String::as_str).collect())
+                    .unwrap_or_default();
+                let probabilities: serde_json::Map<String, Value> = names
+                    .iter()
+                    .map(|name| (name.to_string(), answer["probabilities"][*name].clone()))
+                    .collect();
+                let values: Vec<f64> = names
+                    .iter()
+                    .map(|name| answer["probabilities"][*name].as_f64().unwrap_or(0.0))
+                    .collect();
+                answers.insert(
+                    qid.to_string(),
+                    serde_json::json!({
+                        "type": "choice",
+                        "choice": answer["answer"],
+                        "confidence": json_f64(choice_confidence(&values)),
+                        "probabilities": probabilities,
+                    }),
+                );
+            }
+            "score" => {
+                let levels: Vec<Value> = entry["criteria"].as_array().cloned().unwrap_or_default();
+                // The predict answer keys probabilities by the level's
+                // rendered name (content_text), not by index.
+                let names: Vec<String> = levels
+                    .iter()
+                    .map(|level| match level {
+                        Value::String(text) => text.clone(),
+                        other => crate::state::canonical(other),
+                    })
+                    .collect();
+                let values: Vec<f64> = names
+                    .iter()
+                    .map(|name| {
+                        answer["probabilities"][name.as_str()]
+                            .as_f64()
+                            .unwrap_or(0.0)
+                    })
+                    .collect();
+                let expected: f64 = values.iter().enumerate().map(|(i, v)| i as f64 * v).sum();
+                let legend: serde_json::Map<String, Value> = levels
+                    .iter()
+                    .enumerate()
+                    .map(|(i, level)| (i.to_string(), level.clone()))
+                    .collect();
+                let probabilities: serde_json::Map<String, Value> = values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| (i.to_string(), json_f64(*v)))
+                    .collect();
+                answers.insert(
+                    qid.to_string(),
+                    serde_json::json!({
+                        "type": "score",
+                        "score": json_f64(expected),
+                        "confidence": json_f64(score_confidence(&values)),
+                        "legend": legend,
+                        "probabilities": probabilities,
+                    }),
+                );
+            }
+            "set" => {
+                let selected: Vec<Value> = answer["answer"].as_array().cloned().unwrap_or_default();
+                sets.insert(
+                    qid.to_string(),
+                    serde_json::json!({
+                        "selected": selected,
+                        "probabilities": answer["probabilities"],
+                    }),
+                );
+                thresholds.insert(qid.to_string(), answer["threshold"].clone());
+                for (label, value) in answer["probabilities"]
+                    .as_object()
+                    .unwrap_or(&serde_json::Map::new())
+                {
+                    answers.insert(
+                        format!("{qid}.{label}"),
+                        serde_json::json!({"type": "noul", "noul": value}),
+                    );
+                }
+            }
+            _ => {
+                // span: clip to the plan's field range and re-trim.
+                let part = entry["part"].as_str().unwrap_or("user");
+                let text = part_texts.get(part).cloned().unwrap_or_default();
+                let chars: Vec<char> = text.chars().collect();
+                let mut out = Vec::new();
+                match entry["range"].as_array() {
+                    Some(range) if range.len() == 2 => {
+                        let (lo, hi) = (
+                            range[0].as_u64().unwrap_or(0) as usize,
+                            range[1].as_u64().unwrap_or(0) as usize,
+                        );
+                        for z in answer["spans"].as_array().unwrap_or(&vec![]) {
+                            let s = z["start"].as_u64().unwrap_or(0) as usize;
+                            let e = z["end"].as_u64().unwrap_or(0) as usize;
+                            let (s, e) = trim(&chars, s.max(lo), e.min(hi));
+                            if e > s {
+                                out.push(serde_json::json!({
+                                    "label": z["label"],
+                                    "start": s - lo,
+                                    "end": e - lo,
+                                    "text": chars[s..e].iter().collect::<String>(),
+                                    "probability": z["probability"],
+                                }));
+                            }
+                        }
+                    }
+                    _ => {
+                        out = answer["spans"].as_array().cloned().unwrap_or_default();
+                    }
+                }
+                spans.insert(qid.to_string(), Value::Array(out));
+                span_heads.insert(qid.to_string(), answer["head"].clone());
+                thresholds.insert(qid.to_string(), answer["threshold"].clone());
+                let max = span_word_probabilities
+                    .get(qid)
+                    .map(|probs| probs.iter().cloned().fold(0.0f32, f32::max))
+                    .unwrap_or(0.0);
+                answers.insert(
+                    qid.to_string(),
+                    serde_json::json!({"type": "noul", "noul": json_f64(max as f64)}),
+                );
+            }
+        }
+    }
+    let mut response = serde_json::Map::new();
+    response.insert("model".into(), Value::String(model_name.to_string()));
+    response.insert("answers".into(), Value::Object(answers));
+    response.insert(
+        "usage".into(),
+        serde_json::json!({"input_tokens": input_tokens, "output_tokens": 0}),
+    );
+    if !spans.is_empty() {
+        response.insert("spans".into(), Value::Object(spans));
+        response.insert("span_heads".into(), Value::Object(span_heads));
+    }
+    if !sets.is_empty() {
+        response.insert("sets".into(), Value::Object(sets));
+    }
+    if !thresholds.is_empty() {
+        response.insert("thresholds".into(), Value::Object(thresholds));
+    }
+    Value::Object(response)
+}
+
+/// The top-two probability margin (the reference's `_choice_confidence`).
+pub fn choice_confidence(values: &[f64]) -> f64 {
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    if sorted.len() == 1 {
+        return 1.0;
+    }
+    (sorted[0] - sorted[1]).clamp(0.0, 1.0)
+}
+
+/// One minus the normalized level variance (`_score_confidence`).
+pub fn score_confidence(values: &[f64]) -> f64 {
+    let n = values.len();
+    if n == 1 {
+        return 1.0;
+    }
+    let mean: f64 = values.iter().enumerate().map(|(i, v)| i as f64 * v).sum();
+    let var: f64 = values
+        .iter()
+        .enumerate()
+        .map(|(i, v)| v * (i as f64 - mean).powi(2))
+        .sum();
+    (1.0 - var / ((n * n - 1) as f64 / 12.0)).clamp(0.0, 1.0)
+}
