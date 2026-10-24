@@ -56,7 +56,7 @@ pub fn parse_body(raw: &[u8]) -> Result<Map<String, Value>, RequestError> {
 
 /// Mirror the reference worker's 400 messages: duplicate keys verbatim,
 /// everything else the shared generic message.
-fn normalize_parse_error(error: &str) -> RequestError {
+pub(crate) fn normalize_parse_error(error: &str) -> RequestError {
     if let Some(rest) = error.split("duplicate key ").nth(1) {
         // serde appends its position suffix after the quoted key.
         if let Some(key) = rest
@@ -129,14 +129,5 @@ pub fn runtime_rejection(message: &str) -> RequestError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn duplicate_keys_mirror_the_reference_message() {
-        let error =
-            normalize_parse_error("request body is not valid JSON: duplicate key \"state\"");
-        assert_eq!(error.status, 400);
-        assert_eq!(error.body, json!({"detail": "duplicate JSON key 'state'"}));
-    }
-}
+#[path = "../../../../../tests/vela/native_contract_unit.rs"]
+mod tests;

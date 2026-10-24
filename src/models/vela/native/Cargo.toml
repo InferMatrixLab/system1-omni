@@ -3,15 +3,15 @@ name = "omni-vela-native"
 version = "0.1.0"
 edition = "2024"
 publish = false
-description = "Native library for vllm-sr/Vela-2.0-0.8B: bundle gate and wire contract"
+description = "Native library for vllm-sr/Vela-2.0-0.8B: bundle gate, wire contract and token-level processing"
 
 [dependencies]
 anyhow = "1.0.100"
+onig = { version = "6", default-features = false }
 omni-qwen3-5-native = { path = "../../qwen3_5/native" }
-serde_json = { version = "1.0.149", features = ["preserve_order"] }
-sha2 = "0.11"
-
-[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+tokenizers = { version = "=0.22.2", default-features = false, features = ["onig"] }
+serde_json = { version = "1.0.149", features = ["float_roundtrip", "preserve_order"] }
 sha2 = "0.11"
 
 [lib]
@@ -24,3 +24,11 @@ path = "../../../../tests/vela/native_contract.rs"
 [[test]]
 name = "vela_native_bundle"
 path = "../../../../tests/vela/native_bundle.rs"
+
+[[test]]
+name = "vela_native_processing"
+path = "../../../../tests/vela/native_processing.rs"
+
+[[test]]
+name = "vela_native_units"
+path = "../../../../tests/vela/native_units.rs"
