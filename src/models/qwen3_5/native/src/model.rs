@@ -804,6 +804,34 @@ impl Model {
         Ok(())
     }
 
+    /// Valen's unmerged text path: the same numeric profile as
+    /// [`Model::enable_reference_text_numerics`] over the 2B backbone — the
+    /// framework norm/GEMM/attention selection, FP32 LoRA branches, FP32
+    /// chunked GDN with the pinned Torch cumulative-decay association,
+    /// per-prompt state reset and no prefix continuation.
+    pub fn enable_valen_text_numerics(&mut self) -> Result<()> {
+        ensure!(
+            self.cfg.hidden == 2048 && self.cfg.full_attention.len() == 24 && self.lora.is_some(),
+            "Valen reference text numerics require the unmerged 2B language model"
+        );
+        ensure!(
+            self.scratch.is_none() && self.reference.is_none() && self.fp32_gdn.is_none(),
+            "select reference text numerics before the first forward"
+        );
+        cuda::set_device(0)?;
+        let gdn = cuda::api().fp32_gdn()?;
+        let reference = cuda::api().language_reference()?;
+        cuda::synchronize(self.stream)?;
+        // SAFETY: both handles are model-owned; no queued work or captures exist.
+        let gemm = unsafe { (reference.gemm_create)(GEMM_WORKSPACE) };
+        ensure!(!gemm.is_null(), "reference text cuBLASLt setup failed");
+        unsafe { (cuda::api().cs1_gemm_destroy)(self.gemm) };
+        self.gemm = gemm;
+        self.reference = Some(reference);
+        self.fp32_gdn = Some(gdn);
+        Ok(())
+    }
+
     /// Select JEMM's pinned framework arithmetic before the first forward.
     /// Prefix caching is outside this execution contract.
     pub fn enable_reference_numerics(&mut self) -> Result<()> {
@@ -973,6 +1001,21 @@ impl Model {
         Ok(self.forward_batch(&[ids])?.pop().unwrap())
     }
 
+    /// The final-norm hidden states at the given positions of one prompt, as
+    /// float32 (BF16 values upcast). Positions are validated ascending and in
+    /// range; the forward itself is exactly [`Model::forward`]'s.
+    pub fn forward_positions(&mut self, ids: &[u32], positions: &[usize]) -> Result<Vec<Vec<f32>>> {
+        ensure!(!positions.is_empty(), "no hidden positions requested");
+        ensure!(positions.is_sorted(), "hidden positions must be ascending");
+        ensure!(
+            positions.last().is_some_and(|&p| p < ids.len()),
+            "hidden position outside the prompt"
+        );
+        self.forward_batch(&[ids])?;
+        let s = self.scratch.as_ref().unwrap();
+        self.hidden_rows(s, positions)
+    }
+
     /// Pack independent text prompts for input and gate/up GEMMs.
     /// Mixers reset at each boundary; final-position hidden states retain input order.
     pub fn forward_batch(&mut self, inputs: &[&[u32]]) -> Result<Vec<Vec<f32>>> {
@@ -1073,6 +1116,27 @@ impl Model {
             self.run(s, &[t], true)?;
         }
         self.last_hidden(self.scratch.as_ref().unwrap(), t)
+    }
+
+    /// [`Model::forward_multimodal`] with the final-norm hidden states read at
+    /// the given positions instead of only the last one. The forward itself is
+    /// exactly [`Model::forward_multimodal`]'s; positions are validated
+    /// ascending and in range.
+    pub fn forward_multimodal_positions(
+        &mut self,
+        input: &MultimodalInput<'_>,
+        positions: &[usize],
+    ) -> Result<Vec<Vec<f32>>> {
+        ensure!(!positions.is_empty(), "no hidden positions requested");
+        let t = input.token_ids.len();
+        ensure!(positions.is_sorted(), "hidden positions must be ascending");
+        ensure!(
+            positions.last().is_some_and(|&p| p < t),
+            "hidden position outside the prompt"
+        );
+        self.forward_multimodal(input)?;
+        let s = self.scratch.as_ref().unwrap();
+        self.hidden_rows(s, positions)
     }
 
     /// Both modes retain the eager miss result; capture records without executing.
@@ -1383,6 +1447,31 @@ impl Model {
             .iter()
             .map(|&b| half::bf16::from_le_bytes(b).to_f32())
             .collect())
+    }
+
+    /// The final-norm hidden states at the given in-range positions, one row
+    /// per position, read back after a completed forward.
+    fn hidden_rows(&self, s: &Scratch, positions: &[usize]) -> Result<Vec<Vec<f32>>> {
+        let mut row = vec![0u8; self.cfg.hidden * BF16];
+        let mut rows = Vec::with_capacity(positions.len());
+        for &p in positions {
+            // SAFETY: x holds at least the validated prompt length of hidden-size rows.
+            unsafe {
+                cuda::download(
+                    &mut row,
+                    s.at(s.x + p * self.cfg.hidden * BF16),
+                    self.stream,
+                )?;
+            }
+            let (pairs, _) = row.as_chunks::<2>();
+            rows.push(
+                pairs
+                    .iter()
+                    .map(|&b| half::bf16::from_le_bytes(b).to_f32())
+                    .collect(),
+            );
+        }
+        Ok(rows)
     }
 
     /// Queue language layers over packed embeddings, resetting sequence positions.
@@ -2055,3 +2144,7 @@ impl Model {
 #[cfg(test)]
 #[path = "../../../../../tests/qwen3_5/multimodal_graph.rs"]
 mod graph_tests;
+
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/valen_text_gpu.rs"]
+mod valen_text_gpu_tests;

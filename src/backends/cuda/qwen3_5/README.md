@@ -70,7 +70,8 @@ contains a frozen 1–4-image corpus and reproducible operator/HTTP checks.
 ## Optional Cua-S1 no-FLA text arithmetic
 
 The unmerged Cua-S1 text export reuses the reference norm, attention and GEMM
-operations without requiring cuDNN. Norm additionally supports hidden size 2560.
+operations without requiring cuDNN. Norm additionally supports hidden sizes
+2560 and 2048.
 The additive `cs1_gdn_fp32_*` group owns a cuBLAS handle and 32 MiB internal
 workspace; the caller supplies shape-dependent FP32 buffers. It implements
 64-token chunked GDN, FP32 normalization, triangular solves and recurrent state,

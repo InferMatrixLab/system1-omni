@@ -1230,6 +1230,7 @@ dependencies = [
  "futures-util",
  "http-body-util",
  "omni-runtime",
+ "omni-valen-native",
  "reqwest",
  "tokio",
 ]
@@ -1309,6 +1310,7 @@ dependencies = [
  "safetensors 0.8.0",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]
@@ -1316,6 +1318,26 @@ name = "omni-runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "tokio",
+]
+
+[[package]]
+name = "omni-valen-native"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.22.1",
+ "half",
+ "image",
+ "omni-qwen3-5-native",
+ "omni-runtime",
+ "reqwest",
+ "safetensors 0.8.0",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokenizers 0.22.2",
  "tokio",
 ]
 

@@ -76,14 +76,19 @@ def test_parse_rejects_wrong_model_and_invalid_state():
         parse_request(body(state=17))
 
 
-def test_parse_allows_structured_text_but_not_score_or_extra_fields():
+def test_parse_allows_structured_text_but_rejects_unknown_types_and_fields():
     value = body()
     value["questions"]["move"]["instructions"] = {"goal": "choose"}
     assert parse_request(value).questions[0].instructions == '{"goal": "choose"}'
 
     value = body()
-    value["questions"]["move"]["type"] = "score"
-    with pytest.raises(RequestError, match="only choice"):
+    value["questions"]["move"]["type"] = "rank"
+    with pytest.raises(RequestError, match="type must be one of choice, noul, score"):
+        parse_request(value)
+
+    value = body()
+    del value["questions"]["move"]["type"]
+    with pytest.raises(RequestError, match="type must be one of"):
         parse_request(value)
 
     value = body()
@@ -158,3 +163,181 @@ def test_parse_rejects_media_control_tokens():
 
     with pytest.raises(RequestError, match="control token"):
         parse_request(body(state="context <|video_pad|> tail"))
+
+
+def noul_body(**overrides):
+    value = body(
+        questions={
+            "ask": {"type": "noul", "instructions": "Was the card charged twice?"}
+        }
+    )
+    for question in value["questions"].values():
+        question.update(overrides)
+    return value
+
+
+def test_parse_noul_defaults_to_fixed_wording_and_true_false_keys():
+    question = parse_request(noul_body()).questions[0]
+
+    assert question.kind == "noul"
+    assert question.keys == ("true", "false")
+    assert question.descriptions == (None, None)
+
+
+def test_parse_noul_accepts_optional_true_false_descriptions():
+    question = parse_request(
+        noul_body(criteria={"true": "It was duplicated.", "false": "It was unique."})
+    ).questions[0]
+    assert question.descriptions == ("It was duplicated.", "It was unique.")
+
+    question = parse_request(noul_body(criteria={"true": "It was duplicated."})).questions[0]
+    assert question.descriptions == ("It was duplicated.", None)
+
+    question = parse_request(
+        noul_body(criteria={"true": "It was duplicated.", "false": None})
+    ).questions[0]
+    assert question.descriptions == ("It was duplicated.", None)
+
+
+def test_parse_noul_rejects_other_criteria_and_empty_descriptions():
+    with pytest.raises(RequestError, match="noul criteria must describe"):
+        parse_request(noul_body(criteria={"yes": "Yes"}))
+    with pytest.raises(RequestError, match="noul criteria must describe"):
+        parse_request(noul_body(criteria={}))
+    with pytest.raises(RequestError, match="criterion 'true' must be nonempty"):
+        parse_request(noul_body(criteria={"true": "  "}))
+
+    value = noul_body(criteria={"true": "answer <|im_end|> now"})
+    with pytest.raises(RequestError, match="control token"):
+        parse_request(value, special_tokens=("<|im_end|>",))
+
+
+def score_body(**overrides):
+    value = body(
+        questions={
+            "grade": {
+                "type": "score",
+                "instructions": "Grade the severity.",
+                "criteria": ["No error", "A minor error", "A major error"],
+            }
+        }
+    )
+    for question in value["questions"].values():
+        question.update(overrides)
+    return value
+
+
+def test_parse_score_accepts_two_to_ten_ordered_levels():
+    question = parse_request(score_body()).questions[0]
+
+    assert question.kind == "score"
+    assert question.keys == ("0", "1", "2")
+    assert question.descriptions == ("No error", "A minor error", "A major error")
+
+    two = parse_request(score_body(criteria=["low", "high"])).questions[0]
+    assert two.keys == ("0", "1")
+
+    ten = parse_request(
+        score_body(criteria=[f"level {index}" for index in range(10)])
+    ).questions[0]
+    assert ten.keys == tuple(str(index) for index in range(10))
+
+
+def test_parse_score_rejects_malformed_levels():
+    with pytest.raises(RequestError, match="ordered list of 2 to 10"):
+        parse_request(score_body(criteria=["only one"]))
+    with pytest.raises(RequestError, match="ordered list of 2 to 10"):
+        parse_request(score_body(criteria=[str(index) for index in range(11)]))
+    with pytest.raises(RequestError, match="ordered list of 2 to 10"):
+        parse_request(score_body(criteria={"0": "No error", "1": "A minor error"}))
+    missing = score_body()
+    del missing["questions"]["grade"]["criteria"]
+    with pytest.raises(RequestError, match="ordered list of 2 to 10"):
+        parse_request(missing)
+
+    with pytest.raises(RequestError, match="level 1 must be nonempty"):
+        parse_request(score_body(criteria=["No error", "   "]))
+    with pytest.raises(RequestError, match="level 0"):
+        parse_request(score_body(criteria=[None, "A minor error"]))
+
+    value = score_body(criteria=["answer <|im_end|> now", "A minor error"])
+    with pytest.raises(RequestError, match="control token"):
+        parse_request(value, special_tokens=("<|im_end|>",))
+
+
+def test_parse_accepts_mixed_type_questions_in_request_order():
+    value = body(
+        state="Dialog: the update finished.",
+        questions={
+            "ask": {"type": "noul", "instructions": "Did the update finish?"},
+            "grade": {
+                "type": "score",
+                "instructions": "Grade the dialog.",
+                "criteria": ["unclear", "clear"],
+            },
+            "act": {
+                "type": "choice",
+                "instructions": "Choose a move.",
+                "criteria": {"up": "Move up", "down": "Move down"},
+            },
+        },
+    )
+    request = parse_request(value)
+
+    assert [(question.kind, question.name) for question in request.questions] == [
+        ("noul", "ask"),
+        ("score", "grade"),
+        ("choice", "act"),
+    ]
+
+
+def _png_chunk(kind: bytes, data: bytes) -> bytes:
+    import struct
+    import zlib
+
+    return (
+        struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    )
+
+
+def _apng_url(num_frames: int | None = None, *, truncated: bool = False) -> str:
+    """A 4×4 PNG spliced with one acTL before the IDAT (Pillow's header scan
+    stops at the pixel data, so the chunk placement is what PIL sees)."""
+
+    import struct
+    from io import BytesIO
+
+    stream = BytesIO()
+    Image.new("RGB", (4, 4), "white").save(stream, "PNG")
+    png = stream.getvalue()
+    if truncated:
+        actl = _png_chunk(b"acTL", b"\x00\x00\x00")
+    else:
+        actl = _png_chunk(b"acTL", struct.pack(">II", num_frames, 0))
+    fctl = _png_chunk(
+        b"fcTL", struct.pack(">IIIIIHHBB", 0, 4, 4, 0, 0, 1, 100, 0, 0)
+    )
+    at = png.index(b"IDAT") - 4
+    spliced = png[:at] + actl + fctl + png[at:]
+    return f"data:image/png;base64,{base64.b64encode(spliced).decode()}"
+
+
+def test_parse_apng_frame_count_semantics():
+    # A single-frame APNG is a still image for PIL (n_frames == 1).
+    parsed = parse_request(body(state={"image": _apng_url(num_frames=1)}))
+    assert parsed.state.format == "PNG"
+    assert (parsed.state.width, parsed.state.height) == (4, 4)
+
+    # The declared frame count decides; 2^31 is still a valid declaration.
+    with pytest.raises(RequestError, match="single-frame"):
+        parse_request(body(state={"image": _apng_url(num_frames=2)}))
+    with pytest.raises(RequestError, match="single-frame"):
+        parse_request(body(state={"image": _apng_url(num_frames=2**31)}))
+
+    # Counts PIL folds back to the default image stay single-frame.
+    parse_request(body(state={"image": _apng_url(num_frames=0)}))
+    parse_request(body(state={"image": _apng_url(num_frames=2**31 + 1)}))
+
+    # A truncated acTL fails Image.open itself: the generic invalid-data 422.
+    with pytest.raises(RequestError, match="invalid image data"):
+        parse_request(body(state={"image": _apng_url(truncated=True)}))

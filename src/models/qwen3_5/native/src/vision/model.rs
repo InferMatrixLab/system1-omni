@@ -957,3 +957,7 @@ mod vision_tests;
 #[cfg(test)]
 #[path = "../../../../../../tests/qwen3_5/vision_batch.rs"]
 mod batch_tests;
+
+#[cfg(test)]
+#[path = "../../../../../../tests/valen/valen_vision.rs"]
+mod valen_vision_tests;

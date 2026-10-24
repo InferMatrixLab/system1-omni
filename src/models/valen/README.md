@@ -1,9 +1,12 @@
 # Valen-Preview-0923 reference contract
 
-This directory contains the first System1-Omni integration slice for
-Valen-Preview-0923. It is a reference-serving boundary only: the Python worker,
-processor, executor, and postprocessor are implemented for the pinned text and
-single-image `choice` slice. Native CUDA execution is not part of this slice.
+This directory contains the System1-Omni integration for Valen-Preview-0923.
+The Python worker, processor, executor, and postprocessor are the reference
+serving boundary for the pinned text and single-image `choice`, `noul`, and
+`score` questions; the [`native/`](native/) subdirectory is the
+native Rust/CUDA worker that serves the same contract on the shared Qwen3.5
+backends — startup, parity gates and recorded deviations in
+[recipe/valen/native.md](../../../recipe/valen/native.md).
 
 ## Pinned artifacts
 
@@ -29,9 +32,14 @@ does not contain the frozen Qwen base model. The published config uses
   criteria are limited to 16,384 characters;
 - `instructions` must be non-empty after trimming; criterion keys and texts
   must be non-empty after trimming (a null criterion text defaults to its key);
-- `choice` questions only, at most 8 per request;
-- up to 255 named candidates per question;
-- no `noul`, `score`, video, multi-image, or remote URL inputs;
+- `choice`, `noul` and `score` questions, at most 8 per request, freely mixed
+  against one shared state;
+- `choice`: up to 255 named candidates per question;
+- `noul`: fixed `true`/`false` candidates; `criteria` is optional and may
+  replace either side's wording (`{"true": ..., "false": ...}`, null keeps
+  the reference's fixed wording);
+- `score`: an ordered list of 2 to 10 level descriptions in `criteria`;
+- no video, multi-image, or remote URL inputs;
 - no token generation: the decision head returns candidate logits directly.
 
 The public request keeps the Cua-S1-compatible shape:
@@ -69,12 +77,30 @@ A text-only request replaces the image object with plain text:
 Preprocessing validates and decodes the data URL, writes it to a request-scoped
 directory, hashes the bytes, and converts it to Valen's local-media
 `messages` record. Text state skips materialization and compiles a text-only
-user message with no assets. The worker owns that directory's lifetime. Postprocessing
-uses Valen's original choice confidence formula for this reference slice:
+user message with no assets. The worker owns that directory's lifetime.
+
+The pinned compiler builds every question type from the same record family:
+
+- `choice` and `noul` compile to one branch holding all candidates;
+- `score` compiles one isolated branch per level — each branch sees only its
+  own level description, never the level ID or the other levels — and the K
+  per-level decision logits are softmaxed across branches;
+- `noul` without custom wording is the reference's native noul record with
+  the schema's fixed candidate wording; custom wording cannot flow through
+  it, so it compiles as the equivalent `choice` record keyed `true`/`false`,
+  with unspecified sides filled from the same fixed wording — `P(true)` still
+  comes from the two-candidate softmax.
+
+Postprocessing keeps Valen's original formulas:
 
 ~~~text
-K = 1: confidence = 1
-K > 1: confidence = max(0, (max(p) - 1/K) / (1 - 1/K))
+choice/noul confidence (n candidates):
+  n = 1: 1
+  n > 1: max(0, (max(p) - 1/n) / (1 - 1/n))    # noul is the n = 2 case
+score confidence (K ordered levels, mode = argmax p):
+  distance    = sum_i p_i * |i - mode|
+  uniform_mad = (sum_i |i - (K-1)/2|) / K
+  confidence  = max(0, 1 - distance / uniform_mad)
 ~~~
 
 This confidence choice is intentionally temporary. The shared `/v1/systemone`
@@ -82,17 +108,29 @@ contract, including confidence semantics, error details, busy behavior, model
 identity, and usage fields, remains coordinated with
 [system1-omni#61](https://github.com/ThinkFlowLab/system1-omni/issues/61).
 
-Each answer is `{"type": "choice", "choice": ..., "probabilities": ...,
-"confidence": ...}`: `choice` is the candidate with the highest probability,
-ties go to the earliest candidate in request order, and `probabilities` maps
-every candidate key to its probability in request order.
+Each `choice` answer is `{"type": "choice", "choice": ...,
+"probabilities": ..., "confidence": ...}`: `choice` is the candidate with the
+highest probability, ties go to the earliest candidate in request order, and
+`probabilities` maps every candidate key to its probability in request order.
+
+Each `noul` answer is `{"type": "noul", "noul": ...,
+"probabilities": ..., "confidence": ...}`: `noul` is `P(true)`, the reference
+answer module's own field; the pair and confidence are this worker's
+extension (the reference answer carries only `P(true)`).
+
+Each `score` answer is `{"type": "score", "probabilities": ...,
+"score": ..., "legend": ..., "confidence": ...}`: `probabilities` maps the
+level keys `"0"`… to their cross-branch softmax probability, `score` is the
+expected level `sum(i * p_i)`, and `legend` maps each level key back to its
+request-order description.
 
 The response `model` is `valen-preview-0923`, the worker's stable serving
 identity. `usage.input_tokens` counts the compiled prompt's logical tokens:
 the shared state tokens plus each question's task suffix, counted once.
 `usage.output_tokens` is 0; the decision head returns logits without
 generation. `internal_usage.compute_tokens` counts the full per-question
-branch lengths the executor runs, with the shared state repeated per branch.
+branch lengths the executor runs, with the shared state repeated per branch —
+a K-level `score` question therefore counts K branches.
 
 ## Errors
 
@@ -111,14 +149,17 @@ and `503` that another inference is running.
 The status is `422` when a well-formed request cannot be evaluated:
 
 - a `model` other than `valen-preview-0923`;
-- a `score` or `noul` question, or unsupported request or question fields;
+- a question whose `type` is not `choice`, `noul` or `score`, or unsupported
+  request or question fields;
 - text over its limit, or containing a tokenizer control token — the media
   tokens such as `<|image_pad|>` at minimum, plus the loaded tokenizer's full
   special-token set (for example `<|im_end|>`) when the worker is serving;
-  this guard covers text state, instructions, criterion texts and option keys
-  (candidate names enter the prompt);
-- empty or whitespace-only `instructions`, option keys, criterion texts, or
-  text state;
+  this guard covers text state, instructions, criterion texts, level
+  descriptions and option keys (candidate names enter the prompt);
+- empty or whitespace-only `instructions`, option keys, criterion texts,
+  noul descriptions, score level descriptions, or text state;
+- `noul` criteria that name anything other than `true`/`false`, or `score`
+  criteria that are not an ordered list of 2 to 10 level descriptions;
 - an empty text state, or a state that is neither an image data URL nor text;
 - an image that is not a single-frame PNG/JPEG matching its MIME type and
   limits;
@@ -129,6 +170,47 @@ The status is `422` when a well-formed request cannot be evaluated:
 
 Any other failure is `500` with a generic detail and no request content in
 the log (the exception type only).
+
+## Checkpoint export
+
+The pinned checkpoint and base also export to a native-loadable
+safetensors artifact set — the language LoRA served separately as unmerged
+FP32 adapters, vision-top and merger replaced, FP32 decision head — with
+every transformation recorded in a JSON
+manifest: see [recipe/valen/export.md](../../../recipe/valen/export.md).
+Consuming that export does not change this worker.
+
+## Native unmerged text path
+
+`native/src/text.rs` loads the five-file export (`valen-checkpoint-export/2`)
+onto the shared Qwen3.5 CUDA machinery: the manifest format, LoRA profile
+(rank 32 / alpha 64 / scaling 2 / FP32 / `lora.safetensors`), the hashed
+adapter bytes and the complete configuration-derived inventory (186 targets,
+372 tensors) are validated before any CUDA loading, mirroring the Cua-S1
+`cua-s1-text-unmerged/1` gate. The Valen checkpoint's peft key layout
+(`backbone.language_model.base_model.model.<target>.lora_{A,B}.default.weight`)
+is accepted alongside the Cua-S1 prefixes.
+
+`Model::enable_valen_text_numerics` selects the same numeric profile as the
+Cua-S1 unmerged text path — framework-compatible BF16 norm/GEMM/attention,
+FP32 LoRA deltas on the activations with one final rounding (the manifest's
+application formula), FP32 chunked Gated DeltaNet with the pinned Torch
+cumulative-decay association, per-prompt state reset, and no prefix
+continuation. The optional reference-language and FP32-GDN CUDA symbols are
+resolved at load and fail before the first forward when absent; the
+reference RMS-norm kernels additionally accept the 2B hidden width 2048.
+
+Measured native parity against the pinned reference (RTX 5060 Laptop, sm_120,
+BF16, torch 2.11.0+cu128, peft 0.18.1, TF32 off; fixtures recorded by
+[recipe/valen/dump_text_reference.py](../../../recipe/valen/dump_text_reference.py)):
+per-projection outputs agree within one BF16 ulp per element (the fused
+gate/up projection is bit-exact over the compared tail), and the end-to-end
+final hidden state drifts by at most one BF16 ulp at the largest element
+(max abs 0.25 at output scale 50.75) — declared tolerances 0.0625 and 0.5 in
+the committed fixture. The device gates are env-gated
+(`VALEN_EXPORT`, `VALEN_CUDA_LIB`) in `tests/valen/text_reference.rs` and
+`tests/qwen3_5/valen_text_gpu.rs`; the formula itself is pinned CPU-only in
+`tests/qwen3_5/lora_valen.rs` and `tests/valen/text.rs`.
 
 ## Ownership boundary
 

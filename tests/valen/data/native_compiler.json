@@ -1,0 +1,2050 @@
+{
+ "format": 1,
+ "pins": {
+  "valen_revision": "750bfcfbb48a5275534a9c912257ebe83ca57a97",
+  "base_revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+  "checkpoint_sha256": "836622efe78fe757e2627aa6050c223d461c424ea430a1c110c15e6f42f5a012",
+  "max_length": 8192,
+  "min_pixels": 65536,
+  "max_pixels": 1048576,
+  "patch_size": 16,
+  "merge_size": 2,
+  "special_tokens": [
+   "<|image_pad|>",
+   "<|video_pad|>",
+   "<|vision_start|>",
+   "<|vision_end|>",
+   "<|im_end|>",
+   "<|endoftext|>",
+   "<|audio_start|>",
+   "<|audio_end|>",
+   "<|audio_pad|>",
+   "<|im_start|>",
+   "<|object_ref_start|>",
+   "<|object_ref_end|>",
+   "<|box_start|>",
+   "<|box_end|>",
+   "<|quad_start|>",
+   "<|quad_end|>",
+   "<|vision_pad|>"
+  ],
+  "image_pad_token_id": 248056
+ },
+ "cases": [
+  {
+   "name": "text_choice",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"The card was charged twice for one order.\", \"questions\": {\"refund\": {\"type\": \"choice\", \"instructions\": \"Decide the refund action.\", \"criteria\": {\"refund\": \"Refund the duplicate charge\", \"wait\": \"Wait for review\"}}}}",
+   "image": null,
+   "expected": {
+    "state": {
+     "kind": "text",
+     "user_content": "The card was charged twice for one order.",
+     "prompt": "<|im_start|>user\nThe card was charged twice for one order.<|im_end|>\n"
+    },
+    "questions": [
+     {
+      "qid": "refund",
+      "wire_kind": "choice",
+      "record_kind": "choice",
+      "keys": [
+       "refund",
+       "wait"
+      ],
+      "descriptions": [
+       "Refund the duplicate charge",
+       "Wait for review"
+      ],
+      "record": {
+       "type": "choice",
+       "instructions": "Decide the refund action.",
+       "criteria": {
+        "refund": "Refund the duplicate charge",
+        "wait": "Wait for review"
+       }
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5576,
+         198,
+         14162,
+         25,
+         95462,
+         279,
+         20325,
+         1852,
+         13,
+         198,
+         93785,
+         25,
+         198,
+         66165,
+         25,
+         8288,
+         1199,
+         279,
+         21814,
+         6545,
+         198,
+         11158,
+         25,
+         13428,
+         364,
+         3286,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         38,
+         44
+        ],
+        "decision_position": 47,
+        "length": 48
+       }
+      ]
+     }
+    ],
+    "base_input_ids": [
+     248045,
+     846,
+     198,
+     760,
+     3575,
+     557,
+     11102,
+     10598,
+     364,
+     799,
+     1906,
+     13,
+     248046,
+     198
+    ],
+    "image_pad_span": null,
+    "logical_tokens": 48,
+    "compute_tokens": 48
+   }
+  },
+  {
+   "name": "text_trim_edge",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \" 　 The order 42 was flagged, twice. \\u001c  \", \"questions\": {\"unicode\": {\"type\": \"choice\", \"instructions\": \" 分类这个订单。 \", \"criteria\": {\"正常\": \"订单正常\", \"异常\": \"订单异常\"}}, \"structured\": {\"type\": \"noul\", \"instructions\": \"Is the JSON state an object?\", \"criteria\": {\"true\": \"It parses as an object\"}}}}",
+   "image": null,
+   "expected": {
+    "state": {
+     "kind": "text",
+     "user_content": "The order 42 was flagged, twice.",
+     "prompt": "<|im_start|>user\nThe order 42 was flagged, twice.<|im_end|>\n"
+    },
+    "questions": [
+     {
+      "qid": "unicode",
+      "wire_kind": "choice",
+      "record_kind": "choice",
+      "keys": [
+       "正常",
+       "异常"
+      ],
+      "descriptions": [
+       "订单正常",
+       "订单异常"
+      ],
+      "record": {
+       "type": "choice",
+       "instructions": " 分类这个订单。 ",
+       "criteria": {
+        "正常": "订单正常",
+        "异常": "订单异常"
+       }
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5576,
+         198,
+         14162,
+         25,
+         220,
+         220,
+         98653,
+         96488,
+         108673,
+         1710,
+         695,
+         93785,
+         25,
+         198,
+         97811,
+         25,
+         220,
+         108673,
+         97811,
+         198,
+         100016,
+         25,
+         220,
+         108673,
+         100016,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         38,
+         44
+        ],
+        "decision_position": 47,
+        "length": 48
+       }
+      ]
+     },
+     {
+      "qid": "structured",
+      "wire_kind": "noul",
+      "record_kind": "choice",
+      "keys": [
+       "true",
+       "false"
+      ],
+      "descriptions": [
+       "It parses as an object",
+       "False / 否：不满足问题中的条件。"
+      ],
+      "record": {
+       "type": "choice",
+       "instructions": "Is the JSON state an object?",
+       "criteria": {
+        "true": "It parses as an object",
+        "false": "False / 否：不满足问题中的条件。"
+       }
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5576,
+         198,
+         14162,
+         25,
+         2091,
+         279,
+         4566,
+         1528,
+         449,
+         1576,
+         30,
+         198,
+         93785,
+         25,
+         198,
+         1802,
+         25,
+         1049,
+         68434,
+         430,
+         449,
+         1576,
+         198,
+         3721,
+         25,
+         3439,
+         593,
+         220,
+         96994,
+         4960,
+         95753,
+         97914,
+         96304,
+         96875,
+         97382,
+         1710,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         41,
+         55
+        ],
+        "decision_position": 58,
+        "length": 59
+       }
+      ]
+     }
+    ],
+    "base_input_ids": [
+     248045,
+     846,
+     198,
+     760,
+     1906,
+     220,
+     19,
+     17,
+     557,
+     59144,
+     11,
+     10598,
+     13,
+     248046,
+     198
+    ],
+    "image_pad_span": null,
+    "logical_tokens": 92,
+    "compute_tokens": 107
+   }
+  },
+  {
+   "name": "text_state_object",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"orders\": [1, 2], \"note\": null, \"ratio\": 2.5}, \"questions\": {\"pick\": {\"type\": \"choice\", \"instructions\": \"Choose the only candidate.\", \"criteria\": {\"ok\": \"OK\"}}}}",
+   "image": null,
+   "expected": {
+    "state": {
+     "kind": "text",
+     "user_content": "{\"orders\": [1, 2], \"note\": null, \"ratio\": 2.5}",
+     "prompt": "<|im_start|>user\n{\"orders\": [1, 2], \"note\": null, \"ratio\": 2.5}<|im_end|>\n"
+    },
+    "questions": [
+     {
+      "qid": "pick",
+      "wire_kind": "choice",
+      "record_kind": "choice",
+      "keys": [
+       "ok"
+      ],
+      "descriptions": [
+       "OK"
+      ],
+      "record": {
+       "type": "choice",
+       "instructions": "Choose the only candidate.",
+       "criteria": {
+        "ok": "OK"
+       }
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5576,
+         198,
+         14162,
+         25,
+         21513,
+         279,
+         1132,
+         8871,
+         13,
+         198,
+         93785,
+         25,
+         198,
+         547,
+         25,
+         10092,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         47
+        ],
+        "decision_position": 50,
+        "length": 51
+       }
+      ]
+     }
+    ],
+    "base_input_ids": [
+     248045,
+     846,
+     198,
+     4754,
+     7667,
+     763,
+     498,
+     16,
+     11,
+     220,
+     17,
+     1089,
+     328,
+     9679,
+     763,
+     819,
+     11,
+     328,
+     43844,
+     763,
+     220,
+     17,
+     13,
+     20,
+     92,
+     248046,
+     198
+    ],
+    "image_pad_span": null,
+    "logical_tokens": 51,
+    "compute_tokens": 51
+   }
+  },
+  {
+   "name": "choice_null_label_uses_key",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"fallback\": null, \"described\": \"Described.\"}}}}",
+   "image": null,
+   "expected": {
+    "state": {
+     "kind": "text",
+     "user_content": "A short state.",
+     "prompt": "<|im_start|>user\nA short state.<|im_end|>\n"
+    },
+    "questions": [
+     {
+      "qid": "q",
+      "wire_kind": "choice",
+      "record_kind": "choice",
+      "keys": [
+       "fallback",
+       "described"
+      ],
+      "descriptions": [
+       "fallback",
+       "Described."
+      ],
+      "record": {
+       "type": "choice",
+       "instructions": "Pick.",
+       "criteria": {
+        "fallback": "fallback",
+        "described": "Described."
+       }
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5576,
+         198,
+         14162,
+         25,
+         19123,
+         13,
+         198,
+         93785,
+         25,
+         198,
+         70818,
+         25,
+         31686,
+         198,
+         5618,
+         16917,
+         25,
+         3744,
+         16917,
+         13,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         26,
+         33
+        ],
+        "decision_position": 36,
+        "length": 37
+       }
+      ]
+     }
+    ],
+    "base_input_ids": [
+     248045,
+     846,
+     198,
+     32,
+     2716,
+     1528,
+     13,
+     248046,
+     198
+    ],
+    "image_pad_span": null,
+    "logical_tokens": 37,
+    "compute_tokens": 37
+   }
+  },
+  {
+   "name": "image_choice",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8//8/AwMDEwMDAwMDAwAkBgMB/DXemwAAAABJRU5ErkJggg==\"}, \"questions\": {\"color\": {\"type\": \"choice\", \"instructions\": \"What color is the square?\", \"criteria\": {\"white\": \"The square is white.\", \"black\": \"The square is black.\"}}}}",
+   "image": {
+    "kind": "embedded"
+   },
+   "expected": {
+    "state": {
+     "kind": "image",
+     "format": "PNG",
+     "width": 2,
+     "height": 2,
+     "grid_thw": [
+      1,
+      16,
+      16
+     ],
+     "visual_tokens": 64,
+     "user_content": "<|vision_start|><|image_pad|><|vision_end|>",
+     "prompt": "<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|><|im_end|>\n"
+    },
+    "questions": [
+     {
+      "qid": "color",
+      "wire_kind": "choice",
+      "record_kind": "choice",
+      "keys": [
+       "white",
+       "black"
+      ],
+      "descriptions": [
+       "The square is white.",
+       "The square is black."
+      ],
+      "record": {
+       "type": "choice",
+       "instructions": "What color is the square?",
+       "criteria": {
+        "white": "The square is white.",
+        "black": "The square is black."
+       }
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5576,
+         198,
+         14162,
+         25,
+         3437,
+         1829,
+         369,
+         279,
+         9057,
+         30,
+         198,
+         93785,
+         25,
+         198,
+         5603,
+         25,
+         561,
+         9057,
+         369,
+         4022,
+         13,
+         198,
+         11124,
+         25,
+         561,
+         9057,
+         369,
+         3565,
+         13,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         96,
+         104
+        ],
+        "decision_position": 107,
+        "length": 108
+       }
+      ]
+     }
+    ],
+    "base_input_ids": [
+     248045,
+     846,
+     198,
+     248053,
+     -64,
+     248054,
+     248046,
+     198
+    ],
+    "image_pad_span": [
+     4,
+     68
+    ],
+    "logical_tokens": 108,
+    "compute_tokens": 108
+   }
+  },
+  {
+   "name": "image_choice_generated",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAA+gAAAK8CAIAAADzqQLmAAAOJklEQVR4nO3WQRHAIADAsDE1aEIdUpGw5+hdoqDPjrn2AwAA3O39OwAAAPhm3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAgHEHAIAA4w4AAAHGHQAAAow7AAAEGHcAAAgw7gAAEGDcAQAgwLgDAECAcQcAgADjDgAAAcYdAAACjDsAAAQYdwAACDDuAAAQYNwBACDAuAMAQIBxBwCAAOMOAAABxh0AAAKMOwAABBh3AAAIMO4AABBg3AEAIMC4AwBAwAHpjAaabhoCgwAAAABJRU5ErkJggg==\"}, \"questions\": {\"what\": {\"type\": \"choice\", \"instructions\": \"Describe the picture.\", \"criteria\": {\"blue\": \"It is blue.\", \"dark\": \"It is dark.\"}}}}",
+   "image": {
+    "kind": "generated",
+    "format": "png",
+    "size": [
+     1000,
+     700
+    ],
+    "colour": [
+     40,
+     90,
+     160
+    ]
+   },
+   "expected": {
+    "state": {
+     "kind": "image",
+     "format": "PNG",
+     "width": 1000,
+     "height": 700,
+     "grid_thw": [
+      1,
+      44,
+      62
+     ],
+     "visual_tokens": 682,
+     "user_content": "<|vision_start|><|image_pad|><|vision_end|>",
+     "prompt": "<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|><|im_end|>\n"
+    },
+    "questions": [
+     {
+      "qid": "what",
+      "wire_kind": "choice",
+      "record_kind": "choice",
+      "keys": [
+       "blue",
+       "dark"
+      ],
+      "descriptions": [
+       "It is blue.",
+       "It is dark."
+      ],
+      "record": {
+       "type": "choice",
+       "instructions": "Describe the picture.",
+       "criteria": {
+        "blue": "It is blue.",
+        "dark": "It is dark."
+       }
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5576,
+         198,
+         14162,
+         25,
+         58737,
+         279,
+         6588,
+         13,
+         198,
+         93785,
+         25,
+         198,
+         11855,
+         25,
+         1049,
+         369,
+         6105,
+         13,
+         198,
+         21921,
+         25,
+         1049,
+         369,
+         6121,
+         13,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         711,
+         718
+        ],
+        "decision_position": 721,
+        "length": 722
+       }
+      ]
+     }
+    ],
+    "base_input_ids": [
+     248045,
+     846,
+     198,
+     248053,
+     -682,
+     248054,
+     248046,
+     198
+    ],
+    "image_pad_span": [
+     4,
+     686
+    ],
+    "logical_tokens": 722,
+    "compute_tokens": 722
+   }
+  },
+  {
+   "name": "image_choice_jpeg",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAHgAoADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDkKKKK8U/TAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAP/9k=\"}, \"questions\": {\"what\": {\"type\": \"choice\", \"instructions\": \"Choose the only candidate.\", \"criteria\": {\"ok\": \"OK\"}}}}",
+   "image": {
+    "kind": "generated",
+    "format": "jpeg",
+    "size": [
+     640,
+     480
+    ],
+    "colour": [
+     200,
+     30,
+     30
+    ]
+   },
+   "expected": {
+    "state": {
+     "kind": "image",
+     "format": "JPEG",
+     "width": 640,
+     "height": 480,
+     "grid_thw": [
+      1,
+      30,
+      40
+     ],
+     "visual_tokens": 300,
+     "user_content": "<|vision_start|><|image_pad|><|vision_end|>",
+     "prompt": "<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|><|im_end|>\n"
+    },
+    "questions": [
+     {
+      "qid": "what",
+      "wire_kind": "choice",
+      "record_kind": "choice",
+      "keys": [
+       "ok"
+      ],
+      "descriptions": [
+       "OK"
+      ],
+      "record": {
+       "type": "choice",
+       "instructions": "Choose the only candidate.",
+       "criteria": {
+        "ok": "OK"
+       }
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5576,
+         198,
+         14162,
+         25,
+         21513,
+         279,
+         1132,
+         8871,
+         13,
+         198,
+         93785,
+         25,
+         198,
+         547,
+         25,
+         10092,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         327
+        ],
+        "decision_position": 330,
+        "length": 331
+       }
+      ]
+     }
+    ],
+    "base_input_ids": [
+     248045,
+     846,
+     198,
+     248053,
+     -300,
+     248054,
+     248046,
+     198
+    ],
+    "image_pad_span": [
+     4,
+     304
+    ],
+    "logical_tokens": 331,
+    "compute_tokens": 331
+   }
+  },
+  {
+   "name": "image_boundary_pixels",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACAAAAAIACAIAAACZtRspAAAMAElEQVR4nO3BAQ0AAADCoPdPbQ43oAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAODXAATQAAEz0JbCAAAAAElFTkSuQmCC\"}, \"questions\": {\"what\": {\"type\": \"choice\", \"instructions\": \"Choose the only candidate.\", \"criteria\": {\"ok\": \"OK\"}}}}",
+   "image": {
+    "kind": "generated",
+    "format": "png",
+    "size": [
+     2048,
+     512
+    ],
+    "colour": [
+     0,
+     0,
+     0
+    ]
+   },
+   "expected": {
+    "state": {
+     "kind": "image",
+     "format": "PNG",
+     "width": 2048,
+     "height": 512,
+     "grid_thw": [
+      1,
+      32,
+      128
+     ],
+     "visual_tokens": 1024,
+     "user_content": "<|vision_start|><|image_pad|><|vision_end|>",
+     "prompt": "<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|><|im_end|>\n"
+    },
+    "questions": [
+     {
+      "qid": "what",
+      "wire_kind": "choice",
+      "record_kind": "choice",
+      "keys": [
+       "ok"
+      ],
+      "descriptions": [
+       "OK"
+      ],
+      "record": {
+       "type": "choice",
+       "instructions": "Choose the only candidate.",
+       "criteria": {
+        "ok": "OK"
+       }
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5576,
+         198,
+         14162,
+         25,
+         21513,
+         279,
+         1132,
+         8871,
+         13,
+         198,
+         93785,
+         25,
+         198,
+         547,
+         25,
+         10092,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         1051
+        ],
+        "decision_position": 1054,
+        "length": 1055
+       }
+      ]
+     }
+    ],
+    "base_input_ids": [
+     248045,
+     846,
+     198,
+     248053,
+     -1024,
+     248054,
+     248046,
+     198
+    ],
+    "image_pad_span": [
+     4,
+     1028
+    ],
+    "logical_tokens": 1055,
+    "compute_tokens": 1055
+   }
+  },
+  {
+   "name": "image_upscale_small",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAAAoCAIAAACHGsgUAAAAcUlEQVR4nO3QwQ3AIBDAsNL9J74XK5AXQrIniLJm5uPMfzvgJWYFZgVmBWYFZgVmBWYFZgVmBWYFZgVmBWYFZgVmBWYFZgVmBWYFZgVmBWYFZgVmBWYFZgVmBWYFZgVmBWYFZgVmBWYFZgVmBWYFZgUbVFsDPjqWMO8AAAAASUVORK5CYII=\"}, \"questions\": {\"what\": {\"type\": \"choice\", \"instructions\": \"Choose the only candidate.\", \"criteria\": {\"ok\": \"OK\"}}}}",
+   "image": {
+    "kind": "generated",
+    "format": "png",
+    "size": [
+     100,
+     40
+    ],
+    "colour": [
+     250,
+     250,
+     250
+    ]
+   },
+   "expected": {
+    "state": {
+     "kind": "image",
+     "format": "PNG",
+     "width": 100,
+     "height": 40,
+     "grid_thw": [
+      1,
+      12,
+      26
+     ],
+     "visual_tokens": 78,
+     "user_content": "<|vision_start|><|image_pad|><|vision_end|>",
+     "prompt": "<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|><|im_end|>\n"
+    },
+    "questions": [
+     {
+      "qid": "what",
+      "wire_kind": "choice",
+      "record_kind": "choice",
+      "keys": [
+       "ok"
+      ],
+      "descriptions": [
+       "OK"
+      ],
+      "record": {
+       "type": "choice",
+       "instructions": "Choose the only candidate.",
+       "criteria": {
+        "ok": "OK"
+       }
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5576,
+         198,
+         14162,
+         25,
+         21513,
+         279,
+         1132,
+         8871,
+         13,
+         198,
+         93785,
+         25,
+         198,
+         547,
+         25,
+         10092,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         105
+        ],
+        "decision_position": 108,
+        "length": 109
+       }
+      ]
+     }
+    ],
+    "base_input_ids": [
+     248045,
+     846,
+     198,
+     248053,
+     -78,
+     248054,
+     248046,
+     198
+    ],
+    "image_pad_span": [
+     4,
+     82
+    ],
+    "logical_tokens": 109,
+    "compute_tokens": 109
+   }
+  },
+  {
+   "name": "text_mixed_types",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"Shared state text.\", \"questions\": {\"pick\": {\"type\": \"choice\", \"instructions\": \"Pick one.\", \"criteria\": {\"a\": \"Option A\", \"b\": \"Option B\", \"c\": \"Option C\"}}, \"yn\": {\"type\": \"noul\", \"instructions\": \"Is it?\"}, \"yn2\": {\"type\": \"noul\", \"instructions\": \"Really?\", \"criteria\": {\"true\": \"Certainly so\"}}, \"grade\": {\"type\": \"score\", \"instructions\": \"Grade it.\", \"criteria\": [\"low\", \"mid\", \"high\"]}}}",
+   "image": null,
+   "expected": {
+    "state": {
+     "kind": "text",
+     "user_content": "Shared state text.",
+     "prompt": "<|im_start|>user\nShared state text.<|im_end|>\n"
+    },
+    "questions": [
+     {
+      "qid": "pick",
+      "wire_kind": "choice",
+      "record_kind": "choice",
+      "keys": [
+       "a",
+       "b",
+       "c"
+      ],
+      "descriptions": [
+       "Option A",
+       "Option B",
+       "Option C"
+      ],
+      "record": {
+       "type": "choice",
+       "instructions": "Pick one.",
+       "criteria": {
+        "a": "Option A",
+        "b": "Option B",
+        "c": "Option C"
+       }
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5576,
+         198,
+         14162,
+         25,
+         19123,
+         799,
+         13,
+         198,
+         93785,
+         25,
+         198,
+         64,
+         25,
+         6743,
+         357,
+         198,
+         65,
+         25,
+         6743,
+         417,
+         198,
+         66,
+         25,
+         6743,
+         351,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         28,
+         33,
+         38
+        ],
+        "decision_position": 41,
+        "length": 42
+       }
+      ]
+     },
+     {
+      "qid": "yn",
+      "wire_kind": "noul",
+      "record_kind": "noul",
+      "keys": [
+       "true",
+       "false"
+      ],
+      "descriptions": [
+       "True / 是：满足问题中的条件。",
+       "False / 否：不满足问题中的条件。"
+      ],
+      "record": {
+       "type": "noul",
+       "instructions": "Is it?"
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         307,
+         10644,
+         198,
+         14162,
+         25,
+         2091,
+         424,
+         30,
+         198,
+         93785,
+         25,
+         198,
+         1802,
+         25,
+         2912,
+         593,
+         220,
+         95761,
+         4960,
+         97914,
+         96304,
+         96875,
+         97382,
+         1710,
+         198,
+         3721,
+         25,
+         3439,
+         593,
+         220,
+         96994,
+         4960,
+         95753,
+         97914,
+         96304,
+         96875,
+         97382,
+         1710,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         37,
+         51
+        ],
+        "decision_position": 54,
+        "length": 55
+       }
+      ]
+     },
+     {
+      "qid": "yn2",
+      "wire_kind": "noul",
+      "record_kind": "choice",
+      "keys": [
+       "true",
+       "false"
+      ],
+      "descriptions": [
+       "Certainly so",
+       "False / 否：不满足问题中的条件。"
+      ],
+      "record": {
+       "type": "choice",
+       "instructions": "Really?",
+       "criteria": {
+        "true": "Certainly so",
+        "false": "False / 否：不满足问题中的条件。"
+       }
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5576,
+         198,
+         14162,
+         25,
+         27291,
+         30,
+         198,
+         93785,
+         25,
+         198,
+         1802,
+         25,
+         50607,
+         748,
+         198,
+         3721,
+         25,
+         3439,
+         593,
+         220,
+         96994,
+         4960,
+         95753,
+         97914,
+         96304,
+         96875,
+         97382,
+         1710,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         27,
+         41
+        ],
+        "decision_position": 44,
+        "length": 45
+       }
+      ]
+     },
+     {
+      "qid": "grade",
+      "wire_kind": "score",
+      "record_kind": "score",
+      "keys": [
+       "0",
+       "1",
+       "2"
+      ],
+      "descriptions": [
+       "low",
+       "mid",
+       "high"
+      ],
+      "record": {
+       "type": "score",
+       "instructions": "Grade it.",
+       "criteria": [
+        "low",
+        "mid",
+        "high"
+       ]
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5284,
+         198,
+         14162,
+         25,
+         23067,
+         424,
+         13,
+         198,
+         93785,
+         25,
+         198,
+         9997,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         25
+        ],
+        "decision_position": 28,
+        "length": 29
+       },
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5284,
+         198,
+         14162,
+         25,
+         23067,
+         424,
+         13,
+         198,
+         93785,
+         25,
+         198,
+         15632,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         25
+        ],
+        "decision_position": 28,
+        "length": 29
+       },
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5284,
+         198,
+         14162,
+         25,
+         23067,
+         424,
+         13,
+         198,
+         93785,
+         25,
+         198,
+         11553,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         25
+        ],
+        "decision_position": 28,
+        "length": 29
+       }
+      ]
+     }
+    ],
+    "base_input_ids": [
+     248045,
+     846,
+     198,
+     16499,
+     1528,
+     1414,
+     13,
+     248046,
+     198
+    ],
+    "image_pad_span": null,
+    "logical_tokens": 184,
+    "compute_tokens": 229
+   }
+  },
+  {
+   "name": "image_mixed_types",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAALUlEQVR4nGOM0ljAQEvARFPTRy0YtWDUglELRi0YtWDUglELRi0YtWDUAioCAEq3AWIhMn1vAAAAAElFTkSuQmCC\"}, \"questions\": {\"what\": {\"type\": \"choice\", \"instructions\": \"What is shown?\", \"criteria\": {\"dot\": \"A dot.\", \"square\": \"A square.\"}}, \"grade\": {\"type\": \"score\", \"instructions\": \"Rate the clarity.\", \"criteria\": [\"murky\", \"ok\", \"crisp\"]}}}",
+   "image": {
+    "kind": "generated",
+    "format": "png",
+    "size": [
+     32,
+     32
+    ],
+    "colour": [
+     90,
+     40,
+     160
+    ]
+   },
+   "expected": {
+    "state": {
+     "kind": "image",
+     "format": "PNG",
+     "width": 32,
+     "height": 32,
+     "grid_thw": [
+      1,
+      16,
+      16
+     ],
+     "visual_tokens": 64,
+     "user_content": "<|vision_start|><|image_pad|><|vision_end|>",
+     "prompt": "<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|><|im_end|>\n"
+    },
+    "questions": [
+     {
+      "qid": "what",
+      "wire_kind": "choice",
+      "record_kind": "choice",
+      "keys": [
+       "dot",
+       "square"
+      ],
+      "descriptions": [
+       "A dot.",
+       "A square."
+      ],
+      "record": {
+       "type": "choice",
+       "instructions": "What is shown?",
+       "criteria": {
+        "dot": "A dot.",
+        "square": "A square."
+       }
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5576,
+         198,
+         14162,
+         25,
+         3437,
+         369,
+         6625,
+         30,
+         198,
+         93785,
+         25,
+         198,
+         15644,
+         25,
+         357,
+         12391,
+         13,
+         198,
+         36234,
+         25,
+         357,
+         9057,
+         13,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         92,
+         98
+        ],
+        "decision_position": 101,
+        "length": 102
+       }
+      ]
+     },
+     {
+      "qid": "grade",
+      "wire_kind": "score",
+      "record_kind": "score",
+      "keys": [
+       "0",
+       "1",
+       "2"
+      ],
+      "descriptions": [
+       "murky",
+       "ok",
+       "crisp"
+      ],
+      "record": {
+       "type": "score",
+       "instructions": "Rate the clarity.",
+       "criteria": [
+        "murky",
+        "ok",
+        "crisp"
+       ]
+      },
+      "branches": [
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5284,
+         198,
+         14162,
+         25,
+         19172,
+         279,
+         30246,
+         13,
+         198,
+         93785,
+         25,
+         198,
+         62907,
+         7642,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         89
+        ],
+        "decision_position": 92,
+        "length": 93
+       },
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5284,
+         198,
+         14162,
+         25,
+         19172,
+         279,
+         30246,
+         13,
+         198,
+         93785,
+         25,
+         198,
+         547,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         88
+        ],
+        "decision_position": 91,
+        "length": 92
+       },
+       {
+        "suffix_ids": [
+         248045,
+         846,
+         198,
+         6065,
+         25,
+         5284,
+         198,
+         14162,
+         25,
+         19172,
+         279,
+         30246,
+         13,
+         198,
+         93785,
+         25,
+         198,
+         4920,
+         12713,
+         198,
+         72298,
+         25
+        ],
+        "candidate_positions": [
+         89
+        ],
+        "decision_position": 92,
+        "length": 93
+       }
+      ]
+     }
+    ],
+    "base_input_ids": [
+     248045,
+     846,
+     198,
+     248053,
+     -64,
+     248054,
+     248046,
+     198
+    ],
+    "image_pad_span": [
+     4,
+     68
+    ],
+    "logical_tokens": 167,
+    "compute_tokens": 380
+   }
+  }
+ ],
+ "rejections": [
+  {
+   "name": "body_not_json",
+   "body": "{not json",
+   "status": 400,
+   "detail": "request body must contain valid JSON and UTF-8 text"
+  },
+  {
+   "name": "body_trailing",
+   "body": "{\"model\": \"valen-preview-0923\"} 1",
+   "status": 400,
+   "detail": "request body must contain valid JSON and UTF-8 text"
+  },
+  {
+   "name": "body_duplicate_key",
+   "body": "{\"model\": \"valen-preview-0923\", \"model\": \"valen-preview-0923\", \"state\": \"s\", \"questions\": {}}",
+   "status": 400,
+   "detail": "duplicate JSON key 'model'"
+  },
+  {
+   "name": "body_nan",
+   "body": "{\"model\": NaN}",
+   "status": 400,
+   "detail": "non-finite JSON number NaN is not supported"
+  },
+  {
+   "name": "body_infinity",
+   "body": "{\"model\": Infinity}",
+   "status": 400,
+   "detail": "non-finite JSON number Infinity is not supported"
+  },
+  {
+   "name": "body_negative_infinity",
+   "body": "{\"a\": -Infinity}",
+   "status": 400,
+   "detail": "non-finite JSON number -Infinity is not supported"
+  },
+  {
+   "name": "body_number_out_of_range",
+   "body": "{\"a\": 1e999}",
+   "status": 400,
+   "detail": "request body must contain valid JSON and UTF-8 text"
+  },
+  {
+   "name": "body_not_object",
+   "body": "[1, 2]",
+   "status": 400,
+   "detail": "request must be a JSON object"
+  },
+  {
+   "name": "body_empty",
+   "body": "",
+   "status": 400,
+   "detail": "request body must contain valid JSON and UTF-8 text"
+  },
+  {
+   "name": "body_lone_surrogate",
+   "body_b64": "e30gfSJ9",
+   "status": 400,
+   "detail": "request body must contain valid JSON and UTF-8 text"
+  },
+  {
+   "name": "body_not_utf8",
+   "body_b64": "AP5+",
+   "status": 400,
+   "detail": "request body must contain valid JSON and UTF-8 text"
+  },
+  {
+   "name": "body_oversize",
+   "synthesize": "body_oversize",
+   "status": 413,
+   "detail": "request body exceeds 8 MiB"
+  },
+  {
+   "name": "wrong_model",
+   "body": "{\"model\": \"valen-preview-0924\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "model must be valen-preview-0923"
+  },
+  {
+   "name": "extra_top_field",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}, \"extra\": 1}",
+   "status": 422,
+   "detail": "request must contain model, state and questions only"
+  },
+  {
+   "name": "missing_state",
+   "body": "{\"model\": \"valen-preview-0923\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "request must contain model, state and questions only"
+  },
+  {
+   "name": "questions_missing",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\"}",
+   "status": 422,
+   "detail": "request must contain model, state and questions only"
+  },
+  {
+   "name": "questions_empty",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {}}",
+   "status": 422,
+   "detail": "questions must contain 1 to 8 questions"
+  },
+  {
+   "name": "questions_too_many",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q0\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}, \"q1\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}, \"q2\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}, \"q3\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}, \"q4\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}, \"q5\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}, \"q6\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}, \"q7\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}, \"q8\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "questions must contain 1 to 8 questions"
+  },
+  {
+   "name": "questions_not_object",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": [{\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}]}",
+   "status": 422,
+   "detail": "questions must contain 1 to 8 questions"
+  },
+  {
+   "name": "question_name_empty",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "question names must contain 1 to 256 characters"
+  },
+  {
+   "name": "question_name_too_long",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "question names must contain 1 to 256 characters"
+  },
+  {
+   "name": "question_unknown_field",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}, \"bogus\": 1}}}",
+   "status": 422,
+   "detail": "question 'q' contains unsupported fields"
+  },
+  {
+   "name": "question_not_object",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": \"choice\"}}",
+   "status": 422,
+   "detail": "question 'q' contains unsupported fields"
+  },
+  {
+   "name": "question_bad_type",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"rank\", \"instructions\": \"x\", \"criteria\": {\"a\": \"b\"}}}}",
+   "status": 422,
+   "detail": "question 'q': type must be one of choice, noul, score"
+  },
+  {
+   "name": "question_type_missing",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"instructions\": \"x\", \"criteria\": {\"a\": \"b\"}}}}",
+   "status": 422,
+   "detail": "question 'q': type must be one of choice, noul, score"
+  },
+  {
+   "name": "instructions_missing",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"criteria\": {\"a\": \"b\"}}}}",
+   "status": 422,
+   "detail": "question 'q': instructions is required"
+  },
+  {
+   "name": "instructions_number",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": 5, \"criteria\": {\"a\": \"b\"}}}}",
+   "status": 422,
+   "detail": "question 'q' instructions must be a string, object or array"
+  },
+  {
+   "name": "instructions_whitespace",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"  \\t \", \"criteria\": {\"a\": \"b\"}}}}",
+   "status": 422,
+   "detail": "question 'q': instructions must be nonempty"
+  },
+  {
+   "name": "instructions_special_token",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Use <|audio_pad|>\", \"criteria\": {\"a\": \"b\"}}}}",
+   "status": 422,
+   "detail": "question 'q' instructions contains an unsupported tokenizer control token"
+  },
+  {
+   "name": "instructions_object_ok_state_special",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"v\": \"<|vision_start|>\"}, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": {\"n\": 1}, \"criteria\": {\"a\": \"b\"}}}}",
+   "status": 422,
+   "detail": "state contains an unsupported tokenizer control token"
+  },
+  {
+   "name": "noul_criteria_bad_key",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"x\", \"criteria\": {\"yes\": \"Maybe\"}}}}",
+   "status": 422,
+   "detail": "question 'q': noul criteria must describe true and/or false"
+  },
+  {
+   "name": "noul_criteria_empty",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"x\", \"criteria\": {}}}}",
+   "status": 422,
+   "detail": "question 'q': noul criteria must describe true and/or false"
+  },
+  {
+   "name": "noul_criterion_whitespace",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"x\", \"criteria\": {\"true\": \"  \"}}}}",
+   "status": 422,
+   "detail": "question 'q': criterion 'true' must be nonempty"
+  },
+  {
+   "name": "noul_criterion_number",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"x\", \"criteria\": {\"false\": 3}}}}",
+   "status": 422,
+   "detail": "question 'q' criteria 'false' must be a string, object or array"
+  },
+  {
+   "name": "score_levels_one",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"score\", \"instructions\": \"x\", \"criteria\": [\"only\"]}}}",
+   "status": 422,
+   "detail": "question 'q': score requires an ordered list of 2 to 10 level descriptions"
+  },
+  {
+   "name": "score_levels_eleven",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"score\", \"instructions\": \"x\", \"criteria\": [\"0\", \"1\", \"2\", \"3\", \"4\", \"5\", \"6\", \"7\", \"8\", \"9\", \"10\"]}}}",
+   "status": 422,
+   "detail": "question 'q': score requires an ordered list of 2 to 10 level descriptions"
+  },
+  {
+   "name": "score_levels_not_list",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"score\", \"instructions\": \"x\", \"criteria\": {\"0\": \"a\", \"1\": \"b\"}}}}",
+   "status": 422,
+   "detail": "question 'q': score requires an ordered list of 2 to 10 level descriptions"
+  },
+  {
+   "name": "score_level_empty",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"score\", \"instructions\": \"x\", \"criteria\": [\"ok\", \"\"]}}}",
+   "status": 422,
+   "detail": "question 'q': level 1 must be nonempty"
+  },
+  {
+   "name": "choice_criteria_missing",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"x\"}}}",
+   "status": 422,
+   "detail": "question 'q': choice requires 1 to 255 options"
+  },
+  {
+   "name": "choice_criteria_empty",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"x\", \"criteria\": {}}}}",
+   "status": 422,
+   "detail": "question 'q': choice requires 1 to 255 options"
+  },
+  {
+   "name": "choice_option_key_special_token",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"x\", \"criteria\": {\"<|vision_start|>\": \"b\"}}}}",
+   "status": 422,
+   "detail": "question 'q': option key '<|vision_start|>' contains an unsupported tokenizer control token"
+  },
+  {
+   "name": "choice_option_key_whitespace",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"x\", \"criteria\": {\" \": \"b\"}}}}",
+   "status": 422,
+   "detail": "option keys must be nonempty and at most 256 characters"
+  },
+  {
+   "name": "choice_option_key_too_long",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"x\", \"criteria\": {\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\": \"b\"}}}}",
+   "status": 422,
+   "detail": "option keys must be nonempty and at most 256 characters"
+  },
+  {
+   "name": "choice_option_key_number",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"x\", \"criteria\": {5: \"b\"}}}}",
+   "status": 400,
+   "detail": "request body must contain valid JSON and UTF-8 text"
+  },
+  {
+   "name": "choice_criterion_whitespace",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"x\", \"criteria\": {\"a\": \" \"}}}}",
+   "status": 422,
+   "detail": "question 'q': criterion 'a' must be nonempty"
+  },
+  {
+   "name": "combined_text_too_long",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"A short state.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii\", \"criteria\": {\"a\": \"bbbbbbbbbbbbbbbbbbbb\"}}}}",
+   "status": 422,
+   "detail": "combined question text exceeds 16384 characters"
+  },
+  {
+   "name": "state_empty",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "state must not be empty"
+  },
+  {
+   "name": "state_whitespace",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \" \\t\\n \", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "state must not be only whitespace"
+  },
+  {
+   "name": "state_number",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": 5, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "state must be an image data URL or text"
+  },
+  {
+   "name": "state_null",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": null, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "state must be an image data URL or text"
+  },
+  {
+   "name": "state_bool",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": true, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "state must be an image data URL or text"
+  },
+  {
+   "name": "state_special_token",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"has <|image_pad|> inside\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "state contains an unsupported tokenizer control token"
+  },
+  {
+   "name": "state_too_long",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "state exceeds 16384 characters"
+  },
+  {
+   "name": "image_not_data_url",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"https://example.com/a.png\"}, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "only inline PNG/JPEG images are supported"
+  },
+  {
+   "name": "image_bad_mime",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/webp;base64,AAAA\"}, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "only inline PNG/JPEG images are supported"
+  },
+  {
+   "name": "image_url_not_string",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": 7}, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "state.image must be a PNG/JPEG base64 data URL"
+  },
+  {
+   "name": "image_extra_keys",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/png;base64,AAAA\", \"x\": 1}, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "state must contain exactly one image data URL"
+  },
+  {
+   "name": "image_empty_payload",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/png;base64,\"}, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "invalid image data"
+  },
+  {
+   "name": "image_base64_invalid",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/png;base64,!!!!\"}, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "invalid image data"
+  },
+  {
+   "name": "image_format_mismatch",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/jpeg;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAADElEQVR4nGNgGB4AAADIAAGtQHYiAAAAAElFTkSuQmCC\"}, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "image format does not match its MIME type"
+  },
+  {
+   "name": "image_corrupt_truncated",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAYElEQVR4nO3PQQ0AIBDAMA78e0YEj4ZkVbDN7LN+tnXAqwa0BrQGtA==\"}, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "invalid image data"
+  },
+  {
+   "name": "image_animated_png",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAACGFjVEwAAAACAAAAAPONk3AAAAAaZmNUTAAAAAAAAAAgAAAAIAAAAAAAAAAAAAEACgAAmicj6gAAABlJREFUeJztwTEBAAAAwqD1T+1hDaAAAABuDCAAAbfTZQkAAAAaZmNUTAAAAAEAAAAgAAAAIAAAAAAAAAAAAAEACgAAAVTJPgAAAC1mZEFUAAAAAnic7c0xAQAACMMwQA3+FWKCfamApreyTfgPAAAAAAAAAAAA3jp1JQBopdEPvQAAAABJRU5ErkJggg==\"}, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "image must be single-frame, at most 2048 per side and 1048576 pixels"
+  },
+  {
+   "name": "image_aspect_ratio",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAZAAAAABCAIAAAB/kG/JAAAAEklEQVR4nGNgGAWjYBSMgiECAASxAAHJWzUZAAAAAElFTkSuQmCC\"}, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "image aspect ratio must not exceed 200:1"
+  },
+  {
+   "name": "image_side_too_long",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACAEAAAALCAIAAACLL5H9AAAAWElEQVR4nO3BgQAAAADDoPlT3+AEVQEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwDcIOwAB2QgalAAAAABJRU5ErkJggg==\"}, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "image must be single-frame, at most 2048 per side and 1048576 pixels"
+  },
+  {
+   "name": "image_pixels_too_many",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": {\"image\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACAAAAAIBCAIAAABS6ciMAAAMBklEQVR4nO3BMQEAAADCoPVPbQ0PoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAODIABzRAAEkpoitAAAAAElFTkSuQmCC\"}, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Pick.\", \"criteria\": {\"a\": \"Option A\"}}}}",
+   "status": 422,
+   "detail": "image must be single-frame, at most 2048 per side and 1048576 pixels"
+  },
+  {
+   "name": "image_encoded_oversize",
+   "synthesize": "image_encoded_oversize",
+   "status": 422,
+   "detail": "encoded image exceeds 4 MiB"
+  },
+  {
+   "name": "image_bytes_oversize",
+   "synthesize": "image_bytes_oversize",
+   "status": 422,
+   "detail": "image exceeds 4 MiB"
+  },
+  {
+   "name": "overflow_base",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。\", \"questions\": {\"longq\": {\"type\": \"choice\", \"instructions\": \"x\", \"criteria\": {\"a\": \"b\"}}}}",
+   "status": 422,
+   "detail": "request rejected by the pinned compiler: longq: 8905 tokens exceed max_length=8192; no truncation"
+  },
+  {
+   "name": "overflow_later_question",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。\", \"questions\": {\"ok\": {\"type\": \"choice\", \"instructions\": \"short\", \"criteria\": {\"a\": \"b\"}}, \"over\": {\"type\": \"choice\", \"instructions\": \"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\", \"criteria\": {\"a\": \"b\"}}}}",
+   "status": 422,
+   "detail": "request rejected by the pinned compiler: over: 12155 tokens exceed max_length=8192; no truncation"
+  },
+  {
+   "name": "overflow_score_branch",
+   "body": "{\"model\": \"valen-preview-0923\", \"state\": \"订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。订单异常需要人工复核。\", \"questions\": {\"grade\": {\"type\": \"score\", \"instructions\": \"Rate.\", \"criteria\": [\"a\", \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\"]}}}",
+   "status": 422,
+   "detail": "request rejected by the pinned compiler: grade: 8253 tokens exceed max_length=8192; no truncation"
+  }
+ ]
+}

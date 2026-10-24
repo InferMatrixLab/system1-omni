@@ -7,6 +7,10 @@ use anyhow::{Context, Result, ensure};
 use std::{collections::BTreeMap, ffi::c_void, ops::Range, path::Path};
 
 const PREFIX: &str = "base_model.model.model.language_model.";
+/// The Valen-Preview peft layout (`PEFT_LANGUAGE_PREFIX` in
+/// recipe/valen/export_checkpoint.py): the backbone wraps the language model,
+/// and peft names its adapters (`lora_A.default.weight`).
+const VALEN_PREFIX: &str = "backbone.language_model.base_model.model.";
 const MAX_RANK: usize = 128;
 const MAX_HEADER: usize = 8 << 20;
 
@@ -185,16 +189,28 @@ fn parse(cfg: &Config, bytes: &[u8], scale: f32) -> Result<Parsed> {
         if name == "__metadata__" {
             continue;
         }
-        let native = name
+        // The two accepted key layouts: the Cua-S1 export prefixes the language
+        // model directly with plain `.lora_A.weight` suffixes, while the Valen
+        // peft checkpoint nests the language model inside `backbone` and names
+        // its single `default` adapter in the suffix. Prefix and suffix must
+        // come from the same layout.
+        let (native, named) = name
             .strip_prefix(PREFIX)
             .or_else(|| name.strip_prefix("base_model.model.model."))
+            .map(|native| (native, false))
+            .or_else(|| name.strip_prefix(VALEN_PREFIX).map(|native| (native, true)))
             .context("unsupported LoRA tensor prefix")?;
-        let (target, letter) = if let Some(target) = native.strip_suffix(".lora_A.weight") {
+        let (suffix_a, suffix_b) = if named {
+            (".lora_A.default.weight", ".lora_B.default.weight")
+        } else {
+            (".lora_A.weight", ".lora_B.weight")
+        };
+        let (target, letter) = if let Some(target) = native.strip_suffix(suffix_a) {
             (target, 0)
         } else {
             (
                 native
-                    .strip_suffix(".lora_B.weight")
+                    .strip_suffix(suffix_b)
                     .context("unsupported LoRA tensor suffix")?,
                 1,
             )
@@ -618,6 +634,19 @@ pub(crate) unsafe fn project_components(
     Ok(())
 }
 
+// The shared fake-CUDA helper for the wired-in test suites: the
+// implementation stays under root `tests/` (CONTRIBUTING), wired in and
+// re-exported from here so the tests reach it as `crate::lora::…`.
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/fake_cuda.rs"]
+mod fake_cuda;
+#[cfg(test)]
+pub(crate) use fake_cuda::{FAKE_CUDA_LOCK, fake_cuda_library};
+
 #[cfg(test)]
 #[path = "../../../../../tests/qwen3_5/lora.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/lora_valen.rs"]
+mod valen_layout_tests;
