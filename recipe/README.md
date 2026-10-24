@@ -33,6 +33,10 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
 - [D3 reference worker](d3/reference.md): download the pinned vllm-sr/d3 package,
   verify its runtime manifest, and serve `choice`/`noul`/`score` text decisions
   through the Python worker and the Rust frontend (serving and parity validated on A100).
+- [Vela 2.0 0.3B reference worker](vela/reference.md): download the pinned
+  vllm-sr/Vela-2.0-0.3B package, pass its full-hash package gate, and serve all
+  five SystemOne question kinds (`choice`/`noul`/`score` plus the `span`/`set`
+  extensions) through the Python worker and the Rust frontend on CPU FP32.
 
 - [LFM2.5-350M choice worker](lfm2/README.md): score text decisions with independent
   questions, hybrid cache branching and configurable candidate batches.
