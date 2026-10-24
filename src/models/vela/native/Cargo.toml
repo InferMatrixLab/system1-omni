@@ -1,0 +1,26 @@
+[package]
+name = "omni-vela-native"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Native library for vllm-sr/Vela-2.0-0.8B: bundle gate and wire contract"
+
+[dependencies]
+anyhow = "1.0.100"
+omni-qwen3-5-native = { path = "../../qwen3_5/native" }
+serde_json = { version = "1.0.149", features = ["preserve_order"] }
+sha2 = "0.11"
+
+[dev-dependencies]
+sha2 = "0.11"
+
+[lib]
+path = "src/lib.rs"
+
+[[test]]
+name = "vela_native_contract"
+path = "../../../../tests/vela/native_contract.rs"
+
+[[test]]
+name = "vela_native_bundle"
+path = "../../../../tests/vela/native_bundle.rs"

@@ -1359,7 +1359,17 @@ dependencies = [
  "safetensors 0.8.0",
  "serde_json",
  "tokenizers 0.22.2",
- "tokio",
+"tokio",
+]
+
+[[package]]
+name = "omni-vela-native"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "omni-qwen3-5-native",
+ "serde_json",
+ "sha2 0.11.1",
 ]
 
 [[package]]

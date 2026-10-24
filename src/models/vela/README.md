@@ -225,3 +225,29 @@ the shared worker-contract issue, and nothing is posted upstream.
   a deployment option outside these slices' evidence.
 - The serving procedure, hardware requirements and the recorded
   evidence pointer are [recipe/vela/reference.md](../../recipe/vela/reference.md).
+
+## Native path (0.8B)
+
+The native implementation lives in [`native/`](native/) as the
+`omni-vela-native` crate, a library around the exported bundle:
+
+- [`recipe/vela/export_native.py`](../../recipe/vela/export_native.py)
+  exports the pinned package into a native bundle: the 320 backbone
+  tensors re-keyed `backbone.` → `model.` with **per-tensor dtypes
+  preserved** (204 BF16 Linear/conv1d + 116 F32 embed/norms/A_log/
+  dt_bias — the reference's own layout), the 37 F32 head tensors
+  (CandidateHead, `set_bias`, span2 router, span_broad) in one file,
+  `backbone_config` at the config root, calibration and tokenizer
+  copied, and a manifest pinning the source revision, the worker
+  gate's own file table, the tensor inventory and every bundle file's
+  SHA-256.
+- `native/src/bundle.rs` re-verifies that manifest (revision,
+  inventory counts, per-file hashes) before anything loads it.
+- `native/src/contract.rs` is the wire admission, mirroring
+  `protocol.py` and the pinned runtime's preamble with byte-equal
+  422/400 bodies.
+
+Token-level processing, the F32 heads, backbone execution and an HTTP
+worker are not implemented. Checks: `cargo test -p omni-vela-native`
+(15 tests, no weights, no GPU; see
+[recipe/vela/native.md](../../recipe/vela/native.md)).
