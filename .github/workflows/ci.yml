@@ -83,3 +83,46 @@ jobs:
       - name: Contract check
         if: steps.present.outputs.ready == 'true'
         run: python src/backends/cuda/check_contract.py --repo-root .
+
+  cuda-compile:
+    # Tier 2 of the contract: build every declared backend, so a kernel that
+    # stops compiling cannot land. No GPU and no self-hosted runner -- nvcc
+    # cross-compiles for a target it is not running on, and nothing here runs
+    # what it builds. Tier 3, which does need a card, stays separate.
+    #
+    # The container carries nvcc and cuBLASLt. Laya exports its CUDA from
+    # TileLang before compiling it, so the TileLang the recipe records is
+    # installed too. The CUDA line is 13.0 because that is what
+    # `recipe/laya/native/README.md` records for the native build.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: nvidia/cuda:13.0.0-devel-ubuntu24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build toolchain
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3 python3-pip
+          python3 -m pip install --no-cache-dir --break-system-packages tilelang==0.1.14
+      - name: Compile every declared backend
+        # The manifests decide what is built: a backend added anywhere under
+        # src/backends/cuda/ is covered without an edit here. One backend's
+        # defect is reported against that backend and does not stop the others.
+        run: python3 src/backends/cuda/build_backends.py --repo-root . --out "$RUNNER_TEMP/cuda-build"
+      - name: Report the architecture inside every library
+        # A file of the declared name can exist and still carry the wrong targets,
+        # or no device code at all: its presence proves neither. Listing the ELF
+        # images is what distinguishes a library built for a target from an empty
+        # metadata image.
+        run: |
+          missing=0
+          for library in "$RUNNER_TEMP"/cuda-build/*/*.so; do
+            [ -f "$library" ] || continue
+            echo "== $library"
+            cuobjdump --list-elf "$library" | tee "$library.elf.txt"
+            if ! grep -q "sm_" "$library.elf.txt"; then
+              echo "   no sm_ target inside this library" >&2
+              missing=1
+            fi
+          done
+          exit $missing
