@@ -24,6 +24,10 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
 - [Cua-S1 4B 0.2 native text worker](cua_s1/native.md): build the CUDA library and
   the Rust worker, export BF16 weights with the original FP32 adapter and start
   the worker.
+- [Decider-2B v11 native text worker](decider/README.md): load verified pinned
+  weights, build the Rust/CUDA worker and configure optional batching, Graph,
+  prefix reuse, request/token capacity and HTTP deadlines;
+  [validation](decider/validation.md).
 - [Cua-S1 native screenshot worker](cua_s1/native_screenshot.md): export the
   multimodal language checkpoint and serve one-image decisions with Rust/CUDA.
 - [Open-Jev native text worker](open_jev/native.md): export the merged text
@@ -39,8 +43,9 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
 - [CLM behind the frontend](clm/README.md): run CLM's own server behind the frontend on
   CPU with a stub encoder, and what the response comparison has to allow for.
 - [D3 reference worker](d3/reference.md): download the pinned vllm-sr/d3 package,
-  verify its runtime manifest, and serve `choice`/`noul`/`score` text decisions
-  through the Python worker and the Rust frontend (serving and parity validated on A100).
+  verify its runtime manifest, and serve `choice`/`noul`/`score` decisions over
+  text, image and video state through the Python worker and the Rust frontend
+  (text serving and parity validated on A100; media budgets and caps in the recipe).
 
 - [LFM2.5-350M choice worker](lfm2/README.md): score text decisions with independent
   questions, hybrid cache branching and configurable candidate batches.

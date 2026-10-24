@@ -155,18 +155,20 @@ impl VisionCheckpoint {
         &self.config
     }
     pub fn base_names(&self) -> impl Iterator<Item = &str> {
-        self.base.tensors.keys().map(String::as_str)
+        self.base.names()
     }
     pub fn base_tensor(&self, name: &str) -> Result<TensorView<'_>> {
         self.base.tensor(name)
     }
 }
-struct TensorStore {
+/// Checked visual tensors borrowed from immutable checkpoint mappings.
+pub struct TensorStore {
     maps: Vec<Mmap>,
     tensors: BTreeMap<String, (usize, TensorInfo)>,
 }
 impl TensorStore {
-    fn load(
+    /// `dir` must be canonical; files must remain immutable while the store is alive.
+    pub fn load(
         dir: &Path,
         files: BTreeSet<String>,
         expected: &Inventory,
@@ -231,7 +233,10 @@ impl TensorStore {
         }
         Ok(store)
     }
-    fn tensor(&self, name: &str) -> Result<TensorView<'_>> {
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.tensors.keys().map(String::as_str)
+    }
+    pub fn tensor(&self, name: &str) -> Result<TensorView<'_>> {
         let (shard, info) = self
             .tensors
             .get(name)
@@ -269,10 +274,11 @@ fn validate_header(bytes: &[u8]) -> Result<()> {
     }
     Ok(())
 }
-fn is_visual(name: &str) -> bool {
+pub fn is_visual(name: &str) -> bool {
     name.split('.').any(|part| part == "visual")
 }
-fn inside(dir: &Path, name: &str) -> Result<PathBuf> {
+/// Resolve a checkpoint file inside its canonical directory, including symlinks.
+pub fn inside(dir: &Path, name: &str) -> Result<PathBuf> {
     ensure!(
         !name.is_empty()
             && Path::new(name)
@@ -290,7 +296,7 @@ fn inside(dir: &Path, name: &str) -> Result<PathBuf> {
 }
 
 // serde_json's ordinary maps overwrite repeated keys. Reject ambiguous headers/indexes.
-struct UniqueMap<T>(BTreeMap<String, T>);
+pub struct UniqueMap<T>(pub BTreeMap<String, T>);
 impl<'de, T: Deserialize<'de>> Deserialize<'de> for UniqueMap<T> {
     fn deserialize<D: de::Deserializer<'de>>(
         deserializer: D,
@@ -322,5 +328,5 @@ mod geometry;
 mod model;
 mod valen;
 pub use geometry::VisionGeometry;
-pub use model::VisionModel;
+pub use model::{CacheLimits, VisionModel};
 pub use valen::ValenVisionCheckpoint;
