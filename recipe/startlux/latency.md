@@ -1,13 +1,38 @@
 # StartLux Instant 4B latency on L20X
 
-This is the measurement to run on hk2 after the native worker is serving.
-No latency number is recorded in this change. Do not compare the result
-with the H800 or H200 rows in
+This is the measurement to run on one L20X (Ada, sm_89) after the native
+worker is serving. No latency number is recorded in this change. Do not
+compare the result with the H800 or H200 rows in
 [the Public231 leaderboard](../../benchmarks/latency-leaderboard.md): those
 used different hardware, clocks, and a different client clock.
 
 Label the hardware **L20X** (Ada, compute capability **sm_89**). Do not
 label it H200.
+
+## Operator checklist
+
+From the repository root, on the L20X:
+
+```sh
+src/backends/cuda/qwen3_5/build.sh target/release 89
+cargo build --release --locked -p omni-startlux-native -p omni-jev
+```
+
+Serve Instant with thinking off (omit `think_mode`, or send `never`). Leave
+`STARTLUX_NONE_CHECK` unset and do not set `STARTLUX_ALLOW_NONE`.
+
+```sh
+STARTLUX_MODEL=/path/to/StartLux-Decision-v1.1-4B-Instant \
+STARTLUX_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
+STARTLUX_HOST=127.0.0.1 \
+STARTLUX_PORT=8000 \
+  ./target/release/omni-startlux-native
+```
+
+Bench endpoint: `http://127.0.0.1:8000/v1/systemone`. Model alias:
+`StartLux-Decision-v1.1-4B-Instant`. The three measured `bench.py` invocations
+are in [Native arm](#native-arm). The reference arm listens on
+`http://127.0.0.1:8090/v1/systemone`.
 
 ## What is measured
 
@@ -63,7 +88,7 @@ git revision. On the reference arm also record StartLux-Decision
 `a99977d9332decc9fb27a2488b4a83b533b6cd5f` and
 `python -c 'import vllm; print(vllm.__version__)'`. Upstream documents vLLM
 0.19.1 and 0.31. `cache_policy` for both arms is no prefix cache.
-`reservation` is the id from the host scheduler.
+`reservation` is the bench metadata field for this run's device hold.
 
 ## Native arm
 
@@ -146,5 +171,24 @@ reference only inside this L20X campaign.
 ## What not to claim
 
 This file is the recipe, not a result. Until both arms finish on the
-reserved L20X, p50/p95 are unknown. A feasibility run, a single traversal,
-or a different GPU does not fill them in.
+L20X, p50/p95 are unknown. A feasibility run, a single traversal, or a
+different GPU does not fill them in.
+
+## Unmeasured costs
+
+Code review, not a profile. No millisecond claim.
+
+The worker shares one tokenizer. `Tokenizer::clone` would copy the BPE
+tables on the bench clock (`prepare` and the knockout encoder each used to
+clone). `encode` takes `&self`, so those handles are `Arc` clones. Hypothesis:
+that copy was large next to a short L20X prefill. Measured delta: none.
+
+Device scratch grows to the next multiple of 1024 tokens on the first prompt
+that exceeds the current cap, with a stream sync inside the request. Process
+warmup is one short choice, and `bench.py` warms five manifest rows, so a
+later longer Public231 prompt can allocate during a measured traversal.
+A static count of the Instant 4B scratch layout (the byte offsets in
+`Scratch::new`, including `cs1_gdn_workspace_floats`) is about 240 MiB at
+1024 tokens and about 15 GiB at 65536 tokens, before the weight arena.
+That 65536-token buffer is not reserved. L20X free memory was not measured.
+Hypothesis: the in-request realloc can move p95. Measured delta: none.

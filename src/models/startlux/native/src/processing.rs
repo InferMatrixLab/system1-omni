@@ -1,6 +1,7 @@
 //! Tokenizer probe and request preparation. No device work.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use tokenizers::Tokenizer;
@@ -8,12 +9,12 @@ use tokenizers::Tokenizer;
 use crate::contract::{self, LETTER_IDS, Prepared, RequestError, Settings, THINK_OFF};
 
 pub struct Processor {
-    tokenizer: Tokenizer,
+    tokenizer: Arc<Tokenizer>,
     settings: Settings,
 }
 
 pub struct Encoder {
-    tokenizer: Tokenizer,
+    tokenizer: Arc<Tokenizer>,
 }
 
 impl contract::PromptEncoder for Encoder {
@@ -29,9 +30,11 @@ impl Processor {
             "STARTLUX_MAX_MODEL_LEN must be 1..=262144"
         );
         let path = dir.join("tokenizer.json");
-        let tokenizer = Tokenizer::from_file(&path)
-            .map_err(anyhow::Error::msg)
-            .with_context(|| format!("reading {}", path.display()))?;
+        let tokenizer = Arc::new(
+            Tokenizer::from_file(&path)
+                .map_err(anyhow::Error::msg)
+                .with_context(|| format!("reading {}", path.display()))?,
+        );
         probe(&tokenizer)?;
         Ok(Self {
             tokenizer,
@@ -44,9 +47,11 @@ impl Processor {
         contract::prepare_request(raw, &self.settings, &mut encoder)
     }
 
+    /// Shared encode handle. `Tokenizer::clone` copies the BPE tables, and
+    /// `encode` only needs `&self`, so a request must not pay that copy.
     pub fn encoder(&self) -> Encoder {
         Encoder {
-            tokenizer: self.tokenizer.clone(),
+            tokenizer: Arc::clone(&self.tokenizer),
         }
     }
 

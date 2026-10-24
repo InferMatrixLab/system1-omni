@@ -13,10 +13,10 @@ contain them. Inference code adapted from StartLux-Decision
 [NOTICE](../../src/models/startlux/NOTICE).
 
 GPU parity and latency are unverified here. The intended device is one
-L20X (Ada, sm_89), not an H200. [latency.md](latency.md) is the closed-loop
-measurement to run after this worker starts on that GPU. Reserve the GPU
-with the host's usual scheduler and record the reservation id. This recipe
-does not add scheduler flags.
+L20X (Ada, sm_89). [latency.md](latency.md) is the closed-loop measurement
+to run after this worker starts on that GPU, including the operator
+checklist. Record the bench metadata field `reservation` for the device
+hold. This recipe does not add scheduler flags.
 
 Commands below run from the repository root unless a path says otherwise.
 

@@ -30,9 +30,10 @@ GEMMs. Full-attention layers call the additive
 `cs1_attention_gated_bidirectional` symbol. Gated DeltaNet stays causal.
 There is no prefix cache and no CUDA graph on this path.
 
-Processing (`processing.rs`) loads the tokenizer, checks that A–Z are the
-pinned token ids 32..=57 immediately after the thinking-off prompt, and
-compiles the request. The executor loads the checkpoint, requires the
+Processing (`processing.rs`) loads the tokenizer once and shares it.
+A request encodes through that share.
+The load checks that A–Z are the pinned token ids 32..=57 immediately
+after the thinking-off prompt, and compiles the request. The executor loads the checkpoint, requires the
 bidirectional symbol, and returns FP32 letter logits from a CPU dot of the
 tied `model.language_model.embed_tokens.weight` rows. Softmax, per-type
 temperature, none-check, and wide-choice combination stay in the contract
@@ -82,7 +83,7 @@ That CPU dot is not yet compared with vLLM or Transformers.
 
 CPU contract tests cover prompts, option order, none-check, wide knockout,
 score limits, and 422/400 rejections. GPU numerical parity and HTTP latency
-are **unverified**. The build target for hk2 is Ada sm_89 / L20X. Do not
+are **unverified**. The build target is Ada sm_89 / L20X. Do not
 read an H200 or H800 leaderboard number as a result for this model.
 
 ## Gaps versus Open-Jev native
