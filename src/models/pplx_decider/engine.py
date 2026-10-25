@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -34,10 +35,9 @@ from .contract import (
 )
 from .conv import assert_qwen_conv_uses_package, prepare_causal_conv1d
 from .gdn import (
-    FLASHINFER_LINEAR_ATTENTION,
     MODELING,
     assert_qwen_chunk_uses_fla,
-    install_flashinfer_gdn_prefill,
+    install_short_flashinfer_prefill,
     prepare_fla,
     prepare_flashinfer,
     require_bound_linear_attention,
@@ -163,9 +163,9 @@ class PplxExecutor:
         root = Path(checkpoint)
         verify_checkpoint(root)
         # Import conv and FLA before Qwen3.5 modeling freezes the torch refs.
-        # FlashInfer is imported only when this CUDA device is capability 9.0
-        # and the pin is present. A lab GPU named NVIDIA L20X is accepted at
-        # capability 8.9 or 9.0. Ready is not limited to 9.0.
+        # Capability 9.0 with the FlashInfer pin installs short-sequence
+        # dispatch. PPLX_GDN_PREFILL=fla holds that pin and stays on FLA chunk.
+        # A lab GPU named NVIDIA L20X is accepted at capability 8.9 or 9.0.
         cuda = device == "cuda"
         self.causal_conv1d_version = prepare_causal_conv1d(required=cuda)
         self.fla_version = prepare_fla(required=cuda)
@@ -186,6 +186,10 @@ class PplxExecutor:
             self.gpu_name = torch.cuda.get_device_name(index)
             if uses_flashinfer_prefill(capability):
                 self.flashinfer_version, self.flashinfer_status = prepare_flashinfer()
+                # The all-sequence bind missed the p95 gate. PPLX_GDN_PREFILL=fla
+                # keeps the primary chunk even when the pin is installed.
+                if self.flashinfer_status == "bound" and os.environ.get("PPLX_GDN_PREFILL") == "fla":
+                    self.flashinfer_status = "held"
             else:
                 self.flashinfer_status = "not-selected"
         decision_model, reference_answer = _import_decision_model(root)
@@ -195,17 +199,15 @@ class PplxExecutor:
             assert_qwen_chunk_uses_fla()
         if cuda:
             modeling = importlib.import_module(MODELING)
-            if self.flashinfer_version is not None:
-                install_flashinfer_gdn_prefill(modeling)
+            if self.flashinfer_status == "bound":
+                install_short_flashinfer_prefill(modeling)
             self.linear_attention = require_bound_linear_attention(modeling)
         self.reference_answer = reference_answer
         self.batch_size = batch_size
-        # FlashInfer's SM90 prefill wrapper accepts one sequence. Question
-        # batches still run; each forward on that bind is one row. The FLA
-        # chunk path keeps the configured batch size.
-        self.forward_batch_size = (
-            1 if self.linear_attention == FLASHINFER_LINEAR_ATTENTION else batch_size
-        )
+        # One forward may contain several questions. The short-sequence
+        # dispatcher sends a single short row to FlashInfer and every other
+        # shape to FLA, so the configured batch size stays in force.
+        self.forward_batch_size = batch_size
         self.device = device
         self.model = decision_model(
             root,

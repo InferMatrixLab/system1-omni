@@ -37,7 +37,16 @@ GDN_PREFILL = "flashinfer"
 HOPPER = (9, 0)
 FLA_LINEAR_ATTENTION = "fla-chunk"
 FLASHINFER_LINEAR_ATTENTION = "flashinfer+fla+causal_conv1d"
-READY_LINEAR_ATTENTION = frozenset({FLA_LINEAR_ATTENTION, FLASHINFER_LINEAR_ATTENTION})
+SHORT_FLASHINFER_LINEAR_ATTENTION = "flashinfer-short+fla-chunk"
+# Profile anchors on this workload: median about 136 tokens, tail example
+# about 2676 tokens. 256 sits between those recorded lengths. It is the
+# candidate boundary, not a fitted cutoff.
+SHORT_FLASHINFER_TOKENS = 256
+READY_LINEAR_ATTENTION = frozenset({
+    FLA_LINEAR_ATTENTION,
+    FLASHINFER_LINEAR_ATTENTION,
+    SHORT_FLASHINFER_LINEAR_ATTENTION,
+})
 MODELING = "transformers.models.qwen3_5.modeling_qwen3_5"
 _CHUNK = "torch_chunk_gated_delta_rule"
 
@@ -196,6 +205,63 @@ def flashinfer_chunk_gated_delta_rule(
     return result.unsqueeze(0), None
 
 
+def use_short_flashinfer(batch: int, tokens: int) -> bool:
+    """FlashInfer only for one sequence at or under the candidate boundary.
+
+    The all-sequence bind improved p50 and missed p95. A longer sequence,
+    or more than one sequence in the forward, stays on FLA chunk.
+    """
+
+    return batch == 1 and 0 < tokens <= SHORT_FLASHINFER_TOKENS
+
+
+def dispatch_chunk_gated_delta_rule(
+    q: Any,
+    k: Any,
+    v: Any,
+    g: Any = None,
+    beta: Any = None,
+    scale: float | None = None,
+    initial_state: Any = None,
+    output_final_state: bool = False,
+    use_qk_l2norm_in_kernel: bool = False,
+    cu_seqlens: Any = None,
+    **kwargs: Any,
+) -> tuple[Any, None]:
+    """One short sequence uses FlashInfer. Every other shape uses FLA chunk."""
+
+    shape = getattr(q, "shape", ())
+    batch = shape[0] if len(shape) >= 1 else 0
+    tokens = shape[1] if len(shape) >= 2 else 0
+    if use_short_flashinfer(batch, tokens):
+        return flashinfer_chunk_gated_delta_rule(
+            q,
+            k,
+            v,
+            g=g,
+            beta=beta,
+            scale=scale,
+            initial_state=initial_state,
+            output_final_state=output_final_state,
+            use_qk_l2norm_in_kernel=use_qk_l2norm_in_kernel,
+            cu_seqlens=cu_seqlens,
+            **kwargs,
+        )
+    return fla_chunk_function()(
+        q,
+        k,
+        v,
+        g=g,
+        beta=beta,
+        scale=scale,
+        initial_state=initial_state,
+        output_final_state=output_final_state,
+        use_qk_l2norm_in_kernel=use_qk_l2norm_in_kernel,
+        cu_seqlens=cu_seqlens,
+        **kwargs,
+    )
+
+
 def install_flashinfer_gdn_prefill(modeling: Any) -> None:
     """Replace the chunk global before the checkpoint builds Qwen layers."""
 
@@ -215,6 +281,25 @@ def install_flashinfer_gdn_prefill(modeling: Any) -> None:
     modeling.pplx_gdn_prefill = GDN_PREFILL
 
 
+def install_short_flashinfer_prefill(modeling: Any) -> None:
+    """Install length dispatch. This is not the all-sequence FlashInfer bind."""
+
+    if getattr(modeling, "causal_conv1d_fn", None) is None:
+        raise RuntimeError(
+            "causal_conv1d_fn is not bound. Import causal_conv1d before "
+            f"{MODELING}. F.conv1d is not served."
+        )
+    if getattr(modeling, _CHUNK, None) is None:
+        raise RuntimeError(
+            f"{_CHUNK} is not bound. Import {FLA_DISTRIBUTION}=={FLA_VERSION} "
+            f"before {MODELING}. torch_chunk_gated_delta_rule is not served."
+        )
+    setattr(modeling, _CHUNK, dispatch_chunk_gated_delta_rule)
+    if getattr(modeling, "chunk_gated_delta_rule", None) is not None:
+        modeling.chunk_gated_delta_rule = dispatch_chunk_gated_delta_rule
+    modeling.pplx_gdn_prefill = "flashinfer-short"
+
+
 def bound_linear_attention(modeling: Any, *, fla_chunk: Any = None) -> str:
     """Name the linear-attention implementation the modeling module exposes."""
 
@@ -222,6 +307,8 @@ def bound_linear_attention(modeling: Any, *, fla_chunk: Any = None) -> str:
         return "unloaded"
     chunk = getattr(modeling, _CHUNK, None)
     conv = getattr(modeling, "causal_conv1d_fn", None) is not None
+    if chunk is dispatch_chunk_gated_delta_rule and conv:
+        return SHORT_FLASHINFER_LINEAR_ATTENTION
     if chunk is flashinfer_chunk_gated_delta_rule and conv:
         return FLASHINFER_LINEAR_ATTENTION
     reference = fla_chunk
@@ -234,6 +321,8 @@ def bound_linear_attention(modeling: Any, *, fla_chunk: Any = None) -> str:
         return FLA_LINEAR_ATTENTION
     if fla_bound:
         return "fla"
+    if chunk is dispatch_chunk_gated_delta_rule:
+        return "flashinfer-short"
     if chunk is flashinfer_chunk_gated_delta_rule:
         return GDN_PREFILL
     if conv:
@@ -249,7 +338,8 @@ def require_bound_linear_attention(modeling: Any, *, fla_chunk: Any = None) -> s
         return bound
     raise RuntimeError(
         f"pplx-decider linear attention is {bound}, so the worker is not ready. "
-        f"Ready accepts {FLA_LINEAR_ATTENTION} or {FLASHINFER_LINEAR_ATTENTION}. "
-        "Capability 8.9 stays on the FLA chunk. Capability 9.0 uses FlashInfer "
-        "when that pin imports, and the FLA chunk when it does not."
+        f"Ready accepts {FLA_LINEAR_ATTENTION}, {SHORT_FLASHINFER_LINEAR_ATTENTION}, "
+        f"or {FLASHINFER_LINEAR_ATTENTION}. "
+        "Capability 8.9 stays on the FLA chunk. The all-sequence FlashInfer "
+        "bind is not the startup path."
     )

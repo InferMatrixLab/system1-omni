@@ -10,14 +10,18 @@ from models.pplx_decider.gdn import (
     FLA_LINEAR_ATTENTION,
     FLA_VERSION,
     FLASHINFER_LINEAR_ATTENTION,
+    SHORT_FLASHINFER_LINEAR_ATTENTION,
+    SHORT_FLASHINFER_TOKENS,
     FI_PIN,
     FI_VERSION,
     READY_LINEAR_ATTENTION,
     bound_linear_attention,
     flashinfer_chunk_gated_delta_rule,
     install_flashinfer_gdn_prefill,
+    install_short_flashinfer_prefill,
     require_bound_linear_attention,
     resolve_flashinfer,
+    use_short_flashinfer,
     uses_flashinfer_prefill,
     version_base,
 )
@@ -30,7 +34,11 @@ def test_versions_and_ready_names():
     assert version_base("0.5.2+cu128") == "0.5.2"
     assert FLA_LINEAR_ATTENTION == "fla-chunk"
     assert FLASHINFER_LINEAR_ATTENTION == "flashinfer+fla+causal_conv1d"
-    assert READY_LINEAR_ATTENTION == {FLA_LINEAR_ATTENTION, FLASHINFER_LINEAR_ATTENTION}
+    assert READY_LINEAR_ATTENTION == {
+        FLA_LINEAR_ATTENTION,
+        FLASHINFER_LINEAR_ATTENTION,
+        SHORT_FLASHINFER_LINEAR_ATTENTION,
+    }
 
 
 def _fla_chunk():
@@ -89,6 +97,22 @@ def test_capability_9_0_stays_ready_when_flashinfer_is_absent():
     assert status == "bound"
     with pytest.raises(RuntimeError, match="0.6.16.post3"):
         resolve_flashinfer("0.6.15", imported=True)
+
+
+def test_short_flashinfer_keeps_the_tail_and_a_batch_on_fla():
+    assert SHORT_FLASHINFER_TOKENS == 256
+    assert use_short_flashinfer(1, 136)
+    assert use_short_flashinfer(1, 256)
+    assert not use_short_flashinfer(1, 257)
+    assert not use_short_flashinfer(1, 2676)
+    assert not use_short_flashinfer(3, 136)
+    modeling = SimpleNamespace(
+        torch_chunk_gated_delta_rule=object(),
+        causal_conv1d_fn=object(),
+        chunk_gated_delta_rule=object(),
+    )
+    install_short_flashinfer_prefill(modeling)
+    assert require_bound_linear_attention(modeling) == SHORT_FLASHINFER_LINEAR_ATTENTION
 
 
 def test_flashinfer_wrapper_rejects_a_batch_and_a_state():
