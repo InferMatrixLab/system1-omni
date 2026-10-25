@@ -137,8 +137,8 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
     extension) or a directory carrying any importable entry — an
     ``__init__`` in every module form, or a namespace package's nested
     modules — would shadow one of the pinned runtime's dependencies —
-    and any ``__pycache__``, whose existing bytecode is not verifiable
-    against the pin.
+    and any ``__pycache__`` or directory symlink, whose contents the
+    walk cannot verify against the pin.
     """
 
     table = dict(table or PINNED_FILES_SHA256)
@@ -159,16 +159,23 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
             problems.append(
                 f"existing bytecode cache {entry.name}/ in the package root is not verifiable against the pin"
             )
+        elif entry.is_symlink() and entry.is_dir():
+            problems.append(
+                f"directory symlink {entry.name} in the package root is not verifiable against the pin"
+            )
         elif entry.is_file() and entry.suffix in IMPORTABLE_FILE_SUFFIXES:
             problems.append(f"unexpected importable file {entry.name} in the package root")
         elif entry.is_dir() and any(
-            child.is_file() and child.suffix in IMPORTABLE_FILE_SUFFIXES
+            (child.is_symlink() and child.is_dir())
+            or (child.is_file() and child.suffix in IMPORTABLE_FILE_SUFFIXES)
             for child in entry.rglob("*")
         ):
             # Any importable file at any depth makes the directory an
             # importable package: through an __init__ in source, sourceless
             # or extension form, or as a namespace package whose nested
-            # modules import directly.
+            # modules import directly. A directory symlink is refused the
+            # same way at any depth: rglob does not descend into it, but
+            # import does.
             problems.append(f"unexpected importable package {entry.name}/ in the package root")
     if problems:
         raise ValueError("package verification failed: " + "; ".join(problems[:8]))
