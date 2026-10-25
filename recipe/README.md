@@ -27,6 +27,10 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   backbone and trained decision head of Open-Jev-27B-v1.1 or Open-Jev-9B, then
   serve with Rust and CUDA. [Open-Jev-9B validation](open_jev/validation-9b.md)
   compares the 9B worker with the reference.
+- [StartLux Instant 4B native worker](startlux/README.md): build the Ada sm_89
+  CUDA library, serve the pinned CC BY-NC Instant checkpoint, and run the
+  [L20X closed-loop latency recipe](startlux/latency.md). AutoThink and 27B
+  are not in this recipe. GPU parity is unverified.
 - [JEMM native worker](jemm/README.md): pinned text/image decisions and export;
   known multi-image numerical limitation is documented in the model contract.
 - [JEV-27B-VL experimental worker](jev_vl/README.md): native text and preencoded
@@ -36,6 +40,10 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   and compare it with the reference.
 - [CLM behind the frontend](clm/README.md): run CLM's own server behind the frontend on
   CPU with a stub encoder, and what the response comparison has to allow for.
+- [pplx-decider reference worker](pplx_decider/README.md): pin
+  perplexity-ai/pplx-decider-v1.1-27b, serve `choice`/`noul`/`score` through
+  the checkpoint runtime. Head `1ba07d1` has a reported L20X primary.
+  Later heads have no measured sample.
 - [D3 reference worker](d3/reference.md): download the pinned vllm-sr/d3 package,
   verify its runtime manifest, and serve `choice`/`noul`/`score` decisions over
   text, image and video state through the Python worker and the Rust frontend

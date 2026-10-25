@@ -66,8 +66,11 @@ The LFM2.5-350M Transformers worker owns candidate scoring and hybrid cache bran
   processing and executor modules, with shared FIFO admission and blocking
   dispatch in the [native runtime](src/runtime/README.md).
 - **Native CUDA workers.** The Cua-S1 4B 0.2 `text` adapter,
-  Open-Jev-27B-v1.1 and Open-Jev-9B run as native workers with shared CUDA
-  kernels. Cua-S1 also has a Python worker that serves as the correctness reference.
+  Open-Jev-27B-v1.1, Open-Jev-9B, and StartLux-Decision v1.1 4B Instant run
+  as native workers with shared CUDA kernels. Cua-S1 also has a Python
+  worker that serves as the correctness reference. The StartLux worker is
+  text-only Instant; its weights are CC BY-NC 4.0 and its GPU parity is
+  unverified. AutoThink is not served.
 - **LAYA text serving.** LAYA runs as an external CPU Python worker, the
   in-repository Python MPS/CPU worker, or a native Rust/CUDA worker on Hopper.
 - **CUDA backend and planned Metal backend.** High-performance GPU operations
@@ -164,7 +167,10 @@ Python screenshot worker, Valen-Preview-0923 has a Python reference worker for
 text and one-image state, CLM has a stub-encoder contract recipe, and OmniJev-4B
 v1.1 runs on a native Rust/CUDA worker. D3
 (Decision 3.0) has a Python reference worker that runs the checkpoint's own
-pinned runtime for text, image and video state:
+pinned runtime for text, image and video state. pplx-decider-v1.1-27b has a
+Python reference worker for the pinned Perplexity checkpoint. Public231
+concurrency-1 latency for heads `1ba07d1`, `f968e576`, `ffae182`, `4b99b73`, and `fcf5e2b` is recorded in
+the recipe:
 
 | Model | Status |
 | --- | --- |
@@ -176,12 +182,14 @@ pinned runtime for text, image and video state:
 | Valen-Preview-0923 | [Python reference worker](recipe/valen/reference.md); text state or one inline PNG/JPEG image, `choice`/`noul`/`score`; author-run on RTX 5060 Laptop GPU (sm_120, WSL2), owner: community |
 | Open-Jev-27B-v1.1 | [Native Rust/CUDA worker](recipe/open_jev/native.md); eager independent text candidates; [H200 validation](recipe/open_jev/validation.md) |
 | Open-Jev-9B | The same [native Rust/CUDA worker](recipe/open_jev/native.md); eager independent text candidates; [reference comparison on sm_89](recipe/open_jev/validation-9b.md) |
+| StartLux-Decision v1.1 4B Instant | [Native Rust/CUDA text worker](recipe/startlux/README.md); `choice` / `noul` / `score`; weights CC BY-NC 4.0; Instant only (no AutoThink, no 27B); GPU parity unverified; [L20X latency recipe](recipe/startlux/latency.md) |
 | autotrust/JEV-27B-VL | [Experimental Rust/CUDA worker](recipe/jev_vl/README.md); single-question text, online inline PNG/JPEG and offline-preencoded image inputs; [validation scope and limits](recipe/jev_vl/validation.md) |
 | CLM-v0.1-8B | [External worker with a CPU stub encoder](recipe/clm/README.md); contract checks only, real Qwen3-8B decisions unverified by this recipe |
 | LFM2.5-350M | [Transformers worker](recipe/lfm2/README.md); text state and independent choice questions |
 | OmniJev-4B v1.1 | [Native Rust/CUDA worker](recipe/omnijev/native.md), eager: one image, Choice, Noul and Score; [reference comparison on sm_89](recipe/omnijev/native.md#comparison-with-the-reference) |
 | D3 (Decision 3.0) | [Python reference worker](recipe/d3/reference.md) on the checkpoint's pinned runtime; `choice`/`noul`/`score` over text, image and video state; author-run on A100 for text and media serving (see the integration and media PRs) |
 | Clef-flash (9B) and Clef (27B) | [Python reference worker](recipe/clef/reference.md) for text `choice`/`noul`/`score`; flash is the bring-up variant. Image, video and native CUDA are not served. L20X-labeled lab Public231 C1 primary is tip `594528a9`: p50 164.969 ms, p95 216.755 ms, `/health` `fla+causal_conv1d`, versus `9030065` run1 p50 247.518 ms, p95 413.025 ms (Δp50 −82.549 ms, Δp95 −196.270 ms) |
+| pplx-decider-v1.1-27b | [Python reference worker](recipe/pplx_decider/README.md) on the pinned checkpoint; `choice`/`noul`/`score` text plus up to four images. Lab L20X-labeled GPUs are the H200 target. Kept Public231 primary is `fcf5e2b`: 231/231, p50 87.782 ms, p95 291.183 ms, grouped-value FlashInfer with q and k packed before the L2 view (p50 −1.30%, p95 −1.56% versus `4b99b73` 88.942 / 295.797). `4b99b73` was p50 −4.20%, p95 −0.22% versus `ffae182` 92.844 / 296.458. Uncached all-sequence FlashInfer `3c72f02` is not the primary (p50 88.808 ms, p95 300.751 ms). Short-sequence FlashInfer `a50b9aa` missed its gate (p50 95.446 ms, p95 300.871 ms). cuDNN-first SDPA `0dcaa0ac` missed its gate (p50 138.501 ms, p95 332.859 ms). Fused gate-up `8b4ee326` missed its gate (p50 102.437 ms, p95 304.970 ms). Always-on dynamic compile `e36b32ed` missed the both-percentiles gate (p50 97.751 ms, p95 263.124 ms; p95 improved). The 512-token split `7e3b1be` missed its gate (p50 100.037 ms, p95 257.084 ms). Isolated-median compile `34ba5de` missed its gate (p50 97.084 ms, p95 256.679 ms; the 136-token probe was eager). The FlashInfer state-workspace ring `17a7b120` missed its gate (p50 89.165 ms, p95 295.723 ms). Always-on FLA residual RMSNorm `3afb472` missed its gate (p50 93.935 ms, p95 274.902 ms). Length-gated FLA residual RMSNorm `705ae089` missed its gate (p50 94.604 ms, p95 274.835 ms). `use_cp=auto` `a6f4d9a` missed its gate (p50 112.294 ms, p95 299.419 ms). Grouped-value `3ecdf5a` crashed in warmup (0/231, no p50 or p95). FLA fused gated RMSNorm `801ef7b` missed its gate (p50 89.172 ms, p95 274.790 ms). FLA `swiglu_fwd` `2bbbe4e` missed its gate (owner closeout p50 97.613 ms, p95 292.795 ms) and is not installed |
 
 [Supported models and hardware](docs/supported-models.md) lists the devices
 and where each worker has been run.
