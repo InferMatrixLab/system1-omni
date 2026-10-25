@@ -74,7 +74,7 @@ The ownership boundary follows
 | --- | --- | --- |
 | Package | [vllm-sr/Vela-2.0-0.3B](https://huggingface.co/vllm-sr/Vela-2.0-0.3B) | [vllm-sr/Vela-2.0-0.8B](https://huggingface.co/vllm-sr/Vela-2.0-0.8B) |
 | Pinned revision | `d6f03aa9baca4f9017fa8f8e9c2764d3bed3f409` | `326b01d81f61fff7fd4ae570e54b87a49119e490` |
-| Package gate | config structural identity + a 7-file SHA-256 table in `engine.py` | config structural identity (incl. `model_name`) + a 10-file SHA-256 table in `hybrid.py`, cross-checked against the package's own SHA256SUMS |
+| Package gate | config structural identity + a 7-file SHA-256 table in `engine.py`; no unlisted importables, `__pycache__` or directory symlinks in the package root | config structural identity (incl. `model_name`) + a 10-file SHA-256 table in `hybrid.py`, cross-checked against the package's own SHA256SUMS |
 | Weights check | exact 1,236,473,252 bytes | exact 2,022,189,488 bytes + hashed `broad_head.safetensors` |
 | Served name | `vllm-sr/Vela-2.0-0.3B` | `vllm-sr/Vela-2.0-0.8B` (from `config.json`) |
 | Input window | 8,192 tokens | 16,384 tokens |
@@ -117,8 +117,9 @@ broad-head file); FP32 parameters take about 3 GB of RAM on CPU (about
 3 GB of GPU memory on CUDA, where the backbone runs under bf16
 autocast). A worker refuses to start when the config is not its pinned
 member's, when any gated file fails its hash, when the package root
-holds an importable entry the table does not name or an existing
-`__pycache__`, or when the weights file is not the pinned size — that
+holds an importable entry the table does not name, an existing
+`__pycache__` or a directory symlink, or when the weights file is not
+the pinned size — that
 gate runs before any package code is imported.
 
 ## Start the worker
@@ -283,8 +284,8 @@ oracle fixtures under an `oracle-hybrid-` prefix.
 
 - The package directory must be the pinned revision's download; the
   worker refuses foreign configs, hash mismatches, unlisted importables,
-  `__pycache__` bytecode caches and wrong weights sizes at startup,
-  before importing anything.
+  `__pycache__` bytecode caches, directory symlinks and wrong weights
+  sizes at startup, before importing anything.
 - The 8 MiB body cap is slice-scoped (upstream sets no total-body
   limit); a valid request bounded by either member's input window is
   far below it.

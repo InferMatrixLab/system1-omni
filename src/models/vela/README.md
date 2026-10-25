@@ -39,15 +39,16 @@ structural identity (model type, architecture, `max_length` 8,192, the
 executes — the four runtime modules, `config.json`, `calibration.json`
 and `tokenizer.json` — against the table checked in for the pinned
 revision, before anything is imported, and refuses importable entries
-the table does not name (`model.safetensors` is checked by exact size;
-the runtime's strict safetensors load rejects truncated or structurally
+the table does not name plus any existing `__pycache__` bytecode cache
+or directory symlink (`model.safetensors` is checked by exact size; the
+runtime's strict safetensors load rejects truncated or structurally
 mismatched weights, but not same-size bit-level corruption). The 0.8B
 gate mirrors this with a 10-file table — the same four runtime modules,
 `config.json` (identity includes the served `model_name`, so a 4B or 9B
-package fails with its own name), `calibration.json`,
-`tokenizer.json`, `tokenizer_config.json`,
-`model.safetensors.index.json` (the shard map) and the hashed
-`broad_head.safetensors` — with the 2 GB shard checked by exact size.
+package fails with its own name), `calibration.json`, `tokenizer.json`,
+`tokenizer_config.json`, `model.safetensors.index.json` (the shard map)
+and the hashed `broad_head.safetensors` — with the 2 GB shard checked
+by exact size.
 A later self-consistent snapshot rewrites its own files and fails the
 checked-in pin.
 

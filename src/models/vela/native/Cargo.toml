@@ -9,7 +9,7 @@ description = "Native library for vllm-sr/Vela-2.0-0.8B: bundle gate, wire contr
 anyhow = "1.0.100"
 libm = "0.2"
 safetensors = "0.8.0"
-onig = { version = "6", default-features = false }
+onig = { package = "onig", version = "6", default-features = false }
 omni-qwen3-5-native = { path = "../../qwen3_5/native" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.149", features = ["preserve_order"] }
