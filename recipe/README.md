@@ -48,6 +48,10 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   verify its runtime manifest, and serve `choice`/`noul`/`score` decisions over
   text, image and video state through the Python worker and the Rust frontend
   (text serving and parity validated on A100; media budgets and caps in the recipe).
+- [Vela 2.0 0.3B reference worker](vela/reference.md): download the pinned
+  vllm-sr/Vela-2.0-0.3B package, pass its full-hash package gate, and serve all
+  five SystemOne question kinds (`choice`/`noul`/`score` plus the `span`/`set`
+  extensions) through the Python worker and the Rust frontend on CPU FP32.
 - [Clef reference worker](clef/reference.md): load pinned Clef-flash (9B) or
   Clef (27B) and serve text `choice`/`noul`/`score`. Image, video and native
   CUDA are not served. Operator-reported flash Public231 concurrency-1
