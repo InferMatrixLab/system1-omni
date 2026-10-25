@@ -17,7 +17,9 @@ single-prompt calls; Open-Jev-27B-v1.1 packs candidates within one request for
 input and gate/up GEMMs while preserving per-sequence mixers and output/down GEMM
 shapes. Decider optionally packs up to four complete rows and 4096 tokens within
 one request, or selects request-local shared prefixes through the same canonical
-continuation path used by JEV-VL (below). Both optimizations default off.
+continuation path used by JEV-VL (below). Both optimizations default off. Open-Jev
+can select the same shared prefixes for the candidates of one request, also
+default off.
 [Laya's native worker](../src/models/laya/README.md)
 uses a separate Hopper CUDA backend for one complete padded request. These workers
 coordinate independent processors and executors through

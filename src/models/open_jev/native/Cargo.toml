@@ -21,3 +21,7 @@ path = "../../../../tests/open_jev/contract.rs"
 [[test]]
 name = "prefill_batch"
 path = "../../../../tests/open_jev/prefill_batch.rs"
+
+[[test]]
+name = "prefix"
+path = "../../../../tests/open_jev/prefix.rs"

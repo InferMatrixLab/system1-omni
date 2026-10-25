@@ -172,11 +172,57 @@ single-prompt graph comparison with Open-Jev-27B-v1.1 on the 74-case H200 worklo
 measured mean HTTP latency 2.03% below eager execution after all lengths were
 warmed. Combined
 packing and graph performance remains unmeasured. Tokenization, transfers
-and the CPU scalar head remain outside the graph. Prefix sharing, GEMM autotuning,
-quantization and multimodal inference are not implemented. The
+and the CPU scalar head remain outside the graph. GEMM autotuning, quantization
+and multimodal inference are not implemented; request-local prefix sharing is
+opt-in (below). The
 [H200 validation](validation.md) reports Open-Jev-27B-v1.1 results for 74
 single-candidate requests, including probability differences and timing
 variability. It does not establish general accuracy parity or a speedup over
 OpenJev-Fast; the author's B300 results use different hardware and workloads.
 The [Open-Jev-9B validation](validation-9b.md) compares the 9B worker with the
 reference on one RTX 6000 Ada; it makes no claim about 27B.
+
+## Optional request-local shared prefixes
+
+Each candidate prompt repeats the chat prefix, the state and its question, so the
+candidates of one request share long token prefixes. `OPEN_JEV_PREFIX=1` plans them
+with the Qwen crate's request-local planner
+([`prefix.rs`](../../src/models/qwen3_5/native/src/prefix.rs)), which Decider also
+uses: the prefix all candidates share, then a longer prefix for each question's
+candidates. Each prefix runs once through the shared executor's `forward_shared`
+([architecture](../../docs/architecture.md)) and every candidate continues from its
+state. Prefixes end at their last multiple of 64 tokens and the rest runs in each
+candidate. The prefix-state buffers persist, but their contents are valid only within
+one request; there is no cross-request cache. A request with less than one reusable
+64-token chunk runs its candidates one at a time with the same fixed GEMM algorithms.
+
+Shared execution keeps one GEMM algorithm per weight shape. On GPUs where that keeps
+rows independent of the row count, each candidate's score is bit-identical to
+`OPEN_JEV_FIXED=1`, which runs every candidate as its own full pass with those
+algorithms; both round differently from the default path. Before enabling either
+switch on a new GPU, run Decider's
+[fixed-algorithm check](../decider/validation.md#deploying-fixed-and-shared-modes)
+there. If the backend rejects the fixed algorithm for a shape, the request fails with
+HTTP 500 like any other inference error; it does not fall back to another algorithm.
+`OPEN_JEV_PREFIX=auto` shares only when the plan saves at least 4096 tokens and at
+least a third of the request's tokens, as `DECIDER_PREFIX=auto` does; other requests
+take the default path. Shared candidates run one at a time and are not packed. The
+switches default off, cannot be combined, and require `CUA_S1_GRAPH` off.
+
+```sh
+OPEN_JEV_PREFIX=auto OPEN_JEV_MODEL=weights/open-jev-9b-merged \
+  target/release/omni-open-jev-native
+```
+
+With either switch set, the response's `metadata.prefix_cache` gives the mode,
+whether the request ran on shared prefixes (`enabled`) and the prefix tokens that
+were not recomputed (`saved_tokens`); with both off it is unchanged. Usage still
+counts every candidate's tokens. The [Open-Jev-9B validation](validation-9b.md#shared-prefixes-2026-10-25)
+has the measurements; shared prefixes have not been run on Open-Jev-27B-v1.1. The
+GPU test compares shared and fixed scores on a two-question request:
+
+```sh
+OPEN_JEV_MODEL=$PWD/weights/open-jev-9b-merged \
+OPEN_JEV_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
+  cargo test --release --locked -p omni-open-jev-native --test prefix -- --ignored
+```

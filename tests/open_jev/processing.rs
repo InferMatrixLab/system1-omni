@@ -244,3 +244,40 @@ fn finishing_rejects_missing_candidates_and_nonfinite_scores() {
         );
     }
 }
+
+#[test]
+fn prefix_metadata_reports_how_candidates_ran() {
+    use crate::executor::PrefixUse;
+    use omni_qwen3_5_native::prefix::PrefixMode;
+    let finish = |prefix: Option<PrefixUse>| {
+        processor(4096)
+            .prepare(REQUEST)
+            .unwrap()
+            .context
+            .finish_with_prefix(vec![vec![3.0, 3.0], vec![0.0]], prefix.as_ref())
+            .unwrap()["metadata"]["prefix_cache"]
+            .clone()
+    };
+    let used = |mode, shared, saved_tokens| {
+        Some(PrefixUse {
+            mode,
+            shared,
+            saved_tokens,
+        })
+    };
+    let unchanged = json!({"enabled": false, "mode": "independent_candidates"});
+    assert_eq!(finish(None), unchanged);
+    assert_eq!(finish(used(PrefixMode::Off, false, 0)), unchanged);
+    assert_eq!(
+        finish(used(PrefixMode::Fixed, false, 0)),
+        json!({"enabled": false, "mode": "fixed", "saved_tokens": 0})
+    );
+    assert_eq!(
+        finish(used(PrefixMode::Shared, true, 128)),
+        json!({"enabled": true, "mode": "shared", "saved_tokens": 128})
+    );
+    assert_eq!(
+        finish(used(PrefixMode::Auto, false, 0)),
+        json!({"enabled": false, "mode": "auto", "saved_tokens": 0})
+    );
+}

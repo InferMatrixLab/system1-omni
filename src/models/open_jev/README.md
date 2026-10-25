@@ -37,6 +37,10 @@ projections share packed GEMMs. Output/down projections retain their original
 per-prompt GEMM shapes; attention, positions, convolution and GDN state reset
 at each sequence boundary. Results are regrouped before question normalization.
 Open-Jev-9B runs candidates one at a time until packing is validated for it.
+Optionally, the executor plans the candidates' shared token prefixes with the shared
+Qwen planner and runs each prefix once per request through `forward_shared`, or runs
+every candidate with the same fixed GEMM algorithms as a control; see
+[optional request-local shared prefixes](../../../recipe/open_jev/native.md#optional-request-local-shared-prefixes).
 The engine owns a
 [shared serial scheduler](../../runtime/README.md) that admits the complete request
 before blocking dispatch. Cross-request batching and shared queue budgets remain planned.
