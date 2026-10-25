@@ -133,7 +133,11 @@ same gate. Quality: `choice_acc=0.9065` (139), `noul_acc=0.8784` (74),
 residual RMSNorm `705ae089` measured 231/231, p50 94.604 ms, p95
 274.835 ms (p50 +6.37%, p95 −7.09%) and failed the same gate.
 Quality: `choice_acc=0.906` (139), `noul_acc=0.878` (74),
-`score_mae=0.205` (18). It is not the primary. The `use_cp=auto`
+`score_mae=0.205` (18). It is not the primary. `use_cp=auto`
+`a6f4d9a` measured 231/231, p50 112.294 ms, p95 299.419 ms
+(p50 +26.26%, p95 +1.22%) and failed the same gate. Quality:
+`choice_acc=0.906` (139), `noul_acc=0.878` (74),
+`score_mae=0.204` (18). It is not the primary. The grouped-value
 candidate has no sample.
 These L20X measurements stay in this group and do not enter the H800
 table above. Ready is not limited to capability 9.0.

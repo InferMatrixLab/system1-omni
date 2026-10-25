@@ -44,13 +44,15 @@ from .contract import (
 )
 from .conv import assert_qwen_conv_uses_package, prepare_causal_conv1d
 from .gdn import (
+    GDN_LAYOUT_GVA,
+    GDN_LAYOUT_REPEAT,
     GDN_USE_CP,
     LINEAR_ATTENTION_LAYERS,
     MODELING,
     assert_qwen_chunk_uses_fla,
-    cp_heuristic_matches,
     gdn_prefill_mode,
     install_flashinfer_gdn_prefill,
+    install_gva_prefill,
     install_short_flashinfer_prefill,
     prepare_fla,
     prepare_flashinfer,
@@ -180,10 +182,11 @@ class PplxExecutor:
         # Compile tips raised p50 even after the median route proved eager,
         # so startup leaves the forward eager. Capability 9.0 uses
         # all-sequence FlashInfer. The kept primary rotates 48 cu_seqlens
-        # buffers and passes use_cp false. This candidate passes auto.
-        # FlashInfer allocates its own state workspace. Residual RMSNorm
-        # stays eager: always-on fusion and the 512-token gate both missed
-        # p50. PPLX_GDN_PREFILL=fla reproduces the prior f968e576 chunk.
+        # buffers, passes use_cp false, and repeats q and k. use_cp auto
+        # missed both percentiles, so it stays false. This candidate keeps
+        # the ring and skips that repeat. FlashInfer allocates its own
+        # state workspace. Residual RMSNorm stays eager.
+        # PPLX_GDN_PREFILL=fla reproduces the prior f968e576 chunk.
         # PPLX_GDN_PREFILL=short is the rejected length dispatch.
         # cuDNN-first SDPA and the fused gate-up GEMM are not selectable.
         # A lab GPU named NVIDIA L20X is accepted at capability 8.9 or 9.0.
@@ -203,7 +206,8 @@ class PplxExecutor:
         self.fused_rms_norm_min_tokens = 0
         self.gdn_use_cp = "off"
         self.gdn_cp_heuristic = None
-        self._cuda_index = None
+        self.gdn_layout = GDN_LAYOUT_REPEAT
+        self.gva_layers = 0
         self.forward_compile = compile_preference(device, os.environ.get("PPLX_COMPILE"))
         self.compile_min_tokens = compile_min_tokens(self.forward_compile)
         self.compile_median = compile_median(self.forward_compile)
@@ -217,7 +221,6 @@ class PplxExecutor:
             index = requested.index
             if index is None:
                 index = torch.cuda.current_device()
-            self._cuda_index = index
             capability = torch.cuda.get_device_capability(index)
             self.compute_capability = f"{capability[0]}.{capability[1]}"
             self.gpu_name = torch.cuda.get_device_name(index)
@@ -262,17 +265,9 @@ class PplxExecutor:
         language_model = self.model.backbone.language_model
         self.language_model = language_model
         self.unpadded_full_attention_layers = install_unpadded_full_attention(language_model)
-        if self.gdn_use_cp == GDN_USE_CP:
-            import torch
-
-            config = getattr(language_model, "config", None)
-            heads = getattr(config, "linear_num_value_heads", None)
-            if type(heads) is not int or heads < 1:
-                raise RuntimeError(
-                    "FlashInfer CP dispatch needs linear_num_value_heads on the text config"
-                )
-            sms = torch.cuda.get_device_properties(self._cuda_index).multi_processor_count
-            self.gdn_cp_heuristic = cp_heuristic_matches(heads, int(sms), self.gpu_name or "")
+        if self.flashinfer_status == "bound" and self.gdn_prefill == "flashinfer":
+            self.gva_layers = install_gva_prefill(language_model)
+            self.gdn_layout = GDN_LAYOUT_GVA
         if self.forward_compile != "default":
             install_compiled_forward(language_model, self.forward_compile)
             warmup_compiled_forward(self.model.backbone, device, self.forward_compile)

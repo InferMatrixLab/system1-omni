@@ -34,8 +34,10 @@ on the lab L20X-labeled GPU uses FLA 0.5.2 plus causal_conv1d, including
 when that GPU reports capability 8.9. Capability 9.0 uses all-sequence FlashInfer when
 `flashinfer-python` 0.6.16.post3 imports. The kept primary rotates 48
 `cu_seqlens` buffers per device and length and passes `use_cp` false.
-This candidate keeps that ring, leaves residual RMSNorm eager, and
-passes `use_cp=auto`. Always-on fusion `3afb472` and the 512-token
+This candidate keeps that ring and the eager residual RMSNorms,
+passes `use_cp` false, and skips the q/k repeat on the 48 linear
+layers. `use_cp=auto` on `a6f4d9a` missed both percentiles.
+Always-on fusion `3afb472` and the 512-token
 gate `705ae089` both missed the median.
 FlashInfer allocates its own state workspace. The 48-slot state
 ring `17a7b120` missed the gate.

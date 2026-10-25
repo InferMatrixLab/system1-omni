@@ -14,9 +14,10 @@ then Qwen3.5 modeling. Transformers 5.17 calls
 before the checkpoint constructs layers. The call is one sequence, no
 recurrent state, log-space ``g`` exponentiated to float32, and Q/K L2
 norm from ``fla.modules.l2norm.l2norm_fwd`` with FlashInfer's own flag
-left false. ``use_cp`` is ``auto``. The kept primary passed false, so
-the low-parallelism kernel never ran. CuteDSL, CUDA graphs, and
-``torch.compile`` are not selected.
+left false. ``use_cp`` stays false. ``auto`` was measured and missed
+both percentiles. On the all-sequence bind, q and k are not repeated
+up to the value heads; FlashInfer's GVA path owns that grouping.
+CuteDSL, CUDA graphs, and ``torch.compile`` are not selected.
 """
 
 from __future__ import annotations
@@ -35,11 +36,11 @@ FI_VERSION = "0.6.16.post3"
 FI_PIN = f"{FI_DISTRIBUTION}=={FI_VERSION}"
 FI_MODULE = "flashinfer.gdn_prefill"
 GDN_PREFILL = "flashinfer"
-# FlashInfer 0.6.16 defaults this to "auto" and selects the CP kernel when
-# num_seqs * num_sab_heads is below half the SM count on an HBM device
-# (one third on GDDR). The kept primary forced false. num_sab_heads is
-# linear_num_value_heads because the checkpoint repeats q and k first.
-GDN_USE_CP = "auto"
+# ``auto`` selected the CP kernel on this head count and missed both
+# percentiles (``a6f4d9a``: p50 112.294 ms, p95 299.419 ms). Stay false.
+GDN_USE_CP = False
+GDN_LAYOUT_REPEAT = "repeat"
+GDN_LAYOUT_GVA = "gva"
 HOPPER = (9, 0)
 FLA_LINEAR_ATTENTION = "fla-chunk"
 # Qwen3.5 27B text stack: 64 layers, 16 full attention, so 48 linear
@@ -105,9 +106,10 @@ def gdn_prefill_mode(selected: str | None) -> str:
 
     ``fla`` reproduces the prior ``f968e576`` chunk. ``short`` is the
     rejected length dispatch. The kept primary rotates 48 ``cu_seqlens``
-    buffers and passes ``use_cp`` false. This candidate passes ``auto``.
-    FlashInfer allocates its own state workspace. Residual RMSNorm stays
-    eager.
+    buffers, passes ``use_cp`` false, and repeats q and k up to the value
+    heads. This candidate keeps that ring and ``use_cp`` false, and does
+    not repeat. FlashInfer allocates its own state workspace. Residual
+    RMSNorm stays eager.
     """
 
     chosen = "flashinfer" if selected is None else selected
@@ -266,7 +268,7 @@ def flashinfer_chunk_gated_delta_rule(
     Transformers 5.17 calls this with FLA's ``[B, T, H, D]`` layout and a
     log-space decay ``g``. FlashInfer 0.6.16 wants ``[T, H, D]``, a float32
     multiplicative gate, and a non-null ``cu_seqlens``. ``use_cp`` is
-    ``auto``, so a low head count can take the CP kernel.
+    false. The CP kernel missed both percentiles.
     """
 
     del kwargs
@@ -387,6 +389,116 @@ def install_flashinfer_gdn_prefill(modeling: Any) -> None:
     if getattr(modeling, "chunk_gated_delta_rule", None) is not None:
         modeling.chunk_gated_delta_rule = flashinfer_chunk_gated_delta_rule
     modeling.pplx_gdn_prefill = GDN_PREFILL
+
+
+def gva_group_size(num_k_heads: int, num_v_heads: int) -> int:
+    """Value heads that share one key head.
+
+    FlashInfer's GVA reference repeats q and k with ``repeat_interleave``
+    on the head axis. The checkpoint does that repeat before the kernel.
+    Passing the unrepeated heads is the same grouping, done inside the
+    kernel instead of as two copies.
+    """
+
+    if type(num_k_heads) is not int or type(num_v_heads) is not int:
+        raise TypeError("head counts must be int")
+    if num_k_heads < 1 or num_v_heads <= num_k_heads or num_v_heads % num_k_heads != 0:
+        raise ValueError(
+            "GVA prefill needs more value heads than key heads and an even group"
+        )
+    return num_v_heads // num_k_heads
+
+
+def gva_gated_delta_forward(
+    self: Any,
+    hidden_states: Any,
+    cache_params: Any = None,
+    attention_mask: Any = None,
+    **kwargs: Any,
+) -> Any:
+    """Checkpoint linear-attention forward without the q/k repeat.
+
+    The all-sequence FlashInfer bind is already installed, so the chunk
+    global accepts ``num_v_heads > num_k_heads``. ``use_cp`` stays false.
+    """
+
+    import torch
+    from torch.nn import functional as F
+
+    if cache_params is not None:
+        raise RuntimeError("pplx-decider GVA prefill does not use a recurrent cache")
+    group = gva_group_size(self.num_k_heads, self.num_v_heads)
+    modeling = importlib.import_module(MODELING)
+    hidden_states = modeling.apply_mask_to_padding_states(hidden_states, attention_mask)
+    batch_size, seq_len, _ = hidden_states.shape
+    mixed_qkv = self.in_proj_qkv(hidden_states).transpose(1, 2)
+    z = self.in_proj_z(hidden_states).reshape(batch_size, seq_len, -1, self.head_v_dim)
+    b = self.in_proj_b(hidden_states)
+    a = self.in_proj_a(hidden_states)
+    mixed_qkv = modeling.causal_conv1d_fn(
+        mixed_qkv,
+        self.conv1d.weight.squeeze(1),
+        self.conv1d.bias,
+        activation=self.activation,
+        **kwargs,
+    )
+    mixed_qkv = mixed_qkv.transpose(1, 2)
+    query, key, value = torch.split(
+        mixed_qkv, [self.key_dim, self.key_dim, self.value_dim], dim=-1
+    )
+    query = query.reshape(batch_size, seq_len, -1, self.head_k_dim)
+    key = key.reshape(batch_size, seq_len, -1, self.head_k_dim)
+    value = value.reshape(batch_size, seq_len, -1, self.head_v_dim)
+    if query.shape[-2] != self.num_k_heads or key.shape[-2] != self.num_k_heads:
+        raise RuntimeError("GVA prefill expected unrepeated query and key heads")
+    if value.shape[-2] != self.num_v_heads or group * self.num_k_heads != self.num_v_heads:
+        raise RuntimeError("GVA prefill expected value heads to cover the key groups")
+    beta = b.sigmoid()
+    g = -self.A_log.float().exp() * F.softplus(a.float() + self.dt_bias)
+    core_attn_out, _ = modeling.torch_chunk_gated_delta_rule(
+        query,
+        key,
+        value,
+        g=g,
+        beta=beta,
+        initial_state=None,
+        output_final_state=False,
+        use_qk_l2norm_in_kernel=True,
+        cu_seqlens=kwargs.pop("cu_seq_lens_q", None),
+        **kwargs,
+    )
+    core_attn_out = self.norm(
+        core_attn_out.reshape(-1, self.head_v_dim), z.reshape(-1, self.head_v_dim)
+    )
+    return self.out_proj(core_attn_out.reshape(batch_size, seq_len, -1))
+
+
+def install_gva_prefill(language_model: Any) -> int:
+    """Skip the q/k repeat on every linear layer. Returns the layer count.
+
+    Valid only after ``install_flashinfer_gdn_prefill``. FLA's chunk
+    expects the repeated heads, so the short dispatch does not call this.
+    """
+
+    layers = getattr(language_model, "layers", None)
+    if layers is None:
+        raise RuntimeError("language model has no layers")
+    count = 0
+    for layer in layers:
+        if getattr(layer, "block_type", None) != "linear_attention":
+            continue
+        attn = getattr(layer, "linear_attn", None)
+        if attn is None:
+            raise RuntimeError("linear attention layer has no module")
+        gva_group_size(attn.num_k_heads, attn.num_v_heads)
+        attn.forward = gva_gated_delta_forward.__get__(attn, type(attn))
+        attn.pplx_gdn_layout = GDN_LAYOUT_GVA
+        count += 1
+    if count != LINEAR_ATTENTION_LAYERS:
+        raise RuntimeError(
+            f"GVA prefill expected {LINEAR_ATTENTION_LAYERS} linear layers, found {count}"
+        )
+    return count
 
 
 def install_short_flashinfer_prefill(modeling: Any) -> None:

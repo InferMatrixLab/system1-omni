@@ -21,10 +21,14 @@ from models.pplx_decider.gdn import (
     install_flashinfer_gdn_prefill,
     install_short_flashinfer_prefill,
     require_bound_linear_attention,
+    GDN_LAYOUT_GVA,
     GDN_USE_CP,
     cu_seqlens_key,
     cp_heuristic_matches,
+    gva_gated_delta_forward,
+    gva_group_size,
     gdn_prefill_mode,
+    install_gva_prefill,
     reuse_cu_seqlens_slot,
     resolve_flashinfer,
     use_short_flashinfer,
@@ -170,12 +174,30 @@ def test_flashinfer_wrapper_rejects_a_batch_and_a_state():
         flashinfer_chunk_gated_delta_rule(One(), One(), One(), initial_state=object())
 
 
-def test_flashinfer_use_cp_is_auto_for_this_head_count_on_h200():
-    assert GDN_USE_CP == "auto"
-    # 48 value heads, one sequence. H200 has 132 SMs. HBM threshold is work * 2 < sms.
+def test_use_cp_stays_false_after_the_auto_miss():
+    assert GDN_USE_CP is False
+    # 48 value heads, one sequence, would have selected CP on an H200. That path missed.
     assert cp_heuristic_matches(48, 132, "NVIDIA L20X")
-    assert cp_heuristic_matches(48, 132, "NVIDIA H200")
     assert not cp_heuristic_matches(48, 96, "NVIDIA L20X")
     assert not cp_heuristic_matches(48, 132, "NVIDIA GeForce RTX 4090")
     with pytest.raises(ValueError, match="positive"):
         cp_heuristic_matches(0, 132, "NVIDIA L20X")
+
+
+def test_gva_prefill_skips_the_q_repeat_on_48_linear_layers():
+    import inspect
+
+    assert gva_group_size(16, 48) == 3
+    with pytest.raises(ValueError, match="value heads"):
+        gva_group_size(48, 48)
+    assert "repeat_interleave" not in inspect.getsource(gva_gated_delta_forward)
+    layers = []
+    for index in range(64):
+        block = "full_attention" if index % 4 == 0 else "linear_attention"
+        attn = SimpleNamespace(num_k_heads=16, num_v_heads=48)
+        layers.append(SimpleNamespace(block_type=block, linear_attn=attn))
+    assert install_gva_prefill(SimpleNamespace(layers=layers)) == LINEAR_ATTENTION_LAYERS
+    linear = layers[1].linear_attn
+    assert linear.pplx_gdn_layout == GDN_LAYOUT_GVA
+    assert linear.forward.__func__ is gva_gated_delta_forward
+    assert not hasattr(layers[0].linear_attn, "pplx_gdn_layout")
