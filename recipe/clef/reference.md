@@ -33,33 +33,36 @@ python -m pip install -r recipe/clef/requirements.txt
 
 The requirements pin `causal-conv1d>=1.5`, `flash-linear-attention==0.5.2`,
 and `flashinfer-python==0.6.16.post3`. The worker imports `causal_conv1d`,
-then `fla.ops.gated_delta_rule`, then `flashinfer.gdn_prefill`, and only
-then `transformers.models.qwen3_5.modeling_qwen3_5`. That order binds
-`FusedRMSNormGated` and `causal_conv1d_fn`. Startup then replaces the
-modeling module's `chunk_gated_delta_rule` with the FlashInfer GDN prefill
-wrapper before `load_release_model` builds each `Qwen3_5GatedDeltaNet`,
-because the layer copies that global at init.
+then `fla.ops.gated_delta_rule`, then tries `flashinfer.gdn_prefill`, and
+only then imports `transformers.models.qwen3_5.modeling_qwen3_5`. That
+order binds `FusedRMSNormGated` and `causal_conv1d_fn`. When the reported
+compute capability major is 9, 10, or 12 and FlashInfer loaded, startup
+replaces the modeling module's `chunk_gated_delta_rule` with the FlashInfer
+GDN prefill wrapper before `load_release_model` builds each
+`Qwen3_5GatedDeltaNet`, because the layer copies that global at init.
 
-Startup raises when any of the three distributions is missing, when
-flash-linear-attention is not exactly `0.5.2`, when flashinfer-python is
-not exactly `0.6.16.post3`, when causal-conv1d is older than 1.5, when an
-import fails, when `causal_conv1d_fn` did not bind, or when the chunk
-global is not the FlashInfer wrapper. A ready process has `/health`
-`linear_attention` equal to `flashinfer+fla+causal_conv1d`. The PyTorch
-`torch_chunk_gated_delta_rule` and `F.conv1d` paths are not served. An FLA
-chunk binding without the FlashInfer wrapper is not ready.
+`causal-conv1d` and `flash-linear-attention` are required. Startup raises
+when either is missing, when flash-linear-attention is not exactly `0.5.2`,
+when causal-conv1d is older than 1.5, or when `causal_conv1d_fn` and a
+chunk kernel did not bind. A missing or different FlashInfer install does
+not, by itself, refuse ready. `/health` `linear_attention` is the bind that
+started: `flashinfer+fla+causal_conv1d` or `fla+causal_conv1d`. The PyTorch
+`torch_chunk_gated_delta_rule` and `F.conv1d` paths are not served.
 
-Prefill calls `flashinfer.gdn_prefill.chunk_gated_delta_rule` with
-`use_cp=False`, so Hopper uses the fused SM90 kernel. Q and K L2
-normalization uses FLA `l2norm_fwd`, and FlashInfer's
-`use_qk_l2norm_in_kernel` flag stays false. Log-space `g` is
+FlashInfer prefill calls `flashinfer.gdn_prefill.chunk_gated_delta_rule`
+with `use_cp=False`. Q and K L2 normalization uses FLA `l2norm_fwd`, and
+FlashInfer's `use_qk_l2norm_in_kernel` flag stays false. Log-space `g` is
 exponentiated. The call is one sequence and does not continue a recurrent
-state. vLLM's separate CuteDSL prefill backend, CUDA graphs, and
-`torch.compile` are not used. The device must be CUDA compute capability
-9.0. A device named `NVIDIA L20X` at capability 8.9 is the wrong machine.
-The same name at capability 9.0 is the known driver mislabel of an H200
-and passes the capability check. No H200 Public231 C1 latency, and no
-answer parity against `torch_chunk` or the FLA chunk, has been measured.
+state. FlashInfer 0.6.16 does not dispatch that kernel when the device
+reports capability 8.9, so those processes keep the FLA chunk. vLLM's
+separate CuteDSL prefill backend, CUDA graphs, and `torch.compile` are
+not used.
+
+The lab host is the machine `nvidia-smi` names `NVIDIA L20X`, including
+when it reports compute capability 8.9. Startup does not require the name
+`NVIDIA H200` and does not refuse ready because the capability is not 9.0.
+No Public231 C1 of this tip has been measured. Answer parity against
+`torch_chunk` is not measured.
 
 ```sh
 python - <<'PY'
@@ -166,16 +169,19 @@ The operator named the metric `successful_latency` and the clock
 `post_to_body_json_and_schema_validation`. These three rounds are that
 measurement. They are not a new campaign.
 
-Those three rounds are the L20X report at HEAD `9030065`. They are not an
-H200 baseline. Do not relabel them as H200, and do not treat a later H200
-p50 or p95 as a same-device speedup against 247.518 / 413.025.
+Those three rounds are the earlier report at HEAD `9030065` on the lab
+host `nvidia-smi` names `NVIDIA L20X`. This tip has no new p50 or p95.
+Do not publish a delta until a remeasure of this tip is pasted.
 
-## Next measurement: H200 (sm_90)
+## Next measurement: lab host named NVIDIA L20X
 
-The forward operator path is FlashInfer GDN prefill plus `causal_conv1d`
-and FLA, on compute capability 9.0. No H200 Public231 C1 has been recorded.
-Answer parity of that prefill against `torch_chunk` and against the FLA
-chunk is not measured. The standalone GDN timings in
+That host is the measurement machine, including when `nvidia-smi` reports
+compute capability 8.9. Do not require a card whose name is `NVIDIA H200`.
+On a reported 8.9 the ready bind is `fla+causal_conv1d`. When the same
+process sees reported major 9, 10, or 12 and FlashInfer loaded, the ready
+bind is `flashinfer+fla+causal_conv1d`. Record the `/health` string the
+process returns. No Public231 C1 of this tip has been recorded. Answer
+parity against `torch_chunk` is not measured. The standalone GDN timings in
 [benchmarks/gdn/README.md](../../benchmarks/gdn/README.md) are a different
 experiment and are not a Clef HTTP result.
 
@@ -189,19 +195,18 @@ Record results outside the repository. Do not put hostnames, account names,
 home directories, or the name of a reservation system in the metadata or
 in a commit.
 
-1. Confirm the GPU the process will use. `nvidia-smi` must show compute
-   capability 9.0. Record the device name it prints. Capability 9.0 is the
-   H200 target, including when the name is the known `NVIDIA L20X`
-   mislabel. Capability 8.9 is Ada; stop, and do not report that machine
-   as this H200 run. Do not report the run as H800 or as the Public231
-   leaderboard.
+1. Confirm the GPU the process will use. The lab host is the one
+   `nvidia-smi` names `NVIDIA L20X`. Record that name and the compute
+   capability it prints, including 8.9. Do not stop because the name is
+   not `NVIDIA H200`, and do not stop because the capability is not 9.0.
+   Do not report the run as H800 or as the Public231 leaderboard.
 2. Start `frontend.clef` as above, on loopback port 8000, variant
    `clef-flash`, device `cuda`. Leave that process up for every traversal.
-   `GET /health` must show `status` `ready` and `linear_attention`
-   `flashinfer+fla+causal_conv1d`. A process that exits at startup did not
-   bind FlashInfer GDN prefill and `causal_conv1d_fn`. Do not measure a
-   process that is still on the PyTorch chunk, `F.conv1d`, or an FLA-only
-   chunk path.
+   `GET /health` must show `status` `ready`. `linear_attention` is
+   `fla+causal_conv1d` or `flashinfer+fla+causal_conv1d`, whichever the
+   process bound. Record that string. A process that exits at startup did
+   not bind `causal_conv1d_fn` and a chunk kernel. Do not measure a
+   process that is still on the PyTorch chunk or `F.conv1d` path.
 3. Obtain the frozen Public231 request manifest whose file SHA-256 is
    `00d1f10ca1142499a598b5f1c6602d329cce1cef04c961c46fc0318daa2c67d3`.
    That is the JSONL byte hash cited for the JevBench `7ce310c7` export in
@@ -223,7 +228,7 @@ in a commit.
 
    ```json
    {
-     "gpu": "NVIDIA H200",
+     "gpu": "NVIDIA L20X",
      "gpu_ids": ["0"],
      "driver": "<driver version from nvidia-smi>",
      "cuda": "<CUDA version reported by the torch build>",
@@ -231,7 +236,7 @@ in a commit.
      "model_revision": "Cloudflare/clef-flash@f0b7d3cd65296abfe459e6c228b618f5d8b26d2f",
      "runtime_revision": "<git rev-parse HEAD of this worker>",
      "cache_policy": "one request at a time; no prefix cache; no CUDA graph; transformers cache left at its default",
-     "cuda_evidence": "nvidia-smi showed compute capability 9.0 while the worker was running with --device cuda. Record the printed device name. If that name is NVIDIA L20X and the capability is 9.0, say so; that pair is the known H200 mislabel.",
+     "cuda_evidence": "nvidia-smi name NVIDIA L20X, compute capability as printed (8.9 on the lab host), while the worker was running with --device cuda. Copy /health linear_attention.",
      "reservation": "<allocation id>"
    }
    ```
@@ -267,18 +272,20 @@ in a commit.
    per-round and pooled counts. Keep failure latencies separate.
 9. The clock is the runner's
    `post_to_body_json_and_schema_validation` clock. It is not the H800
-   leaderboard clock. Report this campaign as the H200 C1. Do not relabel
-   the L20X table above as this result, and do not compute a same-device
-   speedup against 247.518 / 413.025.
+   leaderboard clock. Record the `nvidia-smi` name, the printed capability,
+   and `/health` `linear_attention` with the p50 and p95. The table above
+   is the earlier `9030065` report. This tip has no measured p50 or p95
+   until that paste exists.
 
 ## What remains unverified
 
-Image and video inputs, native CUDA, answer parity, and any H200 latency.
-The operator-reported L20X numbers above stay on the clock
+Image and video inputs, native CUDA, answer parity, and any Public231 C1
+of the current tip. The operator-reported numbers above stay on the clock
 `post_to_body_json_and_schema_validation`, metric `successful_latency`, at
 HEAD `903006530fb7772bb668bbf192ee4278e273e583`. H1, one encode per request,
 is already how that HEAD calls the pinned model, so run1 includes it and
-its isolated effect is unknown. The H200 path wires FlashInfer GDN prefill,
-FLA, and causal-conv1d. That path has no measured p50, p95, or
-answer-parity delta. This environment has no GPU and did not repeat the
+its isolated effect is unknown. This tip selects FlashInfer when that
+kernel can dispatch and otherwise serves the FLA chunk with
+`causal_conv1d`. Neither bind has a measured p50, p95, or answer-parity
+result on this tip. This environment has no GPU and did not repeat the
 campaign.

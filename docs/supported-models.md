@@ -45,11 +45,13 @@ refuses image and video inputs. The flash CUDA cell is an operator-reported
 Public231 concurrency-1 result on a lab NVIDIA L20X at compute capability
 8.9 (primary run1 p50 247.518 ms, p95 413.025 ms, metric
 `successful_latency`, clock `post_to_body_json_and_schema_validation`).
-That cell stays an L20X figure. It is not an H200 or H800 result, and it
-was not re-run for this document. The forward path wires FlashInfer GDN
-prefill with FLA and causal-conv1d for compute capability 9.0. No H200 C1
-latency or answer-parity delta is recorded. The 27B variant has no
-recorded timing.
+That cell is the earlier L20X report at that HEAD, and it was not re-run
+for this document. The worker starts on the lab host `nvidia-smi` names
+`NVIDIA L20X`, including when the capability prints 8.9. FlashInfer GDN
+prefill is used when the reported major is 9, 10, or 12 and the package
+loads; otherwise the ready bind is the FLA chunk plus causal-conv1d.
+`/health` reports which one started. No C1 of the current tip is recorded.
+The 27B variant has no recorded timing.
 CLM has a row per path: the merged `clm-serve` recipe exercises those answer shapes with stub
 embeddings and says nothing about decision quality, while the native engine's CUDA row is the
 path through a real Qwen3-8B encoder. Its engine-only figure comes from the same comparison run

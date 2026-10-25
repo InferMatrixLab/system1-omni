@@ -15,10 +15,12 @@ pillow>=10
 # PyTorch norm. The worker then replaces the chunk global with FlashInfer
 # GDN prefill (use_cp false, fused SM90) before layers copy it.
 # causal_conv1d_fn stays the convolution. Startup refuses torch_chunk and
-# F.conv1d, and refuses an FLA chunk binding that was not replaced.
-# The target device is H200, compute capability 9.0. vLLM's separate CuteDSL
-# prefill backend, CUDA graphs, and torch.compile are not selected.
-# No H200 Public231 latency or answer-parity delta has been measured.
+# F.conv1d. FlashInfer replaces the chunk only when the reported capability
+# major is 9, 10, or 12 and this package imports. A device that reports 8.9,
+# including nvidia-smi name NVIDIA L20X, stays on the FLA chunk and still
+# becomes ready. The device name is not required to be NVIDIA H200.
+# vLLM's separate CuteDSL prefill backend, CUDA graphs, and torch.compile
+# are not selected. No Public231 C1 of this tip has been measured.
 causal-conv1d>=1.5
 flash-linear-attention==0.5.2
 flashinfer-python==0.6.16.post3

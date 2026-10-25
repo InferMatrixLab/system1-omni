@@ -91,13 +91,22 @@ def test_response_token_count_must_match_admission():
         require_token_agreement(12, {"usage": {"input_tokens": 9}})
 
 
+def _bound_pair():
+    return type(
+        "M",
+        (),
+        {"chunk_gated_delta_rule": object(), "causal_conv1d_fn": object()},
+    )()
+
+
 def test_linear_attention_name_follows_the_bound_callables():
     from models.clef.engine import (
+        bind_selected_prefill,
+        bound_linear_attention,
         flashinfer_chunk_gated_delta_rule,
         install_flashinfer_gdn_prefill,
-        bound_linear_attention,
         require_bound_linear_attention,
-        require_sm90,
+        select_gdn_prefill,
     )
 
     assert bound_linear_attention(None) == "unloaded"
@@ -106,19 +115,14 @@ def test_linear_attention_name_follows_the_bound_callables():
     conv_only = type("M", (), {"causal_conv1d_fn": object()})()
     assert bound_linear_attention(fla_only) == "fla"
     assert bound_linear_attention(conv_only) == "causal_conv1d"
-    both = type(
-        "M",
-        (),
-        {"chunk_gated_delta_rule": object(), "causal_conv1d_fn": object()},
-    )()
-    assert bound_linear_attention(both) == "fla+causal_conv1d"
-    with pytest.raises(RuntimeError, match="not ready"):
-        require_bound_linear_attention(both)
-    install_flashinfer_gdn_prefill(both)
-    assert both.chunk_gated_delta_rule is flashinfer_chunk_gated_delta_rule
-    assert both.clef_gdn_prefill == "flashinfer"
-    assert bound_linear_attention(both) == "flashinfer+fla+causal_conv1d"
-    assert require_bound_linear_attention(both) == "flashinfer+fla+causal_conv1d"
+    fla_ready = _bound_pair()
+    assert bound_linear_attention(fla_ready) == "fla+causal_conv1d"
+    assert require_bound_linear_attention(fla_ready) == "fla+causal_conv1d"
+    install_flashinfer_gdn_prefill(fla_ready)
+    assert fla_ready.chunk_gated_delta_rule is flashinfer_chunk_gated_delta_rule
+    assert fla_ready.clef_gdn_prefill == "flashinfer"
+    assert bound_linear_attention(fla_ready) == "flashinfer+fla+causal_conv1d"
+    assert require_bound_linear_attention(fla_ready) == "flashinfer+fla+causal_conv1d"
     for modeling in (None, object(), fla_only, conv_only):
         with pytest.raises(RuntimeError, match="not ready"):
             require_bound_linear_attention(modeling)
@@ -126,10 +130,22 @@ def test_linear_attention_name_follows_the_bound_callables():
         install_flashinfer_gdn_prefill(fla_only)
     with pytest.raises(RuntimeError, match="chunk_gated_delta_rule"):
         install_flashinfer_gdn_prefill(conv_only)
-    require_sm90((9, 0), "NVIDIA L20X")
-    require_sm90((9, 0), "NVIDIA H200")
-    with pytest.raises(RuntimeError, match="sm_89"):
-        require_sm90((8, 9), "NVIDIA L20X")
+    assert select_gdn_prefill((8, 9)) == "fla"
+    assert select_gdn_prefill((9, 0)) == "flashinfer"
+    assert select_gdn_prefill((10, 0)) == "flashinfer"
+    assert select_gdn_prefill((12, 0)) == "flashinfer"
+    assert select_gdn_prefill(None) == "fla"
+    reported_89 = _bound_pair()
+    original_chunk = reported_89.chunk_gated_delta_rule
+    bind_selected_prefill(reported_89, select_gdn_prefill((8, 9)), True)
+    assert reported_89.chunk_gated_delta_rule is original_chunk
+    assert require_bound_linear_attention(reported_89) == "fla+causal_conv1d"
+    reported_90 = _bound_pair()
+    bind_selected_prefill(reported_90, select_gdn_prefill((9, 0)), True)
+    assert require_bound_linear_attention(reported_90) == "flashinfer+fla+causal_conv1d"
+    unloaded_fi = _bound_pair()
+    bind_selected_prefill(unloaded_fi, select_gdn_prefill((9, 0)), False)
+    assert require_bound_linear_attention(unloaded_fi) == "fla+causal_conv1d"
     with pytest.raises(RuntimeError, match="one sequence"):
         flashinfer_chunk_gated_delta_rule(object(), object(), object())
     with pytest.raises(RuntimeError, match="recurrent state"):

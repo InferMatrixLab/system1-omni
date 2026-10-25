@@ -159,29 +159,28 @@ implementation was not part of this report.
 
 `causal-conv1d>=1.5`, `flash-linear-attention==0.5.2`, and
 `flashinfer-python==0.6.16.post3` are installed by the recipe. The worker
-imports `causal_conv1d`, then `fla.ops.gated_delta_rule`, then
-`flashinfer.gdn_prefill`, before Transformers binds Qwen3.5, and replaces
-the chunk global with FlashInfer GDN prefill (`use_cp` false) before
-layers copy it. Startup raises unless that wrapper and `causal_conv1d_fn`
-are bound, so a ready `/health` reports
-`linear_attention: flashinfer+fla+causal_conv1d`. The device gate is
-compute capability 9.0. `torch_chunk_gated_delta_rule` and `F.conv1d` are
-not served. No H200 p50 or p95 has been measured, and answer parity
-against `torch_chunk` and against the FLA chunk is not measured. The L20X
-table above is not an H200 baseline.
+imports `causal_conv1d` and `fla.ops.gated_delta_rule` before Transformers
+binds Qwen3.5. FlashInfer replaces the chunk global, with `use_cp` false,
+only when the reported capability major is 9, 10, or 12 and that package
+loads. A reported 8.9, including the lab name `NVIDIA L20X`, keeps the FLA
+chunk and still becomes ready. Startup does not require the name
+`NVIDIA H200`. `/health` `linear_attention` is
+`flashinfer+fla+causal_conv1d` or `fla+causal_conv1d`, matching the bind.
+`torch_chunk_gated_delta_rule` and `F.conv1d` are not served. This tip has
+no measured p50 or p95. Answer parity against `torch_chunk` is not measured.
 
 | Id | Change | Expected effect | Measured result |
 | --- | --- | --- | --- |
 | H1 | One `encode_record` per request, then the pinned forward. The handler does not tokenize the schema again before that encode. | Removes a second BPE pass from the critical path. Prefill and the joint head still dominate. | Included in HEAD `9030065`. Isolated delta unknown |
 | H2 | Fuse the joint head's per-question Python loop. | Fewer small launches after prefill. Needs a forked head and numerical parity against the pinned module. | Not implemented. No measured H200 delta |
 | H3 | `torch.compile` or CUDA graphs on the Qwen3.5 backbone. | Uncertain on the linear-attention layers. | Not implemented. No measured H200 delta |
-| H4 | Bind FlashInfer GDN prefill 0.6.16.post3, `flash-linear-attention` 0.5.2, and `causal-conv1d` >= 1.5 before the Qwen3.5 layers copy the chunk global. Startup is not ready on `torch_chunk`, `F.conv1d`, or FLA-only chunk. Prefill uses FlashInfer with `use_cp` false on compute capability 9.0. vLLM CuteDSL, CUDA graphs, and `torch.compile` are not used. | Replaces the PyTorch chunk loop on H200. | Not measured. No H200 C1 |
+| H4 | Bind `flash-linear-attention` 0.5.2 and `causal-conv1d` >= 1.5 before the Qwen3.5 layers copy the chunk global. Use FlashInfer GDN prefill 0.6.16.post3 with `use_cp` false when the reported capability major is 9, 10, or 12 and the package loads. Reported 8.9, including nvidia-smi name `NVIDIA L20X`, stays on the FLA chunk and still starts. Startup is not ready on `torch_chunk` or `F.conv1d`. vLLM CuteDSL, CUDA graphs, and `torch.compile` are not used. | Replaces the PyTorch chunk loop. `/health` names the bind that started. | Not measured on this tip |
 
 ## Status
 
 | Path | Clef-flash | Clef |
 | --- | --- | --- |
-| Text `choice` / `noul` / `score`, non-thinking prompt | Contract tested. Operator-reported Public231 C1 latency on L20X sm_89 at HEAD `9030065` (not an H200 figure); H200 FlashInfer path has no C1 yet; answer parity not checked | Same loader pin; that latency campaign was flash only |
+| Text `choice` / `noul` / `score`, non-thinking prompt | Contract tested. Operator-reported Public231 C1 latency on L20X at HEAD `9030065`. This tip has no C1 yet. A reported capability of 8.9 on the `NVIDIA L20X` host is ready. Answer parity not checked | Same loader pin; that latency campaign was flash only |
 | Image and video | Rejected | Rejected |
 | Native CUDA | Not implemented | Not implemented |
 | Workers AI proxy | Out of scope | Out of scope |
