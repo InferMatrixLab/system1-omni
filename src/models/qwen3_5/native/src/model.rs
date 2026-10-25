@@ -450,6 +450,57 @@ impl Widths {
     }
 }
 
+/// V layout for one prompt-bidirectional full-attention call.
+///
+/// Q and K leave `cs1_attn_prep` in contiguous scratch. V is produced in the
+/// QKV row. Instant copies those V rows into contiguous `[T, Hk, Dh]` scratch
+/// and passes `ldv`. Causal attention does not pack V; it keeps `source_stride`
+/// as `ldv`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PromptBidirectionalVLayout {
+    /// Elements per packed V row, and the `ldv` argument (`kv_heads * head_dim`).
+    pub ldv: usize,
+    /// QKV row stride in elements (`attn_in`).
+    pub source_stride: usize,
+    /// Element index of V inside that row, after Q/gate and K.
+    pub source_column: usize,
+}
+
+impl PromptBidirectionalVLayout {
+    /// Bytes in one packed bfloat16 V row. This is also the contiguous destination pitch.
+    pub fn row_bytes(self) -> usize {
+        self.ldv * BF16
+    }
+
+    /// Bytes between QKV rows. This is the source pitch of the pack.
+    pub fn source_pitch_bytes(self) -> usize {
+        self.source_stride * BF16
+    }
+
+    /// Byte offset of packed V for `token` inside the contiguous scratch.
+    pub fn packed_offset(self, token: usize) -> usize {
+        token * self.row_bytes()
+    }
+}
+
+/// Layout of the V pack used by prompt-bidirectional attention.
+///
+/// `heads`, `kv_heads`, and `head_dim` are the text-config counts. Instant 4B
+/// is 16, 4, and 256, so `ldv` is 1024 and the QKV stride is 10240.
+pub fn prompt_bidirectional_v_layout(
+    heads: usize,
+    kv_heads: usize,
+    head_dim: usize,
+) -> PromptBidirectionalVLayout {
+    let attn_q = heads * head_dim * 2;
+    let packed = kv_heads * head_dim;
+    PromptBidirectionalVLayout {
+        ldv: packed,
+        source_stride: attn_q + 2 * packed,
+        source_column: attn_q + packed,
+    }
+}
+
 /// Per-request buffers for up to `cap` tokens, as byte offsets into one allocation,
 /// plus the rotary tables for positions below `cap`.
 struct Scratch {
@@ -472,6 +523,9 @@ struct Scratch {
     aq: usize,
     agate: usize,
     ak: usize,
+    /// Contiguous V `[cap, Hk, Dh]` for prompt-bidirectional attention.
+    /// Causal attention does not read it.
+    av: usize,
     ao: usize,
     gate_up: usize,
     act: usize,
@@ -536,6 +590,7 @@ impl Scratch {
             take(cap * hq * hd * BF16),
             take(cap * hq * hd * BF16),
             take(cap * hk * hd * BF16),
+            take(cap * hk * hd * BF16),
             take(cap * hq * hd * BF16),
             take(cap * 2 * cfg.intermediate * BF16),
             take(cap * cfg.intermediate * BF16),
@@ -563,6 +618,7 @@ impl Scratch {
             aq,
             agate,
             ak,
+            av,
             ao,
             gate_up,
             act,
@@ -603,6 +659,7 @@ impl Scratch {
             aq,
             agate,
             ak,
+            av,
             ao,
             gate_up,
             act,
@@ -1181,8 +1238,10 @@ impl Model {
     }
 
     /// One prompt whose full-attention layers read the whole prompt in both
-    /// directions. Linear attention stays causal. CUDA graphs, LoRA and the
-    /// reference numerics are refused: those paths are causal-only.
+    /// directions. Linear attention stays causal. V is packed into contiguous
+    /// `[T, Hk, Dh]` scratch and attention is called with `ldv = Hk * Dh`.
+    /// CUDA graphs, LoRA and the reference numerics are refused: those paths
+    /// are causal-only.
     pub fn forward_prompt_bidirectional(&mut self, ids: &[u32]) -> Result<Vec<f32>> {
         ensure!(
             !self.graph_enabled && self.reference.is_none() && self.lora.is_none(),
@@ -2000,8 +2059,10 @@ impl Model {
     }
 
     /// Queue language layers over packed embeddings, resetting sequence positions.
-    /// Final-norm hidden states end up in `s.x`. `bidirectional` changes only the
-    /// full-attention mask; Gated DeltaNet stays causal and sequence-local.
+    /// Final-norm hidden states end up in `s.x`. `bidirectional` changes the
+    /// full-attention mask and packs V into contiguous `[T, Hk, Dh]` scratch
+    /// (`ldv = Hk * Dh`). Causal full attention still reads V from the QKV row
+    /// (`ldv = attn_in`). Gated DeltaNet stays causal and sequence-local.
     fn run(
         &self,
         s: &Scratch,
@@ -2034,6 +2095,16 @@ impl Model {
         let (kd, vd, hv) = (cfg.key_dim(), cfg.value_dim(), cfg.lin_v_heads);
         let (hq, hk, hd) = (cfg.heads as i32, cfg.kv_heads as i32, cfg.head_dim as i32);
         let w = Widths::of(cfg);
+        let packed_v = if bidirectional {
+            let layout = prompt_bidirectional_v_layout(cfg.heads, cfg.kv_heads, cfg.head_dim);
+            ensure!(
+                layout.source_stride == w.attn_in && layout.source_column + layout.ldv == w.attn_in,
+                "bidirectional V pack does not match the QKV row"
+            );
+            Some(layout)
+        } else {
+            None
+        };
         let p = |off: usize| s.at(off);
         let (cos, sin) = if custom_positions {
             (s.custom_cos, s.custom_sin)
@@ -2179,6 +2250,26 @@ impl Model {
                     let ld = w.attn_in as i32;
                     let k = s.attn_in + w.attn_q * BF16;
                     let v = k + cfg.kv_heads * cfg.head_dim * BF16;
+                    // Instant only: copy V out of the QKV row into contiguous
+                    // [T, Hk, Dh] scratch. Causal attention keeps the strided column.
+                    let (v_base, v_pitch, v_ld) = if let Some(layout) = packed_v {
+                        if t > 0 {
+                            unsafe {
+                                cuda::copy2d(
+                                    p(s.av),
+                                    layout.row_bytes(),
+                                    p(v),
+                                    layout.source_pitch_bytes(),
+                                    layout.row_bytes(),
+                                    t,
+                                    st,
+                                )?;
+                            }
+                        }
+                        (s.av, layout.row_bytes(), layout.ldv as i32)
+                    } else {
+                        (v, w.attn_in * BF16, ld)
+                    };
                     unsafe {
                         for &(offset, length) in &sequences {
                             check(
@@ -2206,13 +2297,14 @@ impl Model {
                                 "attention prep",
                             )?;
                             let scale = (cfg.head_dim as f32).powf(-0.5);
+                            let v_row = p(v_base + offset * v_pitch);
                             check(
                                 if let Some(bidir) = bidir {
                                     (bidir)(
                                         p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
                                         p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
-                                        p(v + offset * w.attn_in * BF16),
-                                        ld,
+                                        v_row,
+                                        v_ld,
                                         p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
                                         p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
                                         length,
@@ -2226,8 +2318,8 @@ impl Model {
                                     (reference.attention)(
                                         p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
                                         p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
-                                        p(v + offset * w.attn_in * BF16),
-                                        ld,
+                                        v_row,
+                                        v_ld,
                                         p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
                                         p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
                                         length,
@@ -2241,8 +2333,8 @@ impl Model {
                                     (cuda::api().cs1_attention_gated)(
                                         p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
                                         p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
-                                        p(v + offset * w.attn_in * BF16),
-                                        ld,
+                                        v_row,
+                                        v_ld,
                                         p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
                                         p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
                                         length,

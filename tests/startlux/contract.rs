@@ -441,6 +441,26 @@ fn rejections_match_the_instant_contract() {
 }
 
 #[test]
+fn instant_4b_packs_bidirectional_v_to_hk_dh() {
+    let config: Value =
+        serde_json::from_str(include_str!("fixtures/instant_4b_config.json")).unwrap();
+    let text = &config["text_config"];
+    let heads = text["num_attention_heads"].as_u64().unwrap() as usize;
+    let kv = text["num_key_value_heads"].as_u64().unwrap() as usize;
+    let dh = text["head_dim"].as_u64().unwrap() as usize;
+    assert_eq!((heads, kv, dh), (16, 4, 256));
+    let layout = omni_qwen3_5_native::model::prompt_bidirectional_v_layout(heads, kv, dh);
+    assert_eq!(layout.ldv, 1024);
+    assert_eq!(layout.source_stride, 10240);
+    assert_eq!(layout.source_column + layout.ldv, layout.source_stride);
+    assert_eq!(layout.row_bytes(), 2048);
+    assert_eq!(layout.source_pitch_bytes(), 20_480);
+    assert_eq!(layout.packed_offset(0), 0);
+    assert_eq!(layout.packed_offset(3), 3 * 2048);
+    assert_ne!(layout.ldv, layout.source_stride);
+}
+
+#[test]
 fn temperatures_and_confidence_follow_the_pinned_readout() {
     let even = contract::probabilities(&[0.0, 0.0], Kind::Choice.temperature());
     assert!((even[0] - 0.5).abs() < 1e-12);

@@ -114,8 +114,11 @@ int cs1_attention_gated(const void* q, const void* k, const void* v, int ldv, co
                         void* out, int T, int Hq, int Hk, int Dh, float scale, void* stream);
 
 // Additive, optional at ABI 9. Same tensors as cs1_attention_gated, but every query
-// reads every key in the prompt. Missing on libraries built before this entry point;
-// causal callers do not resolve it. q_base-style prefix continuation is not supported.
+// reads every key in the prompt. `ldv` is the V row stride in elements. The Instant
+// caller packs V into contiguous [T, Hk, Dh] and passes ldv = Hk*Dh; a larger stride
+// (V still inside the QKV row) remains valid. Missing on libraries built before this
+// entry point; causal callers do not resolve it. q_base-style prefix continuation is
+// not supported.
 int cs1_attention_gated_bidirectional(const void* q, const void* k, const void* v, int ldv,
                                       const void* gate, void* out, int T, int Hq, int Hk, int Dh,
                                       float scale, void* stream);

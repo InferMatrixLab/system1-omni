@@ -18,7 +18,11 @@ the BF16 rounding of both attention and sigmoid before multiplication. The nativ
 workers use this entry point; the separate operations remain available for kernel
 comparisons. `cs1_attention_gated_bidirectional` is an optional ABI 9 symbol with
 the same argument list. It is the Instant prompt mask: every query reads every
-key in that prompt, and a non-zero `q_base` is rejected. Causal
+key in that prompt, and a non-zero `q_base` is rejected. The Instant caller
+packs V into contiguous `[T, Hk, Dh]` rows and passes `ldv = Hk * Dh` (1024 on
+Instant 4B). The kernel still accepts a larger `ldv`, which is how causal
+attention reads V from the QKV row. The pack is a Rust `cs1_copy2d`; it does
+not add a symbol. Causal
 `cs1_attention_gated` and prefix continuation stay causal. The second template
 parameter defaults to false, so existing causal launches keep that mask. Causal
 callers do not resolve the new symbol. StartLux Instant fails closed when it is

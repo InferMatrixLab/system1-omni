@@ -404,7 +404,9 @@ fn flash_attention_matches_float64_reference() {
         (2048, 0.5),
     ] {
         let (qh, kh) = (random(t * hq * dh, 1, amp), random(t * hk * dh, 2, amp));
-        // v is read in place from the q|k|v projection output, rows of 10240 as in the model
+        // Causal attention still reads V from the QKV row (stride 10240 on this
+        // 4B shape). Instant bidirectional packs those rows and passes ldv = Hk*Dh;
+        // this launch keeps the strided kernel contract.
         let (ldv, v_at) = (10240usize, (hq * 2 + hk) * dh);
         let qkvh = random(t * ldv, 3, 1.0);
         let (q, k, qkv) = (to_device(&qh, st), to_device(&kh, st), to_device(&qkvh, st));

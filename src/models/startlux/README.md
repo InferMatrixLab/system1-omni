@@ -27,7 +27,11 @@ Instant is Qwen3.5-4B with bidirectional full attention on one of every four
 layers and a letter readout. It is not an Open-Jev LoRA plus a scalar head.
 The worker reuses the shared Qwen3.5 loader, GDN, MLP, norms, RoPE, and
 GEMMs. Full-attention layers call the additive
-`cs1_attention_gated_bidirectional` symbol. Gated DeltaNet stays causal.
+`cs1_attention_gated_bidirectional` symbol. After the QKV projection, V is
+packed into a contiguous `[tokens, kv_heads, head_dim]` scratch (the same
+width as post-prep K). The call passes `ldv = kv_heads * head_dim` (1024 on
+Instant 4B), not the QKV row stride 10240. Causal workers still read V from
+the QKV row. Gated DeltaNet stays causal.
 There is no prefix cache and no CUDA graph on this path.
 
 Processing (`processing.rs`) loads the tokenizer once and shares it.

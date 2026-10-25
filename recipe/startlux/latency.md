@@ -187,8 +187,11 @@ Device scratch grows to the next multiple of 1024 tokens on the first prompt
 that exceeds the current cap, with a stream sync inside the request. Process
 warmup is one short choice, and `bench.py` warms five manifest rows, so a
 later longer Public231 prompt can allocate during a measured traversal.
-A static count of the Instant 4B scratch layout (the byte offsets in
-`Scratch::new`, including `cs1_gdn_workspace_floats`) is about 240 MiB at
-1024 tokens and about 15 GiB at 65536 tokens, before the weight arena.
+A static count of the Instant 4B scratch layout before the contiguous V
+buffer (the other byte offsets in `Scratch::new`, including
+`cs1_gdn_workspace_floats`) is about 240 MiB at 1024 tokens and about 15 GiB
+at 65536 tokens, before the weight arena. The V buffer is
+`kv_heads * head_dim` bfloat16 values per token (2048 bytes on Instant 4B):
+2 MiB at 1024 tokens and 128 MiB at 65536 tokens.
 That 65536-token buffer is not reserved. L20X free memory was not measured.
 Hypothesis: the in-request realloc can move p95. Measured delta: none.
