@@ -33,11 +33,11 @@ SDPA mask when the padding mask is all true. Linear-attention chunk prefill
 on the lab L20X-labeled GPU uses FLA 0.5.2 plus causal_conv1d, including
 when that GPU reports capability 8.9. Capability 9.0 uses all-sequence FlashInfer when
 `flashinfer-python` 0.6.16.post3 imports. The kept primary rotates 48
-`cu_seqlens` buffers per device and length and passes `use_cp` false.
-This candidate keeps that ring and the eager residual RMSNorms,
-passes `use_cp` false, skips the q/k repeat on the 48 linear
-layers, and packs q and k before FLA's L2-norm view.
-`3ecdf5a` crashed in warmup on the unpacked view.
+`cu_seqlens` buffers per device and length, passes `use_cp` false,
+skips the q/k repeat, and packs q and k before FLA's L2-norm view.
+`3ecdf5a` crashed in warmup on the unpacked view. This candidate
+keeps that path and fuses the 48 linear gated RMSNorms. Residual
+RMSNorm stays eager.
 `use_cp=auto` on `a6f4d9a` missed both percentiles.
 Always-on fusion `3afb472` and the 512-token
 gate `705ae089` both missed the median.

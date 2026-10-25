@@ -12,33 +12,37 @@ the 11 weight shards plus `readout.safetensors` as 52,173,413,928 bytes
 memory. Plan for that much free disk. A reported load on 1× lab L20X
 (~140 GiB, sm_89) was BF16 resident ~50333 MiB with no OOM. Lab GPUs
 labeled L20X are the H200 target. The kept primary is head
-`4b99b730289efc8637f0940cf0079ee3ca4fe61f`: 231/231, p50 88.942 ms,
-p95 295.797 ms. Versus the prior primary `ffae182` 92.844 / 296.458
-that is p50 −4.20% (−3.902 ms) and p95 −0.22% (−0.661 ms). Warmup,
-concurrency, and the latency metric were not restated in that paste.
-`/health` reported `compile=default`, `compile_median=eager`,
-`sdpa=default`, `mlp=default`, `fused_gate_up_layers=0`,
-`linear_attention=flashinfer+fla+causal_conv1d`,
-`flashinfer_status=bound`, `flashinfer=0.6.16.post3`, and
-`cu_seqlens_slots=48`. Quality: `choice_acc=0.9065` (139),
-`noul_acc=0.8784` (74), `score_mae=0.2035` (18). `17a7b120` kept that
+`fcf5e2bef916da81180ac8f1570dff338e8a049d`: 231/231, p50 87.782 ms,
+p95 291.183 ms. Versus the prior primary `4b99b73` 88.942 / 295.797
+that is p50 −1.30% (−1.160 ms) and p95 −1.56% (−4.614 ms). Gate:
+both percentiles strictly under, KEEP_TIP. `/health` reported
+`gdn_layout=gva`, `gva_layers=48`, `gdn_qk_contiguous` true,
+`gdn_use_cp` false, `gdn_cp_heuristic` null, `rms_norm=eager`,
+`fused_rms_norm_layers=0`, `cu_seqlens_slots=48`,
+`flashinfer_status=bound`, `flashinfer=0.6.16.post3`,
+`compile=default`, and `compile_median=eager`. Quality:
+`choice_acc=0.9065` (139), `noul_acc=0.8784` (74),
+`score_mae=0.2035` (18). Warmup, concurrency, the latency metric,
+and compute capability were not restated in that paste. `4b99b73`
+versus `ffae182` 92.844 / 296.458 was p50 −4.20% (−3.902 ms) and
+p95 −0.22% (−0.661 ms). `17a7b120` kept that
 ring and also rotated 48 FlashInfer state workspaces. It missed the
 gate: 231/231, p50 89.165 ms, p95 295.723 ms, +0.25% (+0.223 ms) /
 −0.02% (−0.074 ms). Quality on that paste: `choice_acc=0.906` (139),
-`noul_acc=0.878` (74), `score_mae=0.203` (18). Primary stays
-`4b99b73`. `3afb472` fused every residual RMSNorm and missed the
+`noul_acc=0.878` (74), `score_mae=0.203` (18). That miss left
+`4b99b73` in place. `3afb472` fused every residual RMSNorm and missed the
 gate: 231/231, p50 93.935 ms, p95 274.902 ms, +5.61% (+4.993 ms) /
 −7.06% (−20.895 ms). Quality: `choice_acc=0.9065` (139),
-`noul_acc=0.8784` (74), `score_mae=0.2052` (18). Primary stays
-`4b99b73`. `705ae089` kept the FLA kernel only above 512 tokens and
+`noul_acc=0.8784` (74), `score_mae=0.2052` (18). That miss left
+`4b99b73` in place. `705ae089` kept the FLA kernel only above 512 tokens and
 missed the same way: 231/231, p50 94.604 ms, p95 274.835 ms, +6.37%
 (+5.662 ms) / −7.09% (−20.962 ms). Quality: `choice_acc=0.906` (139),
 `noul_acc=0.878` (74), `score_mae=0.205` (18). `/health` reported
 `rms_norm=fla-long`, `fused_rms_norm_layers=129`,
 `fused_rms_norm_min_tokens=512`, `cu_seqlens_slots=48`,
 `flashinfer_status=bound`, `flashinfer=0.6.16.post3`, `compile=default`,
-`compile_median=eager`, and no `gdn_state_slots`. Primary stays
-`4b99b73`. `a6f4d9a` passed FlashInfer `use_cp=auto` and missed both
+`compile_median=eager`, and no `gdn_state_slots`. That miss left
+`4b99b73` in place. `a6f4d9a` passed FlashInfer `use_cp=auto` and missed both
 percentiles: 231/231, p50 112.294 ms, p95 299.419 ms, +26.26%
 (+23.352 ms) / +1.22% (+3.622 ms). Quality: `choice_acc=0.906` (139),
 `noul_acc=0.878` (74), `score_mae=0.204` (18). `/health` reported
@@ -46,7 +50,7 @@ percentiles: 231/231, p50 112.294 ms, p95 299.419 ms, +26.26%
 `fused_rms_norm_layers=0`, `cu_seqlens_slots=48`,
 `flashinfer_status=bound`, `flashinfer=0.6.16.post3`, `compile=default`,
 `compile_median=eager`, and no `gdn_state_slots`. The heuristic was
-true, so the CP kernel ran. Primary stays `4b99b73`. `3ecdf5a`
+true, so the CP kernel ran. That miss left `4b99b73` in place. `3ecdf5a`
 skipped the q/k repeat and crashed in warmup: 0/231,
 `stop_reason=warmup_failed`, p50 and p95 none, quality N/A. The
 gate is HOLD_PRIMARY. `/health` had already installed the lever:
@@ -57,8 +61,10 @@ gate is HOLD_PRIMARY. `/health` had already installed the lever:
 `compile=default`, `compile_median=eager`. Warmup `easy-intent-00`
 returned HTTP 500. FLA's L2 norm views q before the wrapper packs
 it, and the unrepeated reshape is not contiguous. Primary stays
-`4b99b73`. The unverified lever is the same GVA path with q and k
-packed before that view (`gdn_qk_contiguous` true).
+`4b99b73` at the time of that paste. `fcf5e2b` packed q and k
+before that view and is the kept primary. The unverified lever
+fuses the 48 linear gated RMSNorms (`gated_norm=fla`,
+`fused_gated_norm_layers=48`). Residual `rms_norm` stays eager.
 
 ## CPU checks
 
@@ -110,7 +116,7 @@ install, and, on CUDA, the dynamic-compile warmup. It reports `model`, `max_inpu
 `attention_mode`, `unpadded_full_attention_layers`, `causal_conv1d`, `fla`,
 `flashinfer`, `flashinfer_status`, `linear_attention`, `cu_seqlens_slots`,
 `rms_norm`, `fused_rms_norm_layers`, `fused_rms_norm_min_tokens`,
-`gdn_use_cp`, `gdn_cp_heuristic`, `gdn_layout`, `gva_layers`, `gdn_qk_contiguous`, `sdpa`, `mlp`, `fused_gate_up_layers`, `compile`,
+`gdn_use_cp`, `gdn_cp_heuristic`, `gdn_layout`, `gva_layers`, `gdn_qk_contiguous`, `gated_norm`, `fused_gated_norm_layers`, `sdpa`, `mlp`, `fused_gate_up_layers`, `compile`,
 `compute_capability`, and `gpu_name`.
 A null operator field is an explicit partial, not an omitted key. The
 pinned `config.json` lists 16 `full_attention` layers and 64 text layers,
@@ -122,7 +128,8 @@ so a normal load reports 16 unpadded layers. On CUDA, `causal_conv1d` is
 `compile_min_tokens=0`, `compile_median=eager`, `rms_norm=eager`,
 `fused_rms_norm_layers=0`, `fused_rms_norm_min_tokens=0`,
 `gdn_use_cp=off`, `gdn_cp_heuristic` null, `gdn_layout=repeat`,
-`gva_layers=0`, and `gdn_qk_contiguous` false. CUDA, including
+`gva_layers=0`, `gdn_qk_contiguous` false, `gated_norm=eager`, and
+`fused_gated_norm_layers=0`. CUDA, including
 capability 8.9, leaves every residual RMSNorm eager and reports
 `rms_norm=eager`, `fused_rms_norm_layers=0`, and
 `fused_rms_norm_min_tokens=0`. Always-on `rms_norm=fla` is the rejected
@@ -131,39 +138,45 @@ Capability 8.9 reports
 `linear_attention` `fla-chunk`, `flashinfer` null,
 `flashinfer_status=not-selected`, `cu_seqlens_slots=0`,
 `gdn_use_cp=off`, `gdn_layout=repeat`, `gva_layers=0`,
-`gdn_qk_contiguous` false, and it is ready.
+`gdn_qk_contiguous` false, `gated_norm=eager`,
+`fused_gated_norm_layers=0`, and it is ready.
 Capability 9.0 with `flashinfer-python` 0.6.16.post3 reports
 `flashinfer=0.6.16.post3`, `flashinfer_status=bound`,
 `linear_attention=flashinfer+fla+causal_conv1d`,
 `cu_seqlens_slots=48`, `gdn_use_cp` false, `gdn_cp_heuristic` null,
-`gdn_layout=gva`, `gva_layers=48`, and `gdn_qk_contiguous` true.
+`gdn_layout=gva`, `gva_layers=48`, `gdn_qk_contiguous` true,
+`gated_norm=fla`, and `fused_gated_norm_layers=48`.
 The JSON boolean false is not
 the string `auto` and not `off`. The wrapper keeps 48 distinct
 `cu_seqlens` tensors per device and length. FlashInfer allocates its
 own state workspace. `PPLX_GDN_PREFILL=fla` reproduces the prior
 `f968e576` chunk and reports `flashinfer_status=held`,
 `cu_seqlens_slots=0`, `gdn_use_cp=off`, `gdn_layout=repeat`,
-`gva_layers=0`, and `gdn_qk_contiguous` false.
+`gva_layers=0`, `gdn_qk_contiguous` false, `gated_norm=eager`, and
+`fused_gated_norm_layers=0`.
 `PPLX_GDN_PREFILL=short` is the rejected length
 dispatch: one sequence of at most 256 tokens uses FlashInfer, and
 health then reports `linear_attention=flashinfer-short+fla-chunk`
 with status `bound`, `cu_seqlens_slots=48`, `gdn_layout=repeat`,
-`gva_layers=0`, and `gdn_qk_contiguous` false. Long sequences on that dispatch stay on FLA, which
+`gva_layers=0`, `gdn_qk_contiguous` false, `gated_norm=eager`, and
+`fused_gated_norm_layers=0`. Long sequences on that dispatch stay on FLA, which
 still needs the q/k repeat, so GVA is not installed. The same
 capability without that package, or when the module does not import,
 stays on `fla-chunk` with status `absent` or `import-failed`,
 `cu_seqlens_slots=0`, `gdn_layout=repeat`, `gva_layers=0`,
-`gdn_qk_contiguous` false, and is
+`gdn_qk_contiguous` false, `gated_norm=eager`,
+`fused_gated_norm_layers=0`, and is
 still ready. The kept primary rotates the `cu_seqlens` ring, passes
-`use_cp` false, repeats q and k, and leaves every residual RMSNorm
-eager. The code in this tree is the next candidate: the same ring,
-the same eager norms, and `use_cp` false, with the q/k repeat removed
-on the 48 linear layers and those heads packed before FLA's L2-norm
-view. `3ecdf5a` crashed because that view ran on the unpacked reshape.
-FlashInfer 0.6.16's prefill accepts the unrepeated shape as grouped
-value attention. It still uses the checkpoint SDPA
-order and the checkpoint's separate gate and up GEMMs. Query and key
-norms stay eager.
+`use_cp` false, skips the q/k repeat, packs those heads before the
+L2-norm view, and leaves every residual RMSNorm eager. The code in
+this tree is the next candidate: that same path, plus one FLA kernel
+on each of the 48 linear gated RMSNorms. `3ecdf5a` crashed because
+the L2 view ran on the unpacked reshape. FlashInfer 0.6.16's prefill
+accepts the unrepeated shape as grouped value attention. It still
+uses the checkpoint SDPA order and the checkpoint's separate gate
+and up GEMMs. Query and key norms stay eager. Residual `rms_norm`
+stays `eager`. `gated_norm=fla` is this candidate, not the rejected
+residual fusion.
 The checkpoint leaves cuDNN SDPA off. `PPLX_SDPA=cudnn-first` and
 `PPLX_MLP=fused-gate-up` are refused. Compile stays off.
 `PPLX_COMPILE=dynamic` and `PPLX_COMPILE=dynamic-tail` are rejected
@@ -188,12 +201,13 @@ nvcc. This tree did not compile it.
 
 The kept primary installed FlashInfer, rotates 48 `cu_seqlens` buffers,
 left cuDNN SDPA off, left the gate and up GEMMs separate, left the
-residual RMSNorms eager, and left the forward eager. Always-on FLA
-residual RMSNorm, the 512-token gate, and `use_cp=auto` missed the
-gate. `3ecdf5a` passed unrepeated q and k and crashed in warmup
-because FLA's L2 norm views them before they are packed. The next
-candidate changes that order: q and k are contiguous before the
-view. `use_cp` stays false. Leave `PPLX_GDN_PREFILL`, `PPLX_SDPA`,
+residual RMSNorms eager, packed q and k before the L2-norm view, and
+left the forward eager. Always-on FLA residual RMSNorm, the 512-token
+gate, and `use_cp=auto` missed the gate. `3ecdf5a` passed unrepeated
+q and k and crashed in warmup because FLA's L2 norm views them before
+they are packed. `fcf5e2b` packs them first and is the primary. The
+next candidate keeps that pack and fuses the linear gated RMSNorm.
+`use_cp` stays false. Leave `PPLX_GDN_PREFILL`, `PPLX_SDPA`,
 `PPLX_MLP`, and `PPLX_COMPILE` unset. Startup refuses
 `PPLX_SDPA=cudnn-first` and `PPLX_MLP=fused-gate-up`. CUDA then
 reports `sdpa=default`, `mlp=default`, `fused_gate_up_layers=0`,
@@ -203,17 +217,19 @@ reports `sdpa=default`, `mlp=default`, `fused_gate_up_layers=0`,
 `cu_seqlens_slots=48`, `rms_norm=eager`,
 `fused_rms_norm_layers=0`, `fused_rms_norm_min_tokens=0`,
 `gdn_use_cp` false, `gdn_cp_heuristic` null, `gdn_layout=gva`,
-`gva_layers=48`, and `gdn_qk_contiguous` true. There is no
+`gva_layers=48`, `gdn_qk_contiguous` true, `gated_norm=fla`, and
+`fused_gated_norm_layers=48`. There is no
 `gdn_state_slots` field. `gdn_qk_contiguous` false means the crashed
-tip's unpack is what would run. `rms_norm=fla`
-and `rms_norm=fla-long` are the rejected tips. `gdn_use_cp=auto` is
+tip's unpack is what would run. `gated_norm=eager` means this fused
+gate is not installed. `rms_norm=fla`
+and `rms_norm=fla-long` are the rejected residual tips. `gdn_use_cp=auto` is
 the rejected `a6f4d9a` tip.
 `PPLX_GDN_PREFILL=fla` reproduces the prior `f968e576` chunk.
 `PPLX_COMPILE=dynamic` and `PPLX_COMPILE=dynamic-tail` are the rejected
 compile tips. `PPLX_GDN_PREFILL=short` is the rejected ≤256 dispatch.
 `install_flashinfer.py` is required for this candidate. A new C1 is
-inconclusive until it reports p50 and p95 strictly under 88.942 /
-295.797, plus `choice_acc`, `noul_acc`, and `score_mae`.
+inconclusive until it reports p50 and p95 strictly under 87.782 /
+291.183, plus `choice_acc`, `noul_acc`, and `score_mae`.
 
 ```sh
 curl -sS http://127.0.0.1:8000/health
@@ -244,11 +260,12 @@ Head `1ba07d15b11a8c0796657e4a10b7ba3e62354421` was measured on 1× lab L20X
 (sm_89, ~140 GiB). Head `f968e576aa733a0e6e4b2bc46bb11035e7662c8f` was
 remeasured on a lab GPU labeled L20X and is the prior primary. That
 remeasure reported `compute_capability=9.0`. Head
-`ffae182cc80eaeb023f5e3501fb2dd36b1c65004` is the prior primary. Head
-`4b99b730289efc8637f0940cf0079ee3ca4fe61f` is the kept primary. A load
+`ffae182cc80eaeb023f5e3501fb2dd36b1c65004` is an earlier primary. Head
+`4b99b730289efc8637f0940cf0079ee3ca4fe61f` is the prior primary. Head
+`fcf5e2bef916da81180ac8f1570dff338e8a049d` is the kept primary. A load
 failure is a startup failure, not a latency. H800 board numbers use a
 different clock and stay on that board. The next candidate is compared
-with `4b99b73` p50 88.942 ms and p95 295.797 ms, not with a new invented
+with `fcf5e2b` p50 87.782 ms and p95 291.183 ms, not with a new invented
 target.
 
 Reported load: BF16 resident ~50333 MiB, no OOM. Warmup 5, concurrency 1,
@@ -269,23 +286,30 @@ the same 231 rows. This head admits `thinking` only when the value is
 | `f968e576` earlier paste | 231/231 | 98.037 ms | 302.569 ms |
 | `f968e576` remeasure | 231/231 | 94.077 ms | 300.200 ms |
 | `ffae182` reused `cu_seqlens` | 231/231 | 92.844 ms | 296.458 ms |
-| `4b99b73` 48-slot `cu_seqlens`, primary | 231/231 | 88.942 ms | 295.797 ms |
+| `4b99b73` 48-slot `cu_seqlens` | 231/231 | 88.942 ms | 295.797 ms |
+| `fcf5e2b` GVA, q/k packed, primary | 231/231 | 87.782 ms | 291.183 ms |
 | `17a7b120` 48-slot state workspace, rejected | 231/231 | 89.165 ms | 295.723 ms |
 | `3afb472` FLA residual RMSNorm ×129, rejected | 231/231 | 93.935 ms | 274.902 ms |
 | `705ae089` FLA residual RMSNorm above 512, rejected | 231/231 | 94.604 ms | 274.835 ms |
 | `a6f4d9a` `use_cp=auto`, rejected | 231/231 | 112.294 ms | 299.419 ms |
 | `3ecdf5a` GVA, warmup failed | 0/231 | none | none |
 
-The primary row is `4b99b73`. Versus the prior primary `ffae182`
-92.844 / 296.458, p50 is −4.20% (−3.902 ms) and p95 is −0.22%
-(−0.661 ms). `/health` reported `compile=default`,
+The primary row is `fcf5e2b`. Versus the prior primary `4b99b73`
+88.942 / 295.797, p50 is −1.30% (−1.160 ms) and p95 is −1.56%
+(−4.614 ms). `/health` reported `gdn_layout=gva`, `gva_layers=48`,
+`gdn_qk_contiguous` true, `gdn_use_cp` false, `gdn_cp_heuristic` null,
+`rms_norm=eager`, `fused_rms_norm_layers=0`, `cu_seqlens_slots=48`,
+`flashinfer_status=bound`, `flashinfer=0.6.16.post3`, `compile=default`,
+and `compile_median=eager`. Quality: `choice_acc=0.9065` (139),
+`noul_acc=0.8784` (74), `score_mae=0.2035` (18). Warmup, concurrency,
+the latency metric, and compute capability were not restated in that
+paste. `4b99b73` versus `ffae182` 92.844 / 296.458 was p50 −4.20%
+(−3.902 ms) and p95 −0.22% (−0.661 ms), with `compile=default`,
 `compile_median=eager`, `sdpa=default`, `mlp=default`,
 `fused_gate_up_layers=0`, `linear_attention=flashinfer+fla+causal_conv1d`,
 `flashinfer_status=bound`, `flashinfer=0.6.16.post3`, and
-`cu_seqlens_slots=48`. Quality: `choice_acc=0.9065` (139),
-`noul_acc=0.8784` (74), `score_mae=0.2035` (18). Warmup, concurrency,
-the latency metric, and compute capability were not restated in that
-paste. `ffae182` versus `f968e576` 94.077 / 300.200 was p50 −1.31% and
+`cu_seqlens_slots=48`. Quality on that paste: `choice_acc=0.9065` (139),
+`noul_acc=0.8784` (74), `score_mae=0.2035` (18). `ffae182` versus `f968e576` 94.077 / 300.200 was p50 −1.31% and
 p95 −1.25%. The `f968e576` remeasure stays in the table: protocol
 warmup 5, concurrency 1, stock Public231 with `thinking.enabled=false`,
 metric `successful_latency`, `/health` `linear_attention=fla-chunk`,
@@ -327,8 +351,9 @@ false, `gdn_cp_heuristic` null, `rms_norm=eager`,
 `easy-intent-00` returned HTTP 500 from FLA `l2norm_fwd` viewing a
 non-contiguous q. It is not a latency result. `/health` for `17a7b120` reported `cu_seqlens_slots=48`, `gdn_state_slots=48`,
 `flashinfer_status=bound`, `flashinfer=0.6.16.post3`, `compile=default`,
-and `compile_median=eager`. It is not the primary. The next tip has to beat
-88.942 / 295.797 on both p50 and p95. `3c72f02` beat an older p50 and
+and `compile_median=eager`. It is not the primary. `fcf5e2b` beat
+both percentiles of `4b99b73`. The next tip has to beat
+87.782 / 291.183 on both p50 and p95. `3c72f02` beat an older p50 and
 missed that older p95. `a50b9aa`, `0dcaa0ac`, and `8b4ee326` missed both
 percentiles of the older primary. The three compile tips improved p95 and
 raised p50. None of those is the primary.
@@ -398,8 +423,8 @@ them and do not raise the timeout after seeing the times.
 6. A second arm through `http://127.0.0.1:8080/v1/systemone` is frontend
    time only. Keep it in different output directories. The Rust frontend's
    own 60 second cap still applies. Do not average it into the worker p50.
-7. The kept primary is `4b99b73` in the table above. The prior primary
-   is `ffae182`. `3c72f02` bound
+7. The kept primary is `fcf5e2b` in the table above. The prior primary
+   is `4b99b73`. `ffae182` is the primary before that. `3c72f02` bound
    FlashInfer on every sequence and failed the gate: p50 88.808 ms, p95
    300.751 ms. `a50b9aa` used FlashInfer only for one sequence of at most
    256 tokens and failed: p50 95.446 ms, p95 300.871 ms.
@@ -415,31 +440,35 @@ them and do not raise the timeout after seeing the times.
    compiled frames, so the remaining p50 gap is in-process compile.
    Do not run another compile split. `4b99b73` rotates 48 `cu_seqlens`
    tensors per device and length and passed the gate against `ffae182`:
-   p50 88.942 ms, p95 295.797 ms. That is the kept primary.
+   p50 88.942 ms, p95 295.797 ms. `fcf5e2b` keeps that ring, passes
+   `use_cp` false, skips the q/k repeat, and packs q and k before the
+   L2 view. It passed the gate: p50 87.782 ms, p95 291.183 ms. That
+   is the kept primary.
    `17a7b120` rotated the FlashInfer state workspace and missed the
    gate: p50 89.165 ms, p95 295.723 ms. Do not retry a GDN or
    `cu_seqlens` ring sizing without a concrete reason both percentiles
-   beat 88.942 / 295.797.
+   beat 87.782 / 291.183.
    `3afb472` fused every residual RMSNorm and missed the gate: p50
    93.935 ms, p95 274.902 ms. Do not run that always-on fusion again.
    `705ae089` kept the kernel only above 512 tokens and missed the
    gate: p50 94.604 ms, p95 274.835 ms. Do not ship another residual
    RMSNorm variant unless a new hypothesis explains a p50 under
-   88.942 ms. `a6f4d9a` passed `use_cp=auto`. `/health` reported
+   87.782 ms. `a6f4d9a` passed `use_cp=auto`. `/health` reported
    `gdn_use_cp=auto` and `gdn_cp_heuristic=true`, so the CP kernel
    ran on every layer. It missed both percentiles: p50 112.294 ms,
    p95 299.419 ms, +26.26% (+23.352 ms) / +1.22% (+3.622 ms).
    Quality: `choice_acc=0.906` (139), `noul_acc=0.878` (74),
    `score_mae=0.204` (18). Do not retry `use_cp=auto` or the CP
    heuristic without a new hypothesis that explains a p50 under
-   88.942 ms. `3ecdf5a` installed that GVA path and crashed in
+   87.782 ms. `3ecdf5a` installed that GVA path and crashed in
    warmup: 0/231, `stop_reason=warmup_failed`, no p50 or p95.
    Quality was N/A. `/health` showed the lever installed. FLA
    `l2norm_fwd` calls `x.view(-1, D)` before q was packed, and the
    unrepeated reshape is not contiguous. Do not rerun `3ecdf5a`.
-   The next candidate keeps the same ring, eager norms, `use_cp`
-   false, and unrepeated heads, and packs q and k before that view.
-   Unset `PPLX_SDPA`, `PPLX_MLP`, `PPLX_COMPILE`, and
+   The next candidate keeps the packed GVA path and replaces the 48
+   linear gated RMSNorms with FLA `layer_norm_gated_fwd`. Residual
+   norms stay eager. Startup warms the six FLA length buckets before
+   ready. Unset `PPLX_SDPA`, `PPLX_MLP`, `PPLX_COMPILE`, and
    `PPLX_GDN_PREFILL`. `/health` must show `sdpa=default`,
    `mlp=default`, `fused_gate_up_layers=0`, `compile=default`,
    `compile_median=eager`,
@@ -449,15 +478,16 @@ them and do not raise the timeout after seeing the times.
    `fused_rms_norm_layers=0`, `fused_rms_norm_min_tokens=0`,
    `gdn_use_cp` false (JSON boolean, not the string `auto` or
    `off`), `gdn_cp_heuristic` null, `gdn_layout=gva`,
-   `gva_layers=48`, and `gdn_qk_contiguous` true before the run
-   counts. It must not report `gdn_state_slots`, `rms_norm=fla`,
-   or `rms_norm=fla-long`. A true heuristic means the rejected CP
-   lever is engaged. `gdn_layout=repeat`, `gva_layers=0`, or
-   `gdn_qk_contiguous` false means this fix is not the running
-   worker. Both p50 and p95 have to be strictly under 88.942 /
-   295.797 before that candidate replaces the primary. Record
-   `choice_acc`, `noul_acc`, and `score_mae`. Until that paste,
-   the candidate is inconclusive.
+   `gva_layers=48`, `gdn_qk_contiguous` true, `gated_norm=fla`, and
+   `fused_gated_norm_layers=48` before the run counts. It must not
+   report `gdn_state_slots`, `rms_norm=fla`, or `rms_norm=fla-long`.
+   A true heuristic means the rejected CP lever is engaged.
+   `gdn_layout=repeat`, `gva_layers=0`, `gdn_qk_contiguous` false, or
+   `gated_norm=eager` means this candidate is not the running worker.
+   Both p50 and p95 have to be strictly under 87.782 / 291.183 before
+   that candidate replaces the primary. Record `choice_acc`,
+   `noul_acc`, and `score_mae`. Until that paste, the candidate is
+   inconclusive.
 
 `benchmarks/smoke.jsonl` checks the client, not this model and not Public231.
 
@@ -489,14 +519,17 @@ them and do not raise the timeout after seeing the times.
 | 2026-10-25 | Median-safe subset of the measured RMSNorm result, not another always-on fusion and not compile. `3afb472` raised p50 by 4.993 ms and cut p95 by 20.895 ms. The median is about 136 tokens and the tail example is about 2676, so the tax is the FLA kernel on short sequences. Sequences of 512 tokens or fewer call the saved eager `Qwen3_5RMSNorm` forward. Longer sequences call FLA `layer_norm_fwd` with the same fp32 `1 + weight` scale. 512 is between those profiled lengths and is not a fitted cutoff. The short path does not compile and does not change CUDA flags. Query and key norms stay eager. The `cu_seqlens` ring stays. `/health` reports `rms_norm=fla-long`, `fused_rms_norm_layers=129`, and `fused_rms_norm_min_tokens=512`. Tip `705ae089a9546f12471fafe8b6728cbced819854`. | Public231 C1, 231/231, p50 94.604 ms, p95 274.835 ms. Primary `4b99b73` was 88.942 / 295.797. `/health`: `rms_norm=fla-long`, `fused_rms_norm_layers=129`, `fused_rms_norm_min_tokens=512`, `cu_seqlens_slots=48`, `flashinfer_status=bound`, `flashinfer=0.6.16.post3`, `compile=default`, `compile_median=eager`, no `gdn_state_slots`. Quality: `choice_acc=0.906` (139), `noul_acc=0.878` (74), `score_mae=0.205` (18). | p50 +5.662 ms (+6.37%). p95 −20.962 ms (−7.09%). Gate failed. Primary stays `4b99b73`. The 512 threshold did not protect the median. |
 | 2026-10-25 | Different lever, not another residual RMSNorm and not compile. `705ae089` matched the always-on shape, so both FLA residual-norm variants stay off. The non-CP SM90 kernel's host-side parallelism is one sequence times 48 value heads. FlashInfer 0.6.16 selects its CP kernel on HBM when that product times 2 is below the SM count. An H200 has 132 SMs and 96 is below 132, so every Public231 layer is in the low-parallelism region. The kept primary passes `use_cp` false. This candidate passes `auto` and leaves the CP chunk length to that kernel. The `cu_seqlens` ring stays. Residual RMSNorm stays eager. FlashInfer still allocates its own state workspace. SDPA and the gate and up GEMMs stay as in the checkpoint. `/health` reports `gdn_use_cp=auto`, `gdn_cp_heuristic=true`, and `rms_norm=eager`. Tip `a6f4d9a0773f2ce2f34cf0118e3792b9fbe253d7`. | Public231 C1, 231/231, p50 112.294 ms, p95 299.419 ms. Primary `4b99b73` was 88.942 / 295.797. `/health`: `gdn_use_cp=auto`, `gdn_cp_heuristic=true`, `rms_norm=eager`, `fused_rms_norm_layers=0`, `cu_seqlens_slots=48`, `flashinfer_status=bound`, `flashinfer=0.6.16.post3`, `compile=default`, `compile_median=eager`, no `gdn_state_slots`. Quality: `choice_acc=0.906` (139), `noul_acc=0.878` (74), `score_mae=0.204` (18). Warmup, concurrency, the latency metric, and compute capability were not restated in the paste. | p50 +23.352 ms (+26.26%). p95 +3.622 ms (+1.22%). Gate failed. Both percentiles worse. Primary stays `4b99b73`. |
 | 2026-10-25 | Different lever, not another residual RMSNorm and not `use_cp`. `a6f4d9a` engaged the CP kernel on every layer and raised both percentiles, so `use_cp` stays false. The checkpoint `repeat_interleave`s q and k from 16 key heads to 48 value heads before the chunk kernel, two copies on each of the 48 linear layers. FlashInfer 0.6.16's prefill documents grouped value attention as `num_v_heads > num_q_heads = num_k_heads`: q and k stay at 16 heads, v and the gates stay at 48, and the output head count is 48. L2 norm is per head along the head dimension, so the unrepeated heads match a repeat followed by the same norm. This candidate replaces only the linear-layer forward on the all-sequence bind. The `cu_seqlens` ring stays. Residual RMSNorm stays eager. FlashInfer still allocates its own state workspace. Compile stays off. Full-attention layers are unchanged. `PPLX_GDN_PREFILL=short` does not install this path, because its long sequences stay on FLA and FLA needs the repeat. If the grouped kernel is slower than the expanded path, both percentiles can rise. The paste decides. `/health` reports `gdn_layout=gva`, `gva_layers=48`, `gdn_use_cp` false, `gdn_cp_heuristic` null, and `rms_norm=eager`. Tip `3ecdf5adb68ebbe0ca0e9c93ad1dae573f8e1f12`. | Public231 C1, 0/231, `stop_reason=warmup_failed`. p50 and p95 none. Quality N/A. Gate HOLD_PRIMARY against `4b99b73` 88.942 / 295.797. `/health` had installed the lever: `gdn_layout=gva`, `gva_layers=48`, `gdn_use_cp` false, `gdn_cp_heuristic` null, `rms_norm=eager`, `fused_rms_norm_layers=0`, `cu_seqlens_slots=48`, `flashinfer_status=bound`, `flashinfer=0.6.16.post3`, `compile=default`, `compile_median=eager`. Warmup `easy-intent-00` returned HTTP 500. `l2norm_fwd` views q before it is packed. | No measured samples. Not a latency result. Primary stays `4b99b73`. |
-| 2026-10-25 | Same GVA lever, with the warmup crash fixed. `3ecdf5a` skipped the q/k repeat and died before a sample because FLA 0.5.2 `l2norm_fwd` calls `x.view(-1, D)` on the unrepeated reshape. `repeat_interleave` used to copy those heads into a contiguous tensor. This candidate calls `contiguous` on q and k before that view. An already packed tensor is not copied. The `cu_seqlens` ring stays. `use_cp` stays false. Residual RMSNorm stays eager. FlashInfer still allocates its own state workspace. Compile stays off. `/health` adds `gdn_qk_contiguous` true next to `gdn_layout=gva` and `gva_layers=48`. False means the crashed unpack is still what would run. | Not run. Samples: 0. | inconclusive |
+| 2026-10-25 | Same GVA lever, with the warmup crash fixed. `3ecdf5a` skipped the q/k repeat and died before a sample because FLA 0.5.2 `l2norm_fwd` calls `x.view(-1, D)` on the unrepeated reshape. `repeat_interleave` used to copy those heads into a contiguous tensor. This candidate calls `contiguous` on q and k before that view. An already packed tensor is not copied. The `cu_seqlens` ring stays. `use_cp` stays false. Residual RMSNorm stays eager. FlashInfer still allocates its own state workspace. Compile stays off. `/health` adds `gdn_qk_contiguous` true next to `gdn_layout=gva` and `gva_layers=48`. False means the crashed unpack is still what would run. Tip `fcf5e2bef916da81180ac8f1570dff338e8a049d`. | Public231 C1, 231/231, p50 87.782 ms, p95 291.183 ms. Prior primary `4b99b73` was 88.942 / 295.797. `/health`: `gdn_layout=gva`, `gva_layers=48`, `gdn_qk_contiguous` true, `gdn_use_cp` false, `gdn_cp_heuristic` null, `rms_norm=eager`, `fused_rms_norm_layers=0`, `cu_seqlens_slots=48`, `flashinfer_status=bound`, `flashinfer=0.6.16.post3`, `compile=default`, `compile_median=eager`. Quality: `choice_acc=0.9065` (139), `noul_acc=0.8784` (74), `score_mae=0.2035` (18). Warmup, concurrency, the latency metric, and compute capability were not restated in the paste. | p50 −1.160 ms (−1.30%). p95 −4.614 ms (−1.56%). Gate passed. New primary. |
+| 2026-10-25 | Different lever, not another residual RMSNorm and not another q/k pack. `fcf5e2b` is the primary at 87.782 / 291.183. The 48 linear layers still run eager `Qwen3_5RMSNormGated`: fp32 variance, a cast, the weight multiply, and SiLU(gate), once per layer on `[seq * 48, 128]`. The checkpoint does not call `kernelize`, so that eager chain is what the primary runs. FLA 0.5.2 `layer_norm_gated_fwd` is one kernel and, for D=128, buckets rows by `cdiv(rows, 65536)`. About 136 tokens is bucket 1 and about 2676 tokens is bucket 2. The 8192-token cap is bucket 6. Startup warms those six buckets before ready, so the measured run does not autotune. `rms_norm_gated` is an autograd wrapper and is not called. Residual RMSNorm stays eager: `3afb472` and `705ae089` used the wide kernel and missed the median, and this op is the gated head-dim path, not that kernel. The wide residual fusion can still be the wrong analogy, in which case p50 rises and the tip loses. The `cu_seqlens` ring stays. `use_cp` stays false. q and k stay packed. Compile stays off. `/health` adds `gated_norm=fla` and `fused_gated_norm_layers=48` beside `rms_norm=eager`. | Not run. Samples: 0. | inconclusive |
 
 ## Limits
 
-Image parity is unverified. The kept Public231 primary is `4b99b73` in
-the optimization log: p50 88.942 ms, p95 295.797 ms, all-sequence
-FlashInfer with a 48-slot `cu_seqlens` ring. The prior primary
-`ffae182` is p50 92.844 ms, p95 296.458 ms, one reused `cu_seqlens`.
+Image parity is unverified. The kept Public231 primary is `fcf5e2b` in
+the optimization log: p50 87.782 ms, p95 291.183 ms, grouped-value
+FlashInfer with q and k packed before the L2 view and a 48-slot
+`cu_seqlens` ring. The prior primary `4b99b73` is p50 88.942 ms,
+p95 295.797 ms. `ffae182` is p50 92.844 ms, p95 296.458 ms, one reused
+`cu_seqlens`.
 `f968e576` is p50 94.077 ms, p95 300.200 ms, on `fla-chunk` at compute
 capability 9.0. Uncached all-sequence FlashInfer `3c72f02` is not the
 primary: p50 88.808 ms, p95 300.751 ms. The short-sequence FlashInfer bind
@@ -515,7 +548,8 @@ FLA residual RMSNorm `705ae089` is not the primary: p50 94.604 ms,
 p95 274.835 ms. `use_cp=auto` `a6f4d9a` is not the primary: p50
 112.294 ms, p95 299.419 ms. Grouped-value `3ecdf5a` is not a
 latency result: 0/231, `stop_reason=warmup_failed`, p50 and p95
-none. The packed-q/k candidate has no sample.
+none. The packed-q/k tip `fcf5e2b` is the primary. The fused
+linear gated-norm candidate has no sample.
 The shared Qwen CUDA backend is not used. PR #140 is a separate Rust port of this same contract;
 it does not serve, and its JSON parser rewrites integers outside i64/u64.
 This worker keeps those integers because it uses Python's parser and the

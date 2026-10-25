@@ -95,15 +95,22 @@ remeasure of head `f968e576` on a lab GPU labeled L20X: warmup 5, concurrency
 p50 is −4.700 ms (−4.76%) and p95 is −41.002 ms (−12.02%). An earlier paste
 of 98.037 / 302.569 is not a primary. `ffae182` measured 231/231, p50
 92.844 ms, p95 296.458 ms, p50 −1.31% and p95 −1.25% versus `f968e576`.
-The kept primary is `4b99b73`: 231/231, p50 88.942 ms, p95 295.797 ms,
+`4b99b73` measured 231/231, p50 88.942 ms, p95 295.797 ms,
 p50 −4.20% (−3.902 ms) and p95 −0.22% (−0.661 ms) versus `ffae182`.
-`/health` reported `compile=default`, `compile_median=eager`,
-`sdpa=default`, `mlp=default`, `fused_gate_up_layers=0`,
-`linear_attention=flashinfer+fla+causal_conv1d`, `flashinfer_status=bound`,
-`flashinfer=0.6.16.post3`, and `cu_seqlens_slots=48`. Quality:
-`choice_acc=0.9065` (139), `noul_acc=0.8784` (74), `score_mae=0.2035`
-(18). Warmup, concurrency, the latency metric, and compute capability
-were not restated in that paste. Uncached
+The kept primary is `fcf5e2b`: 231/231, p50 87.782 ms, p95 291.183 ms,
+p50 −1.30% (−1.160 ms) and p95 −1.56% (−4.614 ms) versus `4b99b73`.
+`/health` reported `gdn_layout=gva`, `gva_layers=48`,
+`gdn_qk_contiguous` true, `gdn_use_cp` false, `gdn_cp_heuristic` null,
+`rms_norm=eager`, `fused_rms_norm_layers=0`, `cu_seqlens_slots=48`,
+`flashinfer_status=bound`, `flashinfer=0.6.16.post3`, `compile=default`,
+and `compile_median=eager`. Quality: `choice_acc=0.9065` (139),
+`noul_acc=0.8784` (74), `score_mae=0.2035` (18). Warmup, concurrency,
+the latency metric, and compute capability were not restated in that
+paste. The `4b99b73` paste reported `/health` `compile=default`,
+`compile_median=eager`, `sdpa=default`, `mlp=default`,
+`fused_gate_up_layers=0`, `linear_attention=flashinfer+fla+causal_conv1d`,
+`flashinfer_status=bound`, `flashinfer=0.6.16.post3`, and
+`cu_seqlens_slots=48`, with the same quality digits. Uncached
 all-sequence FlashInfer `3c72f02` measured 231/231, p50 88.808 ms, p95
 300.751 ms (p50 −5.60%, p95 +0.18% versus `f968e576`) and failed the gate
 that both percentiles must improve. It is not the primary. Short-sequence
@@ -139,8 +146,8 @@ Quality: `choice_acc=0.906` (139), `noul_acc=0.878` (74),
 `choice_acc=0.906` (139), `noul_acc=0.878` (74),
 `score_mae=0.204` (18). It is not the primary. Grouped-value
 `3ecdf5a` returned 0/231, `stop_reason=warmup_failed`, with no p50
-or p95. Quality was N/A. It is not a latency result. The packed-q/k
-candidate has no sample.
+or p95. Quality was N/A. It is not a latency result. The fused
+linear gated-norm candidate has no sample.
 These L20X measurements stay in this group and do not enter the H800
 table above. Ready is not limited to capability 9.0.
 

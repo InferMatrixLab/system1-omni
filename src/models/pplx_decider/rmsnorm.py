@@ -2,17 +2,17 @@
 
 Always-on fusion ``3afb472`` was p50 93.935 ms and p95 274.902 ms.
 The 512-token gate ``705ae089`` was p50 94.604 ms and p95 274.835 ms.
-Both missed the median against ``4b99b73`` at 88.942 / 295.797. Do not
-wire this module back without a new hypothesis that keeps p50 under
-88.942 ms.
+Both missed the median against ``4b99b73`` at 88.942 / 295.797. The
+kept primary is now faster than that row. Do not wire this module
+back without a new hypothesis that keeps p50 under 87.782 ms.
 
 ``Qwen3_5RMSNorm`` computes ``rms(x.float()) * (1 + weight.float())`` and
 casts back. Eager runs that as a kernel chain, twice per text layer plus
 once on the final hidden state. FLA 0.5.2 ``layer_norm_fwd`` is one
 kernel. Its autotune key ignores sequence length when the normalized
 dimension is above 512. This checkpoint's hidden size is 5120. Query
-and key norms are head_dim 256 and stay eager. The gated RMSNorm stays
-eager. The functions below are the rejected implementation, kept so the
+and key norms are head_dim 256 and stay eager. The gated output norm
+is not this module. The functions below are the rejected implementation, kept so the
 CPU contract of that attempt stays tested.
 
 ``evaluate`` runs under ``torch.inference_mode``. FLA's autograd
