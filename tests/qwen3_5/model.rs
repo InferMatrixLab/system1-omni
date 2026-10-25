@@ -41,6 +41,40 @@ fn runs_keep_every_prompt_and_end_prefixes_on_chunks() {
     }
 }
 
+#[test]
+fn token_logprob_is_a_log_softmax_over_the_vocabulary_only() {
+    let vocab = 1001;
+    // logits in [-20, 20) and, past the vocabulary, padding that must not count
+    let mut x = 7u64;
+    let mut values: Vec<f32> = (0..vocab)
+        .map(|_| {
+            x = x
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((x >> 40) as f32 / (1u64 << 24) as f32) * 40.0 - 20.0
+        })
+        .collect();
+    values.extend([1e4f32; 7]);
+    let bytes: Vec<u8> = values
+        .iter()
+        .flat_map(|&v| half::bf16::from_f32(v).to_le_bytes())
+        .collect();
+    let rounded: Vec<f64> = values[..vocab]
+        .iter()
+        .map(|&v| half::bf16::from_f32(v).to_f64())
+        .collect();
+    let lse = rounded.iter().map(|v| v.exp()).sum::<f64>().ln();
+    for token in [0u32, 1, 500, 1000] {
+        let want = rounded[token as usize] - lse;
+        let got = token_logprob(&bytes, vocab, token) as f64;
+        assert!((got - want).abs() <= 1e-5, "token {token}: {got} vs {want}");
+    }
+    let total: f64 = (0..vocab as u32)
+        .map(|t| (token_logprob(&bytes, vocab, t) as f64).exp())
+        .sum();
+    assert!((total - 1.0).abs() <= 1e-5, "{total}");
+}
+
 /// A two-layer checkpoint with hidden size 128, the smallest whose stacked weights stay
 /// contiguous in the arena, and an FP32 adapter on layer 0's down projection.
 #[cfg(unix)]
@@ -233,11 +267,22 @@ fn cpu_fixed_and_shared_refuse_other_profiles_before_device_work() {
             branches: vec![&[4], &[5, 6]],
         }],
     };
+    let positions = [0, 1, 2];
+    let input = MultimodalInput {
+        token_ids: &[1, 2, 3],
+        image_token_indices: &[],
+        image_embeddings: &[],
+        position_ids: [&positions; 3],
+    };
     let refuse = |model: &mut Model, profile: &str| {
         let before = unsafe { calls() };
         for error in [
             model.forward_fixed(&[1, 2, 3]).unwrap_err(),
             model.forward_shared(&prompts).unwrap_err(),
+            model
+                .forward_multimodal_readout(&input, &[2], &[(2, 4)])
+                .map(drop)
+                .unwrap_err(),
         ] {
             assert!(
                 error.to_string().contains("only merged weights"),
@@ -247,6 +292,7 @@ fn cpu_fixed_and_shared_refuse_other_profiles_before_device_work() {
         assert_eq!(unsafe { calls() }, before, "{profile}: CUDA calls");
         assert!(
             model.scratch.is_none()
+                && model.vocab_buffers.is_none()
                 && model.fixed_gemm.is_null()
                 && model.shared.iter().all(Option::is_none),
             "{profile}: buffers"
