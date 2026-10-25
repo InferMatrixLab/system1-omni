@@ -1428,69 +1428,14 @@ fn annotate(value: &Value) -> Value {
     }
 }
 
+/// Pinned `startlux_decide/prompt.py` (`a99977d`) calls
+/// `json.dumps(..., ensure_ascii=False)`.
+///
+/// Non-ASCII stays UTF-8. Python's default `ensure_ascii=True` (`\u00e9`) is
+/// not the pin. Floats use Python `repr` (`1e-05`, `1e+16`), not serde_json's
+/// default (`0.00001`, `1e16`). Control characters still use `\u00XX`.
 fn py_dumps(value: &Value) -> String {
-    let mut out = String::new();
-    write_py(&mut out, value);
-    out
-}
-
-fn write_py(out: &mut String, value: &Value) {
-    match value {
-        Value::Null => out.push_str("null"),
-        Value::Bool(flag) => out.push_str(if *flag { "true" } else { "false" }),
-        Value::Number(number) => out.push_str(&py_number(number)),
-        Value::String(text) => push_py_string(out, text),
-        Value::Array(items) => {
-            out.push('[');
-            for (index, item) in items.iter().enumerate() {
-                if index > 0 {
-                    out.push_str(", ");
-                }
-                write_py(out, item);
-            }
-            out.push(']');
-        }
-        Value::Object(map) => {
-            out.push('{');
-            for (index, (key, item)) in map.iter().enumerate() {
-                if index > 0 {
-                    out.push_str(", ");
-                }
-                push_py_string(out, key);
-                out.push_str(": ");
-                write_py(out, item);
-            }
-            out.push('}');
-        }
-    }
-}
-
-fn py_number(number: &Number) -> String {
-    if let Some(value) = number.as_i64() {
-        return value.to_string();
-    }
-    if let Some(value) = number.as_u64() {
-        return value.to_string();
-    }
-    serde_json::to_string(number).unwrap_or_else(|_| "null".into())
-}
-
-fn push_py_string(out: &mut String, text: &str) {
-    out.push('"');
-    for ch in text.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\u{0008}' => out.push_str("\\b"),
-            '\u{000c}' => out.push_str("\\f"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch if (ch as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", ch as u32)),
-            ch => out.push(ch),
-        }
-    }
-    out.push('"');
+    omni_qwen3_5_native::json::dumps(value)
 }
 
 fn value_text(value: &Value) -> Option<String> {

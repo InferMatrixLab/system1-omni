@@ -105,6 +105,16 @@ With the defaults, the choice answer includes `none_probability` and the
 choice stays one of the listed options. `think_mode` omitted or `never` is
 the Instant path. `think_mode` `auto` or `always` is 422.
 
+A string `state` is copied unchanged. Any other JSON state follows pinned
+`startlux_decide/prompt.py` (`a99977d`):
+`json.dumps(annotate_indices(state), ensure_ascii=False)`. Separators are
+`, ` and `: `. Lists of eight or more items gain `_index`. Non-ASCII stays
+UTF-8 (`café`, `東京`); Python's default `ensure_ascii=True` escapes are not
+the pin. Floats follow Python `repr`, so `1e-5` is `1e-05` and `1e16` is
+`1e+16`, not serde_json's `0.00001` and `1e16`. Control characters still use
+`\u00XX`. `cargo test --locked -p omni-startlux-native --test contract` locks
+both the exponent and the non-ASCII cases.
+
 ## Checks without a GPU
 
 ```sh

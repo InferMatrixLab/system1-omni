@@ -48,7 +48,10 @@ context is 262144; `STARTLUX_MAX_MODEL_LEN` can raise the cap up to that.
 Prompts over the cap return 422. Nothing is truncated.
 
 `think_mode` `never` and `plain` are accepted. `auto`, `always`, `hybrid`,
-and `think` return 422. This folder has no `auto_think` block. Images,
+and `think` return 422. A string `state` is copied unchanged. Other JSON
+states use pinned `prompt.py` `json.dumps(..., ensure_ascii=False)`: UTF-8
+for non-ASCII, and Python float `repr` (`1e-05`, `1e+16`) rather than
+serde_json's default. This folder has no `auto_think` block. Images,
 `return_details`, `return_thought`, and `thought_generation: stream` return
 422. Bad JSON is 400. The request `model` field is ignored; the response
 model id is the pin above. `/v1/decisions` is not served.

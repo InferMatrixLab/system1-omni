@@ -170,6 +170,62 @@ fn bare_letter_ids_are_hidden_and_json_state_matches_python_spacing() {
     assert!(text.contains(", "), "{text}");
     assert!(!text.contains(r"\u"));
     assert_eq!(contract::state_text(&json!("café")), "café");
+    let mixed = json!({
+        "ticket": "I was charged twice",
+        "note": "café",
+        "city": "東京",
+        "tiny": 1e-5,
+        "huge": 1e16,
+        "edge": 1e-4,
+        "plain": 1e15
+    });
+    assert_eq!(
+        contract::state_text(&mixed),
+        r#"{"ticket": "I was charged twice", "note": "café", "city": "東京", "tiny": 1e-05, "huge": 1e+16, "edge": 0.0001, "plain": 1000000000000000.0}"#
+    );
+    assert_eq!(
+        contract::state_text(&json!({"bell": "a\u{0001}b"})),
+        "{\"bell\": \"a\\u0001b\"}"
+    );
+    let indexed = json!(["a", "b", "c", "d", "e", "f", "g", "café"]);
+    let indexed_text = contract::state_text(&indexed);
+    assert!(
+        indexed_text.contains(r#""value": "café""#),
+        "{indexed_text}"
+    );
+    assert!(!indexed_text.contains('\\'), "{indexed_text}");
+
+    let dumped = prepare(
+        &json!({
+            "state": mixed,
+            "none_check": false,
+            "questions": {"q": {"type": "choice", "instructions": "City?", "criteria": {"A": 1e-5, "B": "東京"}}}
+        }),
+        &listed(),
+    )
+    .unwrap();
+    let dumped_prompt = prompt_text(&dumped, 0);
+    assert!(
+        dumped_prompt.contains(r#""note": "café""#),
+        "{dumped_prompt}"
+    );
+    assert!(
+        dumped_prompt.contains(r#""city": "東京""#),
+        "{dumped_prompt}"
+    );
+    assert!(
+        dumped_prompt.contains(r#""tiny": 1e-05"#),
+        "{dumped_prompt}"
+    );
+    assert!(
+        dumped_prompt.contains(r#""huge": 1e+16"#),
+        "{dumped_prompt}"
+    );
+    assert!(
+        dumped_prompt.contains("A) 1e-05\nB) 東京"),
+        "{dumped_prompt}"
+    );
+    assert!(!dumped_prompt.contains('\\'), "{dumped_prompt}");
 
     let prepared = prepare(
         &json!({
