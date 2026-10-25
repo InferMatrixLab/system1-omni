@@ -1,22 +1,25 @@
-"""Fuse the checkpoint's zero-centered residual RMSNorms.
+"""Length-gated FLA residual RMSNorm.
 
 ``Qwen3_5RMSNorm`` computes ``rms(x.float()) * (1 + weight.float())`` and
-casts back. Eager runs that as a separate kernel chain, twice per text
-layer plus once on the final hidden state. At the median those
-activations are small, so the chain is launch-bound. At the tail the
-same chain also rewrites the fp32 activation several times.
+casts back. Eager runs that as a kernel chain, twice per text layer plus
+once on the final hidden state. FLA 0.5.2 ``layer_norm_fwd`` is one
+kernel. Its autotune key ignores sequence length when the normalized
+dimension is above 512. This checkpoint's hidden size is 5120. Query
+and key norms are head_dim 256 and stay eager. The gated RMSNorm stays
+eager.
 
-FLA 0.5.2 ``layer_norm_fwd`` is one kernel. Its autotune key ignores
-sequence length when the normalized dimension is above 512, which is
-this checkpoint's hidden size (5120). Query and key norms are head_dim
-256 and stay eager: that kernel's autotune key changes with length.
-The gated RMSNorm on linear layers stays eager. This is not a wider
-GEMM and not a workspace ring.
+Always-on fusion on ``3afb472`` cut p95 by 20.895 ms and raised p50 by
+4.993 ms. The median of this workload is about 136 tokens, and the tail
+example is about 2676. Sequences of 512 tokens or fewer keep the
+original eager forward. Longer sequences call the FLA kernel. 512 sits
+between those two profiled lengths. It is not a fitted cutoff. The
+short path is the saved checkpoint method, not a compiled region and
+not a second CUDA-flag mode.
 
 ``evaluate`` runs under ``torch.inference_mode``. FLA's autograd
-``rms_norm`` calls ``save_for_backward`` and would raise, so the forward
-calls ``layer_norm_fwd`` directly. The fp32 scale is ``1 + weight``,
-matching the zero-centered affine, and it is built once at install.
+``rms_norm`` calls ``save_for_backward`` and would raise, so the long
+path calls ``layer_norm_fwd`` directly. The fp32 scale is ``1 + weight``
+and is built once at install.
 """
 
 from __future__ import annotations
@@ -24,11 +27,15 @@ from __future__ import annotations
 from typing import Any
 
 RMS_NORM_EAGER = "eager"
-RMS_NORM_FLA = "fla"
+# Always-on ``rms_norm=fla`` is the rejected ``3afb472`` tip.
+RMS_NORM_FLA_LONG = "fla-long"
 # FLA 0.5.2 ``layer_norm_fwd`` uses the length-independent kernel only
 # above this feature count. At or below it, the autotune key includes
 # ``cdiv(T, 2048)`` and Public231 lengths would rebenchmark.
 FLA_RMS_LENGTH_STABLE_FEATURES = 512
+# Eager at or below this many tokens. FLA above it. Between the profiled
+# median of about 136 tokens and the profiled tail of about 2676.
+FLA_RMS_MIN_TOKENS = 512
 _RESIDUAL_NORM_NAMES = ("input_layernorm", "post_attention_layernorm")
 _LAYER_NORM_FWD: Any = None
 
@@ -50,10 +57,35 @@ def fused_residual_rms_norm(norm: Any, x: Any, layer_norm_fwd: Any) -> Any:
     return y.reshape(x.shape)
 
 
+def sequence_tokens(x: Any) -> int:
+    """Sequence length of a residual RMSNorm input. The last dim is features."""
+
+    shape = getattr(x, "shape", None)
+    if shape is None or len(shape) < 2:
+        raise RuntimeError("residual RMSNorm expects a batch and a sequence")
+    return int(shape[-2])
+
+
+def dispatch_residual_rms_norm(
+    norm: Any,
+    x: Any,
+    layer_norm_fwd: Any,
+    min_tokens: int = FLA_RMS_MIN_TOKENS,
+) -> Any:
+    """Eager at or below ``min_tokens``. FLA above it."""
+
+    if sequence_tokens(x) <= min_tokens:
+        original = getattr(norm, "_pplx_rms_original", None)
+        if original is None:
+            raise RuntimeError("residual RMSNorm eager forward was not saved")
+        return original(x)
+    return fused_residual_rms_norm(norm, x, layer_norm_fwd)
+
+
 def _fused_forward(self: Any, x: Any) -> Any:
     if _LAYER_NORM_FWD is None:
         raise RuntimeError("fused residual RMSNorm is not installed")
-    return fused_residual_rms_norm(self, x, _LAYER_NORM_FWD)
+    return dispatch_residual_rms_norm(self, x, _LAYER_NORM_FWD)
 
 
 def prepare_residual_rms_norm(norm: Any) -> int:
@@ -119,6 +151,7 @@ def install_fused_residual_rms_norm(language_model: Any) -> int:
             raise RuntimeError("zero-centered RMSNorm scale does not match the weight")
         if scale.device != norm.weight.device:
             raise RuntimeError("zero-centered RMSNorm scale is on the wrong device")
+        norm._pplx_rms_original = norm.forward
         norm._pplx_rms_scale = scale
         norm.forward = _fused_forward.__get__(norm, type(norm))
     return len(norms)

@@ -225,6 +225,7 @@ def test_http_health_and_decision():
         assert health["cu_seqlens_slots"] is None
         assert health["rms_norm"] is None
         assert health["fused_rms_norm_layers"] is None
+        assert health["fused_rms_norm_min_tokens"] is None
         assert "gdn_state_slots" not in health
         assert health["compute_capability"] is None
         assert health["gpu_name"] is None
@@ -265,15 +266,18 @@ def test_http_health_and_decision():
         conn.close()
         assert health["cu_seqlens_slots"] == 48
         assert health["rms_norm"] is None
+        assert health["fused_rms_norm_min_tokens"] is None
         assert "gdn_state_slots" not in health
-        server.executor.rms_norm = "fla"
+        server.executor.rms_norm = "fla-long"
         server.executor.fused_rms_norm_layers = 129
+        server.executor.fused_rms_norm_min_tokens = 512
         conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
         conn.request("GET", "/health")
         health = json.loads(conn.getresponse().read())
         conn.close()
-        assert health["rms_norm"] == "fla"
+        assert health["rms_norm"] == "fla-long"
         assert health["fused_rms_norm_layers"] == 129
+        assert health["fused_rms_norm_min_tokens"] == 512
         assert "gdn_state_slots" not in health
         assert health["compute_capability"] == "9.0"
         assert health["gpu_name"] == "NVIDIA L20X"

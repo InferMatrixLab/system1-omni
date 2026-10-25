@@ -98,9 +98,11 @@ are the H200 target. Capability 8.9 reports `linear_attention` as `fla-chunk` an
 Capability 9.0 with `flashinfer-python` 0.6.16.post3 uses all-sequence
 FlashInfer and keeps 48 distinct `cu_seqlens` buffers per device and
 length. FlashInfer allocates its own state workspace. CUDA also replaces
-the zero-centered residual RMSNorms with one FLA kernel (`rms_norm=fla`,
-129 modules on this checkpoint). The kept primary rotates the `cu_seqlens`
-ring only and leaves those norms eager.
+the zero-centered residual RMSNorms with one FLA kernel only when the
+sequence is longer than 512 tokens (`rms_norm=fla-long`,
+`fused_rms_norm_min_tokens=512`, 129 modules on this checkpoint).
+Shorter sequences keep the original eager norm. The kept primary
+rotates the `cu_seqlens` ring only and leaves those norms eager.
 `PPLX_GDN_PREFILL=fla` reproduces the prior `f968e576` chunk.
 `PPLX_GDN_PREFILL=short` is the rejected one-sequence ≤256 dispatch.
 CuteDSL and CUDA graphs are not used. These kernels are not bit-exact with
@@ -143,8 +145,11 @@ primary. Isolated-median compile on `34ba5de` missed the gate (p50
 (74), `score_mae=0.2003` (18)) and is not the primary. The FlashInfer
 state-workspace ring `17a7b120` missed the gate (p50 89.165 ms, p95
 295.723 ms, `choice_acc=0.906` (139), `noul_acc=0.878` (74),
-`score_mae=0.203` (18)) and is not the primary. The FLA residual
-RMSNorm candidate has no sample.
+`score_mae=0.203` (18)) and is not the primary. Always-on FLA residual
+RMSNorm `3afb472` missed the gate (p50 93.935 ms, p95 274.902 ms,
+`choice_acc=0.9065` (139), `noul_acc=0.8784` (74), `score_mae=0.2052`
+(18)) and is not the primary. The length-gated FLA residual RMSNorm
+candidate has no sample.
 
 The shared Qwen3.5 CUDA language kernels in this repository are causal
 (`src/backends/cuda/qwen3_5/attention.cu`). Their vision-operator tests mention
@@ -156,8 +161,8 @@ backend. A native executor is not in this change.
 | Path | State |
 | --- | --- |
 | CPU contract and HTTP rejection | Implemented; tests do not need weights |
-| CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, checkpoint SDPA order, separate gate and up GEMMs, an eager language-model forward, FLA residual RMSNorms (`rms_norm=fla`), `causal-conv1d` 1.7.0 with sm_90 and sm_89 cubins, FLA 0.5.2 chunk, and all-sequence FlashInfer on capability 9.0 with 48 `cu_seqlens` slots per device and length. FlashInfer allocates its own state workspace. `PPLX_GDN_PREFILL=fla` holds an installed pin and reproduces the prior `f968e576` chunk. `PPLX_GDN_PREFILL=short` is the rejected length dispatch. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
-| Public231 concurrency 1 | Kept primary is `4b99b73`: 231/231, p50 88.942 ms, p95 295.797 ms, all-sequence FlashInfer, 48-slot `cu_seqlens`. Versus prior primary `ffae182` 92.844 / 296.458: p50 −4.20% (−3.902 ms), p95 −0.22% (−0.661 ms). Quality `choice_acc=0.9065` (139), `noul_acc=0.8784` (74), `score_mae=0.2035` (18). `ffae182` versus `f968e576` 94.077 / 300.200 was p50 −1.31%, p95 −1.25%. Uncached all-sequence FlashInfer `3c72f02` is not the primary: p50 88.808 ms, p95 300.751 ms. Short-sequence FlashInfer `a50b9aa` failed its gate: p50 95.446 ms, p95 300.871 ms. cuDNN-first SDPA `0dcaa0ac` failed its gate: p50 138.501 ms, p95 332.859 ms. Fused gate-up `8b4ee326` failed its gate: p50 102.437 ms, p95 304.970 ms. Always-on dynamic compile `e36b32ed` failed the both-percentiles gate: p50 97.751 ms, p95 263.124 ms. The 512-token split `7e3b1be` failed its gate: p50 100.037 ms, p95 257.084 ms. Isolated-median compile `34ba5de` failed its gate: p50 97.084 ms, p95 256.679 ms. The FlashInfer state-workspace ring `17a7b120` failed its gate: p50 89.165 ms, p95 295.723 ms. None of those is the primary. The FLA residual RMSNorm candidate has no sample |
+| CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, checkpoint SDPA order, separate gate and up GEMMs, an eager language-model forward, length-gated FLA residual RMSNorms (`rms_norm=fla-long`, minimum 512 tokens), `causal-conv1d` 1.7.0 with sm_90 and sm_89 cubins, FLA 0.5.2 chunk, and all-sequence FlashInfer on capability 9.0 with 48 `cu_seqlens` slots per device and length. FlashInfer allocates its own state workspace. `PPLX_GDN_PREFILL=fla` holds an installed pin and reproduces the prior `f968e576` chunk. `PPLX_GDN_PREFILL=short` is the rejected length dispatch. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
+| Public231 concurrency 1 | Kept primary is `4b99b73`: 231/231, p50 88.942 ms, p95 295.797 ms, all-sequence FlashInfer, 48-slot `cu_seqlens`. Versus prior primary `ffae182` 92.844 / 296.458: p50 −4.20% (−3.902 ms), p95 −0.22% (−0.661 ms). Quality `choice_acc=0.9065` (139), `noul_acc=0.8784` (74), `score_mae=0.2035` (18). `ffae182` versus `f968e576` 94.077 / 300.200 was p50 −1.31%, p95 −1.25%. Uncached all-sequence FlashInfer `3c72f02` is not the primary: p50 88.808 ms, p95 300.751 ms. Short-sequence FlashInfer `a50b9aa` failed its gate: p50 95.446 ms, p95 300.871 ms. cuDNN-first SDPA `0dcaa0ac` failed its gate: p50 138.501 ms, p95 332.859 ms. Fused gate-up `8b4ee326` failed its gate: p50 102.437 ms, p95 304.970 ms. Always-on dynamic compile `e36b32ed` failed the both-percentiles gate: p50 97.751 ms, p95 263.124 ms. The 512-token split `7e3b1be` failed its gate: p50 100.037 ms, p95 257.084 ms. Isolated-median compile `34ba5de` failed its gate: p50 97.084 ms, p95 256.679 ms. The FlashInfer state-workspace ring `17a7b120` failed its gate: p50 89.165 ms, p95 295.723 ms. Always-on FLA residual RMSNorm `3afb472` failed its gate: p50 93.935 ms, p95 274.902 ms. None of those is the primary. The length-gated FLA residual RMSNorm candidate has no sample |
 | CPU `device="cpu"` | The checkpoint switches the backbone to float32. Not the measured path |
 | Images | Admitted. No image parity run |
 | Apple GPU | Not supported |

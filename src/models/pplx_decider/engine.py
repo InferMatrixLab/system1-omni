@@ -27,7 +27,12 @@ from .compile_forward import (
     warmup_compiled_forward,
 )
 from .mlp import mlp_preference
-from .rmsnorm import RMS_NORM_EAGER, RMS_NORM_FLA, install_fused_residual_rms_norm
+from .rmsnorm import (
+    FLA_RMS_MIN_TOKENS,
+    RMS_NORM_EAGER,
+    RMS_NORM_FLA_LONG,
+    install_fused_residual_rms_norm,
+)
 from .contract import (
     ATTENTION_MODE,
     BASE_MODEL,
@@ -179,7 +184,8 @@ class PplxExecutor:
         # so startup leaves the forward eager. Capability 9.0 uses
         # all-sequence FlashInfer. The kept primary rotates 48 cu_seqlens
         # buffers. FlashInfer allocates its own state workspace. CUDA
-        # replaces the zero-centered residual RMSNorms with one FLA kernel.
+        # keeps residual RMSNorm eager at 512 tokens or fewer and uses
+        # one FLA kernel above that. Always-on fusion missed p50.
         # PPLX_GDN_PREFILL=fla reproduces the prior f968e576 chunk.
         # PPLX_GDN_PREFILL=short is the rejected length dispatch.
         # cuDNN-first SDPA and the fused gate-up GEMM are not selectable.
@@ -197,6 +203,7 @@ class PplxExecutor:
         self.fused_gate_up_layers = 0
         self.rms_norm = RMS_NORM_EAGER
         self.fused_rms_norm_layers = 0
+        self.fused_rms_norm_min_tokens = 0
         self.forward_compile = compile_preference(device, os.environ.get("PPLX_COMPILE"))
         self.compile_min_tokens = compile_min_tokens(self.forward_compile)
         self.compile_median = compile_median(self.forward_compile)
@@ -254,7 +261,8 @@ class PplxExecutor:
         self.unpadded_full_attention_layers = install_unpadded_full_attention(language_model)
         if cuda:
             self.fused_rms_norm_layers = install_fused_residual_rms_norm(language_model)
-            self.rms_norm = RMS_NORM_FLA
+            self.rms_norm = RMS_NORM_FLA_LONG
+            self.fused_rms_norm_min_tokens = FLA_RMS_MIN_TOKENS
         if self.forward_compile != "default":
             install_compiled_forward(language_model, self.forward_compile)
             warmup_compiled_forward(self.model.backbone, device, self.forward_compile)

@@ -126,7 +126,11 @@ primary. The FlashInfer state-workspace ring `17a7b120` measured
 231/231, p50 89.165 ms, p95 295.723 ms (p50 +0.25%, p95 −0.02%) and
 failed the same gate. Quality: `choice_acc=0.906` (139),
 `noul_acc=0.878` (74), `score_mae=0.203` (18). It is not the primary.
-The FLA residual RMSNorm candidate has no sample.
+Always-on FLA residual RMSNorm `3afb472` measured 231/231, p50
+93.935 ms, p95 274.902 ms (p50 +5.61%, p95 −7.06%) and failed the
+same gate. Quality: `choice_acc=0.9065` (139), `noul_acc=0.8784` (74),
+`score_mae=0.2052` (18). It is not the primary. The length-gated FLA
+residual RMSNorm candidate has no sample.
 These L20X measurements stay in this group and do not enter the H800
 table above. Ready is not limited to capability 9.0.
 

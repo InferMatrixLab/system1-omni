@@ -6,6 +6,8 @@ import pytest
 
 from models.pplx_decider.rmsnorm import (
     FLA_RMS_LENGTH_STABLE_FEATURES,
+    FLA_RMS_MIN_TOKENS,
+    dispatch_residual_rms_norm,
     fused_residual_rms_norm,
     prepare_residual_rms_norm,
     residual_rms_norm_modules,
@@ -128,3 +130,41 @@ def test_forward_calls_the_length_stable_kernel_and_restores_the_shape():
         "is_rms_norm": True,
     }
     assert y.shape == (1, 136, 5120)
+
+
+def test_median_lengths_keep_the_original_forward():
+    assert FLA_RMS_MIN_TOKENS == 512
+    norm = Qwen3_5RMSNorm()
+    norm._pplx_rms_scale = object()
+    eager = []
+
+    def original(x):
+        eager.append(x.shape[-2])
+        return x
+
+    norm._pplx_rms_original = original
+    fused = {"calls": 0}
+
+    def layer_norm_fwd(flat, scale, bias, eps, is_rms_norm):
+        fused["calls"] += 1
+        return _Tensor(flat.shape), None, None, None
+
+    for tokens in (136, 512):
+        y = dispatch_residual_rms_norm(
+            norm, _Tensor((1, tokens, 5120)), layer_norm_fwd, FLA_RMS_MIN_TOKENS
+        )
+        assert y.shape == (1, tokens, 5120)
+    assert eager == [136, 512]
+    assert fused["calls"] == 0
+    for tokens in (513, 2676):
+        y = dispatch_residual_rms_norm(
+            norm, _Tensor((1, tokens, 5120)), layer_norm_fwd, FLA_RMS_MIN_TOKENS
+        )
+        assert y.shape == (1, tokens, 5120)
+    assert fused["calls"] == 2
+
+
+def test_short_path_refuses_a_missing_original_forward():
+    norm = Qwen3_5RMSNorm()
+    with pytest.raises(RuntimeError, match="eager forward was not saved"):
+        dispatch_residual_rms_norm(norm, _Tensor((1, 136, 5120)), None, FLA_RMS_MIN_TOKENS)
