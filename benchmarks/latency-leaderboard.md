@@ -98,7 +98,10 @@ of 98.037 / 302.569 is not this primary. All-sequence FlashInfer
 +0.18%) and failed the gate that both percentiles must improve. It is not
 the primary. Short-sequence FlashInfer `a50b9aa` measured 231/231, p50
 95.446 ms, p95 300.871 ms (p50 +1.46%, p95 +0.22%) and failed the same
-gate. It is not the primary. The cuDNN-first SDPA candidate has no sample.
+gate. It is not the primary. cuDNN-first SDPA `0dcaa0ac` measured 231/231,
+p50 138.501 ms, p95 332.859 ms (p50 +47.22%, p95 +10.88%) and failed the
+same gate. It is not the primary. The fused gate-up candidate has no
+sample.
 Both kept measurements stay in this L20X group and do not enter the H800
 table above. Ready is not limited to capability 9.0.
 
