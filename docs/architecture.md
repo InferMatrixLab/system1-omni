@@ -30,8 +30,11 @@ noncausal, and the language kernels in `src/backends/cuda/qwen3_5/attention.cu`
 are causal. Its readout is a separate 255-row tensor. After that load, the
 worker marks those full-attention modules noncausal and omits the explicit
 SDPA mask when the padding mask is all true. Linear-attention chunk prefill
-uses the pinned FLA/Triton kernel. It does not load FlashInfer or CuteDSL
-and does not capture a CUDA graph.
+on the lab L20X-labeled GPU uses FLA 0.5.2 plus causal_conv1d, including
+when that GPU reports capability 8.9. Capability 9.0 binds FlashInfer's
+chunk prefill when flashinfer-python 0.6.16.post3 imports, and stays on
+the FLA chunk when it does not. Ready accepts either bind. CuteDSL and
+CUDA graphs are not selected.
 
 Cua-S1 and Open-Jev compute their decision heads on the CPU after downloading
 the final hidden state. Decider projects its selected LM-head rows on CUDA.

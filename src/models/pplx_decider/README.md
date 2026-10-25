@@ -87,14 +87,16 @@ grouped-query kernel (`head_dim` 256). Any false padding bit keeps
 cuDNN SDPA stays off, which is the checkpoint setting. Flash and math SDPA
 are not bit-exact. CUDA startup requires `causal-conv1d` 1.7.0, imported
 before Qwen3.5 modeling, and refuses the `F.conv1d` fallback. The build
-inserts an sm_89 cubin. It also requires `flash-linear-attention` 0.5.2
-so `/health` can report `linear_attention` as `fla-chunk`. That is the
-sm_89 vLLM auto path and the SGLang chunk path for this classification
-prefill. FlashInfer, CuteDSL, and CUDA graphs are not used. These kernels
-are not bit-exact with the torch fallbacks. A later Public231 sample has
-to count decision disagreements against head
-`1ba07d15b11a8c0796657e4a10b7ba3e62354421`. That L20X number is the
-baseline. This head has no sample.
+keeps an sm_90 cubin and an sm_89 cubin. It also requires
+`flash-linear-attention` 0.5.2. Lab GPUs labeled NVIDIA L20X are the H200
+target. Capability 8.9, and capability 9.0 when FlashInfer is absent, report
+`linear_attention` as `fla-chunk` and are ready. Capability 9.0 with
+`flashinfer-python` 0.6.16.post3 replaces the chunk global with FlashInfer's
+GDN prefill and reports `flashinfer+fla+causal_conv1d`. That prefill is one
+sequence per forward. CuteDSL and CUDA graphs are not used. These kernels
+are not bit-exact with the torch fallbacks. A later Public231 sample on
+that lab host has to count decision disagreements against head
+`1ba07d15b11a8c0796657e4a10b7ba3e62354421`. This head has no sample.
 
 The shared Qwen3.5 CUDA language kernels in this repository are causal
 (`src/backends/cuda/qwen3_5/attention.cu`). Their vision-operator tests mention
@@ -106,7 +108,7 @@ backend. A native executor is not in this change.
 | Path | State |
 | --- | --- |
 | CPU contract and HTTP rejection | Implemented; tests do not need weights |
-| CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, `causal-conv1d` 1.7.0 with an sm_89 cubin, and FLA 0.5.2 chunk. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
+| CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, `causal-conv1d` 1.7.0 with sm_90 and sm_89 cubins, and FLA 0.5.2 chunk. Capability 9.0 also binds FlashInfer 0.6.16.post3 when that pin imports. Ready accepts either bind. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
 | Public231 concurrency 1 | Head `1ba07d1` on L20X, stripped no-thinking twin, warmup 5, concurrency 1. Primary run1: 231/231, p50 98.777 ms, p95 341.202 ms. Later heads have no sample and no win against that primary |
 | CPU `device="cpu"` | The checkpoint switches the backbone to float32. Not the measured path |
 | Images | Admitted. No image parity run |
