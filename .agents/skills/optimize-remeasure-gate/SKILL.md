@@ -1,6 +1,6 @@
 ---
 name: optimize-remeasure-gate
-description: Gate continuous optimization after a measured Public231 C1 baseline, including Cloud Agent and coding-agent loops. Use when a new tip must not land until that tip is remeasured with the same protocol on the same recorded device and compute capability. Every paste includes those two fields. The documented production target is H200 / SM90. Each tip names its RSI phase and the primary change versus alternatives considered, or it is not merge-clean. Incomplete evidence is INCONCLUSIVE. The pull request stays draft until a separate owner yes.
+description: Gate continuous optimization after a measured Public231 C1 baseline, including Cloud Agent and coding-agent loops. Use when a new tip must not land until smoke passes and a fast-screen either drops a clear regression or the tip is remeasured with full C1 on the same recorded device and compute capability. Every paste includes those two fields. The documented production target is H200 / SM90. Each tip names its RSI phase and the primary change versus alternatives considered, or it is not merge-clean. Incomplete evidence is INCONCLUSIVE. A fast-screen cannot KEEP a tip. The pull request stays draft until a separate owner yes.
 ---
 
 # Optimize only against a remeasured tip
@@ -35,15 +35,16 @@ Those are the primary figures. Per-round values stay attached so a pooled
 number can be checked. A recalled or rounded figure, a single round, or a
 percentile averaged across rounds is not a baseline.
 
-## One tip, then remeasure
+## One tip, then screen, then full C1
 
 A tip is one optimization commit on the draft branch. Do not add another
-commit on top of it until that tip has its own Public231 C1 remeasure. The
-gate requires the same measurement protocol and the same named hardware as
-the baseline. It does not require the SKU to be H200, L20X, SM90, or sm_89.
+commit on top of it until that tip has either been dropped by the fast-screen
+or has its own full Public231 C1 remeasure. The full gate requires the same
+measurement protocol and the same named hardware as the baseline. It does not
+require the SKU to be H200, L20X, SM90, or sm_89.
 
-Same measurement protocol means warmup 5, concurrency 1, three measured
-rounds, the same manifest, and the same clock
+Same measurement protocol for that full remeasure means warmup 5, concurrency
+1, three measured rounds, the same manifest, and the same clock
 (`post_to_body_json_and_schema_validation`). Same named hardware means the
 same recorded `device` string and the same recorded `compute capability`.
 The remeasure SHA must be the tip SHA. A measurement of an older commit does
@@ -54,13 +55,51 @@ cache policy, thinking treatment, server shape). State any necessary
 difference. Do not reset the comparison by changing the clock, the quantile
 method, or the named hardware.
 
+## Fast-screen before full C1
+
+Follow [public231-c1](../public231-c1/SKILL.md). Smoke must pass before the
+screen. Run one fast-screen: 60 requests, seed 231, concurrency 1, warmup 5,
+bucket quotas 0–127:10, 128–255:10, 256–511:8, 512–1023:8, 1024–2047:8,
+2048+:16. Compare its p50 and p95 to this model's current full-C1 primary,
+on the same device, compute capability, and clock.
+
+The StartLux Instant primary named for this gate, until a full-C1 KEEP
+replaces it, is runtime revision
+`51f80ad681c8f7b1be9b22b5e700bef34e33534c` (`51f80ad`), pooled p50 7.338 ms,
+pooled p95 51.816 ms. Clef and pplx-decider keep the primaries recorded in
+their recipes and in the latency leaderboard. Do not reuse the StartLux
+Instant pair for those models. A primary moves only when a later full C1
+KEEPs.
+
+Early DROP only when both Δp50 and Δp95 are worse. A metric is worse when
+its delta (tip minus baseline) is ≥ +2% of that baseline or ≥ +0.5 ms.
+Otherwise, including a mixed result, run full C1.
+`python benchmarks/bench.py run --fast-screen` records `drop`, `full_c1`,
+or `inconclusive`. It does not record a KEEP.
+
+A `drop` is a regression. Do not run full C1. Do not stack the next commit
+on that tip. Do not adopt the screen p50/p95 as the next baseline. A
+negative screen delta is not a gain and is not a KEEP. An `inconclusive`
+screen stops the loop.
+
+KEEP, merge, and ready-for-review require the full C1 dual gate: pooled p50
+and pooled p95 both strictly lower, pooled 2048+ p95 strictly lower, and no
+quality collapse under the rules in the next section. The +2% / +0.5 ms
+band does not make a full-C1 tie a KEEP.
+
 ## INCONCLUSIVE stops the loop
 
 Mark the tip **INCONCLUSIVE** and do not stack the next commit when any of
 these are true:
 
 - the baseline p50/p95 were not recorded before the edit
-- fewer than three measured rounds finished
+- smoke did not pass before the latency screen
+- the fast-screen was skipped on a tip that already has a full-C1 primary
+- the fast-screen decision is `inconclusive`
+- a KEEP, a gain, or a new primary is claimed from fast-screen numbers
+- the fast-screen decision was `full_c1` but fewer than three measured
+  rounds finished
+- a completed `drop` is treated as a KEEP or as the next baseline
 - `evidence_complete` is not true, or warmup failed
 - any measured request failed, was incomplete, or was unattempted
 - `device` or `compute capability` is missing on the baseline or the tip
@@ -76,7 +115,8 @@ these are true:
 INCONCLUSIVE is not a win and not a regression. Do not drop failures, relax a
 tolerance, or add undeclared rounds to produce a preferred delta. A recorded
 `device` other than H200, or a `compute capability` other than SM90, is not
-by itself INCONCLUSIVE.
+by itself INCONCLUSIVE. A fast-screen `drop` is a regression. It is not
+INCONCLUSIVE, and it is not a reason to relax the rule that produced it.
 
 ## Quality and contract stay green
 
@@ -98,16 +138,22 @@ stack past it.
 Before the agent proposes the next change, give it this record:
 
 - baseline SHA, pooled p50, pooled p95, pass rate
-- tip SHA, pooled p50, pooled p95, pass rate
-- p50 and p95 delta (tip minus baseline), in milliseconds
+- tip SHA; pooled p50, pooled p95, and pass rate when full C1 ran
+- full-C1 p50 and p95 delta (tip minus baseline), in milliseconds, when
+  full C1 ran
 - clock basis, `device`, and `compute capability` for both sides
 - RSI phase, alternatives considered, and which change is primary
+- fast-screen decision (`drop`, `full_c1`, or `inconclusive`) and, when the
+  screen ran, its p50/p95 deltas labeled as screen-only
 - verdict: improved, regressed, or INCONCLUSIVE
-- quality/contract result
+- quality/contract result when the path reached full C1 or a KEEP decision
 
-The agent uses that record as the next baseline only when the verdict is
-improved or regressed and the evidence is complete. An INCONCLUSIVE tip stays
-the head until it is fixed and remeasured, or until the tip is reverted.
+Improved is only a full-C1 KEEP. A `drop` verdict is regressed, and the
+screen numbers stay out of the next baseline. The agent uses a full-C1
+record as the next baseline only when the verdict is improved or regressed
+and the evidence is complete. An INCONCLUSIVE tip stays the head until it
+is fixed and remeasured, or until the tip is reverted. A dropped tip is
+reverted or left unstacked; the previous primary stays the baseline.
 
 ## RSI phase, or the tip is not merge-clean
 
@@ -127,8 +173,9 @@ fill in a missing phase.
 ## Draft, and a separate yes to merge
 
 Leave the pull request in draft through the loop. Do not mark it ready for
-review and do not merge it because a remeasure improved p50 or p95. Merge
-and ready-for-review each need a separate explicit yes from the owner.
+review and do not merge it because a remeasure improved p50 or p95, or
+because a fast-screen was not a drop. Merge and ready-for-review each need
+a separate explicit yes from the owner, and only after a full-C1 KEEP.
 Passing CI is not that yes. A tip that is not merge-clean on the RSI phase
 stays unmerged even when the owner has not yet been asked. Room posts of a
 delta follow the metrics-only rule in [public231-c1](../public231-c1/SKILL.md)

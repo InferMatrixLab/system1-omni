@@ -1,6 +1,6 @@
 ---
 name: public231-c1
-description: Measure Public231 C1 request latency for a model or pull request. Use when a campaign needs warmup 5, concurrency 1, three measured rounds, SHA, pass rate, and p50/p95 on the bench.py clock. Every paste records measured device and compute capability. The documented production target is H200 / SM90; a different measured identity stays a valid run and pairs only with that same recorded identity. Includes how to treat a thinking field and what a room post may contain.
+description: Measure Public231 C1 request latency for a model or pull request. Use when a campaign needs the contract smoke, a 60-request fast-screen that can drop a clear regression, then warmup 5, concurrency 1, three measured rounds, SHA, pass rate, and p50/p95 on the bench.py clock. A fast-screen is not a KEEP and is not a gain. Every paste records measured device and compute capability. The documented production target is H200 / SM90; a different measured identity stays a valid run and pairs only with that same recorded identity. Includes how to treat a thinking field and what a room post may contain.
 ---
 
 # Public231 C1
@@ -12,6 +12,111 @@ concurrency 1. Read [the benchmark protocol](../../../benchmarks/README.md) and
 
 This skill records a measurement. It does not authorize a merge, a hardware
 relabel, or a room post that contains operator metadata.
+
+## Order of operations
+
+1. **Smoke.** Unchanged. `benchmarks/smoke.jsonl` is the contract smoke, not
+   this campaign. `python benchmarks/bench.py validate benchmarks/smoke.jsonl`
+   must succeed before any latency screen. A model recipe that already runs a
+   server contract smoke still runs that smoke. A failed smoke is not a
+   latency result and is not a DROP.
+2. **Fast-screen.** One 60-request round after smoke. DROP the tip when both
+   p50 and p95 are clearly worse than that model's current full-C1 primary.
+   Otherwise run full C1. The screen never KEEPs a tip.
+3. **Full Public231 C1.** Unchanged measurement: warmup 5, concurrency 1,
+   three measured rounds. KEEP only on the full dual gate below.
+
+## Fast-screen
+
+Use this on the frozen Public231 manifest after smoke, before spending a
+full C1. The manifest cases carry a nonnegative integer `prompt_tokens` next
+to `id` / `request` / `expected`. That field is the model's prompt-token
+count. `wire_request` does not send it. A file without it cannot be
+screened. Do not invent lengths.
+
+Sample with `benchmarks/bench.py run --fast-screen`. The draw is fixed:
+
+- seed **231**
+- rank is SHA-256 of the UTF-8 string `{seed}\n{bucket}\n{id}`
+- each bucket keeps its quota of lowest ranks
+- selected requests are replayed in original manifest order
+- one invocation, one fresh output directory, one measured round
+- concurrency 1, warmup 5 (warmup stays out of the percentiles)
+- clock `post_to_body_json_and_schema_validation`
+- same recorded `device`, `compute capability`, precision, cache policy,
+  and thinking treatment as the primary
+
+Bucket quotas (inclusive lower bound, exclusive upper bound):
+
+| Bucket | Quota |
+|---|---:|
+| 0–127 | 10 |
+| 128–255 | 10 |
+| 256–511 | 8 |
+| 512–1023 | 8 |
+| 1024–2047 | 8 |
+| 2048+ | 16 |
+
+That is 60 requests. 2048+ is the overweight. A bucket with fewer cases than
+its quota is not a screen; fix the length index or stop. Do not fill the
+quota from another bucket. Do not run a second screen round and pool it.
+
+Compare the screen's successful p50 and p95 to the current full-C1 primary
+for **this** model. Pass that primary with `--baseline-p50-ms` and
+`--baseline-p95-ms`. The StartLux Instant primary named for this gate, until
+a full-C1 KEEP replaces it, is runtime revision
+`51f80ad681c8f7b1be9b22b5e700bef34e33534c` (`51f80ad`), pooled p50 7.338 ms,
+pooled p95 51.816 ms. Clef and pplx-decider keep the primaries recorded in
+their recipes and in [the latency leaderboard](../../../benchmarks/latency-leaderboard.md).
+Do not paste the StartLux Instant pair onto Clef or pplx-decider.
+
+```sh
+python benchmarks/bench.py run <public231.jsonl> \
+  --endpoint <ready /v1/systemone URL> --model <served-alias> \
+  --metadata <run-metadata.json> --phase measured \
+  --concurrency 1 --warmup 5 \
+  --fast-screen --baseline-p50-ms <primary-p50> --baseline-p95-ms <primary-p95> \
+  --output <fresh-directory>
+```
+
+Delta is tip minus baseline, in milliseconds. A percentile is **worse** when
+its delta is ≥ +2% of that baseline value or ≥ +0.5 ms. The runner evaluates
+that boundary as `tip >= baseline * 1.02` or `tip >= baseline + 0.5`, so an
+exact threshold stays worse. Early **DROP** only when **both** p50 and p95
+are worse. Mixed results and results inside that band proceed to full C1.
+The saved summary field `fast_screen_decision` is `drop`, `full_c1`, or
+`inconclusive`. It is never `keep`.
+
+`drop` means do not run full C1. `inconclusive` means any measured request
+failed, was incomplete, or was unattempted, warmup failed, or
+`evidence_complete` is not true. An inconclusive screen is not a DROP and
+not permission to continue. A negative screen delta is not a gain, not a
+new primary, and not a KEEP. Do not claim a speedup from fast-screen
+numbers. Percentiles use the same median and nearest-rank p95 as full C1,
+on this one round of 60, not an average of rounds.
+
+## Full C1 KEEP
+
+The measurement commands in [Measure](#measure) stay the full gate: warmup
+5, concurrency 1, three rounds, then recompute pooled p50 and p95 from the
+concatenated successful samples. KEEP requires all of:
+
+- pooled p50 strictly lower than the primary
+- pooled p95 strictly lower than the primary
+- pooled **2048+** p95 strictly lower than the primary's pooled 2048+ p95
+- no quality collapse: serving pass rate not lower, and the quality and
+  contract checks in
+  [optimize-remeasure-gate](../optimize-remeasure-gate/SKILL.md) stay green
+
+When every case has `prompt_tokens`, each round's summary includes
+`latency_by_prompt_bucket`. Pool 2048+ the same way as the campaign p95:
+concatenate successful `latency_ms` whose `prompt_tokens` is ≥ 2048 across
+the three rounds, then take nearest-rank p95. Do not average the three
+bucket percentiles. The fast-screen's 16 long requests are not this figure.
+A manifest without `prompt_tokens` omits the bucket report; do not KEEP
+until the same lengths are joined offline and that pooled p95 is shown.
+Equal latency is not "down" and is not a KEEP. The +2% / +0.5 ms band is
+only the early DROP rule. It is not a KEEP tolerance.
 
 ## Measured hardware
 
@@ -99,6 +204,11 @@ text campaign.
 
 ## Measure
 
+This is the full Public231 C1, run only after smoke and only when the
+fast-screen decision is `full_c1` (or when establishing a model's first
+primary, which has no screen baseline yet). A fast-screen `drop` stops
+here.
+
 `bench.py` defaults `--warmup` to 3. This protocol passes **5** on every
 measured round. The historical H800 board warmed up once for all three
 traversals and used a different clock; do not copy that shape. Invoke `run`
@@ -147,6 +257,12 @@ Publish:
   incomplete, and unattempted counts
 - `evidence_complete` from each `summary.json`
 
+A fast-screen paste is a separate record. Label it fast-screen, and include
+the decision (`drop`, `full_c1`, or `inconclusive`), seed 231, both deltas,
+the primary SHA those deltas use, and the same `device` and
+`compute capability`. Do not publish that paste as a C1 baseline or as a
+speedup.
+
 Labelled choice/noul accuracy and score MAE in
 `quality_on_successful_requests` are conditional on successes. Report them
 separately. They are not the serving pass rate, and a fast success subset is
@@ -166,4 +282,6 @@ p50/p95, plus INCONCLUSIVE when that is the result. A production-target
 example is `device: H200` and `compute capability: SM90`; if the host string
 differs, post the recorded pair instead.
 Omit hostnames, SSH targets, usernames, filesystem paths, and reservation-tool
-names. Local output directories stay local.
+names. Local output directories stay local. A fast-screen room post uses the
+same omission rule and the fast-screen label above. It does not announce a
+KEEP.

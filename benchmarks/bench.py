@@ -37,6 +37,22 @@ def response_digest(text):
 RESPONSE_FORMAT = "httpx-content-base64-utf8-v1"
 LEGACY_RESPONSE_FORMAT = "httpx-text-v1"
 
+# Public231 fast-screen. One measured round samples these prompt-token buckets
+# (inclusive lower bound, exclusive upper bound; 2048+ is unbounded). Selection
+# rank is SHA-256 of "{seed}\\n{bucket}\\n{id}"; the quota of lowest ranks is
+# replayed in manifest order. Seed 231 is the fixed draw.
+FAST_SCREEN_SEED = 231
+FAST_SCREEN_RELATIVE = 0.02
+FAST_SCREEN_ABSOLUTE_MS = 0.5
+FAST_SCREEN_BUCKETS = (
+    ("0-127", 0, 128, 10),
+    ("128-255", 128, 256, 10),
+    ("256-511", 256, 512, 8),
+    ("512-1023", 512, 1024, 8),
+    ("1024-2047", 1024, 2048, 8),
+    ("2048+", 2048, None, 16),
+)
+
 
 def saved_response_format(config):
     value = config.get("response_format", LEGACY_RESPONSE_FORMAT)
@@ -246,6 +262,179 @@ def read_answers(
     return normalized
 
 
+def nearest_rank_p95(samples):
+    if not samples:
+        return None
+    ordered = sorted(samples)
+    return ordered[math.ceil(0.95 * len(ordered)) - 1]
+
+
+def prompt_token_count(case):
+    if "prompt_tokens" not in case:
+        raise ValueError(
+            f"case {case['id']!r} needs integer prompt_tokens for fast-screen"
+        )
+    value = case["prompt_tokens"]
+    if type(value) is not int or value < 0:
+        raise ValueError(
+            f"case {case['id']!r} prompt_tokens must be a nonnegative integer"
+        )
+    return value
+
+
+def fast_screen_bucket(tokens):
+    for name, lo, hi, _quota in FAST_SCREEN_BUCKETS:
+        if tokens >= lo and (hi is None or tokens < hi):
+            return name
+    raise ValueError(f"prompt_tokens {tokens} is outside fast-screen buckets")
+
+
+def _fast_screen_rank(seed, bucket, case_id):
+    return hashlib.sha256(f"{seed}\n{bucket}\n{case_id}".encode()).hexdigest()
+
+
+def fast_screen_sample(cases, seed=FAST_SCREEN_SEED):
+    """Pick the fixed 60-request screen. Returns cases in manifest order."""
+    grouped = {name: [] for name, *_rest in FAST_SCREEN_BUCKETS}
+    for case in cases:
+        grouped[fast_screen_bucket(prompt_token_count(case))].append(case)
+    chosen = set()
+    counts = {}
+    for name, _lo, _hi, quota in FAST_SCREEN_BUCKETS:
+        pool = grouped[name]
+        if len(pool) < quota:
+            raise ValueError(
+                f"fast-screen bucket {name} needs {quota} requests; found {len(pool)}"
+            )
+        ranked = sorted(
+            pool,
+            key=lambda case: (_fast_screen_rank(seed, name, case["id"]), case["id"]),
+        )
+        picked = ranked[:quota]
+        counts[name] = len(picked)
+        chosen.update(case["id"] for case in picked)
+    return [case for case in cases if case["id"] in chosen], counts
+
+
+def latency_clearly_worse(baseline_ms, tip_ms):
+    """True when tip - baseline is at least +2% or +0.5 ms."""
+    if (
+        type(baseline_ms) is bool
+        or type(tip_ms) is bool
+        or not isinstance(baseline_ms, (int, float))
+        or not isinstance(tip_ms, (int, float))
+        or not math.isfinite(baseline_ms)
+        or not math.isfinite(tip_ms)
+        or baseline_ms <= 0
+    ):
+        raise ValueError(
+            "fast-screen latencies must be finite and the baseline must be positive"
+        )
+    # Compare on the tip side so an exact +2% or +0.5 ms boundary stays worse.
+    # Subtracting first can land just below the threshold for the same decimal.
+    return tip_ms >= baseline_ms * (
+        1 + FAST_SCREEN_RELATIVE
+    ) or tip_ms >= baseline_ms + FAST_SCREEN_ABSOLUTE_MS
+
+
+def fast_screen_decision(baseline_p50, baseline_p95, tip_p50, tip_p95):
+    """DROP only when both percentiles are clearly worse. Never returns keep."""
+    p50_worse = latency_clearly_worse(baseline_p50, tip_p50)
+    p95_worse = latency_clearly_worse(baseline_p95, tip_p95)
+    if p50_worse and p95_worse:
+        return "drop"
+    return "full_c1"
+
+
+def latency_by_prompt_bucket(cases, records):
+    """Per-bucket p50/p95 when every case carries prompt_tokens. Else None."""
+    if any("prompt_tokens" not in case for case in cases):
+        return None
+    by_id = {case["id"]: prompt_token_count(case) for case in cases}
+    grouped = {name: [] for name, *_rest in FAST_SCREEN_BUCKETS}
+    for record in records:
+        if record.get("latency_ms") is None:
+            continue
+        grouped[fast_screen_bucket(by_id[record["id"]])].append(record["latency_ms"])
+    report = {}
+    for name, _lo, _hi, _quota in FAST_SCREEN_BUCKETS:
+        samples = grouped[name]
+        report[name] = {
+            "samples": len(samples),
+            "p50_ms": statistics.median(samples) if samples else None,
+            "p95_ms": nearest_rank_p95(samples),
+        }
+    return report
+
+
+def _require_fast_screen_run(args):
+    if args.phase != "measured":
+        raise ValueError("fast-screen requires --phase measured")
+    if args.concurrency != 1:
+        raise ValueError("fast-screen requires --concurrency 1")
+    if args.warmup != 5:
+        raise ValueError("fast-screen requires --warmup 5")
+    baseline_p50 = getattr(args, "baseline_p50_ms", None)
+    baseline_p95 = getattr(args, "baseline_p95_ms", None)
+    if baseline_p50 is None or baseline_p95 is None:
+        raise ValueError(
+            "fast-screen requires --baseline-p50-ms and --baseline-p95-ms"
+        )
+    latency_clearly_worse(baseline_p50, baseline_p50)
+    latency_clearly_worse(baseline_p95, baseline_p95)
+
+
+def manifest_subset_bytes(path, selected_ids):
+    lines = [line for line in path.read_text().splitlines() if line.strip()]
+    by_id = {}
+    for line in lines:
+        item = json.loads(line)
+        by_id[item["id"]] = line
+    missing = [case_id for case_id in selected_ids if case_id not in by_id]
+    if missing:
+        raise ValueError("fast-screen selection is missing manifest lines")
+    return "".join(by_id[case_id] + "\n" for case_id in selected_ids).encode()
+
+
+def _check_saved_fast_screen(screen, cases):
+    if screen.get("seed") != FAST_SCREEN_SEED:
+        raise ValueError("unsupported fast-screen seed")
+    if (
+        screen.get("relative_worse") != FAST_SCREEN_RELATIVE
+        or screen.get("absolute_worse_ms") != FAST_SCREEN_ABSOLUTE_MS
+    ):
+        raise ValueError("fast-screen thresholds do not match this runner")
+    expected = {name: quota for name, _lo, _hi, quota in FAST_SCREEN_BUCKETS}
+    if screen.get("bucket_counts") != expected:
+        raise ValueError("fast-screen bucket counts do not match the protocol")
+    if "baseline_p50_ms" not in screen or "baseline_p95_ms" not in screen:
+        raise ValueError("saved fast-screen is missing its baseline")
+    if screen.get("selected_ids") != [case["id"] for case in cases]:
+        raise ValueError("fast-screen selection does not match the saved manifest")
+    if len(cases) != sum(expected.values()):
+        raise ValueError("fast-screen manifest is not 60 requests")
+
+
+def _saved_fast_screen_decision(screen, summary):
+    complete = (
+        summary["evidence_complete"]
+        and summary["failed_requests"] == 0
+        and summary["incomplete_requests"] == 0
+        and summary["unattempted_requests"] == 0
+        and summary["successful_requests"] == summary["planned_requests"]
+        and summary["successful_latency_p50_ms"] is not None
+        and summary["successful_latency_p95_ms"] is not None
+    )
+    if not complete:
+        return "inconclusive"
+    return fast_screen_decision(
+        screen["baseline_p50_ms"],
+        screen["baseline_p95_ms"],
+        summary["successful_latency_p50_ms"],
+        summary["successful_latency_p95_ms"],
+    )
+
+
 def quality(cases, records):
     values = {"choice_accuracy": [], "noul_accuracy": [], "score_mae": []}
     by_id = {r["id"]: r for r in records}
@@ -299,7 +488,7 @@ def summarize(cases, records, elapsed, attempted_ids=None):
     for record in failed:
         key = record["error_kind"]
         errors[key] = errors.get(key, 0) + 1
-    return {
+    result = {
         "requests": len(records),
         "planned_requests": len(cases),
         "attempted_requests": len(attempted),
@@ -320,19 +509,17 @@ def summarize(cases, records, elapsed, attempted_ids=None):
         "successful_latency_p50_ms": statistics.median(latencies)
         if latencies
         else None,
-        "successful_latency_p95_ms": latencies[math.ceil(0.95 * len(latencies)) - 1]
-        if latencies
-        else None,
+        "successful_latency_p95_ms": nearest_rank_p95(latencies),
         "failed_latency_p50_ms": statistics.median(failed_latencies)
         if failed_latencies
         else None,
-        "failed_latency_p95_ms": failed_latencies[
-            math.ceil(0.95 * len(failed_latencies)) - 1
-        ]
-        if failed_latencies
-        else None,
+        "failed_latency_p95_ms": nearest_rank_p95(failed_latencies),
         "quality_on_successful_requests": quality(cases, records),
     }
+    buckets = latency_by_prompt_bucket(cases, successful)
+    if buckets is not None:
+        result["latency_by_prompt_bucket"] = buckets
+    return result
 
 
 def wire_request(case, model, protocol):
@@ -582,8 +769,6 @@ async def run(args, cases):
             "validation_protocol": VALIDATION_PROTOCOL,
         }
     )
-    warmup_manifest = getattr(args, "warmup_manifest", None)
-    warmup_cases = load_cases(warmup_manifest) if warmup_manifest else cases
     metadata = json.loads(args.metadata.read_text())
     for name in (
         "gpu",
@@ -599,6 +784,37 @@ async def run(args, cases):
     ):
         if not metadata.get(name):
             raise ValueError(f"metadata requires {name}")
+    fast_screen = getattr(args, "fast_screen", False)
+    baseline_p50 = getattr(args, "baseline_p50_ms", None)
+    baseline_p95 = getattr(args, "baseline_p95_ms", None)
+    screen_record = None
+    if fast_screen:
+        _require_fast_screen_run(args)
+        cases, bucket_counts = fast_screen_sample(cases)
+        selected_ids = [case["id"] for case in cases]
+        screen_record = {
+            "seed": FAST_SCREEN_SEED,
+            "relative_worse": FAST_SCREEN_RELATIVE,
+            "absolute_worse_ms": FAST_SCREEN_ABSOLUTE_MS,
+            "buckets": [
+                {
+                    "name": name,
+                    "min_tokens": lo,
+                    "max_tokens_exclusive": hi,
+                    "quota": quota,
+                }
+                for name, lo, hi, quota in FAST_SCREEN_BUCKETS
+            ],
+            "selected_ids": selected_ids,
+            "bucket_counts": bucket_counts,
+            "parent_manifest_sha256": digest(args.manifest),
+            "baseline_p50_ms": args.baseline_p50_ms,
+            "baseline_p95_ms": args.baseline_p95_ms,
+        }
+    elif baseline_p50 is not None or baseline_p95 is not None:
+        raise ValueError("baseline percentiles require --fast-screen")
+    warmup_manifest = getattr(args, "warmup_manifest", None)
+    warmup_cases = load_cases(warmup_manifest) if warmup_manifest else cases
     # A case the adapter cannot wire fails before any HTTP exchange; reject it
     # before creating the output directory so a saved archive stays summarizable.
     for case in cases if warmup_cases is cases else [*cases, *warmup_cases]:
@@ -609,32 +825,34 @@ async def run(args, cases):
                 f"case {case['id']!r} is incompatible with the {protocol} "
                 f"wire protocol: {exc}"
             ) from exc
+    if fast_screen:
+        request_bytes = manifest_subset_bytes(args.manifest, selected_ids)
+    else:
+        request_bytes = args.manifest.read_bytes()
     args.output.mkdir(parents=True, exist_ok=False)
-    write_json(
-        args.output / "config.json",
-        {
-            "manifest_sha256": digest(args.manifest),
-            "runner_sha256": digest(Path(__file__)),
-            "metadata": metadata,
-            "validation_protocol": version,
-            "score_decimals": score_decimals,
-            "protocol": protocol,
-            "response_format": RESPONSE_FORMAT,
-            "endpoint": args.endpoint,
-            "model": args.model,
-            "phase": args.phase,
-            "concurrency": args.concurrency,
-            "warmup": args.warmup,
-            "warmup_manifest_sha256": digest(warmup_manifest)
-            if warmup_manifest
-            else None,
-            "timeout_seconds": args.timeout,
-            "latency_basis": "post_to_body_json_and_schema_validation",
-            "python": platform.python_version(),
-            "httpx": httpx.__version__,
-        },
-    )
-    (args.output / "requests.jsonl").write_bytes(args.manifest.read_bytes())
+    config = {
+        "manifest_sha256": hashlib.sha256(request_bytes).hexdigest(),
+        "runner_sha256": digest(Path(__file__)),
+        "metadata": metadata,
+        "validation_protocol": version,
+        "score_decimals": score_decimals,
+        "protocol": protocol,
+        "response_format": RESPONSE_FORMAT,
+        "endpoint": args.endpoint,
+        "model": args.model,
+        "phase": args.phase,
+        "concurrency": args.concurrency,
+        "warmup": args.warmup,
+        "warmup_manifest_sha256": digest(warmup_manifest) if warmup_manifest else None,
+        "timeout_seconds": args.timeout,
+        "latency_basis": "post_to_body_json_and_schema_validation",
+        "python": platform.python_version(),
+        "httpx": httpx.__version__,
+    }
+    if screen_record is not None:
+        config["fast_screen"] = screen_record
+    write_json(args.output / "config.json", config)
+    (args.output / "requests.jsonl").write_bytes(request_bytes)
     if warmup_manifest:
         (args.output / "warmup-requests.jsonl").write_bytes(
             warmup_manifest.read_bytes()
@@ -737,6 +955,9 @@ def summarize_saved(path):
     else:
         records = [json.loads(line) for line in responses_path.read_text().splitlines()]
     cases = load_cases(path / "requests.jsonl")
+    screen = config.get("fast_screen")
+    if screen is not None:
+        _check_saved_fast_screen(screen, cases)
     by_id = {c["id"]: c for c in cases}
     ids = {}
     for name in ("attempted_ids", "completed_ids", "active_ids"):
@@ -846,6 +1067,16 @@ def summarize_saved(path):
     summary["evidence_complete"] = (
         summary["evidence_complete"] and state["stop_reason"] == "completed"
     )
+    if screen is not None:
+        summary["fast_screen_decision"] = _saved_fast_screen_decision(screen, summary)
+        p50 = summary["successful_latency_p50_ms"]
+        p95 = summary["successful_latency_p95_ms"]
+        summary["fast_screen_delta_p50_ms"] = (
+            None if p50 is None else p50 - screen["baseline_p50_ms"]
+        )
+        summary["fast_screen_delta_p95_ms"] = (
+            None if p95 is None else p95 - screen["baseline_p95_ms"]
+        )
     return summary
 
 
@@ -946,6 +1177,24 @@ def main():
     runner.add_argument("--phase", choices=("feasibility", "measured"), required=True)
     runner.add_argument("--concurrency", type=positive, default=1)
     runner.add_argument("--warmup", type=positive, default=3)
+    runner.add_argument(
+        "--fast-screen",
+        action="store_true",
+        help=(
+            "sample 60 Public231 requests (seed 231, length buckets) for one "
+            "measured round; requires --baseline-p50-ms and --baseline-p95-ms"
+        ),
+    )
+    runner.add_argument(
+        "--baseline-p50-ms",
+        type=float,
+        help="current full-C1 primary p50, milliseconds; fast-screen only",
+    )
+    runner.add_argument(
+        "--baseline-p95-ms",
+        type=float,
+        help="current full-C1 primary p95, milliseconds; fast-screen only",
+    )
     runner.add_argument(
         "--warmup-manifest", type=Path, help="independent labelled warmup requests"
     )

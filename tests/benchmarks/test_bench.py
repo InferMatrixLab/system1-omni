@@ -3,6 +3,7 @@ import asyncio
 import base64
 import io
 import json
+import math
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -913,3 +914,237 @@ class ValidationTests(unittest.TestCase):
                 )
             with self.assertRaises(ValueError):
                 bench.compare(args)
+
+
+def screen_case(index, tokens):
+    return {
+        "id": f"s{index:03d}",
+        "prompt_tokens": tokens,
+        "request": {
+            "state": f"state {index}",
+            "questions": {"q": {"type": "noul", "instructions": "Is this a test?"}},
+        },
+        "expected": {"q": True},
+    }
+
+
+def screen_population():
+    cases = []
+    index = 0
+    for base, count in ((0, 12), (128, 12), (256, 10), (512, 10), (1024, 10), (2048, 20)):
+        for offset in range(count):
+            cases.append(screen_case(index, base + offset))
+            index += 1
+    return cases
+
+
+def noul_ok():
+    return {"answers": {"q": {"type": "noul", "noul": 1.0}}}
+
+
+class FastScreenTests(unittest.IsolatedAsyncioTestCase):
+    def test_protocol_constants_match_the_confirmed_quotas(self):
+        self.assertEqual(
+            [(name, quota) for name, _lo, _hi, quota in bench.FAST_SCREEN_BUCKETS],
+            [
+                ("0-127", 10),
+                ("128-255", 10),
+                ("256-511", 8),
+                ("512-1023", 8),
+                ("1024-2047", 8),
+                ("2048+", 16),
+            ],
+        )
+        self.assertEqual(sum(quota for *_rest, quota in bench.FAST_SCREEN_BUCKETS), 60)
+        self.assertEqual(bench.FAST_SCREEN_SEED, 231)
+        self.assertEqual(bench.FAST_SCREEN_RELATIVE, 0.02)
+        self.assertEqual(bench.FAST_SCREEN_ABSOLUTE_MS, 0.5)
+        edges = {
+            0: "0-127",
+            127: "0-127",
+            128: "128-255",
+            255: "128-255",
+            256: "256-511",
+            511: "256-511",
+            512: "512-1023",
+            1023: "512-1023",
+            1024: "1024-2047",
+            2047: "1024-2047",
+            2048: "2048+",
+            100000: "2048+",
+        }
+        for tokens, name in edges.items():
+            self.assertEqual(bench.fast_screen_bucket(tokens), name)
+
+    def test_sample_is_stable_quota_and_manifest_order(self):
+        cases = screen_population()
+        selected, counts = bench.fast_screen_sample(cases)
+        again, _counts = bench.fast_screen_sample(cases)
+        self.assertEqual([case["id"] for case in selected], [case["id"] for case in again])
+        self.assertEqual(sum(counts.values()), 60)
+        self.assertEqual(
+            counts,
+            {
+                "0-127": 10,
+                "128-255": 10,
+                "256-511": 8,
+                "512-1023": 8,
+                "1024-2047": 8,
+                "2048+": 16,
+            },
+        )
+        ids = [case["id"] for case in cases]
+        chosen = [case["id"] for case in selected]
+        self.assertEqual(chosen, [case_id for case_id in ids if case_id in set(chosen)])
+        for case in selected:
+            self.assertNotIn("prompt_tokens", case["request"])
+
+    def test_short_bucket_and_bad_lengths_fail_closed(self):
+        cases = screen_population()
+        long = [case for case in cases if case["prompt_tokens"] >= 2048][:15]
+        short = [case for case in cases if case["prompt_tokens"] < 2048] + long
+        with self.assertRaisesRegex(ValueError, "2048\\+"):
+            bench.fast_screen_sample(short)
+        missing = dict(cases[0])
+        missing.pop("prompt_tokens")
+        with self.assertRaisesRegex(ValueError, "prompt_tokens"):
+            bench.fast_screen_sample([missing, *cases[1:]])
+        bad = dict(cases[0])
+        bad["prompt_tokens"] = True
+        with self.assertRaisesRegex(ValueError, "nonnegative integer"):
+            bench.fast_screen_sample([bad, *cases[1:]])
+
+    def test_drop_only_when_both_percentiles_are_clearly_worse(self):
+        relative_tip = 10 * (1 + bench.FAST_SCREEN_RELATIVE)
+        self.assertTrue(bench.latency_clearly_worse(10, relative_tip))
+        self.assertFalse(
+            bench.latency_clearly_worse(10, math.nextafter(relative_tip, 10))
+        )
+        absolute_tip = 1000 + bench.FAST_SCREEN_ABSOLUTE_MS
+        self.assertTrue(bench.latency_clearly_worse(1000, absolute_tip))
+        self.assertFalse(
+            bench.latency_clearly_worse(1000, math.nextafter(absolute_tip, 1000))
+        )
+        self.assertEqual(
+            bench.fast_screen_decision(10, 1000, relative_tip, absolute_tip), "drop"
+        )
+        self.assertEqual(
+            bench.fast_screen_decision(1000, 1000, absolute_tip, absolute_tip),
+            "drop",
+        )
+        self.assertEqual(bench.fast_screen_decision(10, 1000, relative_tip, 999), "full_c1")
+        self.assertEqual(bench.fast_screen_decision(1000, 1000, 1000.5, 1000), "full_c1")
+        self.assertEqual(bench.fast_screen_decision(10, 1000, 9, 900), "full_c1")
+        with self.assertRaisesRegex(ValueError, "positive"):
+            bench.latency_clearly_worse(0, 1)
+
+    async def test_run_fast_screen_keeps_sixty_and_does_not_keep(self):
+        cases = screen_population()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "public231.jsonl"
+            manifest.write_text("".join(json.dumps(case) + "\n" for case in cases))
+            args = run_args(root)
+            args.manifest = manifest
+            args.fast_screen = True
+            args.warmup = 5
+            args.baseline_p50_ms = 1_000_000.0
+            args.baseline_p95_ms = 1_000_000.0
+            seen = []
+
+            def handler(request):
+                body = json.loads(request.content)
+                seen.append(body)
+                self.assertNotIn("prompt_tokens", body)
+                self.assertEqual(body["model"], "english")
+                return httpx.Response(200, json=noul_ok())
+
+            client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            with (
+                patch.object(bench.httpx, "AsyncClient", return_value=client),
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(await bench.run(args, bench.load_cases(manifest)), 0)
+            saved = json.loads((args.output / "summary.json").read_text())
+            self.assertEqual(saved, bench.summarize_saved(args.output))
+            self.assertEqual(saved["planned_requests"], 60)
+            self.assertEqual(saved["successful_requests"], 60)
+            self.assertEqual(saved["fast_screen_decision"], "full_c1")
+            self.assertNotIn("keep", saved["fast_screen_decision"])
+            self.assertLess(saved["fast_screen_delta_p50_ms"], 0)
+            config = json.loads((args.output / "config.json").read_text())
+            screen = config["fast_screen"]
+            self.assertEqual(screen["seed"], 231)
+            self.assertEqual(screen["parent_manifest_sha256"], bench.digest(manifest))
+            self.assertEqual(len(screen["selected_ids"]), 60)
+            self.assertEqual(
+                screen["bucket_counts"]["2048+"],
+                16,
+            )
+            recorded = [
+                json.loads(line)
+                for line in (args.output / "requests.jsonl").read_text().splitlines()
+            ]
+            self.assertEqual([case["id"] for case in recorded], screen["selected_ids"])
+            buckets = saved["latency_by_prompt_bucket"]
+            self.assertEqual(buckets["2048+"]["samples"], 16)
+            self.assertEqual(buckets["0-127"]["samples"], 10)
+            self.assertEqual(len(seen), 65)
+
+    async def test_failed_fast_screen_is_inconclusive_and_short_bucket_writes_nothing(self):
+        cases = screen_population()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "public231.jsonl"
+            manifest.write_text("".join(json.dumps(case) + "\n" for case in cases))
+            args = run_args(root)
+            args.manifest = manifest
+            args.fast_screen = True
+            args.warmup = 5
+            args.baseline_p50_ms = 1_000_000.0
+            args.baseline_p95_ms = 1_000_000.0
+            calls = {"n": 0}
+
+            def handler(_request):
+                calls["n"] += 1
+                if calls["n"] == 6:
+                    return httpx.Response(503, text="busy")
+                return httpx.Response(200, json=noul_ok())
+
+            client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            with (
+                patch.object(bench.httpx, "AsyncClient", return_value=client),
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(await bench.run(args, bench.load_cases(manifest)), 1)
+            saved = bench.summarize_saved(args.output)
+            self.assertEqual(saved["fast_screen_decision"], "inconclusive")
+            self.assertGreater(saved["failed_requests"], 0)
+
+            refused = run_args(root)
+            refused.output = root / "unused"
+            refused.manifest = manifest
+            refused.fast_screen = True
+            refused.warmup = 3
+            refused.baseline_p50_ms = 7.338
+            refused.baseline_p95_ms = 51.816
+            with self.assertRaisesRegex(ValueError, "warmup 5"):
+                await bench.run(refused, bench.load_cases(manifest))
+            self.assertFalse(refused.output.exists())
+
+            long = [case for case in cases if case["prompt_tokens"] >= 2048][:15]
+            short_cases = [case for case in cases if case["prompt_tokens"] < 2048] + long
+            short_manifest = root / "short.jsonl"
+            short_manifest.write_text(
+                "".join(json.dumps(case) + "\n" for case in short_cases)
+            )
+            short = run_args(root)
+            short.output = root / "short-out"
+            short.manifest = short_manifest
+            short.fast_screen = True
+            short.warmup = 5
+            short.baseline_p50_ms = 7.338
+            short.baseline_p95_ms = 51.816
+            with self.assertRaisesRegex(ValueError, "2048\\+"):
+                await bench.run(short, bench.load_cases(short_manifest))
+            self.assertFalse(short.output.exists())

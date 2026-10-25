@@ -87,10 +87,13 @@ that: do not invent a C1 result. CPU contract tests are not a latency baseline.
 
 Further latency work stays on this model's draft branch. Run it under
 [optimize-remeasure-gate](../optimize-remeasure-gate/SKILL.md): paste the C1
-p50/p95, `device`, and `compute capability` first, and do not stack the next
-tip commit until that tip is remeasured with the same protocol on the same
-named hardware. Incomplete evidence is INCONCLUSIVE. Quality and contract
-checks stay green. Each tip states its RSI phase (bring-up/scheduling,
+p50/p95, `device`, and `compute capability` first. After that primary
+exists, smoke and the fast-screen run before another full C1; a clear
+regression is dropped there and is not a KEEP. Do not stack the next tip
+commit until that tip has been dropped by the screen or remeasured with
+full C1 on the same named hardware. Incomplete evidence is INCONCLUSIVE.
+Quality and contract checks stay green. Each tip states its RSI phase
+(bring-up/scheduling,
 parallelism/comms, kernel, or launch/post) and which alternatives were
 considered versus the primary; without that it is not merge-clean. Feed each
 delta back to the agent before the next edit.

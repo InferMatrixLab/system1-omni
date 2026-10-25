@@ -121,6 +121,27 @@ traversals at concurrency 1, with five warmup requests per traversal and the sam
 running server. Invoke `run` separately for each output directory. Repeating the
 manifest three times still represents 231 independent tasks, not 693 tasks.
 
+A Public231 tip that already has a full-C1 primary can be dropped before those
+three traversals. Validate `benchmarks/smoke.jsonl` first. `--fast-screen` then
+samples 60 requests from a manifest whose cases include integer `prompt_tokens`
+(not sent on the wire): quotas 10, 10, 8, 8, 8, and 16 for buckets 0–127,
+128–255, 256–511, 512–1023, 1024–2047, and 2048+. Seed 231, one measured round,
+concurrency 1, warmup 5. Pass the current primary with `--baseline-p50-ms` and
+`--baseline-p95-ms`. The summary field `fast_screen_decision` is `drop` only
+when both p50 and p95 are worse by ≥ +2% or ≥ +0.5 ms, `full_c1` when they are
+not, and `inconclusive` when the round is incomplete. The field is never a
+KEEP. The gate, including the StartLux Instant primary and the Clef and
+pplx-decider pairing rules, is `.agents/skills/public231-c1/SKILL.md`.
+
+```sh
+python benchmarks/bench.py run requests.jsonl \
+  --endpoint http://127.0.0.1:8000/v1/systemone --model english \
+  --metadata run-metadata.json --phase measured \
+  --concurrency 1 --warmup 5 \
+  --fast-screen --baseline-p50-ms <primary-p50> --baseline-p95-ms <primary-p95> \
+  --output /tmp/public231-fast-screen
+```
+
 By default warmup cycles through the measured manifest. Use
 `--warmup-manifest warmup-requests.jsonl` to supply independent labelled requests
 in the same format. They are saved with their checksum and never enter measured
