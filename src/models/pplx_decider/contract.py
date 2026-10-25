@@ -283,7 +283,7 @@ def _question(name: str, question: Any) -> dict[str, Any]:
 def _image(value: Any) -> None:
     if not isinstance(value, str) or len(value) > MAX_IMAGE_CHARS:
         if isinstance(value, str) and len(value) > MAX_IMAGE_CHARS:
-            raise RequestError("Each image must be at most 8 MB before base64 encoding.")
+            raise RequestError("Each image data URL must be at most 12,000,000 characters.")
         raise RequestError("Images must be base64 PNG, JPEG, or WebP data URLs.")
     header, separator, encoded = value.partition(",")
     if not separator or header not in IMAGE_HEADERS:

@@ -74,10 +74,13 @@ installed the lever: `gated_norm=fla`, `fused_gated_norm_layers=48`,
 `0.6.16.post3`, `compile=default/eager`. The paste did not restate
 `flashinfer_status`, `sdpa`, `mlp`, warmup, concurrency, the latency
 metric, or compute capability. Gate HOLD_PRIMARY. That fusion stays
-off. The unverified lever keeps GVA and the q/k pack and replaces
-`silu(gate) * up` on all 64 text MLPs with FLA `swiglu_fwd`
-(`mlp=swiglu`, `fused_swiglu_layers=64`). Gate and up stay separate
-GEMMs. `gated_norm` stays `eager`. Residual `rms_norm` stays eager.
+off. `2bbbe4e` replaced `silu(gate) * up` with FLA `swiglu_fwd`. The
+owner closeout rejected it: p50 97.613 ms, p95 292.795 ms versus
+`fcf5e2b` 87.782 / 291.183 (p50 +9.831 ms / +11.20%, p95 +1.612 ms /
++0.55%). That closeout did not restate success count, quality, or
+`/health`. The engine does not install it. `mlp` stays `default` and
+`fused_swiglu_layers` stays 0. Gate and up stay separate GEMMs.
+`gated_norm` stays `eager`. Residual `rms_norm` stays eager.
 
 ## CPU checks
 
@@ -160,8 +163,9 @@ Capability 9.0 with `flashinfer-python` 0.6.16.post3 reports
 `linear_attention=flashinfer+fla+causal_conv1d`,
 `cu_seqlens_slots=48`, `gdn_use_cp` false, `gdn_cp_heuristic` null,
 `gdn_layout=gva`, `gva_layers=48`, `gdn_qk_contiguous` true,
-`gated_norm=eager`, `fused_gated_norm_layers=0`, `mlp=swiglu`, and
-`fused_swiglu_layers=64`.
+`gated_norm=eager`, `fused_gated_norm_layers=0`, `mlp=default`, and
+`fused_swiglu_layers=0`. An unknown `PPLX_GDN_PREFILL` raises before
+the capability check, including on CPU and on capability 8.9.
 The JSON boolean false is not
 the string `auto` and not `off`. The wrapper keeps 48 distinct
 `cu_seqlens` tensors per device and length. FlashInfer allocates its
@@ -185,16 +189,19 @@ stays on `fla-chunk` with status `absent` or `import-failed`,
 still ready. The kept primary rotates the `cu_seqlens` ring, passes
 `use_cp` false, skips the q/k repeat, packs those heads before the
 L2-norm view, and leaves every residual RMSNorm eager. The code in
-this tree is the next candidate: that same path, plus FLA
-`swiglu_fwd` on all 64 text MLPs. `801ef7b` fused the linear gated
-RMSNorm and missed p50, so `gated_norm` stays `eager`. `3ecdf5a`
+this tree is that primary path. `2bbbe4e` added FLA `swiglu_fwd` on
+the 64 text MLPs and the owner closeout rejected it (p50 97.613 ms,
+p95 292.795 ms), so the engine does not install it. `801ef7b` fused
+the linear gated RMSNorm and missed p50, so `gated_norm` stays
+`eager`. `3ecdf5a`
 crashed because the L2 view ran on the unpacked reshape. FlashInfer
 0.6.16's prefill accepts the unrepeated shape as grouped value
 attention. It still uses the checkpoint SDPA order and the
 checkpoint's separate gate and up GEMMs. Query and key norms stay
-eager. Residual `rms_norm` stays `eager`. `mlp=swiglu` with
-`fused_swiglu_layers=64` is this candidate. `gated_norm=fla` is the
-rejected `801ef7b` tip, not this one.
+eager. Residual `rms_norm` stays `eager`. `mlp=default` and
+`fused_swiglu_layers=0` are the running worker. `mlp=swiglu` is the
+rejected `2bbbe4e` tip. `gated_norm=fla` is the rejected `801ef7b`
+tip, not this one.
 The checkpoint leaves cuDNN SDPA off. `PPLX_SDPA=cudnn-first` and
 `PPLX_MLP=fused-gate-up` are refused. Compile stays off.
 `PPLX_COMPILE=dynamic` and `PPLX_COMPILE=dynamic-tail` are rejected
@@ -225,14 +232,14 @@ gate, and `use_cp=auto` missed the gate. `3ecdf5a` passed unrepeated
 q and k and crashed in warmup because FLA's L2 norm views them before
 they are packed. `fcf5e2b` packs them first and is the primary.
 `801ef7b` fused the linear gated RMSNorm and missed the median, so
-that kernel stays off. The next candidate keeps the pack and
-replaces `silu(gate) * up` with FLA `swiglu_fwd`. The gate and up
-GEMMs stay separate.
+that kernel stays off. `2bbbe4e` replaced `silu(gate) * up` with FLA
+`swiglu_fwd` and missed both percentiles, so that kernel stays off.
+The gate and up GEMMs stay separate.
 `use_cp` stays false. Leave `PPLX_GDN_PREFILL`, `PPLX_SDPA`,
 `PPLX_MLP`, and `PPLX_COMPILE` unset. Startup refuses
 `PPLX_SDPA=cudnn-first` and `PPLX_MLP=fused-gate-up`. CUDA then
-reports `sdpa=default`, `mlp=swiglu`, `fused_gate_up_layers=0`,
-`fused_swiglu_layers=64`, `compile=default`, `compile_median=eager`,
+reports `sdpa=default`, `mlp=default`, `fused_gate_up_layers=0`,
+`fused_swiglu_layers=0`, `compile=default`, `compile_median=eager`,
 `linear_attention=flashinfer+fla+causal_conv1d`,
 `flashinfer_status=bound`, `flashinfer=0.6.16.post3`,
 `cu_seqlens_slots=48`, `rms_norm=eager`,
@@ -242,15 +249,16 @@ reports `sdpa=default`, `mlp=swiglu`, `fused_gate_up_layers=0`,
 `fused_gated_norm_layers=0`. There is no
 `gdn_state_slots` field. `gdn_qk_contiguous` false means the crashed
 tip's unpack is what would run. `gated_norm=fla` means the rejected
-`801ef7b` fusion is installed. `mlp=default` or
-`fused_swiglu_layers=0` means this SwiGLU lever is not installed.
+`801ef7b` fusion is installed. `mlp=swiglu` means the rejected
+`2bbbe4e` lever is installed. `fused_swiglu_layers=0` is the
+running worker.
 `rms_norm=fla`
 and `rms_norm=fla-long` are the rejected residual tips. `gdn_use_cp=auto` is
 the rejected `a6f4d9a` tip.
 `PPLX_GDN_PREFILL=fla` reproduces the prior `f968e576` chunk.
 `PPLX_COMPILE=dynamic` and `PPLX_COMPILE=dynamic-tail` are the rejected
 compile tips. `PPLX_GDN_PREFILL=short` is the rejected ≤256 dispatch.
-`install_flashinfer.py` is required for this candidate. A new C1 is
+`install_flashinfer.py` is required for the kept primary. A new C1 is
 inconclusive until it reports p50 and p95 strictly under 87.782 /
 291.183, plus `choice_acc`, `noul_acc`, and `score_mae`.
 
@@ -496,14 +504,14 @@ them and do not raise the timeout after seeing the times.
    `score_mae=0.1992` (18). `/health` showed the lever installed
    (`gated_norm=fla`, `fused_gated_norm_layers=48`). Do not ship
    always-on FLA fused gated_norm, and do not ship a tip that trades
-   p50 for p95. The next candidate keeps the packed GVA path and
-   replaces `silu(gate) * up` with FLA `swiglu_fwd` on all 64 text
-   MLPs. Gate, up, and down stay separate GEMMs. Startup warms that
-   kernel once at 136 tokens before ready. The autotune key is the
-   intermediate size, not the token count. Unset `PPLX_SDPA`,
-   `PPLX_MLP`, `PPLX_COMPILE`, and `PPLX_GDN_PREFILL`. `/health` must
-   show `sdpa=default`, `mlp=swiglu`, `fused_gate_up_layers=0`,
-   `fused_swiglu_layers=64`, `compile=default`, `compile_median=eager`,
+   p50 for p95. `2bbbe4e` replaced `silu(gate) * up` with FLA
+   `swiglu_fwd` and the owner closeout rejected it: p50 97.613 ms,
+   p95 292.795 ms. That closeout did not restate success count,
+   quality, or `/health`. The engine does not install it. This tree
+   is the kept primary path. Unset `PPLX_SDPA`, `PPLX_MLP`,
+   `PPLX_COMPILE`, and `PPLX_GDN_PREFILL`. `/health` must show
+   `sdpa=default`, `mlp=default`, `fused_gate_up_layers=0`,
+   `fused_swiglu_layers=0`, `compile=default`, `compile_median=eager`,
    `linear_attention=flashinfer+fla+causal_conv1d`,
    `flashinfer_status=bound`, `flashinfer=0.6.16.post3`,
    `cu_seqlens_slots=48`, `rms_norm=eager`,
@@ -511,16 +519,9 @@ them and do not raise the timeout after seeing the times.
    `gdn_use_cp` false (JSON boolean, not the string `auto` or
    `off`), `gdn_cp_heuristic` null, `gdn_layout=gva`,
    `gva_layers=48`, `gdn_qk_contiguous` true, `gated_norm=eager`, and
-   `fused_gated_norm_layers=0` before the run counts. It must not
-   report `gdn_state_slots`, `rms_norm=fla`, `rms_norm=fla-long`, or
-   `gated_norm=fla`. A true heuristic means the rejected CP lever is
-   engaged. `gdn_layout=repeat`, `gva_layers=0`,
-   `gdn_qk_contiguous` false, `mlp=default`, or
-   `fused_swiglu_layers=0` means this candidate is not the running
-   worker. Both p50 and p95 have to be strictly under 87.782 /
-   291.183 before that candidate replaces the primary. Record
-   `choice_acc`, `noul_acc`, and `score_mae`. Until that paste, the
-   candidate is inconclusive.
+   `fused_gated_norm_layers=0`. It must not report `gdn_state_slots`,
+   `rms_norm=fla`, `rms_norm=fla-long`, `gated_norm=fla`, or
+   `mlp=swiglu`. There is no new latency candidate in this commit.
 
 `benchmarks/smoke.jsonl` checks the client, not this model and not Public231.
 
@@ -554,7 +555,7 @@ them and do not raise the timeout after seeing the times.
 | 2026-10-25 | Different lever, not another residual RMSNorm and not `use_cp`. `a6f4d9a` engaged the CP kernel on every layer and raised both percentiles, so `use_cp` stays false. The checkpoint `repeat_interleave`s q and k from 16 key heads to 48 value heads before the chunk kernel, two copies on each of the 48 linear layers. FlashInfer 0.6.16's prefill documents grouped value attention as `num_v_heads > num_q_heads = num_k_heads`: q and k stay at 16 heads, v and the gates stay at 48, and the output head count is 48. L2 norm is per head along the head dimension, so the unrepeated heads match a repeat followed by the same norm. This candidate replaces only the linear-layer forward on the all-sequence bind. The `cu_seqlens` ring stays. Residual RMSNorm stays eager. FlashInfer still allocates its own state workspace. Compile stays off. Full-attention layers are unchanged. `PPLX_GDN_PREFILL=short` does not install this path, because its long sequences stay on FLA and FLA needs the repeat. If the grouped kernel is slower than the expanded path, both percentiles can rise. The paste decides. `/health` reports `gdn_layout=gva`, `gva_layers=48`, `gdn_use_cp` false, `gdn_cp_heuristic` null, and `rms_norm=eager`. Tip `3ecdf5adb68ebbe0ca0e9c93ad1dae573f8e1f12`. | Public231 C1, 0/231, `stop_reason=warmup_failed`. p50 and p95 none. Quality N/A. Gate HOLD_PRIMARY against `4b99b73` 88.942 / 295.797. `/health` had installed the lever: `gdn_layout=gva`, `gva_layers=48`, `gdn_use_cp` false, `gdn_cp_heuristic` null, `rms_norm=eager`, `fused_rms_norm_layers=0`, `cu_seqlens_slots=48`, `flashinfer_status=bound`, `flashinfer=0.6.16.post3`, `compile=default`, `compile_median=eager`. Warmup `easy-intent-00` returned HTTP 500. `l2norm_fwd` views q before it is packed. | No measured samples. Not a latency result. Primary stays `4b99b73`. |
 | 2026-10-25 | Same GVA lever, with the warmup crash fixed. `3ecdf5a` skipped the q/k repeat and died before a sample because FLA 0.5.2 `l2norm_fwd` calls `x.view(-1, D)` on the unrepeated reshape. `repeat_interleave` used to copy those heads into a contiguous tensor. This candidate calls `contiguous` on q and k before that view. An already packed tensor is not copied. The `cu_seqlens` ring stays. `use_cp` stays false. Residual RMSNorm stays eager. FlashInfer still allocates its own state workspace. Compile stays off. `/health` adds `gdn_qk_contiguous` true next to `gdn_layout=gva` and `gva_layers=48`. False means the crashed unpack is still what would run. Tip `fcf5e2bef916da81180ac8f1570dff338e8a049d`. | Public231 C1, 231/231, p50 87.782 ms, p95 291.183 ms. Prior primary `4b99b73` was 88.942 / 295.797. `/health`: `gdn_layout=gva`, `gva_layers=48`, `gdn_qk_contiguous` true, `gdn_use_cp` false, `gdn_cp_heuristic` null, `rms_norm=eager`, `fused_rms_norm_layers=0`, `cu_seqlens_slots=48`, `flashinfer_status=bound`, `flashinfer=0.6.16.post3`, `compile=default`, `compile_median=eager`. Quality: `choice_acc=0.9065` (139), `noul_acc=0.8784` (74), `score_mae=0.2035` (18). Warmup, concurrency, the latency metric, and compute capability were not restated in the paste. | p50 −1.160 ms (−1.30%). p95 −4.614 ms (−1.56%). Gate passed. New primary. |
 | 2026-10-25 | Different lever, not another residual RMSNorm and not another q/k pack. `fcf5e2b` is the primary at 87.782 / 291.183. The 48 linear layers still run eager `Qwen3_5RMSNormGated`: fp32 variance, a cast, the weight multiply, and SiLU(gate), once per layer on `[seq * 48, 128]`. The checkpoint does not call `kernelize`, so that eager chain is what the primary runs. FLA 0.5.2 `layer_norm_gated_fwd` is one kernel and, for D=128, buckets rows by `cdiv(rows, 65536)`. About 136 tokens is bucket 1 and about 2676 tokens is bucket 2. The 8192-token cap is bucket 6. Startup warms those six buckets before ready, so the measured run does not autotune. `rms_norm_gated` is an autograd wrapper and is not called. Residual RMSNorm stays eager: `3afb472` and `705ae089` used the wide kernel and missed the median, and this op is the gated head-dim path, not that kernel. The wide residual fusion can still be the wrong analogy, in which case p50 rises and the tip loses. The `cu_seqlens` ring stays. `use_cp` stays false. q and k stay packed. Compile stays off. `/health` adds `gated_norm=fla` and `fused_gated_norm_layers=48` beside `rms_norm=eager`. Tip `801ef7b103c9285bef749d54af6cea6f4472088b`. | Public231 C1, 231/231, p50 89.172 ms, p95 274.790 ms. Primary `fcf5e2b` was 87.782 / 291.183. `/health` (lever installed): `gated_norm=fla`, `fused_gated_norm_layers=48`, `gdn_layout=gva`, `gva_layers=48`, `gdn_qk_contiguous` true, `gdn_use_cp` false, `gdn_cp_heuristic` null, `rms_norm=eager`, `fused_rms_norm_layers=0`, `cu_seqlens_slots=48`, flashinfer bound `0.6.16.post3`, `compile=default/eager`. Quality: `choice_acc=0.9065` (139), `noul_acc=0.8784` (74), `score_mae=0.1992` (18). The paste did not restate `flashinfer_status`, `sdpa`, `mlp`, warmup, concurrency, the latency metric, or compute capability. | p50 +1.390 ms (+1.58%). p95 −16.393 ms (−5.63%). Gate failed. HOLD_PRIMARY at `fcf5e2be` 87.782 / 291.183. Same shape as the residual RMSNorm tips. Do not ship always-on FLA fused gated_norm. |
-| 2026-10-25 | Different lever, not another norm. `801ef7b` raised p50 by 1.390 ms and cut p95 by 16.393 ms, so the FLA gated norm stays unwired. The text MLP is still `silu(gate_proj(x)) * up_proj(x)` then `down_proj`. Stacking gate and up into one GEMM (`8b4ee326`) missed both percentiles, so those GEMMs stay separate. FLA 0.5.2 `swiglu_fwd` reads the two activations and writes the product in one elementwise kernel. The autotune key is the intermediate size, not the token count. Startup warms one call at 136 tokens before ready, so the chosen block is the median shape. `swiglu` and `swiglu_linear` are autograd wrappers and are not called. `down_proj` stays `F.linear`. A heavier elementwise kernel can still raise p50; the paste decides. The `cu_seqlens` ring, GVA, the q/k pack, `use_cp` false, eager residual RMSNorm, and the eager gated output norm stay. Compile stays off. `/health` reports `mlp=swiglu`, `fused_swiglu_layers=64`, `fused_gate_up_layers=0`, `gated_norm=eager`, and `fused_gated_norm_layers=0`. | Not run. Samples: 0. | inconclusive |
+| 2026-10-25 | Different lever, not another norm. `801ef7b` raised p50 by 1.390 ms and cut p95 by 16.393 ms, so the FLA gated norm stays unwired. The text MLP is still `silu(gate_proj(x)) * up_proj(x)` then `down_proj`. Stacking gate and up into one GEMM (`8b4ee326`) missed both percentiles, so those GEMMs stay separate. FLA 0.5.2 `swiglu_fwd` reads the two activations and writes the product in one elementwise kernel. The autotune key is the intermediate size, not the token count. Startup warms one call at 136 tokens before ready, so the chosen block is the median shape. `swiglu` and `swiglu_linear` are autograd wrappers and are not called. `down_proj` stays `F.linear`. A heavier elementwise kernel can still raise p50; the paste decides. The `cu_seqlens` ring, GVA, the q/k pack, `use_cp` false, eager residual RMSNorm, and the eager gated output norm stay. Compile stays off. `/health` reports `mlp=swiglu`, `fused_swiglu_layers=64`, `fused_gate_up_layers=0`, `gated_norm=eager`, and `fused_gated_norm_layers=0`. | Owner closeout: p50 97.613 ms, p95 292.795 ms versus `fcf5e2b` 87.782 / 291.183. Success count, quality, and `/health` were not restated. p50 +9.831 ms (+11.20%). p95 +1.612 ms (+0.55%). Both worse. Gate failed. HOLD_PRIMARY. The engine does not install `swiglu_fwd`. | rejected |
 
 ## Limits
 
@@ -584,7 +585,7 @@ p95 274.835 ms. `use_cp=auto` `a6f4d9a` is not the primary: p50
 latency result: 0/231, `stop_reason=warmup_failed`, p50 and p95
 none. The packed-q/k tip `fcf5e2b` is the primary. FLA fused
 gated RMSNorm `801ef7b` is not the primary: 231/231, p50 89.172 ms,
-p95 274.790 ms. The SwiGLU MLP candidate has no sample.
+p95 274.790 ms. FLA `swiglu_fwd` `2bbbe4e` is not the primary: owner closeout p50 97.613 ms, p95 292.795 ms. The engine does not install it.
 The shared Qwen CUDA backend is not used. PR #140 is a separate Rust port of this same contract;
 it does not serve, and its JSON parser rewrites integers outside i64/u64.
 This worker keeps those integers because it uses Python's parser and the

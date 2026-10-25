@@ -111,6 +111,21 @@ def test_token_limit_is_a_client_error():
         raise AssertionError("expected rejection")
 
 
+def test_unexpected_value_error_is_not_a_client_reject():
+    fake = Fake(error="checkpoint forward failed")
+    raw = json.dumps(
+        {"model": "jev-latest", "state": "s", "questions": {"q": {"type": "noul"}}}
+    ).encode()
+    try:
+        decide(raw, fake)
+    except RequestError:
+        raise AssertionError("a server fault must not become a 422")
+    except ValueError as exc:
+        assert str(exc) == "checkpoint forward failed"
+    else:
+        raise AssertionError("expected the fault to propagate")
+
+
 def oversized_png():
     import struct
     import zlib
@@ -154,7 +169,7 @@ def test_image_rules():
     try:
         decide(json.dumps(request).encode(), Fake())
     except RequestError as exc:
-        assert "8 MB before base64" in str(exc)
+        assert "12,000,000 characters" in str(exc)
     else:
         raise AssertionError("expected rejection")
 
@@ -434,6 +449,24 @@ def test_http_disabled_thinking_is_accepted_and_other_values_are_422():
         assert b"thinking.enabled must be false" in body
     finally:
         stop(server)
+
+
+def test_http_token_limit_is_422_and_other_value_errors_are_500():
+    payload = {"model": "jev-latest", "state": "s", "questions": {"q": {"type": "noul"}}}
+    limited = start(Fake(error=TOKEN_LIMIT_MESSAGE))
+    try:
+        status, body = post(limited, payload)
+        assert status == 422
+        assert json.loads(body)["detail"] == TOKEN_LIMIT_MESSAGE
+    finally:
+        stop(limited)
+    faulted = start(Fake(error="checkpoint forward failed"))
+    try:
+        status, body = post(faulted, payload)
+        assert status == 500
+        assert json.loads(body)["detail"] == "inference failed"
+    finally:
+        stop(faulted)
 
 
 def test_http_busy_is_503():

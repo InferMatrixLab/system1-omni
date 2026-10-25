@@ -16,7 +16,13 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from models.pplx_decider.contract import MAX_BODY, RequestError, parse_body, parse_request
+from models.pplx_decider.contract import (
+    MAX_BODY,
+    TOKEN_LIMIT_MESSAGE,
+    RequestError,
+    parse_body,
+    parse_request,
+)
 from models.pplx_decider.engine import PplxExecutor
 
 LOG = logging.getLogger("pplx_decider")
@@ -27,7 +33,11 @@ def decide(raw: bytes, executor: Any) -> dict[str, Any]:
     try:
         return executor.evaluate(request)
     except ValueError as exc:
-        raise RequestError(str(exc), 422) from exc
+        # Only the checkpoint's token-limit sentence is a client reject.
+        # Any other ValueError is a server fault and must stay a 500.
+        if str(exc) != TOKEN_LIMIT_MESSAGE:
+            raise
+        raise RequestError(TOKEN_LIMIT_MESSAGE, 422) from exc
 
 
 class WorkerServer(ThreadingHTTPServer):

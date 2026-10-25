@@ -34,7 +34,7 @@ def main() -> None:
         if len(archives) != 1:
             raise SystemExit(f"expected one sdist, found {archives}")
         with tarfile.open(archives[0]) as archive:
-            archive.extractall(root)
+            archive.extractall(root, filter="data")
         setup = next(root.glob("causal_conv1d-*/setup.py"))
         patched = ensure_prefill_gencode(setup.read_text(encoding="utf-8"))
         if "compute_90" not in patched or "compute_89" not in patched:

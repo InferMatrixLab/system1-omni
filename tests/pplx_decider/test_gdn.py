@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 
 import pytest
+
+from models.pplx_decider.engine import PplxExecutor
 
 from models.pplx_decider.gdn import (
     FLA_LINEAR_ATTENTION,
@@ -117,6 +120,23 @@ def test_gdn_prefill_defaults_to_all_sequence_flashinfer():
     assert gdn_prefill_mode("short") == "short"
     with pytest.raises(RuntimeError, match="flashinfer, fla, or short"):
         gdn_prefill_mode("512")
+
+
+def test_unknown_gdn_prefill_fails_closed_on_cpu(monkeypatch, tmp_path):
+    monkeypatch.setenv("PPLX_GDN_PREFILL", "typo")
+    with pytest.raises(RuntimeError, match="flashinfer, fla, or short"):
+        PplxExecutor(tmp_path, device="cpu")
+
+
+def test_known_gdn_prefill_reaches_checkpoint_checks_on_cpu(monkeypatch, tmp_path):
+    monkeypatch.setenv("PPLX_GDN_PREFILL", "fla")
+    with pytest.raises(ValueError, match="checkpoint directory does not exist"):
+        PplxExecutor(tmp_path / "absent", device="cpu")
+
+
+def test_gdn_prefill_is_validated_before_the_capability_branch():
+    source = inspect.getsource(PplxExecutor.__init__)
+    assert source.index("gdn_prefill_mode(") < source.index("uses_flashinfer_prefill(")
 
 
 def test_cu_seqlens_ring_is_one_slot_per_linear_layer():

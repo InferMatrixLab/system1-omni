@@ -55,10 +55,11 @@ def test_swiglu_rejects_a_short_stack():
         install_swiglu_mlp(_language_model(1))
 
 
-def test_engine_does_not_install_the_rejected_gated_norm():
+def test_engine_does_not_install_the_rejected_kernels():
     source = inspect.getsource(PplxExecutor.__init__)
     assert "install_fused_gated_norm(" not in source
     assert "warm_fused_gated_norm(" not in source
-    assert "install_swiglu_mlp(" in source
-    assert "warm_swiglu_mlp(" in source
+    assert "install_swiglu_mlp(" not in source
+    assert "warm_swiglu_mlp(" not in source
     assert "GATED_NORM_FLA" not in source
+    assert "MLP_SWIGLU" not in source

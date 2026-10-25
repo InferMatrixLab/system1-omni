@@ -61,6 +61,33 @@ def test_large_integer_is_not_rewritten():
     assert isinstance(request.state["event_id"], int)
 
 
+def test_falsy_admitted_prompts_use_the_checkpoint_fallbacks():
+    """Empty instructions and noul criteria are admitted, then replaced.
+
+    ``""``, ``[]``, and ``{}`` are falsy. The checkpoint ``or`` fallbacks
+    turn them into the default question and the default true/false labels.
+    ``noul-falsy-fallbacks`` is the case ``check_contract.py`` compares.
+    """
+
+    questions = [
+        {"type": "noul", "instructions": [], "criteria": {"false": "", "true": ""}},
+        {"type": "noul", "instructions": "", "criteria": {}},
+        {"type": "noul", "instructions": [], "criteria": {}},
+    ]
+    for question in questions:
+        admitted = parse_request(
+            {"model": "jev-latest", "state": "s", "questions": {"q": question}}
+        )
+        assert admitted.questions[0][1]["instructions"] in ("", [])
+        text = messages("s", question)[1]["content"][0]["text"]
+        assert "Question:\nChoose the best matching option.\n" in text
+        assert "A: No / false" in text
+        assert "B: Yes / true" in text
+    case = next(item for item in CASES["cases"] if item["name"] == "noul-falsy-fallbacks")
+    assert case["question"]["instructions"] == []
+    assert case["question"]["criteria"] == {"false": "", "true": ""}
+
+
 def test_choice_tie_keeps_first_option_and_key_order():
     case = next(item for item in CASES["cases"] if item["name"] == "choice-tie")
     produced = answer(case["question"], case["probabilities_in"])

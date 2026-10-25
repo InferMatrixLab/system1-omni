@@ -44,7 +44,6 @@ from .contract import (
 )
 from .conv import assert_qwen_conv_uses_package, prepare_causal_conv1d
 from .gated_norm import GATED_NORM_EAGER
-from .swiglu import MLP_SWIGLU, install_swiglu_mlp, warm_swiglu_mlp
 from .gdn import (
     GDN_LAYOUT_GVA,
     GDN_LAYOUT_REPEAT,
@@ -178,6 +177,9 @@ class PplxExecutor:
             raise ValueError("device must be cuda or cpu")
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
+        # Fail closed on every device. Capability 8.9 never enters the
+        # FlashInfer branch, and a typo there used to be ignored.
+        gdn_mode = gdn_prefill_mode(os.environ.get("PPLX_GDN_PREFILL"))
         root = Path(checkpoint)
         verify_checkpoint(root)
         # Import conv and FLA before Qwen3.5 modeling freezes the torch refs.
@@ -189,9 +191,11 @@ class PplxExecutor:
         # percentiles, so it stays false. 3ecdf5a crashed because the
         # unpacked reshape hit that view. 801ef7b fused the linear
         # gated RMSNorm and missed p50, so that kernel stays off.
-        # This candidate keeps GVA and replaces silu(gate)*up with
-        # FLA swiglu_fwd. The gate and up GEMMs stay separate.
-        # Residual RMSNorm and the gated output norm stay eager.
+        # 2bbbe4e replaced silu(gate)*up with FLA swiglu_fwd and missed
+        # both percentiles, so that kernel stays off. The gate and up
+        # GEMMs stay separate. Residual RMSNorm and the gated output
+        # norm stay eager. An unknown PPLX_GDN_PREFILL fails closed
+        # before the capability check, including on 8.9.
         # FlashInfer allocates its own state workspace.
         # PPLX_GDN_PREFILL=fla reproduces the prior f968e576 chunk.
         # PPLX_GDN_PREFILL=short is the rejected length dispatch.
@@ -237,7 +241,6 @@ class PplxExecutor:
             self.gpu_name = torch.cuda.get_device_name(index)
             if uses_flashinfer_prefill(capability):
                 self.flashinfer_version, self.flashinfer_status = prepare_flashinfer()
-                gdn_mode = gdn_prefill_mode(os.environ.get("PPLX_GDN_PREFILL"))
                 if self.flashinfer_status != "bound" or gdn_mode == "fla":
                     self.gdn_prefill = "fla"
                     if self.flashinfer_status == "bound":
@@ -280,9 +283,6 @@ class PplxExecutor:
             self.gva_layers = install_gva_prefill(language_model)
             self.gdn_layout = GDN_LAYOUT_GVA
             self.gdn_qk_contiguous = True
-            self.fused_swiglu_layers = install_swiglu_mlp(language_model)
-            self.mlp = MLP_SWIGLU
-            warm_swiglu_mlp(language_model)
         if self.forward_compile != "default":
             install_compiled_forward(language_model, self.forward_compile)
             warmup_compiled_forward(self.model.backbone, device, self.forward_compile)

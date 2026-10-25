@@ -1,10 +1,10 @@
-"""FLA SwiGLU on the 64 text MLPs. Not a norm fusion.
+"""FLA SwiGLU on the 64 text MLPs. Not installed.
 
-``801ef7b`` replaced the 48 linear gated RMSNorms with FLA
-``layer_norm_gated_fwd`` and missed the median: p50 89.172 ms, p95
-274.790 ms against ``fcf5e2b`` 87.782 / 291.183. That kernel stays
-unwired. ``3afb472`` and ``705ae089`` missed the same way on the
-residual norm. This lever does not replace a norm.
+``2bbbe4e`` installed this path and the owner closeout rejected it:
+p50 97.613 ms, p95 292.795 ms against ``fcf5e2b`` 87.782 / 291.183.
+The engine does not call ``install_swiglu_mlp``. ``801ef7b`` missed
+the median on the gated RMSNorm the same way other FLA norm fusions
+did, and that kernel stays unwired too.
 
 The checkpoint MLP is ``silu(gate_proj(x)) * up_proj(x)`` and then
 ``down_proj``. Those two GEMMs stay separate. Stacking them
@@ -17,8 +17,8 @@ shape. ``swiglu`` and ``swiglu_linear`` are autograd wrappers and raise
 under ``inference_mode``. They are not called. ``down_proj`` stays
 ``F.linear``.
 
-``/health`` reports ``mlp=swiglu`` and ``fused_swiglu_layers``.
-``fused_gate_up_layers`` stays 0. ``gated_norm`` stays ``eager``.
+The running worker keeps ``mlp=default`` and ``fused_swiglu_layers``
+at 0. ``fused_gate_up_layers`` stays 0. ``gated_norm`` stays ``eager``.
 """
 
 from __future__ import annotations

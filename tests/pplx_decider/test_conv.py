@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from models.pplx_decider.conv import (
@@ -19,6 +21,12 @@ UPSTREAM = """
         cc_flag.append("arch=compute_87,code=sm_87")
         if bare_metal_version >= Version("11.8"):
 """
+
+
+def test_sdist_extract_uses_the_data_filter():
+    script = Path(__file__).resolve().parents[2] / "recipe/pplx_decider/install_causal_conv1d.py"
+    source = script.read_text(encoding="utf-8")
+    assert 'extractall(root, filter="data")' in source
 
 
 def package_fn():

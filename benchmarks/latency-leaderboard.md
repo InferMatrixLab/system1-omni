@@ -149,8 +149,10 @@ Quality: `choice_acc=0.906` (139), `noul_acc=0.878` (74),
 or p95. Quality was N/A. It is not a latency result. FLA fused gated RMSNorm `801ef7b` measured 231/231, p50 89.172 ms,
 p95 274.790 ms (p50 +1.58%, p95 −5.63%) and failed the same gate.
 Quality: `choice_acc=0.9065` (139), `noul_acc=0.8784` (74),
-`score_mae=0.1992` (18). It is not the primary. The SwiGLU MLP
-candidate has no sample.
+`score_mae=0.1992` (18). It is not the primary. FLA `swiglu_fwd`
+`2bbbe4e` is not the primary: the owner closeout records p50 97.613 ms
+and p95 292.795 ms. Success count, quality, and `/health` were not
+restated. The engine does not install it.
 These L20X measurements stay in this group and do not enter the H800
 table above. Ready is not limited to capability 9.0.
 
