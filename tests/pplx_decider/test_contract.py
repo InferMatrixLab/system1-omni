@@ -206,6 +206,49 @@ def test_rejections(name, body, message):
         parse_request(body)
 
 
+def test_disabled_thinking_is_ignored():
+    base = {"model": "jev-latest", "state": "s", "questions": {"q": {"type": "noul"}}}
+    admitted = parse_request({**base, "thinking": {"enabled": False}})
+    assert admitted == parse_request(base)
+    assert messages(admitted.state, admitted.questions[0][1]) == messages("s", {"type": "noul"})
+
+
+@pytest.mark.parametrize(
+    "thinking",
+    [
+        {"enabled": True},
+        {"enabled": "false"},
+        {"enabled": 0},
+        {"enabled": 0.0},
+        {"enabled": False, "budget": 0},
+        {},
+        False,
+        "off",
+        None,
+    ],
+)
+def test_other_thinking_values_are_rejected(thinking):
+    body = {
+        "model": "jev-latest",
+        "state": "s",
+        "questions": {"q": {"type": "noul"}},
+        "thinking": thinking,
+    }
+    with pytest.raises(RequestError, match="thinking.enabled must be false") as caught:
+        parse_request(body)
+    assert caught.value.status == 422
+
+
+def test_question_thinking_stays_unknown():
+    body = {
+        "model": "jev-latest",
+        "state": "s",
+        "questions": {"q": {"type": "noul", "thinking": {"enabled": False}}},
+    }
+    with pytest.raises(RequestError, match="unknown fields"):
+        parse_request(body)
+
+
 def test_bad_json_is_400():
     with pytest.raises(RequestError) as caught:
         parse_body(b"{")

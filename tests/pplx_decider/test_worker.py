@@ -226,6 +226,35 @@ def test_http_health_and_decision():
         stop(server)
 
 
+def test_http_disabled_thinking_is_accepted_and_other_values_are_422():
+    server = start(Fake({"q": [0.1, 0.9]}))
+    try:
+        status, body = post(
+            server,
+            {
+                "model": "jev-latest",
+                "state": "s",
+                "questions": {"q": {"type": "noul"}},
+                "thinking": {"enabled": False},
+            },
+        )
+        assert status == 200
+        assert json.loads(body)["answers"]["q"]["noul"] == 0.9
+        status, body = post(
+            server,
+            {
+                "model": "jev-latest",
+                "state": "s",
+                "questions": {"q": {"type": "noul"}},
+                "thinking": {"enabled": True},
+            },
+        )
+        assert status == 422
+        assert b"thinking.enabled must be false" in body
+    finally:
+        stop(server)
+
+
 def test_http_busy_is_503():
     server = start(Fake({"q": [0.5, 0.5]}))
     server.inference_lock.acquire()

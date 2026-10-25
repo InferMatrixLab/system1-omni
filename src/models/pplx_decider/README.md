@@ -28,7 +28,10 @@ fields, bad images and the token-limit sentence. They do not load weights.
 ## Request and answers
 
 The body is `model`, `state`, `questions` and optional `images`. Unknown
-fields are rejected. `model` must be `autojev-qwen3.8-27b`, `autojev`,
+fields are rejected. Top-level `thinking` is admitted only when it is
+`{"enabled": false}`; that object is ignored. The checkpoint template is
+still applied with `enable_thinking=False`. Any other `thinking` value is
+HTTP 422 `thinking.enabled must be false`. `model` must be `autojev-qwen3.8-27b`, `autojev`,
 `jev-latest`, `jev-preview` or `jev-1.13.0`. The response `model` is always
 `autojev-qwen3.8-27b`.
 

@@ -2,9 +2,12 @@
 
 Prompt text, option order and answer formulas follow
 ``source/src/autojev/model.py`` at the pinned revision (Apache-2.0).
-Acceptance follows ``source/src/autojev/server.py`` ``EvaluationRequest``.
-Messages below are this worker's, except the image sentences and the
-token-limit sentence, which are the checkpoint's own ``ValueError`` text.
+Acceptance follows ``source/src/autojev/server.py`` ``EvaluationRequest``,
+plus one field that server rejects: top-level ``thinking`` is admitted only
+when it is ``{"enabled": false}``. The checkpoint template is still called
+with ``enable_thinking=False``. Messages below are this worker's, except
+the image sentences and the token-limit sentence, which are the
+checkpoint's own ``ValueError`` text.
 Nothing here truncates options, state text or probabilities.
 """
 
@@ -40,7 +43,7 @@ MAX_BODY = 50 * 1024 * 1024
 TOKEN_LIMIT_MESSAGE = (
     "Question branch exceeds the 8192-token limit; no input was truncated."
 )
-REQUEST_FIELDS = {"model", "state", "questions", "images"}
+REQUEST_FIELDS = {"model", "state", "questions", "images", "thinking"}
 QUESTION_FIELDS = {"type", "instructions", "criteria"}
 IMAGE_HEADERS = {
     "data:image/png;base64",
@@ -307,10 +310,29 @@ def _image(value: Any) -> None:
         raise RequestError("Invalid image data.") from exc
 
 
+def _thinking_disabled(value: Any) -> None:
+    """Admit stock Public231 ``thinking.enabled=false`` and nothing else.
+
+    The check uses ``bool`` identity. ``0 == False`` in Python, and a numeric
+    zero must not pass.
+    """
+
+    enabled = value.get("enabled") if isinstance(value, dict) else None
+    if (
+        not isinstance(value, dict)
+        or list(value) != ["enabled"]
+        or type(enabled) is not bool
+        or enabled is not False
+    ):
+        raise RequestError("thinking.enabled must be false")
+
+
 def parse_request(value: dict[str, Any]) -> Request:
     unknown = set(value) - REQUEST_FIELDS
     if unknown:
         raise RequestError(f"unknown request fields: {sorted(unknown)}")
+    if "thinking" in value:
+        _thinking_disabled(value["thinking"])
     model = value.get("model")
     if not isinstance(model, str) or model not in ALIASES:
         raise RequestError(f"Unknown model. Use {MODEL_NAME} or jev-latest.")

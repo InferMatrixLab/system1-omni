@@ -95,10 +95,13 @@ and stay on that board.
 
 Reported load: BF16 resident ~50333 MiB, no OOM. Warmup 5, concurrency 1,
 clock `successful_latency` / `post_to_body_json_and_schema_validation`.
-Rows that still contain `thinking` return HTTP 422
-`unknown request fields: ['thinking']`. The measured workload is the
-stripped no-thinking twin of the same 231 rows. The worker still rejects
-`thinking`.
+Heads `1ba07d1` and `b6fa9d0` return HTTP 422
+`unknown request fields: ['thinking']` for any `thinking` field. Their
+measured workload, where one exists, is the stripped no-thinking twin of
+the same 231 rows. This head admits `thinking` only when the value is
+`{"enabled": false}` and ignores it. Other values return HTTP 422
+`thinking.enabled must be false`. The checkpoint template stays
+`enable_thinking=False`.
 
 | Round | Successful | p50 | p95 |
 | --- | --- | --- | --- |
@@ -109,12 +112,12 @@ stripped no-thinking twin of the same 231 rows. The worker still rejects
 The two-model Public231 export hashes to
 `00d1f10ca1142499a598b5f1c6602d329cce1cef04c961c46fc0318daa2c67d3`
 ([latency leaderboard](../../benchmarks/latency-leaderboard.md)). That hash
-is not the canonical task-record hash. The measured file is the stripped
-twin: the same 231 rows with the `thinking` field removed. Its SHA-256 was
-not in the latency report. Point `PUBLIC231_JSONL` at that twin, record the
-digest `validate` prints, and stop if the row count is not 231 or if any
-row still has `thinking`. The export that still contains `thinking` returns
-422 and is not this measurement.
+is not the canonical task-record hash. The `1ba07d1` measurement used the
+stripped twin: the same 231 rows with `thinking` removed. Its SHA-256 was
+not in the latency report. A run of this head may point `PUBLIC231_JSONL`
+at that twin or at stock Public231 whose `thinking` value is
+`{"enabled": false}`. Record the digest `validate` prints. Stop if the row
+count is not 231, or if any `thinking` value is not `{"enabled": false}`.
 
 Clock, quantiles and the three-traversal budget are the existing runner in
 [benchmarks/README.md](../../benchmarks/README.md): client latency includes
@@ -185,7 +188,8 @@ them and do not raise the timeout after seeing the times.
 | --- | --- | --- | --- |
 | 2026-10-24 | No kernel change. Asked whether the BF16 resident set fits a 48 GB sm_89 card. | No CUDA device in the implementation environment. Samples: 0. | none |
 | 2026-10-25 | Baseline at `1ba07d15b11a8c0796657e4a10b7ba3e62354421`. The checkpoint supplies an all-ones full-attention mask, so SDPA stays on the masked math kernel. | 1× lab L20X, sm_89, ~140 GiB. BF16 resident ~50333 MiB, no OOM. Warmup 5, concurrency 1, clock `successful_latency` / `post_to_body_json_and_schema_validation`. Stripped no-thinking twin. run1 231/231, p50 98.777 ms, p95 341.202 ms (primary). run2 231/231, p50 97.921 ms, p95 340.804 ms. run3 231/231, p50 98.177 ms, p95 343.953 ms. | baseline |
-| 2026-10-25 | Omit the explicit full-attention mask when every padding bit is true, and set full-attention `is_causal` false, so Transformers 5.17 can take the grouped-query SDPA kernel (`head_dim` 256). Padded batches keep the bool mask. Linear attention is unchanged. Flash and math are not bit-exact. | No CUDA device in this environment. Samples: 0. | not measured |
+| 2026-10-25 | Omit the explicit full-attention mask when every padding bit is true, and set full-attention `is_causal` false, so Transformers 5.17 can take the grouped-query SDPA kernel (`head_dim` 256). Padded batches keep the bool mask. Linear attention is unchanged. Flash and math are not bit-exact. | No CUDA device in this environment. Head `b6fa9d0`. Samples: 0. | not measured |
+| 2026-10-25 | Admit stock Public231 `thinking` only when it is `{"enabled": false}`. No kernel change. Further optimize commits wait for a pasted L20X p50/p95 of the current head. | No CUDA device in this environment. Samples: 0. Baseline primary stays `1ba07d1` run1. | not measured |
 
 ## Limits
 
