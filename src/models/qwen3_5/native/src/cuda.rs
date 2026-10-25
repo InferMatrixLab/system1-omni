@@ -278,7 +278,37 @@ impl Drop for Fp32Gdn {
         unsafe { (self.destroy)(self.handle) };
     }
 }
+/// `cs1_attention_gated_bidirectional`: same arguments as `cs1_attention_gated`.
+pub type GatedAttention = unsafe extern "C" fn(
+    *const c_void,
+    *const c_void,
+    *const c_void,
+    c_int,
+    *const c_void,
+    *mut c_void,
+    c_int,
+    c_int,
+    c_int,
+    c_int,
+    f32,
+    Stream,
+) -> c_int;
+
 impl Api {
+    /// Prompt-bidirectional full attention. Absent on CUDA libraries built before
+    /// this additive ABI 9 symbol; causal workers never resolve it.
+    pub fn attention_gated_bidirectional(&self) -> Result<GatedAttention> {
+        // SAFETY: the signature matches ops.h. The library lives in this Api.
+        unsafe {
+            self._lib
+                .get::<GatedAttention>(b"cs1_attention_gated_bidirectional\0")
+                .map(|symbol| *symbol)
+                .context(
+                    "libqwen3_5_cuda.so has no cs1_attention_gated_bidirectional; rebuild src/backends/cuda/qwen3_5 (ABI 9 additive symbol required by StartLux Instant)",
+                )
+        }
+    }
+
     pub fn fp32_gdn(&self) -> Result<Fp32Gdn> {
         // SAFETY: these optional signatures match ops.h; the library lives in static API.
         let (create, destroy, run, size) = unsafe {

@@ -223,6 +223,35 @@ const GROUPS: &[&str] = &[
 
 /// Upload order: by layer, and inside a layer the GROUPS members first and in order,
 /// so each group's matrices sit back to back and form one [sum N, K] matrix.
+/// HF Qwen3.5 folders store these two GDN parameters in FP32. Every other
+/// language tensor is BF16. The kernels read both as BF16.
+fn fp32_gdn_param(name: &str) -> bool {
+    name.ends_with("linear_attn.A_log") || name.ends_with("linear_attn.norm.weight")
+}
+
+fn bf16_payload_len(name: &str, dtype: safetensors::Dtype, nbytes: usize) -> Result<usize> {
+    match dtype {
+        safetensors::Dtype::BF16 => Ok(nbytes),
+        safetensors::Dtype::F32 if fp32_gdn_param(name) => {
+            ensure!(nbytes.is_multiple_of(4), "{name} has a short FP32 payload");
+            Ok(nbytes / 2)
+        }
+        other => bail!("{name} is {other:?}, not bfloat16"),
+    }
+}
+
+fn round_f32_param_to_bf16(data: &[u8]) -> Result<Vec<u8>> {
+    ensure!(data.len().is_multiple_of(4), "FP32 parameter length");
+    let (chunks, _) = data.as_chunks::<4>();
+    let mut out = Vec::with_capacity(chunks.len() * 2);
+    for chunk in chunks {
+        let value = f32::from_le_bytes(*chunk);
+        ensure!(value.is_finite(), "non-finite FP32 GDN parameter");
+        out.extend_from_slice(&half::bf16::from_f32(value).to_le_bytes());
+    }
+    Ok(out)
+}
+
 fn upload_order(name: &str) -> (usize, usize, String) {
     if let Some(tail) = name.strip_prefix("layers.")
         && let Some((layer, rest)) = tail.split_once('.')
@@ -295,20 +324,24 @@ impl Weights {
         let mut total = 0usize;
         for (i, name) in ours {
             let view = sts[i].tensor(&name)?;
-            ensure!(
-                view.dtype() == safetensors::Dtype::BF16,
-                "{name} is {:?}, not bfloat16",
-                view.dtype()
-            );
+            let bytes = bf16_payload_len(&name, view.dtype(), view.data().len())?;
             plan.push((i, name, total));
-            total = (total + view.data().len()).next_multiple_of(ALIGN);
+            total = (total + bytes).next_multiple_of(ALIGN);
         }
         let arena = DeviceBuffer::new(total)?;
         let mut tensors = HashMap::new();
         for (i, name, offset) in plan {
             let view = sts[i].tensor(&name)?;
+            // A_log and the GDN norm are FP32 in current HF Qwen3.5 folders.
+            // The kernels consume BF16, so round each finite value once at load.
+            let converted = if view.dtype() == safetensors::Dtype::F32 {
+                Some(round_f32_param_to_bf16(view.data())?)
+            } else {
+                None
+            };
+            let bytes = converted.as_deref().unwrap_or_else(|| view.data());
             // SAFETY: the arena has room for every planned tensor at its offset.
-            unsafe { cuda::upload(arena.at(offset), view.data(), stream)? };
+            unsafe { cuda::upload(arena.at(offset), bytes, stream)? };
             tensors.insert(
                 name[prefix.len()..].to_string(),
                 Tensor {
@@ -1147,6 +1180,39 @@ impl Model {
         Ok(self.forward_batch(&[ids])?.pop().unwrap())
     }
 
+    /// One prompt whose full-attention layers read the whole prompt in both
+    /// directions. Linear attention stays causal. CUDA graphs, LoRA and the
+    /// reference numerics are refused: those paths are causal-only.
+    pub fn forward_prompt_bidirectional(&mut self, ids: &[u32]) -> Result<Vec<f32>> {
+        ensure!(
+            !self.graph_enabled && self.reference.is_none() && self.lora.is_none(),
+            "prompt-bidirectional prefill is eager, merged and uses the default kernels"
+        );
+        ensure!(
+            !ids.is_empty() && ids.len() <= self.cfg.max_positions,
+            "empty or oversized prompt"
+        );
+        ensure!(
+            ids.iter().all(|&id| (id as usize) < self.embed.shape[0]),
+            "token id outside the vocabulary"
+        );
+        self.prepare_scratch(ids.len())?;
+        let s = self.scratch.as_ref().unwrap();
+        self.embed_tokens(s, ids)?;
+        self.run(s, &[ids.len()], false, true)?;
+        self.last_hidden(s, ids.len())
+    }
+
+    /// Fail at load when this library cannot run an Instant prompt.
+    pub fn require_prompt_bidirectional(&self) -> Result<()> {
+        ensure!(
+            !self.graph_enabled && self.reference.is_none() && self.lora.is_none(),
+            "prompt-bidirectional prefill is eager, merged and uses the default kernels"
+        );
+        cuda::api().attention_gated_bidirectional()?;
+        Ok(())
+    }
+
     /// Pack independent text prompts for input and gate/up GEMMs.
     /// Mixers reset at each boundary; final-position hidden states retain input order.
     pub fn forward_batch(&mut self, inputs: &[&[u32]]) -> Result<Vec<Vec<f32>>> {
@@ -1187,13 +1253,14 @@ impl Model {
             } else {
                 // Warm plans and keep the eager result: run() advances the residual
                 // in place, so replaying on this cache miss would advance it twice.
-                self.run(s, &lengths, false)?;
+                self.run(s, &lengths, false, false)?;
                 cuda::synchronize(self.stream)?;
-                let captured = cuda::Graph::capture(self.stream, || self.run(s, &lengths, false));
+                let captured =
+                    cuda::Graph::capture(self.stream, || self.run(s, &lengths, false, false));
                 self.cache_graph(&lengths, false, captured)?;
             }
         } else {
-            self.run(s, &lengths, false)?;
+            self.run(s, &lengths, false, false)?;
         }
         let s = self.scratch.as_ref().unwrap();
         let mut end = 0;
@@ -1240,13 +1307,13 @@ impl Model {
             } else {
                 // Uploads and embedding are outside capture. Keep the warmed eager
                 // result; launching now would advance the residual a second time.
-                self.run(s, &[t], true)?;
+                self.run(s, &[t], true, false)?;
                 cuda::synchronize(self.stream)?;
-                let captured = cuda::Graph::capture(self.stream, || self.run(s, &[t], true));
+                let captured = cuda::Graph::capture(self.stream, || self.run(s, &[t], true, false));
                 self.cache_graph(&[t], true, captured)?;
             }
         } else {
-            self.run(s, &[t], true)?;
+            self.run(s, &[t], true, false)?;
         }
         self.last_hidden(self.scratch.as_ref().unwrap(), t)
     }
@@ -1515,7 +1582,7 @@ impl Model {
                 }
                 begin = end;
             }
-            self.run(s, &[t], true)?;
+            self.run(s, &[t], true, false)?;
             self.last_hidden(s, t)
         })();
         let synced = self.synchronize();
@@ -1933,8 +2000,24 @@ impl Model {
     }
 
     /// Queue language layers over packed embeddings, resetting sequence positions.
-    /// Final-norm hidden states end up in `s.x`.
-    fn run(&self, s: &Scratch, lengths: &[usize], custom_positions: bool) -> Result<()> {
+    /// Final-norm hidden states end up in `s.x`. `bidirectional` changes only the
+    /// full-attention mask; Gated DeltaNet stays causal and sequence-local.
+    fn run(
+        &self,
+        s: &Scratch,
+        lengths: &[usize],
+        custom_positions: bool,
+        bidirectional: bool,
+    ) -> Result<()> {
+        let bidir = if bidirectional {
+            ensure!(
+                self.reference.is_none() && self.lora.is_none(),
+                "prompt-bidirectional prefill does not use reference numerics or an adapter"
+            );
+            Some(cuda::api().attention_gated_bidirectional()?)
+        } else {
+            None
+        };
         let t: usize = lengths.iter().sum();
         let mut start = 0;
         let sequences: Vec<(usize, i32)> = lengths
@@ -2122,8 +2205,24 @@ impl Model {
                                 ),
                                 "attention prep",
                             )?;
+                            let scale = (cfg.head_dim as f32).powf(-0.5);
                             check(
-                                if let Some(reference) = self.reference {
+                                if let Some(bidir) = bidir {
+                                    (bidir)(
+                                        p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
+                                        p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
+                                        p(v + offset * w.attn_in * BF16),
+                                        ld,
+                                        p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
+                                        p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
+                                        length,
+                                        hq,
+                                        hk,
+                                        hd,
+                                        scale,
+                                        st,
+                                    )
+                                } else if let Some(reference) = self.reference {
                                     (reference.attention)(
                                         p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
                                         p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
@@ -2134,7 +2233,7 @@ impl Model {
                                         length,
                                         hq,
                                         hk,
-                                        (cfg.head_dim as f32).powf(-0.5),
+                                        scale,
                                         p(s.workspace),
                                         st,
                                     )
@@ -2150,7 +2249,7 @@ impl Model {
                                         hq,
                                         hk,
                                         hd,
-                                        (cfg.head_dim as f32).powf(-0.5),
+                                        scale,
                                         st,
                                     )
                                 },
