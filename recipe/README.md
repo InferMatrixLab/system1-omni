@@ -42,6 +42,8 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   Clef (27B) and serve text `choice`/`noul`/`score`. Image, video and native
   CUDA are not served. Operator-reported flash Public231 concurrency-1
   timing on L20X sm_89 is in the recipe (run1 p50 247.518 ms, p95 413.025 ms).
+  That figure is not an H200 result. The forward prefill target is H200
+  (sm_90); no H200 C1 is recorded.
 
 - [LFM2.5-350M choice worker](lfm2/README.md): score text decisions with independent
   questions, hybrid cache branching and configurable candidate batches.

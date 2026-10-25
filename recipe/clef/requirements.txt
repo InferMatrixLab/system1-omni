@@ -9,10 +9,16 @@ tokenizers>=0.22
 # The processor loads with the backbone. Image and video requests are rejected
 # by this worker; pillow is still imported by the pinned processor.
 pillow>=10
-# Transformers 5.10.2 binds these at the first import of modeling_qwen3_5.
-# Installed, they replace torch_chunk_gated_delta_rule and the conv1d
-# fallback. They are CUDA builds. No L20X latency delta and no answer-parity
-# delta against the torch fallback have been measured. If either import
-# fails, the worker stays on the torch path and /health says so.
-flash-linear-attention==0.5.2
+# Import order is causal_conv1d, then fla.ops.gated_delta_rule, then
+# flashinfer.gdn_prefill, and only then modeling_qwen3_5. FLA must be
+# importable first so Transformers binds FusedRMSNormGated instead of the
+# PyTorch norm. The worker then replaces the chunk global with FlashInfer
+# GDN prefill (use_cp false, fused SM90) before layers copy it.
+# causal_conv1d_fn stays the convolution. Startup refuses torch_chunk and
+# F.conv1d, and refuses an FLA chunk binding that was not replaced.
+# The target device is H200, compute capability 9.0. vLLM's separate CuteDSL
+# prefill backend, CUDA graphs, and torch.compile are not selected.
+# No H200 Public231 latency or answer-parity delta has been measured.
 causal-conv1d>=1.5
+flash-linear-attention==0.5.2
+flashinfer-python==0.6.16.post3

@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import importlib.metadata
 import importlib.util
 import json
-import logging
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,7 +39,18 @@ SHARED_FILES = {
 }
 EXECUTABLE = "joint_schema_model.py"
 MODELING = "transformers.models.qwen3_5.modeling_qwen3_5"
-LOG = logging.getLogger(__name__)
+FLA_DISTRIBUTION = "flash-linear-attention"
+FLA_VERSION = "0.5.2"
+FLA_MODULE = "fla.ops.gated_delta_rule"
+CONV_DISTRIBUTION = "causal-conv1d"
+CONV_MODULE = "causal_conv1d"
+CONV_MINIMUM = (1, 5)
+FI_DISTRIBUTION = "flashinfer-python"
+FI_VERSION = "0.6.16.post3"
+FI_MODULE = "flashinfer.gdn_prefill"
+GDN_PREFILL = "flashinfer"
+HOPPER = (9, 0)
+REQUIRED_LINEAR_ATTENTION = "flashinfer+fla+causal_conv1d"
 
 
 @dataclass(frozen=True)
@@ -173,43 +184,247 @@ def require_token_agreement(admitted: int, response: dict[str, Any]) -> dict[str
 
 
 def bound_linear_attention(modeling: Any) -> str:
-    """Name the linear-attention implementation Transformers actually bound.
+    """Name the linear-attention implementation the modeling module exposes.
 
-    ``modeling_qwen3_5`` keeps the fast callables as module globals when the
-    optional packages imported, and ``None`` when it kept the PyTorch
-    fallback. The report is that binding, not an install attempt.
+    Transformers copies ``chunk_gated_delta_rule`` and ``causal_conv1d_fn``
+    onto each ``Qwen3_5GatedDeltaNet`` at ``__init__``. Ready means this
+    module global is the FlashInfer wrapper, ``causal_conv1d_fn`` is bound,
+    and ``clef_gdn_prefill`` is ``flashinfer``. An FLA chunk global without
+    that wrapper is not the H200 path.
     """
 
     if modeling is None:
         return "unloaded"
 
-    fla = getattr(modeling, "chunk_gated_delta_rule", None) is not None
+    chunk = getattr(modeling, "chunk_gated_delta_rule", None)
     conv = getattr(modeling, "causal_conv1d_fn", None) is not None
-    if fla and conv:
+    prefill = getattr(modeling, "clef_gdn_prefill", None)
+    if prefill == GDN_PREFILL and chunk is flashinfer_chunk_gated_delta_rule and conv:
+        return REQUIRED_LINEAR_ATTENTION
+    if chunk is not None and conv:
         return "fla+causal_conv1d"
-    if fla:
+    if chunk is not None:
         return "fla"
     if conv:
         return "causal_conv1d"
     return "torch_chunk"
 
 
-def activate_linear_attention() -> None:
-    """Import the optional kernels before Transformers binds Qwen3.5.
+def require_sm90(capability: tuple[int, int], name: str) -> None:
+    """Accept compute capability 9.0. The device name is not the gate.
 
-    The modeling module chooses ``chunk_gated_delta_rule`` and
-    ``causal_conv1d_fn`` once, at import. A later install does not move a
-    process that already imported the module. A failed import leaves the
-    PyTorch fallback in place.
+    A driver can label an H200 ``NVIDIA L20X``. Capability 9.0 is that
+    machine. Capability 8.9 is Ada and is not the FlashInfer prefill target.
+    """
+
+    if capability == HOPPER:
+        return
+    major, minor = capability
+    raise RuntimeError(
+        "Clef FlashInfer GDN prefill requires compute capability 9.0 (H200). "
+        f"This device is {name} sm_{major}{minor}."
+    )
+
+
+def require_hopper_device(device: str) -> None:
+    """Refuse startup unless ``device`` is a CUDA device at capability 9.0."""
+
+    import torch
+
+    requested = torch.device(device)
+    if requested.type != "cuda" or not torch.cuda.is_available():
+        raise RuntimeError(
+            "Clef FlashInfer GDN prefill requires --device cuda on compute "
+            "capability 9.0 (H200)."
+        )
+    index = requested.index if requested.index is not None else torch.cuda.current_device()
+    require_sm90(torch.cuda.get_device_capability(index), torch.cuda.get_device_name(index))
+
+
+def flashinfer_chunk_gated_delta_rule(
+    q: Any,
+    k: Any,
+    v: Any,
+    g: Any = None,
+    beta: Any = None,
+    scale: float | None = None,
+    initial_state: Any = None,
+    output_final_state: bool = False,
+    use_qk_l2norm_in_kernel: bool = False,
+    cu_seqlens: Any = None,
+    **kwargs: Any,
+) -> tuple[Any, None]:
+    """Run one-sequence GDN prefill through FlashInfer's fused SM90 kernel.
+
+    Transformers calls this with FLA's ``[B, T, H, D]`` layout and a
+    log-space decay ``g``. FlashInfer 0.6.16 wants ``[T, H, D]``, a float32
+    multiplicative gate, and a non-null ``cu_seqlens``. ``use_cp`` is false
+    so SM90 does not take the context-parallel path. Q/K L2 norm is FLA's
+    ``l2norm_fwd``; FlashInfer's own flag stays false so the vectors are not
+    normalized twice. vLLM's SM90 adapter is the source of that split.
+    FLA state is ``[N, H, K, V]`` and FlashInfer state is ``[N, H, V, K]``,
+    so a recurrent state is refused. Clef prefill passes neither.
+    """
+
+    del kwargs
+    if initial_state is not None or output_final_state:
+        raise RuntimeError(
+            "Clef FlashInfer GDN prefill does not continue or return a recurrent "
+            "state. This worker serves one full-prompt prefill."
+        )
+    if getattr(q, "shape", (0,))[0] != 1:
+        raise RuntimeError(
+            "Clef FlashInfer GDN prefill serves one sequence, "
+            f"got batch {getattr(q, 'shape', None)}"
+        )
+
+    import torch
+    from flashinfer.gdn_prefill import chunk_gated_delta_rule as chunk_gated_delta_rule_fi
+    from fla.modules.l2norm import l2norm_fwd
+
+    if use_qk_l2norm_in_kernel:
+        q, _ = l2norm_fwd(q)
+        k, _ = l2norm_fwd(k)
+    q = q.squeeze(0).contiguous()
+    k = k.squeeze(0).contiguous()
+    v = v.squeeze(0).contiguous()
+    fi_g = None if g is None else torch.exp(g.squeeze(0).contiguous().to(torch.float32))
+    fi_beta = None if beta is None else beta.squeeze(0).contiguous().to(torch.float32)
+    if cu_seqlens is None:
+        cu_seqlens = torch.tensor([0, q.shape[0]], dtype=torch.int64, device=q.device)
+    else:
+        cu_seqlens = cu_seqlens.to(device=q.device, dtype=torch.int64)
+    result = chunk_gated_delta_rule_fi(
+        q=q,
+        k=k,
+        v=v,
+        g=fi_g,
+        beta=fi_beta,
+        scale=scale,
+        initial_state=None,
+        output_final_state=False,
+        cu_seqlens=cu_seqlens,
+        use_qk_l2norm_in_kernel=False,
+        use_cp=False,
+    )
+    return result.unsqueeze(0), None
+
+
+def install_flashinfer_gdn_prefill(modeling: Any) -> None:
+    """Replace the modeling chunk global before layers copy it.
+
+    ``Qwen3_5GatedDeltaNet.__init__`` binds ``self.chunk_gated_delta_rule``
+    from this module global. Patching after ``load_release_model`` does not
+    change layers that already copied the FLA function.
+    """
+
+    if getattr(modeling, "causal_conv1d_fn", None) is None:
+        raise RuntimeError(
+            "causal_conv1d_fn is not bound. Import causal_conv1d before "
+            f"{MODELING}. F.conv1d is not served."
+        )
+    if getattr(modeling, "chunk_gated_delta_rule", None) is None:
+        raise RuntimeError(
+            "chunk_gated_delta_rule is not bound. Import "
+            f"{FLA_DISTRIBUTION}=={FLA_VERSION} before {MODELING}. "
+            "torch_chunk_gated_delta_rule is not served."
+        )
+    modeling.chunk_gated_delta_rule = flashinfer_chunk_gated_delta_rule
+    modeling.clef_gdn_prefill = GDN_PREFILL
+
+
+def version_tuple(text: str) -> tuple[int, ...]:
+    """Return the leading numeric components of a distribution version."""
+
+    parts: list[int] = []
+    for piece in text.split("."):
+        digits = ""
+        for char in piece:
+            if not char.isdigit():
+                break
+            digits += char
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
+def check_distribution_version(
+    installed: str, *, exact: str | None = None, minimum: tuple[int, ...] | None = None
+) -> None:
+    """Reject a pin outside the recipe's exact version or minimum range."""
+
+    if exact is not None and installed != exact:
+        raise RuntimeError(f"required {exact}, found {installed}")
+    if minimum is not None and version_tuple(installed) < minimum:
+        joined = ".".join(str(part) for part in minimum)
+        raise RuntimeError(f"required >={joined}, found {installed}")
+
+
+def require_fast_linear_attention() -> None:
+    """Import conv, FLA, and FlashInfer before Transformers binds Qwen3.5.
+
+    The modeling module chooses ``FusedRMSNormGated``, ``causal_conv1d_fn``,
+    and the chunk global once, at import. Packages are imported first, the
+    chunk global is then replaced with FlashInfer, and only after that may
+    ``load_release_model`` construct the layers. A missing package, a wrong
+    pin, or an import that fails leaves ``torch_chunk_gated_delta_rule`` or
+    ``F.conv1d`` in place, so startup raises instead of becoming ready.
     """
 
     if MODELING in sys.modules:
-        return
-    for name in ("causal_conv1d", "fla.ops.gated_delta_rule"):
+        raise RuntimeError(
+            f"{MODELING} is already imported. Start a new process so "
+            f"{CONV_DISTRIBUTION}>={'.'.join(str(part) for part in CONV_MINIMUM)}, "
+            f"{FLA_DISTRIBUTION}=={FLA_VERSION}, and "
+            f"{FI_DISTRIBUTION}=={FI_VERSION} import first. "
+            "torch_chunk_gated_delta_rule and F.conv1d are not served."
+        )
+    for distribution, exact, minimum in (
+        (CONV_DISTRIBUTION, None, CONV_MINIMUM),
+        (FLA_DISTRIBUTION, FLA_VERSION, None),
+        (FI_DISTRIBUTION, FI_VERSION, None),
+    ):
         try:
-            importlib.import_module(name)
+            installed = importlib.metadata.version(distribution)
+        except importlib.metadata.PackageNotFoundError as exc:
+            raise RuntimeError(
+                f"{distribution} is not installed. The PyTorch linear-attention "
+                "fallback is not served."
+            ) from exc
+        try:
+            check_distribution_version(installed, exact=exact, minimum=minimum)
+        except RuntimeError as exc:
+            raise RuntimeError(f"{distribution} {exc}") from exc
+    for distribution, module in (
+        (CONV_DISTRIBUTION, CONV_MODULE),
+        (FLA_DISTRIBUTION, FLA_MODULE),
+        (FI_DISTRIBUTION, FI_MODULE),
+    ):
+        try:
+            importlib.import_module(module)
         except (ImportError, OSError) as exc:
-            LOG.info("clef linear-attention package %s is not active: %s", name, type(exc).__name__)
+            raise RuntimeError(
+                f"{distribution} did not import {module} ({type(exc).__name__}). "
+                "torch_chunk_gated_delta_rule and F.conv1d are not served."
+            ) from exc
+    install_flashinfer_gdn_prefill(importlib.import_module(MODELING))
+
+
+def require_bound_linear_attention(modeling: Any) -> str:
+    """Refuse ready unless FlashInfer prefill and causal_conv1d are bound."""
+
+    bound = bound_linear_attention(modeling)
+    if bound == REQUIRED_LINEAR_ATTENTION:
+        return bound
+    raise RuntimeError(
+        f"Clef linear attention is {bound}, so the worker is not ready. "
+        f"Ready requires {REQUIRED_LINEAR_ATTENTION} "
+        f"({FI_DISTRIBUTION}=={FI_VERSION} GDN prefill, "
+        f"{FLA_DISTRIBUTION}=={FLA_VERSION}, and "
+        f"{CONV_DISTRIBUTION}>={'.'.join(str(part) for part in CONV_MINIMUM)} "
+        "causal_conv1d_fn). torch_chunk_gated_delta_rule and F.conv1d are not served."
+    )
 
 
 def load_joint_schema_module(path: Path) -> Any:
@@ -235,10 +450,11 @@ class ClefExecutor:
         self.device = device
         self.max_length = MAX_INPUT_TOKENS
         verify_snapshot(self.root, self.variant)
-        activate_linear_attention()
+        require_fast_linear_attention()
+        require_hopper_device(device)
         self.module = load_joint_schema_module(self.root / EXECUTABLE)
         self.model, self.processor = self.module.load_release_model(self.root, device=device)
-        self.linear_attention = bound_linear_attention(sys.modules.get(MODELING))
+        self.linear_attention = require_bound_linear_attention(sys.modules.get(MODELING))
         if self.processor.tokenizer.pad_token_id is None:
             raise ValueError("tokenizer pad_token_id is required")
 

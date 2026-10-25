@@ -92,22 +92,71 @@ def test_response_token_count_must_match_admission():
 
 
 def test_linear_attention_name_follows_the_bound_callables():
-    from models.clef.engine import activate_linear_attention, bound_linear_attention
+    from models.clef.engine import (
+        flashinfer_chunk_gated_delta_rule,
+        install_flashinfer_gdn_prefill,
+        bound_linear_attention,
+        require_bound_linear_attention,
+        require_sm90,
+    )
 
     assert bound_linear_attention(None) == "unloaded"
     assert bound_linear_attention(object()) == "torch_chunk"
-    assert (
-        bound_linear_attention(type("M", (), {"chunk_gated_delta_rule": object()})())
-        == "fla"
-    )
-    assert (
-        bound_linear_attention(type("M", (), {"causal_conv1d_fn": object()})())
-        == "causal_conv1d"
-    )
+    fla_only = type("M", (), {"chunk_gated_delta_rule": object()})()
+    conv_only = type("M", (), {"causal_conv1d_fn": object()})()
+    assert bound_linear_attention(fla_only) == "fla"
+    assert bound_linear_attention(conv_only) == "causal_conv1d"
     both = type(
         "M",
         (),
         {"chunk_gated_delta_rule": object(), "causal_conv1d_fn": object()},
     )()
     assert bound_linear_attention(both) == "fla+causal_conv1d"
-    activate_linear_attention()
+    with pytest.raises(RuntimeError, match="not ready"):
+        require_bound_linear_attention(both)
+    install_flashinfer_gdn_prefill(both)
+    assert both.chunk_gated_delta_rule is flashinfer_chunk_gated_delta_rule
+    assert both.clef_gdn_prefill == "flashinfer"
+    assert bound_linear_attention(both) == "flashinfer+fla+causal_conv1d"
+    assert require_bound_linear_attention(both) == "flashinfer+fla+causal_conv1d"
+    for modeling in (None, object(), fla_only, conv_only):
+        with pytest.raises(RuntimeError, match="not ready"):
+            require_bound_linear_attention(modeling)
+    with pytest.raises(RuntimeError, match="causal_conv1d_fn"):
+        install_flashinfer_gdn_prefill(fla_only)
+    with pytest.raises(RuntimeError, match="chunk_gated_delta_rule"):
+        install_flashinfer_gdn_prefill(conv_only)
+    require_sm90((9, 0), "NVIDIA L20X")
+    require_sm90((9, 0), "NVIDIA H200")
+    with pytest.raises(RuntimeError, match="sm_89"):
+        require_sm90((8, 9), "NVIDIA L20X")
+    with pytest.raises(RuntimeError, match="one sequence"):
+        flashinfer_chunk_gated_delta_rule(object(), object(), object())
+    with pytest.raises(RuntimeError, match="recurrent state"):
+        flashinfer_chunk_gated_delta_rule(object(), object(), object(), output_final_state=True)
+
+
+def test_linear_attention_pins_and_startup_fail_closed():
+    from models.clef.engine import (
+        FI_VERSION,
+        FLA_VERSION,
+        check_distribution_version,
+        require_fast_linear_attention,
+        version_tuple,
+    )
+
+    assert version_tuple("1.5.0.post8") == (1, 5, 0)
+    assert version_tuple("0.5.2") == (0, 5, 2)
+    assert version_tuple("0.6.16.post3") == (0, 6, 16)
+    check_distribution_version("0.5.2", exact=FLA_VERSION)
+    check_distribution_version(FI_VERSION, exact=FI_VERSION)
+    check_distribution_version("1.5.0.post8", minimum=(1, 5))
+    check_distribution_version("1.6", minimum=(1, 5))
+    with pytest.raises(RuntimeError, match="required 0.5.2"):
+        check_distribution_version("0.5.1", exact=FLA_VERSION)
+    with pytest.raises(RuntimeError, match="required 0.6.16.post3"):
+        check_distribution_version("0.6.16", exact=FI_VERSION)
+    with pytest.raises(RuntimeError, match="required >=1.5"):
+        check_distribution_version("1.4.9", minimum=(1, 5))
+    with pytest.raises(RuntimeError, match="not installed"):
+        require_fast_linear_attention()

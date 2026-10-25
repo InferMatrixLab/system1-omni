@@ -31,6 +31,36 @@ here.
 python -m pip install -r recipe/clef/requirements.txt
 ```
 
+The requirements pin `causal-conv1d>=1.5`, `flash-linear-attention==0.5.2`,
+and `flashinfer-python==0.6.16.post3`. The worker imports `causal_conv1d`,
+then `fla.ops.gated_delta_rule`, then `flashinfer.gdn_prefill`, and only
+then `transformers.models.qwen3_5.modeling_qwen3_5`. That order binds
+`FusedRMSNormGated` and `causal_conv1d_fn`. Startup then replaces the
+modeling module's `chunk_gated_delta_rule` with the FlashInfer GDN prefill
+wrapper before `load_release_model` builds each `Qwen3_5GatedDeltaNet`,
+because the layer copies that global at init.
+
+Startup raises when any of the three distributions is missing, when
+flash-linear-attention is not exactly `0.5.2`, when flashinfer-python is
+not exactly `0.6.16.post3`, when causal-conv1d is older than 1.5, when an
+import fails, when `causal_conv1d_fn` did not bind, or when the chunk
+global is not the FlashInfer wrapper. A ready process has `/health`
+`linear_attention` equal to `flashinfer+fla+causal_conv1d`. The PyTorch
+`torch_chunk_gated_delta_rule` and `F.conv1d` paths are not served. An FLA
+chunk binding without the FlashInfer wrapper is not ready.
+
+Prefill calls `flashinfer.gdn_prefill.chunk_gated_delta_rule` with
+`use_cp=False`, so Hopper uses the fused SM90 kernel. Q and K L2
+normalization uses FLA `l2norm_fwd`, and FlashInfer's
+`use_qk_l2norm_in_kernel` flag stays false. Log-space `g` is
+exponentiated. The call is one sequence and does not continue a recurrent
+state. vLLM's separate CuteDSL prefill backend, CUDA graphs, and
+`torch.compile` are not used. The device must be CUDA compute capability
+9.0. A device named `NVIDIA L20X` at capability 8.9 is the wrong machine.
+The same name at capability 9.0 is the known driver mislabel of an H200
+and passes the capability check. No H200 Public231 C1 latency, and no
+answer parity against `torch_chunk` or the FLA chunk, has been measured.
+
 ```sh
 python - <<'PY'
 from huggingface_hub import snapshot_download
@@ -117,8 +147,8 @@ L20X at compute capability 8.9, warmup 5, concurrency 1. Stock Public231
 includes a `thinking` field. That HEAD rejected it with HTTP 422
 `Unknown request fields`. The measured manifest was
 `public231-no-thinking.jsonl`, with the `thinking` key stripped. The
-stripped file's SHA-256 was not reported. Primary for later deltas is run1.
-Do not average the percentiles.
+stripped file's SHA-256 was not reported. Run1 is the primary L20X round.
+Do not average the percentiles. Run1 is not a baseline for an H200 delta.
 
 | Round | p50 (ms) | p95 (ms) | Successful |
 | --- | --- | --- | --- |
@@ -127,25 +157,30 @@ Do not average the percentiles.
 | run3 | 242.421 | 410.369 | 231/231 |
 
 The worker now admits `thinking` when it is an object with `enabled` set to
-the JSON boolean `false`, then drops the field before encoding. A stock
-Public231 request in that shape is the next comparison against run1. That
-admission has no measured latency delta. `enabled: true` stays a 422.
+the JSON boolean `false`, then drops the field before encoding. The next
+H200 campaign should send stock Public231 in that shape. That admission
+has no measured latency delta on these L20X rounds. `enabled: true` stays
+a 422.
 
 The operator named the metric `successful_latency` and the clock
 `post_to_body_json_and_schema_validation`. These three rounds are that
 measurement. They are not a new campaign.
 
-`recipe/clef/requirements.txt` now installs `flash-linear-attention==0.5.2`
-and `causal-conv1d>=1.5`. Transformers 5.10.2 uses those packages, when
-they import before `modeling_qwen3_5`, in place of
-`torch_chunk_gated_delta_rule` and the conv1d fallback. `/health` reports
-the binding in `linear_attention` (`torch_chunk` when neither bound).
-Restart the worker after installing them. The p50 and p95 delta of that
-binding against run1 is not measured. Answer parity against the torch
-fallback is not measured. Do not publish a speedup from an unmeasured run.
+Those three rounds are the L20X report at HEAD `9030065`. They are not an
+H200 baseline. Do not relabel them as H200, and do not treat a later H200
+p50 or p95 as a same-device speedup against 247.518 / 413.025.
 
-This is the operator checklist for a concurrency-1 latency measurement of
-the flash worker. It uses the existing
+## Next measurement: H200 (sm_90)
+
+The forward operator path is FlashInfer GDN prefill plus `causal_conv1d`
+and FLA, on compute capability 9.0. No H200 Public231 C1 has been recorded.
+Answer parity of that prefill against `torch_chunk` and against the FLA
+chunk is not measured. The standalone GDN timings in
+[benchmarks/gdn/README.md](../../benchmarks/gdn/README.md) are a different
+experiment and are not a Clef HTTP result.
+
+This is the operator checklist for the next concurrency-1 latency
+measurement of the flash worker. It uses the existing
 [benchmark runner](../../benchmarks/README.md). The client does not reserve
 a GPU and does not prove that CUDA ran. This repository does not contain
 the Public231 JSONL.
@@ -154,11 +189,19 @@ Record results outside the repository. Do not put hostnames, account names,
 home directories, or the name of a reservation system in the metadata or
 in a commit.
 
-1. Confirm the GPU the process will use. `nvidia-smi` must show the device
-   name `NVIDIA L20X` and compute capability 8.9. If either differs, stop.
-   Do not report the run as H200, H800, or as the Public231 leaderboard.
+1. Confirm the GPU the process will use. `nvidia-smi` must show compute
+   capability 9.0. Record the device name it prints. Capability 9.0 is the
+   H200 target, including when the name is the known `NVIDIA L20X`
+   mislabel. Capability 8.9 is Ada; stop, and do not report that machine
+   as this H200 run. Do not report the run as H800 or as the Public231
+   leaderboard.
 2. Start `frontend.clef` as above, on loopback port 8000, variant
    `clef-flash`, device `cuda`. Leave that process up for every traversal.
+   `GET /health` must show `status` `ready` and `linear_attention`
+   `flashinfer+fla+causal_conv1d`. A process that exits at startup did not
+   bind FlashInfer GDN prefill and `causal_conv1d_fn`. Do not measure a
+   process that is still on the PyTorch chunk, `F.conv1d`, or an FLA-only
+   chunk path.
 3. Obtain the frozen Public231 request manifest whose file SHA-256 is
    `00d1f10ca1142499a598b5f1c6602d329cce1cef04c961c46fc0318daa2c67d3`.
    That is the JSONL byte hash cited for the JevBench `7ce310c7` export in
@@ -180,7 +223,7 @@ in a commit.
 
    ```json
    {
-     "gpu": "NVIDIA L20X",
+     "gpu": "NVIDIA H200",
      "gpu_ids": ["0"],
      "driver": "<driver version from nvidia-smi>",
      "cuda": "<CUDA version reported by the torch build>",
@@ -188,7 +231,7 @@ in a commit.
      "model_revision": "Cloudflare/clef-flash@f0b7d3cd65296abfe459e6c228b618f5d8b26d2f",
      "runtime_revision": "<git rev-parse HEAD of this worker>",
      "cache_policy": "one request at a time; no prefix cache; no CUDA graph; transformers cache left at its default",
-     "cuda_evidence": "nvidia-smi showed NVIDIA L20X compute capability 8.9 while the worker was running with --device cuda",
+     "cuda_evidence": "nvidia-smi showed compute capability 9.0 while the worker was running with --device cuda. Record the printed device name. If that name is NVIDIA L20X and the capability is 9.0, say so; that pair is the known H200 mislabel.",
      "reservation": "<allocation id>"
    }
    ```
@@ -224,17 +267,18 @@ in a commit.
    per-round and pooled counts. Keep failure latencies separate.
 9. The clock is the runner's
    `post_to_body_json_and_schema_validation` clock. It is not the H800
-   leaderboard clock. Do not compute a speedup against that board, against
-   H200, or against an unmeasured hypothesis.
+   leaderboard clock. Report this campaign as the H200 C1. Do not relabel
+   the L20X table above as this result, and do not compute a same-device
+   speedup against 247.518 / 413.025.
 
 ## What remains unverified
 
-Image and video inputs, native CUDA, answer parity, and any latency delta
-after HEAD `903006530fb7772bb668bbf192ee4278e273e583`. The operator-reported
-C1 numbers above are the baseline, on the clock
-`post_to_body_json_and_schema_validation`, metric `successful_latency`.
-H1, one encode per request, is already how that HEAD calls the pinned
-model, so run1 includes it and its isolated effect is unknown. The recipe
-now installs the fast linear-attention packages. That binding has no
-measured p50, p95, or answer-parity delta against run1. This environment
-has no GPU and did not repeat the campaign.
+Image and video inputs, native CUDA, answer parity, and any H200 latency.
+The operator-reported L20X numbers above stay on the clock
+`post_to_body_json_and_schema_validation`, metric `successful_latency`, at
+HEAD `903006530fb7772bb668bbf192ee4278e273e583`. H1, one encode per request,
+is already how that HEAD calls the pinned model, so run1 includes it and
+its isolated effect is unknown. The H200 path wires FlashInfer GDN prefill,
+FLA, and causal-conv1d. That path has no measured p50, p95, or
+answer-parity delta. This environment has no GPU and did not repeat the
+campaign.

@@ -181,7 +181,7 @@ pinned runtime for text, image and video state:
 | LFM2.5-350M | [Transformers worker](recipe/lfm2/README.md); text state and independent choice questions |
 | OmniJev-4B v1.1 | [Checkpoint export and CPU contract](recipe/omnijev/README.md) only; the native worker is in progress ([#114](https://github.com/ThinkFlowLab/system1-omni/issues/114)) |
 | D3 (Decision 3.0) | [Python reference worker](recipe/d3/reference.md) on the checkpoint's pinned runtime; `choice`/`noul`/`score` over text, image and video state; author-run on A100 for text and media serving (see the integration and media PRs) |
-| Clef-flash (9B) and Clef (27B) | [Python reference worker](recipe/clef/reference.md) for text `choice`/`noul`/`score`; flash is the bring-up variant. Image, video and native CUDA are not served. Operator-reported flash Public231 C1 on L20X sm_89: run1 p50 247.518 ms, p95 413.025 ms |
+| Clef-flash (9B) and Clef (27B) | [Python reference worker](recipe/clef/reference.md) for text `choice`/`noul`/`score`; flash is the bring-up variant. Image, video and native CUDA are not served. Operator-reported flash Public231 C1 on L20X sm_89: run1 p50 247.518 ms, p95 413.025 ms. That figure is not an H200 result. The forward prefill target is H200 (sm_90) and has no recorded C1 |
 
 [Supported models and hardware](docs/supported-models.md) lists the devices
 and where each worker has been run.

@@ -146,35 +146,42 @@ label this run as H200. Percentiles are not averaged across rounds.
 
 | Round | p50 (ms) | p95 (ms) | Successful |
 | --- | --- | --- | --- |
-| run1, primary for later deltas | 247.518 | 413.025 | 231/231 |
+| run1, primary L20X round | 247.518 | 413.025 | 231/231 |
 | run2 | 247.404 | 426.231 | 231/231 |
 | run3 | 242.421 | 410.369 | 231/231 |
 
 The `thinking.enabled: false` admission strips that field before encoding.
-It has no measured p50 or p95 delta against run1. The operator named the
+These L20X rounds do not include a measured p50 or p95 for that admission.
+The operator named the
 metric `successful_latency` and the clock
 `post_to_body_json_and_schema_validation`. Answer parity against another
 implementation was not part of this report.
 
-`flash-linear-attention==0.5.2` and `causal-conv1d>=1.5` are installed by
-the recipe. Transformers 5.10.2 binds them, if they import first, instead
-of the PyTorch chunked gated-delta rule and the conv1d fallback. `/health`
-field `linear_attention` is that binding. Their p50 and p95 delta against
-run1 is not measured, and their answer parity against `torch_chunk` is not
-measured.
+`causal-conv1d>=1.5`, `flash-linear-attention==0.5.2`, and
+`flashinfer-python==0.6.16.post3` are installed by the recipe. The worker
+imports `causal_conv1d`, then `fla.ops.gated_delta_rule`, then
+`flashinfer.gdn_prefill`, before Transformers binds Qwen3.5, and replaces
+the chunk global with FlashInfer GDN prefill (`use_cp` false) before
+layers copy it. Startup raises unless that wrapper and `causal_conv1d_fn`
+are bound, so a ready `/health` reports
+`linear_attention: flashinfer+fla+causal_conv1d`. The device gate is
+compute capability 9.0. `torch_chunk_gated_delta_rule` and `F.conv1d` are
+not served. No H200 p50 or p95 has been measured, and answer parity
+against `torch_chunk` and against the FLA chunk is not measured. The L20X
+table above is not an H200 baseline.
 
-| Id | Change | Expected effect | Delta vs run1 |
+| Id | Change | Expected effect | Measured result |
 | --- | --- | --- | --- |
 | H1 | One `encode_record` per request, then the pinned forward. The handler does not tokenize the schema again before that encode. | Removes a second BPE pass from the critical path. Prefill and the joint head still dominate. | Included in HEAD `9030065`. Isolated delta unknown |
-| H2 | Fuse the joint head's per-question Python loop. | Fewer small launches after prefill. Needs a forked head and numerical parity against the pinned module. | Not implemented. No measured L20X delta |
-| H3 | `torch.compile` or CUDA graphs on the Qwen3.5 backbone. | Uncertain on the linear-attention layers. | Not implemented. No measured L20X delta |
-| H4 | Let Transformers bind `flash-linear-attention` 0.5.2 and `causal-conv1d` for the 24 linear-attention layers. | Replaces the PyTorch chunk loop. The recipe installs the packages. A process that already imported the modeling module does not rebind. | Not measured |
+| H2 | Fuse the joint head's per-question Python loop. | Fewer small launches after prefill. Needs a forked head and numerical parity against the pinned module. | Not implemented. No measured H200 delta |
+| H3 | `torch.compile` or CUDA graphs on the Qwen3.5 backbone. | Uncertain on the linear-attention layers. | Not implemented. No measured H200 delta |
+| H4 | Bind FlashInfer GDN prefill 0.6.16.post3, `flash-linear-attention` 0.5.2, and `causal-conv1d` >= 1.5 before the Qwen3.5 layers copy the chunk global. Startup is not ready on `torch_chunk`, `F.conv1d`, or FLA-only chunk. Prefill uses FlashInfer with `use_cp` false on compute capability 9.0. vLLM CuteDSL, CUDA graphs, and `torch.compile` are not used. | Replaces the PyTorch chunk loop on H200. | Not measured. No H200 C1 |
 
 ## Status
 
 | Path | Clef-flash | Clef |
 | --- | --- | --- |
-| Text `choice` / `noul` / `score`, non-thinking prompt | Contract tested. Operator-reported Public231 C1 latency on L20X sm_89 at HEAD `9030065`; answer parity not checked | Same loader pin; that latency campaign was flash only |
+| Text `choice` / `noul` / `score`, non-thinking prompt | Contract tested. Operator-reported Public231 C1 latency on L20X sm_89 at HEAD `9030065` (not an H200 figure); H200 FlashInfer path has no C1 yet; answer parity not checked | Same loader pin; that latency campaign was flash only |
 | Image and video | Rejected | Rejected |
 | Native CUDA | Not implemented | Not implemented |
 | Workers AI proxy | Out of scope | Out of scope |
