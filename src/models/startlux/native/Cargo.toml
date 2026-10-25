@@ -1,0 +1,26 @@
+[package]
+name = "omni-startlux-native"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Native Rust/CUDA worker for StartLux-Decision v1.1 4B Instant"
+
+[[bin]]
+name = "omni-startlux-native"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.100"
+axum = "0.8.8"
+half = "2.7.1"
+memmap2 = "0.9.9"
+omni-qwen3-5-native = { path = "../../qwen3_5/native" }
+omni-runtime = { path = "../../../runtime" }
+safetensors = "0.8.0"
+serde_json = { version = "1.0.149", features = ["float_roundtrip", "preserve_order"] }
+tokenizers = { version = "=0.22.2", default-features = false, features = ["onig"] }
+tokio = { version = "1.49.0", features = ["macros", "net", "rt-multi-thread", "sync"] }
+
+[[test]]
+name = "contract"
+path = "../../../../tests/startlux/contract.rs"

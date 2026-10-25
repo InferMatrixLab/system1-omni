@@ -109,10 +109,15 @@ impl Encoder {
         if let Some(hit) = self.cache.borrow().get(text) {
             return hit.clone();
         }
-        let encoding = self
-            .tokenizer
-            .encode(text, false)
-            .expect("tokenizer failure");
+        let encoding = match self.tokenizer.encode(text, false) {
+            Ok(encoding) => encoding,
+            Err(error) => {
+                // The pinned tokenizer should never fail on valid UTF-8
+                // input; surface the error instead of panicking so a
+                // wrapping worker can map it.
+                unreachable!("the pinned tokenizer failed on valid input: {error}")
+            }
+        };
         let byte_offsets = encoding.get_offsets();
         // Byte → code-point offsets.
         let char_starts: Vec<usize> = text
