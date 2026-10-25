@@ -66,8 +66,11 @@ The LFM2.5-350M Transformers worker owns candidate scoring and hybrid cache bran
   processing and executor modules, with shared FIFO admission and blocking
   dispatch in the [native runtime](src/runtime/README.md).
 - **Native CUDA workers.** The Cua-S1 4B 0.2 `text` adapter,
-  Open-Jev-27B-v1.1 and Open-Jev-9B run as native workers with shared CUDA
-  kernels. Cua-S1 also has a Python worker that serves as the correctness reference.
+  Open-Jev-27B-v1.1, Open-Jev-9B, and StartLux-Decision v1.1 4B Instant run
+  as native workers with shared CUDA kernels. Cua-S1 also has a Python
+  worker that serves as the correctness reference. The StartLux worker is
+  text-only Instant; its weights are CC BY-NC 4.0 and its GPU parity is
+  unverified. AutoThink is not served.
 - **LAYA text serving.** LAYA runs as an external CPU Python worker, the
   in-repository Python MPS/CPU worker, or a native Rust/CUDA worker on Hopper.
 - **CUDA backend and planned Metal backend.** High-performance GPU operations
@@ -176,6 +179,7 @@ pinned runtime for text, image and video state:
 | Valen-Preview-0923 | [Python reference worker](recipe/valen/reference.md); text state or one inline PNG/JPEG image, `choice`/`noul`/`score`; author-run on RTX 5060 Laptop GPU (sm_120, WSL2), owner: community |
 | Open-Jev-27B-v1.1 | [Native Rust/CUDA worker](recipe/open_jev/native.md); eager independent text candidates; [H200 validation](recipe/open_jev/validation.md) |
 | Open-Jev-9B | The same [native Rust/CUDA worker](recipe/open_jev/native.md); eager independent text candidates; [reference comparison on sm_89](recipe/open_jev/validation-9b.md) |
+| StartLux-Decision v1.1 4B Instant | [Native Rust/CUDA text worker](recipe/startlux/README.md); `choice` / `noul` / `score`; weights CC BY-NC 4.0; Instant only (no AutoThink, no 27B); GPU parity unverified; [L20X latency recipe](recipe/startlux/latency.md) |
 | autotrust/JEV-27B-VL | [Experimental Rust/CUDA worker](recipe/jev_vl/README.md); single-question text, online inline PNG/JPEG and offline-preencoded image inputs; [validation scope and limits](recipe/jev_vl/validation.md) |
 | CLM-v0.1-8B | [External worker with a CPU stub encoder](recipe/clm/README.md); contract checks only, real Qwen3-8B decisions unverified by this recipe |
 | LFM2.5-350M | [Transformers worker](recipe/lfm2/README.md); text state and independent choice questions |
