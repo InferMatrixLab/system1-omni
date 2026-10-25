@@ -99,7 +99,10 @@ Capability 9.0 with `flashinfer-python` 0.6.16.post3 uses all-sequence
 FlashInfer and keeps 48 distinct `cu_seqlens` buffers per device and
 length. FlashInfer allocates its own state workspace. Residual RMSNorm
 stays eager. `use_cp` stays false. The candidate skips the q/k
-repeat on the 48 linear layers (`gdn_layout=gva`, `gva_layers=48`).
+repeat on the 48 linear layers and packs those heads before FLA's
+L2-norm view (`gdn_layout=gva`, `gva_layers=48`,
+`gdn_qk_contiguous` true). `3ecdf5a` crashed in warmup on the
+unpacked view.
 The kept primary rotates the `cu_seqlens` ring, passes `use_cp` false,
 repeats q and k, and leaves those norms eager.
 `PPLX_GDN_PREFILL=fla` reproduces the prior `f968e576` chunk.
@@ -153,7 +156,9 @@ RMSNorm `3afb472` missed the gate (p50 93.935 ms, p95 274.902 ms,
 (18)) and is not the primary. `use_cp=auto` on `a6f4d9a` missed
 the gate (p50 112.294 ms, p95 299.419 ms, `choice_acc=0.906` (139),
 `noul_acc=0.878` (74), `score_mae=0.204` (18)) and is not the
-primary. The grouped-value candidate has no sample.
+primary. Grouped-value `3ecdf5a` crashed in warmup (0/231,
+`stop_reason=warmup_failed`, p50 and p95 none, quality N/A) and is
+not a latency result. The packed-q/k candidate has no sample.
 
 The shared Qwen3.5 CUDA language kernels in this repository are causal
 (`src/backends/cuda/qwen3_5/attention.cu`). Their vision-operator tests mention
@@ -165,8 +170,8 @@ backend. A native executor is not in this change.
 | Path | State |
 | --- | --- |
 | CPU contract and HTTP rejection | Implemented; tests do not need weights |
-| CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, checkpoint SDPA order, separate gate and up GEMMs, an eager language-model forward, eager residual RMSNorms, FlashInfer `use_cp` false and unrepeated q/k heads on the all-sequence bind, `causal-conv1d` 1.7.0 with sm_90 and sm_89 cubins, FLA 0.5.2 chunk, and all-sequence FlashInfer on capability 9.0 with 48 `cu_seqlens` slots per device and length. FlashInfer allocates its own state workspace. `PPLX_GDN_PREFILL=fla` holds an installed pin and reproduces the prior `f968e576` chunk. `PPLX_GDN_PREFILL=short` is the rejected length dispatch. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
-| Public231 concurrency 1 | Kept primary is `4b99b73`: 231/231, p50 88.942 ms, p95 295.797 ms, all-sequence FlashInfer, 48-slot `cu_seqlens`. Versus prior primary `ffae182` 92.844 / 296.458: p50 −4.20% (−3.902 ms), p95 −0.22% (−0.661 ms). Quality `choice_acc=0.9065` (139), `noul_acc=0.8784` (74), `score_mae=0.2035` (18). `ffae182` versus `f968e576` 94.077 / 300.200 was p50 −1.31%, p95 −1.25%. Uncached all-sequence FlashInfer `3c72f02` is not the primary: p50 88.808 ms, p95 300.751 ms. Short-sequence FlashInfer `a50b9aa` failed its gate: p50 95.446 ms, p95 300.871 ms. cuDNN-first SDPA `0dcaa0ac` failed its gate: p50 138.501 ms, p95 332.859 ms. Fused gate-up `8b4ee326` failed its gate: p50 102.437 ms, p95 304.970 ms. Always-on dynamic compile `e36b32ed` failed the both-percentiles gate: p50 97.751 ms, p95 263.124 ms. The 512-token split `7e3b1be` failed its gate: p50 100.037 ms, p95 257.084 ms. Isolated-median compile `34ba5de` failed its gate: p50 97.084 ms, p95 256.679 ms. The FlashInfer state-workspace ring `17a7b120` failed its gate: p50 89.165 ms, p95 295.723 ms. Always-on FLA residual RMSNorm `3afb472` failed its gate: p50 93.935 ms, p95 274.902 ms. Length-gated FLA residual RMSNorm `705ae089` failed its gate: p50 94.604 ms, p95 274.835 ms. None of those is the primary. `use_cp=auto` `a6f4d9a` failed its gate: p50 112.294 ms, p95 299.419 ms. The grouped-value candidate has no sample |
+| CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, checkpoint SDPA order, separate gate and up GEMMs, an eager language-model forward, eager residual RMSNorms, FlashInfer `use_cp` false, unrepeated q/k heads, and those heads packed before the L2-norm view, `causal-conv1d` 1.7.0 with sm_90 and sm_89 cubins, FLA 0.5.2 chunk, and all-sequence FlashInfer on capability 9.0 with 48 `cu_seqlens` slots per device and length. FlashInfer allocates its own state workspace. `PPLX_GDN_PREFILL=fla` holds an installed pin and reproduces the prior `f968e576` chunk. `PPLX_GDN_PREFILL=short` is the rejected length dispatch. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
+| Public231 concurrency 1 | Kept primary is `4b99b73`: 231/231, p50 88.942 ms, p95 295.797 ms, all-sequence FlashInfer, 48-slot `cu_seqlens`. Versus prior primary `ffae182` 92.844 / 296.458: p50 −4.20% (−3.902 ms), p95 −0.22% (−0.661 ms). Quality `choice_acc=0.9065` (139), `noul_acc=0.8784` (74), `score_mae=0.2035` (18). `ffae182` versus `f968e576` 94.077 / 300.200 was p50 −1.31%, p95 −1.25%. Uncached all-sequence FlashInfer `3c72f02` is not the primary: p50 88.808 ms, p95 300.751 ms. Short-sequence FlashInfer `a50b9aa` failed its gate: p50 95.446 ms, p95 300.871 ms. cuDNN-first SDPA `0dcaa0ac` failed its gate: p50 138.501 ms, p95 332.859 ms. Fused gate-up `8b4ee326` failed its gate: p50 102.437 ms, p95 304.970 ms. Always-on dynamic compile `e36b32ed` failed the both-percentiles gate: p50 97.751 ms, p95 263.124 ms. The 512-token split `7e3b1be` failed its gate: p50 100.037 ms, p95 257.084 ms. Isolated-median compile `34ba5de` failed its gate: p50 97.084 ms, p95 256.679 ms. The FlashInfer state-workspace ring `17a7b120` failed its gate: p50 89.165 ms, p95 295.723 ms. Always-on FLA residual RMSNorm `3afb472` failed its gate: p50 93.935 ms, p95 274.902 ms. Length-gated FLA residual RMSNorm `705ae089` failed its gate: p50 94.604 ms, p95 274.835 ms. None of those is the primary. `use_cp=auto` `a6f4d9a` failed its gate: p50 112.294 ms, p95 299.419 ms. Grouped-value `3ecdf5a` crashed in warmup (0/231, no p50 or p95). The packed-q/k candidate has no sample |
 | CPU `device="cpu"` | The checkpoint switches the backbone to float32. Not the measured path |
 | Images | Admitted. No image parity run |
 | Apple GPU | Not supported |

@@ -35,8 +35,10 @@ when that GPU reports capability 8.9. Capability 9.0 uses all-sequence FlashInfe
 `flashinfer-python` 0.6.16.post3 imports. The kept primary rotates 48
 `cu_seqlens` buffers per device and length and passes `use_cp` false.
 This candidate keeps that ring and the eager residual RMSNorms,
-passes `use_cp` false, and skips the q/k repeat on the 48 linear
-layers. `use_cp=auto` on `a6f4d9a` missed both percentiles.
+passes `use_cp` false, skips the q/k repeat on the 48 linear
+layers, and packs q and k before FLA's L2-norm view.
+`3ecdf5a` crashed in warmup on the unpacked view.
+`use_cp=auto` on `a6f4d9a` missed both percentiles.
 Always-on fusion `3afb472` and the 512-token
 gate `705ae089` both missed the median.
 FlashInfer allocates its own state workspace. The 48-slot state

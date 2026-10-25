@@ -137,7 +137,9 @@ Quality: `choice_acc=0.906` (139), `noul_acc=0.878` (74),
 `a6f4d9a` measured 231/231, p50 112.294 ms, p95 299.419 ms
 (p50 +26.26%, p95 +1.22%) and failed the same gate. Quality:
 `choice_acc=0.906` (139), `noul_acc=0.878` (74),
-`score_mae=0.204` (18). It is not the primary. The grouped-value
+`score_mae=0.204` (18). It is not the primary. Grouped-value
+`3ecdf5a` returned 0/231, `stop_reason=warmup_failed`, with no p50
+or p95. Quality was N/A. It is not a latency result. The packed-q/k
 candidate has no sample.
 These L20X measurements stay in this group and do not enter the H800
 table above. Ready is not limited to capability 9.0.

@@ -17,7 +17,8 @@ norm from ``fla.modules.l2norm.l2norm_fwd`` with FlashInfer's own flag
 left false. ``use_cp`` stays false. ``auto`` was measured and missed
 both percentiles. On the all-sequence bind, q and k are not repeated
 up to the value heads; FlashInfer's GVA path owns that grouping.
-CuteDSL, CUDA graphs, and ``torch.compile`` are not selected.
+Those unrepeated heads are packed before FLA's L2 norm, which views
+its input. CuteDSL, CUDA graphs, and ``torch.compile`` are not selected.
 """
 
 from __future__ import annotations
@@ -250,6 +251,18 @@ def cached_cu_seqlens(q: Any) -> Any:
     )
 
 
+def pack_qk_for_l2norm(q: Any, k: Any) -> tuple[Any, Any]:
+    """Pack q and k so FLA 0.5.2 can view them as ``[-1, D]``.
+
+    ``l2norm_fwd`` calls ``x.view(-1, x.shape[-1])``. ``repeat_interleave``
+    copies, so the expanded heads were contiguous. GVA skips that copy.
+    The reshape of the conv split is not contiguous, and ``3ecdf5a`` died
+    in warmup on that view. ``contiguous`` does not copy a packed tensor.
+    """
+
+    return q.contiguous(), k.contiguous()
+
+
 def flashinfer_chunk_gated_delta_rule(
     q: Any,
     k: Any,
@@ -288,6 +301,7 @@ def flashinfer_chunk_gated_delta_rule(
     from fla.modules.l2norm import l2norm_fwd
 
     if use_qk_l2norm_in_kernel:
+        q, k = pack_qk_for_l2norm(q, k)
         q, _ = l2norm_fwd(q)
         k, _ = l2norm_fwd(k)
     q = q.squeeze(0).contiguous()

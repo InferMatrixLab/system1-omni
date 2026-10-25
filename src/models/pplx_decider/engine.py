@@ -184,8 +184,10 @@ class PplxExecutor:
         # all-sequence FlashInfer. The kept primary rotates 48 cu_seqlens
         # buffers, passes use_cp false, and repeats q and k. use_cp auto
         # missed both percentiles, so it stays false. This candidate keeps
-        # the ring and skips that repeat. FlashInfer allocates its own
-        # state workspace. Residual RMSNorm stays eager.
+        # the ring and skips that repeat. Unrepeated q and k are packed
+        # before FLA's L2 norm. The unpacked reshape crashed warmup on
+        # 3ecdf5a. FlashInfer allocates its own state workspace.
+        # Residual RMSNorm stays eager.
         # PPLX_GDN_PREFILL=fla reproduces the prior f968e576 chunk.
         # PPLX_GDN_PREFILL=short is the rejected length dispatch.
         # cuDNN-first SDPA and the fused gate-up GEMM are not selectable.
@@ -208,6 +210,7 @@ class PplxExecutor:
         self.gdn_cp_heuristic = None
         self.gdn_layout = GDN_LAYOUT_REPEAT
         self.gva_layers = 0
+        self.gdn_qk_contiguous = False
         self.forward_compile = compile_preference(device, os.environ.get("PPLX_COMPILE"))
         self.compile_min_tokens = compile_min_tokens(self.forward_compile)
         self.compile_median = compile_median(self.forward_compile)
@@ -268,6 +271,7 @@ class PplxExecutor:
         if self.flashinfer_status == "bound" and self.gdn_prefill == "flashinfer":
             self.gva_layers = install_gva_prefill(language_model)
             self.gdn_layout = GDN_LAYOUT_GVA
+            self.gdn_qk_contiguous = True
         if self.forward_compile != "default":
             install_compiled_forward(language_model, self.forward_compile)
             warmup_compiled_forward(self.model.backbone, device, self.forward_compile)

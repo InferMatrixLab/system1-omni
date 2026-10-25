@@ -23,6 +23,7 @@ from models.pplx_decider.gdn import (
     require_bound_linear_attention,
     GDN_LAYOUT_GVA,
     GDN_USE_CP,
+    pack_qk_for_l2norm,
     cu_seqlens_key,
     cp_heuristic_matches,
     gva_gated_delta_forward,
@@ -182,6 +183,30 @@ def test_use_cp_stays_false_after_the_auto_miss():
     assert not cp_heuristic_matches(48, 132, "NVIDIA GeForce RTX 4090")
     with pytest.raises(ValueError, match="positive"):
         cp_heuristic_matches(0, 132, "NVIDIA L20X")
+
+
+def test_unrepeated_qk_are_packed_before_the_l2norm_view():
+    import inspect
+
+    class Split:
+        def __init__(self):
+            self.packed = False
+
+        def contiguous(self):
+            packed = Split()
+            packed.packed = True
+            return packed
+
+        def view(self, *shape):
+            if not self.packed:
+                raise RuntimeError("view size is not compatible")
+            return ("view", shape)
+
+    query, key = pack_qk_for_l2norm(Split(), Split())
+    assert query.view(-1, 128) == ("view", (-1, 128))
+    assert key.view(-1, 128) == ("view", (-1, 128))
+    source = inspect.getsource(flashinfer_chunk_gated_delta_rule)
+    assert source.index("pack_qk_for_l2norm(q, k)") < source.index("l2norm_fwd(q)")
 
 
 def test_gva_prefill_skips_the_q_repeat_on_48_linear_layers():

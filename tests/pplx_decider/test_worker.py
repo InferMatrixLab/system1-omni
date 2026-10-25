@@ -230,6 +230,7 @@ def test_http_health_and_decision():
         assert health["gdn_cp_heuristic"] is None
         assert health["gdn_layout"] is None
         assert health["gva_layers"] is None
+        assert health["gdn_qk_contiguous"] is None
         assert "gdn_state_slots" not in health
         assert health["compute_capability"] is None
         assert health["gpu_name"] is None
@@ -275,6 +276,7 @@ def test_http_health_and_decision():
         assert health["gdn_cp_heuristic"] is None
         assert health["gdn_layout"] is None
         assert health["gva_layers"] is None
+        assert health["gdn_qk_contiguous"] is None
         assert "gdn_state_slots" not in health
         server.executor.rms_norm = "fla-long"
         server.executor.fused_rms_norm_layers = 129
@@ -296,6 +298,7 @@ def test_http_health_and_decision():
         server.executor.gdn_cp_heuristic = None
         server.executor.gdn_layout = "gva"
         server.executor.gva_layers = 48
+        server.executor.gdn_qk_contiguous = True
         conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
         conn.request("GET", "/health")
         health = json.loads(conn.getresponse().read())
@@ -307,6 +310,7 @@ def test_http_health_and_decision():
         assert health["gdn_cp_heuristic"] is None
         assert health["gdn_layout"] == "gva"
         assert health["gva_layers"] == 48
+        assert health["gdn_qk_contiguous"] is True
         assert "gdn_state_slots" not in health
         assert health["compute_capability"] == "9.0"
         assert health["gpu_name"] == "NVIDIA L20X"
