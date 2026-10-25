@@ -93,8 +93,10 @@ remeasure of head `f968e576` on a lab GPU labeled L20X: warmup 5, concurrency
 `causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`,
 `linear_attention=fla-chunk`, and `compute_capability=9.0`. Against run1,
 p50 is −4.700 ms (−4.76%) and p95 is −41.002 ms (−12.02%). An earlier paste
-of 98.037 / 302.569 is not this primary. The FlashInfer install candidate
-has no sample. Both measured runs stay in this L20X group and do not enter
+of 98.037 / 302.569 is not this primary. All-sequence FlashInfer
+`3c72f02` measured 231/231, p50 88.808 ms, p95 300.751 ms (p50 −5.60%, p95
++0.18%) and failed the gate that both percentiles must improve. It is not
+the primary. Both kept measurements stay in this L20X group and do not enter
 the H800 table above. Ready is not limited to capability 9.0.
 
 Image replacement, repeated-image/cache workloads and higher
