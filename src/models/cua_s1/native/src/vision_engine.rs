@@ -26,6 +26,7 @@ pub struct VisionEngine {
     letters: Vec<f32>,
     device_features: bool,
     prefix_mode: prefix::Mode,
+    prefix_storage: Option<crate::model::PrefixState>,
 }
 
 pub struct Readout {
@@ -86,6 +87,7 @@ impl VisionEngine {
             letters,
             device_features,
             prefix_mode,
+            prefix_storage: None,
         })
     }
 
@@ -221,6 +223,7 @@ impl VisionEngine {
                     prepared,
                     &features,
                     self.prefix_mode,
+                    &mut self.prefix_storage,
                 )
             } else if self.device_features {
                 let features = self.vision.forward_device(&prepared.image)?;

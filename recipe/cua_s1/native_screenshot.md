@@ -112,16 +112,34 @@ export CUA_S1_GRAPH=0 CUA_S1_DEVICE_FEATURES=0
 The planner compares prepared token IDs and all three position axes, rounds the
 common prefix down to 64 tokens, and leaves a nonempty suffix for each question.
 It captures attention K/V, GDN recurrent state and convolution history once, then
-continues each suffix independently in request order. The snapshot is released
-within that request; even a repeated screenshot is recomputed on the next call.
-One question, or less than 64 shared tokens, uses complete fixed passes.
+continues each suffix independently in request order. The engine retains one
+snapshot allocation, growing it when a larger shared prefix needs capacity and
+freeing it with the engine. Every shared request captures fresh contents before
+reading them; a repeated or changed screenshot is always recomputed. One question,
+or less than 64 shared tokens, uses complete fixed passes and never reads a
+previous snapshot. Retained capacity is additional device memory, separate from
+the vision-cache budget.
 
 Both opt-in modes require host features and language Graph off; vision Graph
 remains independently selectable. They keep the existing prompt, CPU letter head,
 answer order and usage accounting. Fixed GEMMs can round differently from default
 execution: compare `shared` with `fixed` for continuation parity, and separately
 report probability drift/decision changes against `off`. No automatic mode or
-cross-request cache is included.
+cross-request content cache is included. Fixed algorithms still use reference
+M=64; the experimental M=256 profile is not part of this implementation.
+
+On one RTX 4090 (SM8.9), a matched eight-payload synthetic HTTP comparison with
+vision cache 8 entries/1024 MiB measured shared M64 p50/p95 149.213/223.530 ms
+before allocation reuse and 138.404/214.262 ms after it. All response bytes
+matched; sampled process maxima were 10282/10288 MiB. Each side excluded an
+8-request growth pass, an 8-request all-shape stabilization pass and 5 warmups,
+then measured 3 rounds of 8 requests, concurrency 1. The clock includes full
+HTTP response parsing and schema validation. The ordinary off control was
+118.804/275.748 ms, so this result does not justify enabling shared mode by default.
+Source pins, raw samples, exclusions and reproduction inputs are in the
+[follow-up qualification](https://github.com/Levius-Fubuki/system1-omni/releases/download/cua-mm-qualification-20261025/cua-mm-followup-qualification-20261025.tar.gz).
+These measurements precede the documentation update; the tested runtime sources
+are byte-identical. Other GPUs and general GUI task success remain unverified.
 
 CPU control/planner tests run in the ordinary Cua suite. On a reserved GPU with
 the four artifact variables above, run the exact model and recovery checks:

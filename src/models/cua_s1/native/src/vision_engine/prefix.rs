@@ -89,6 +89,7 @@ pub(super) fn execute(
     prepared: &PreparedRequest,
     features: &[bf16],
     mode: Mode,
+    storage: &mut Option<PrefixState>,
 ) -> Result<Vec<Vec<f32>>> {
     // PreparedRequest is public. Reject malformed layouts before planning or
     // slicing; readout_window validates token values and window positions.
@@ -127,9 +128,13 @@ pub(super) fn execute(
     } else {
         0
     };
-    // The snapshot belongs to this request only; a changed screenshot can never hit it.
+    // Reuse allocation only. Every request captures fresh contents, and a
+    // request without a common prefix must not read the retained snapshot.
     let mut state = if shared > 0 {
-        Some(model.alloc_prefix(shared)?)
+        if storage.as_ref().is_none_or(|s| s.capacity() < shared) {
+            *storage = Some(model.alloc_prefix(shared)?);
+        }
+        storage.as_mut()
     } else {
         None
     };
@@ -154,7 +159,7 @@ pub(super) fn execute(
                 p,
                 features,
                 shared..p.token_ids.len(),
-                state.as_ref(),
+                state.as_deref(),
                 None,
                 true,
             )?;

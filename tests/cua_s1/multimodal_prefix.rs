@@ -35,6 +35,7 @@ fn screenshot_prefix_matches_fixed_and_does_not_retain_previous_request_state() 
         (512, 256, 3, 4),
         (256, 512, 4, 8),
         (256, 256, 1, 2),
+        (256, 256, 8, 1),
     ] {
         let rgb: Vec<_> = (0..width * height * 3)
             .map(|i| ((i * 17 + seed * 31) % 251) as u8)
@@ -57,6 +58,7 @@ fn screenshot_prefix_matches_fixed_and_does_not_retain_previous_request_state() 
             &prepared,
             &features,
             prefix::Mode::Fixed,
+            &mut None,
         )
         .unwrap();
         let shared = prefix::execute(
@@ -65,6 +67,7 @@ fn screenshot_prefix_matches_fixed_and_does_not_retain_previous_request_state() 
             &prepared,
             &features,
             prefix::Mode::Shared,
+            &mut engine.prefix_storage,
         )
         .unwrap();
         assert_eq!(

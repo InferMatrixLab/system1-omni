@@ -165,8 +165,10 @@ The historical cumulative A800 investigation and frozen-corpus results are recor
 The screenshot worker optionally shares a request's exact token/3D-position
 prefix with `CUA_S1_MM_PREFIX=shared`. The `fixed` control uses independent full
 prompts with the same fixed GEMMs; unset/`off` preserves default execution.
-Both modes reject language Graph and resident features at startup. Prefix state
-is request-local and branches execute serially. Prompt construction, the CPU
+Both modes reject language Graph and resident features at startup. Prefix contents
+are request-local and branches execute serially. One engine-owned snapshot storage
+slot grows as needed; each shared request recaptures it before use. Requests with
+no shared prefix ignore the retained contents. Prompt construction, the CPU
 letter head, answer order and token accounting are unchanged. Fixed versus default
 rounding is a separate comparison from shared-versus-fixed continuation parity.
 See the [recipe](../../../recipe/cua_s1/native_screenshot.md#request-local-language-prefix-reuse).
