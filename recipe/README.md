@@ -40,6 +40,10 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   and compare it with the reference.
 - [CLM behind the frontend](clm/README.md): run CLM's own server behind the frontend on
   CPU with a stub encoder, and what the response comparison has to allow for.
+- [pplx-decider reference worker](pplx_decider/README.md): pin
+  perplexity-ai/pplx-decider-v1.1-27b, serve `choice`/`noul`/`score` through
+  the checkpoint runtime. Head `1ba07d1` has a reported L20X primary.
+  Later heads have no measured sample.
 - [D3 reference worker](d3/reference.md): download the pinned vllm-sr/d3 package,
   verify its runtime manifest, and serve `choice`/`noul`/`score` decisions over
   text, image and video state through the Python worker and the Rust frontend

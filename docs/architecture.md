@@ -27,6 +27,39 @@ per loaded executor. The [Decider native worker](../recipe/decider/README.md)
 also uses this runtime and can opt into outstanding-request and processed-token
 budgets plus HTTP request deadlines. Shared processing orchestration,
 cross-request batch assembly, compatibility grouping and dynamic batching are planned.
+The pplx-decider reference worker runs the checkpoint's own loader instead of
+this shared Qwen executor: the checkpoint's full-attention layers are
+noncausal, and the language kernels in `src/backends/cuda/qwen3_5/attention.cu`
+are causal. Its readout is a separate 255-row tensor. After that load, the
+worker marks those full-attention modules noncausal and omits the explicit
+SDPA mask when the padding mask is all true. Linear-attention chunk prefill
+on the lab L20X-labeled GPU uses FLA 0.5.2 plus causal_conv1d, including
+when that GPU reports capability 8.9. Capability 9.0 uses all-sequence FlashInfer when
+`flashinfer-python` 0.6.16.post3 imports. The kept primary rotates 48
+`cu_seqlens` buffers per device and length, passes `use_cp` false,
+skips the q/k repeat, and packs q and k before FLA's L2-norm view.
+`3ecdf5a` crashed in warmup on the unpacked view. `801ef7b` fused
+the 48 linear gated RMSNorms and missed the median, so that kernel
+stays off. `2bbbe4e` replaced `silu(gate) * up` with FLA `swiglu_fwd`
+and the owner closeout rejected it (p50 97.613 ms, p95 292.795 ms),
+so that kernel stays off. Gate and up GEMMs stay separate. Residual
+RMSNorm and the gated output norm stay eager. An unknown
+`PPLX_GDN_PREFILL` fails closed on every device, including capability
+8.9.
+`use_cp=auto` on `a6f4d9a` missed both percentiles.
+Always-on fusion `3afb472` and the 512-token
+gate `705ae089` both missed the median.
+FlashInfer allocates its own state workspace. The 48-slot state
+ring `17a7b120` missed the gate.
+`PPLX_GDN_PREFILL=fla` reproduces the prior `f968e576` chunk.
+`PPLX_GDN_PREFILL=short` is the rejected one-sequence ≤256
+dispatch. Capability 8.9, and capability 9.0 without that package, stay
+ready on FLA chunk. SDPA stays on the checkpoint order.
+`PPLX_SDPA=cudnn-first` and `PPLX_MLP=fused-gate-up` are refused.
+The forward stays eager. `PPLX_COMPILE=dynamic` and
+`PPLX_COMPILE=dynamic-tail` are rejected opt-ins. Ready accepts the
+FLA chunk and either FlashInfer dispatch. CuteDSL and CUDA graphs are
+not selected.
 
 Cua-S1 and Open-Jev compute their decision heads on the CPU after downloading
 the final hidden state. Decider projects its selected LM-head rows on CUDA.
