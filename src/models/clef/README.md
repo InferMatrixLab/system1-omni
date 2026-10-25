@@ -168,26 +168,29 @@ chunk and still becomes ready. Startup does not require the name
 `flashinfer+fla+causal_conv1d` or `fla+causal_conv1d`, matching the bind.
 `torch_chunk_gated_delta_rule` and `F.conv1d` are not served.
 
-Operator-reported Public231 C1 of worker
-`594528a9f9c1ca38ce0dbb58a549191dfbde5bf3` on the L20X-labeled lab host:
-231/231, p50 164.969 ms, p95 216.755 ms, `/health` `linear_attention`
-`fla+causal_conv1d`. Against `9030065` run1: Δp50 −33.35% (−82.5 ms),
-Δp95 −47.52% (−196.3 ms). Not re-run here. Warmup, clock, manifest hash,
-driver, and CUDA version were not restated in that paste. Answer parity
-was not reported. The measured bind is the FLA chunk.
+Operator-reported Public231 C1 remeasure of worker
+`594528a9f9c1ca38ce0dbb58a549191dfbde5bf3` on the L20X-labeled lab host.
+The paste states warmup 5, concurrency 1, stock Public231 with
+`thinking.enabled` false, and metric `successful_latency`. 231/231, p50
+164.969 ms, p95 216.755 ms, `/health` `linear_attention`
+`fla+causal_conv1d`. Against `9030065` run1: Δp50 −82.549 ms (−33.35%),
+Δp95 −196.270 ms (−47.52%). Not re-run here. The paste does not restate
+the clock name, manifest hash, driver, or CUDA version. Answer parity
+was not reported. The measured bind is the FLA chunk. This pair is the
+primary a later tip has to beat.
 
 | Id | Change | Expected effect | Measured result |
 | --- | --- | --- | --- |
 | H1 | One `encode_record` per request, then the pinned forward. The handler does not tokenize the schema again before that encode. | Removes a second BPE pass from the critical path. Prefill and the joint head still dominate. | Included in HEAD `9030065`. Isolated delta unknown |
 | H2 | Fuse the joint head's per-question Python loop. | Fewer small launches after prefill. Needs a forked head and numerical parity against the pinned module. | Not implemented. No measured H200 delta |
 | H3 | `torch.compile` or CUDA graphs on the Qwen3.5 backbone. | Uncertain on the linear-attention layers. | Not implemented. No measured H200 delta |
-| H4 | Bind `flash-linear-attention` 0.5.2 and `causal-conv1d` >= 1.5 before the Qwen3.5 layers copy the chunk global. Use FlashInfer GDN prefill 0.6.16.post3 with `use_cp` false when the reported capability major is 9, 10, or 12 and the package loads. Reported 8.9, including nvidia-smi name `NVIDIA L20X`, stays on the FLA chunk and still starts. Startup is not ready on `torch_chunk` or `F.conv1d`. vLLM CuteDSL, CUDA graphs, and `torch.compile` are not used. | Replaces the PyTorch chunk loop. `/health` names the bind that started. | Tip `594528a9`, L20X-labeled host, `/health` `fla+causal_conv1d`: p50 164.969 ms, p95 216.755 ms, 231/231. Versus `9030065` run1: Δp50 −33.35% (−82.5 ms), Δp95 −47.52% (−196.3 ms) |
+| H4 | Bind `flash-linear-attention` 0.5.2 and `causal-conv1d` >= 1.5 before the Qwen3.5 layers copy the chunk global. Use FlashInfer GDN prefill 0.6.16.post3 with `use_cp` false when the reported capability major is 9, 10, or 12 and the package loads. Reported 8.9, including nvidia-smi name `NVIDIA L20X`, stays on the FLA chunk and still starts. Startup is not ready on `torch_chunk` or `F.conv1d`. vLLM CuteDSL, CUDA graphs, and `torch.compile` are not used. | Replaces the PyTorch chunk loop. `/health` names the bind that started. | Tip `594528a9`, L20X-labeled host, warmup 5, concurrency 1, stock Public231 with `thinking.enabled` false, metric `successful_latency`, `/health` `fla+causal_conv1d`: p50 164.969 ms, p95 216.755 ms, 231/231. Versus `9030065` run1: Δp50 −82.549 ms (−33.35%), Δp95 −196.270 ms (−47.52%). This is the primary |
 
 ## Status
 
 | Path | Clef-flash | Clef |
 | --- | --- | --- |
-| Text `choice` / `noul` / `score`, non-thinking prompt | Contract tested. `9030065` run1 p50 247.518 ms, p95 413.025 ms. Tip `594528a9` on the L20X-labeled host: p50 164.969 ms, p95 216.755 ms, 231/231, `/health` `fla+causal_conv1d`. Answer parity not checked | Same loader pin; both latency campaigns were flash only |
+| Text `choice` / `noul` / `score`, non-thinking prompt | Contract tested. `9030065` run1 p50 247.518 ms, p95 413.025 ms. Tip `594528a9` primary on the L20X-labeled host: p50 164.969 ms, p95 216.755 ms, 231/231, `/health` `fla+causal_conv1d`, Δp50 −82.549 ms, Δp95 −196.270 ms. Answer parity not checked | Same loader pin; both latency campaigns were flash only |
 | Image and video | Rejected | Rejected |
 | Native CUDA | Not implemented | Not implemented |
 | Workers AI proxy | Out of scope | Out of scope |

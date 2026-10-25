@@ -173,19 +173,28 @@ Those three rounds are the baseline at HEAD `9030065` on the lab host
 
 ## Public231 C1 of tip `594528a9`
 
-Operator-reported on that same L20X-labeled lab host. Not re-run in the
-environment that edited this recipe. Worker
-`594528a9f9c1ca38ce0dbb58a549191dfbde5bf3`. `/health` `linear_attention`
-was `fla+causal_conv1d`. Successful requests 231/231. p50 164.969 ms. p95
-216.755 ms. Against baseline `9030065` run1 (p50 247.518 ms, p95 413.025 ms):
-Δp50 −33.35% (−82.5 ms), Δp95 −47.52% (−196.3 ms). This run's bind is the
-FLA chunk, not FlashInfer. Answer parity was not part of the paste.
-Warmup count, clock name, manifest hash, driver, and CUDA version were
-not restated in the paste, so they are not copied from the `9030065`
-campaign.
+Operator-reported remeasure on that same L20X-labeled lab host. Not re-run
+in the environment that edited this recipe. This paste is the primary a
+later tip has to beat.
+
+Worker `594528a9f9c1ca38ce0dbb58a549191dfbde5bf3`. The paste states warmup
+5, concurrency 1, stock Public231 with `thinking.enabled` false, and metric
+`successful_latency`. `/health` `linear_attention` was `fla+causal_conv1d`.
+Successful requests 231/231. p50 164.969 ms. p95 216.755 ms. Against
+baseline `9030065` run1 (p50 247.518 ms, p95 413.025 ms, 231/231): Δp50
+−82.549 ms (−33.35%), Δp95 −196.270 ms (−47.52%). This run's bind is the
+FLA chunk, not FlashInfer.
+
+The paste does not restate the clock name, the manifest SHA-256, the
+driver, the CUDA version, or answer parity. Those fields are not copied
+from the `9030065` rounds. Those rounds used `public231-no-thinking.jsonl`
+because that HEAD returned HTTP 422 on `thinking`. This remeasure names
+stock Public231 with `thinking.enabled` false. Neither paste includes a
+`sha256sum` of the file that was sent.
 
 This code tip stays. A later prefill change is a new tip and needs its own
-Public231 C1 paste before another delta is claimed.
+Public231 C1 paste before another delta is claimed. Compare that paste
+with p50 164.969 ms and p95 216.755 ms.
 
 ## Next code tip on the L20X-labeled host
 
@@ -197,6 +206,10 @@ bind is `flashinfer+fla+causal_conv1d`. Record the `/health` string the
 process returns. The standalone GDN timings in
 [benchmarks/gdn/README.md](../../benchmarks/gdn/README.md) are a different
 experiment and are not a Clef HTTP result.
+
+The primary to beat is the `594528a9` remeasure: p50 164.969 ms, p95
+216.755 ms, 231/231, `/health` `fla+causal_conv1d`. A new tip needs its
+own paste against those two figures.
 
 This is the operator checklist for the next concurrency-1 latency
 measurement of the flash worker. It uses the existing
@@ -227,11 +240,13 @@ in a commit.
    The canonical task hash
    `dc3995d8ae1e2fc8e81ce38431add509eb8bb39b85aadfd0c7c32079382dde51`
    is a different encoding and must not be substituted. Check the file
-   with `sha256sum` before `validate`. The recorded campaign above did not
-   use that byte string: the `thinking` key had been removed, and the
-   resulting file hash was not reported. Record `sha256sum` of whichever
-   file the next run actually sends. Keep `thinking` when its `enabled`
-   value is false; stripping it is no longer required for admission.
+   with `sha256sum` before `validate`. The `9030065` rounds did not use
+   that byte string: the `thinking` key had been removed, and the resulting
+   file hash was not reported. The `594528a9` remeasure names stock
+   Public231 with `thinking.enabled` false and also does not report a file
+   hash. Record `sha256sum` of whichever file the next run actually sends.
+   Keep `thinking` when its `enabled` value is false; stripping it is no
+   longer required for admission.
 4. Install `benchmarks/requirements.txt` (`httpx==0.28.1`) into the client
    environment. The client and the worker may use different environments.
 5. Write a metadata JSON file. Required keys are `gpu`, `gpu_ids`,
@@ -287,18 +302,24 @@ in a commit.
    `post_to_body_json_and_schema_validation` clock. It is not the H800
    leaderboard clock. Record the `nvidia-smi` name, the printed capability,
    and `/health` `linear_attention` with the p50 and p95. Compare a new
-   code tip with the recorded tip `594528a9` only after that new tip has
-   its own paste. The `9030065` run1 figures remain the baseline of the
-   recorded comparison above.
+   code tip with the recorded primary, tip `594528a9` at p50 164.969 ms
+   and p95 216.755 ms, only after that new tip has its own paste. The
+   `9030065` run1 figures remain the baseline of that recorded comparison.
 
 ## What remains unverified
 
 Image and video inputs, native CUDA, and answer parity. The `9030065`
 rounds use metric `successful_latency` and clock
-`post_to_body_json_and_schema_validation`. The tip `594528a9` p50 and p95
-are the operator paste in the section above; this environment has no GPU
-and did not repeat either campaign. H1, one encode per request, is already
-inside the `9030065` baseline, so its isolated effect is unknown. The
-recorded win is the FLA chunk plus `causal_conv1d` on the reported-8.9
-host. FlashInfer on a reported major 9, 10, or 12 has no C1. A later code
-change is unmeasured until its own paste.
+`post_to_body_json_and_schema_validation`. The tip `594528a9` remeasure
+states metric `successful_latency`, warmup 5, concurrency 1, and stock
+Public231 with `thinking.enabled` false. It does not restate the clock
+name, manifest hash, driver, CUDA version, or answer parity. This
+environment has no GPU and did not repeat either campaign. H1, one encode
+per request, is already inside the `9030065` baseline, so its isolated
+effect is unknown. The recorded win, and the primary a later tip has to
+beat, is the FLA chunk plus `causal_conv1d` on the reported-8.9 host:
+p50 164.969 ms, p95 216.755 ms. FlashInfer on a reported major 9, 10, or
+12 has no C1. FlashInfer's GDN prefill does not dispatch when the reported
+major is 8, so this primary stays on the FLA chunk. Full attention is
+already Transformers SDPA at head dimension 256. No further kernel change
+is in this tree. A later code change is unmeasured until its own paste.
