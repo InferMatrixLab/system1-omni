@@ -19,7 +19,12 @@ from pathlib import Path
 from typing import Any
 
 from .attention import install_unpadded_full_attention, sdpa_preference
-from .compile_forward import compile_preference, install_dynamic_compile, warmup_dynamic_compile
+from .compile_forward import (
+    compile_min_tokens,
+    compile_preference,
+    install_compiled_forward,
+    warmup_compiled_forward,
+)
 from .mlp import mlp_preference
 from .contract import (
     ATTENTION_MODE,
@@ -169,9 +174,10 @@ class PplxExecutor:
         # Both measured FlashInfer policies missed the gate, so the default
         # stays on FLA chunk. PPLX_GDN_PREFILL=short opts into the rejected
         # length dispatch. cuDNN-first SDPA and the fused gate-up GEMM also
-        # missed the gate and are not selectable. CUDA compiles the
-        # language-model forward unless PPLX_COMPILE=default. A lab GPU
-        # named NVIDIA L20X is accepted at capability 8.9 or 9.0.
+        # missed the gate and are not selectable. Always-on dynamic compile
+        # cut p95 and raised p50, so CUDA compiles only sequences longer
+        # than 512 tokens unless PPLX_COMPILE=default. A lab GPU named
+        # NVIDIA L20X is accepted at capability 8.9 or 9.0.
         cuda = device == "cuda"
         self.causal_conv1d_version = prepare_causal_conv1d(required=cuda)
         self.fla_version = prepare_fla(required=cuda)
@@ -184,6 +190,7 @@ class PplxExecutor:
         self.mlp = mlp_preference(device, os.environ.get("PPLX_MLP"))
         self.fused_gate_up_layers = 0
         self.forward_compile = compile_preference(device, os.environ.get("PPLX_COMPILE"))
+        self.compile_min_tokens = compile_min_tokens(self.forward_compile)
         if cuda:
             import torch
 
@@ -227,9 +234,9 @@ class PplxExecutor:
         # full-attention modules and the noncausal pre-hook.
         language_model = self.model.backbone.language_model
         self.unpadded_full_attention_layers = install_unpadded_full_attention(language_model)
-        if self.forward_compile == "dynamic":
-            install_dynamic_compile(language_model)
-            warmup_dynamic_compile(self.model.backbone, device)
+        if self.forward_compile != "default":
+            install_compiled_forward(language_model, self.forward_compile)
+            warmup_compiled_forward(self.model.backbone, device, self.forward_compile)
 
     def evaluate(self, request: Request) -> dict[str, Any]:
         import torch

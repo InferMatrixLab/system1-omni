@@ -205,6 +205,7 @@ def test_http_health_and_decision():
         assert health["mlp"] is None
         assert health["fused_gate_up_layers"] is None
         assert health["compile"] is None
+        assert health["compile_min_tokens"] is None
         server.executor.unpadded_full_attention_layers = 16
         conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
         conn.request("GET", "/health")
@@ -265,12 +266,23 @@ def test_http_health_and_decision():
         assert health["mlp"] == "fused-gate-up"
         assert health["fused_gate_up_layers"] == 64
         assert health["compile"] is None
+        assert health["compile_min_tokens"] is None
         server.executor.forward_compile = "dynamic"
+        server.executor.compile_min_tokens = 0
         conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
         conn.request("GET", "/health")
         health = json.loads(conn.getresponse().read())
         conn.close()
         assert health["compile"] == "dynamic"
+        assert health["compile_min_tokens"] == 0
+        server.executor.forward_compile = "dynamic-tail"
+        server.executor.compile_min_tokens = 512
+        conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        conn.request("GET", "/health")
+        health = json.loads(conn.getresponse().read())
+        conn.close()
+        assert health["compile"] == "dynamic-tail"
+        assert health["compile_min_tokens"] == 512
         assert "gdn" not in health
         status, body = post(
             server,

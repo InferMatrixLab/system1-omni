@@ -85,9 +85,11 @@ explicit full-attention mask so Transformers 5.17 SDPA can use its
 grouped-query kernel (`head_dim` 256). Any false padding bit keeps
 `padding[:, None, None, :].bool()`. The linear-attention mask is unchanged. SDPA stays on the checkpoint
 order, which leaves cuDNN off. `PPLX_SDPA=cudnn-first` and
-`PPLX_MLP=fused-gate-up` are refused. CUDA startup compiles the
-language-model forward with a dynamic sequence length unless
-`PPLX_COMPILE=default`, and warms that compile before it is ready.
+`PPLX_MLP=fused-gate-up` are refused. Always-on dynamic compile cut p95
+and raised p50. CUDA startup compiles the language-model forward only
+when the sequence is longer than 512 tokens unless
+`PPLX_COMPILE=default`, and warms lengths 768, 1024, and 2048 before it
+is ready. `PPLX_COMPILE=dynamic` is the rejected always-on compile.
 Inductor is not bit-exact with eager. CUDA startup requires
 `causal-conv1d` 1.7.0, imported before Qwen3.5 modeling, and refuses the
 `F.conv1d` fallback. The build keeps an sm_90 cubin and an sm_89 cubin. It
@@ -114,8 +116,11 @@ and is not the primary. cuDNN-first SDPA on `0dcaa0ac` missed the gate
 (p50 138.501 ms, p95 332.859 ms, `choice_acc=0.9065`, `noul_acc=0.8784`,
 `score_mae=0.2050`) and is not the primary. Fused gate-up on `8b4ee326`
 missed the gate (p50 102.437 ms, p95 304.970 ms, `choice_acc=0.9065`,
-`noul_acc=0.8784`, `score_mae=0.2027`) and is not the primary. The
-dynamic-compile candidate has no sample.
+`noul_acc=0.8784`, `score_mae=0.2027`) and is not the primary.
+Always-on dynamic compile on `e36b32ed` missed the both-percentiles gate
+(p50 97.751 ms, p95 263.124 ms, `choice_acc≈0.906`, `noul_acc≈0.878`,
+`score_mae≈0.203`) and is not the primary. p95 improved. The
+long-sequence compile candidate has no sample.
 
 The shared Qwen3.5 CUDA language kernels in this repository are causal
 (`src/backends/cuda/qwen3_5/attention.cu`). Their vision-operator tests mention
@@ -127,8 +132,8 @@ backend. A native executor is not in this change.
 | Path | State |
 | --- | --- |
 | CPU contract and HTTP rejection | Implemented; tests do not need weights |
-| CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, checkpoint SDPA order, separate gate and up GEMMs, dynamic `torch.compile` of the language-model forward unless `PPLX_COMPILE=default`, `causal-conv1d` 1.7.0 with sm_90 and sm_89 cubins, and FLA 0.5.2 chunk. An installed FlashInfer pin is held unless `PPLX_GDN_PREFILL=short`. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
-| Public231 concurrency 1 | Kept primary is the `f968e576` remeasure on the lab L20X-labeled GPU, capability 9.0, `fla-chunk`, `flashinfer` null: 231/231, p50 94.077 ms, p95 300.200 ms. Versus `1ba07d1` run1 98.777 / 341.202: p50 −4.76%, p95 −12.02%. All-sequence FlashInfer `3c72f02` failed the gate: p50 88.808 ms, p95 300.751 ms. Short-sequence FlashInfer `a50b9aa` failed the gate: p50 95.446 ms, p95 300.871 ms. cuDNN-first SDPA `0dcaa0ac` failed the gate: p50 138.501 ms, p95 332.859 ms. Fused gate-up `8b4ee326` failed the gate: p50 102.437 ms, p95 304.970 ms. None of those is the primary |
+| CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, checkpoint SDPA order, separate gate and up GEMMs, dynamic `torch.compile` of language-model forwards longer than 512 tokens unless `PPLX_COMPILE=default`, `causal-conv1d` 1.7.0 with sm_90 and sm_89 cubins, and FLA 0.5.2 chunk. An installed FlashInfer pin is held unless `PPLX_GDN_PREFILL=short`. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
+| Public231 concurrency 1 | Kept primary is the `f968e576` remeasure on the lab L20X-labeled GPU, capability 9.0, `fla-chunk`, `flashinfer` null: 231/231, p50 94.077 ms, p95 300.200 ms. Versus `1ba07d1` run1 98.777 / 341.202: p50 −4.76%, p95 −12.02%. All-sequence FlashInfer `3c72f02` failed the gate: p50 88.808 ms, p95 300.751 ms. Short-sequence FlashInfer `a50b9aa` failed the gate: p50 95.446 ms, p95 300.871 ms. cuDNN-first SDPA `0dcaa0ac` failed the gate: p50 138.501 ms, p95 332.859 ms. Fused gate-up `8b4ee326` failed the gate: p50 102.437 ms, p95 304.970 ms. Always-on dynamic compile `e36b32ed` failed the both-percentiles gate: p50 97.751 ms, p95 263.124 ms. None of those is the primary. The long-sequence compile candidate has no sample |
 | CPU `device="cpu"` | The checkpoint switches the backbone to float32. Not the measured path |
 | Images | Admitted. No image parity run |
 | Apple GPU | Not supported |

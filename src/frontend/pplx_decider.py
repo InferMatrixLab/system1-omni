@@ -84,6 +84,7 @@ class Handler(BaseHTTPRequestHandler):
         body["mlp"] = getattr(executor, "mlp", None)
         body["fused_gate_up_layers"] = getattr(executor, "fused_gate_up_layers", None)
         body["compile"] = getattr(executor, "forward_compile", None)
+        body["compile_min_tokens"] = getattr(executor, "compile_min_tokens", None)
         self.send_json(200, body)
 
     def do_POST(self):
@@ -152,7 +153,7 @@ def main(argv=None):
     try:
         server = WorkerServer((args.host, args.port), executor)
         LOG.info(
-            "ready model=%s device=%s gpu=%s capability=%s attention=%s sdpa=%s mlp=%s compile=%s fused_gate_up_layers=%s unpadded_full_attention_layers=%s causal_conv1d=%s fla=%s flashinfer=%s flashinfer_status=%s linear_attention=%s bind=%s:%s",
+            "ready model=%s device=%s gpu=%s capability=%s attention=%s sdpa=%s mlp=%s compile=%s compile_min_tokens=%s fused_gate_up_layers=%s unpadded_full_attention_layers=%s causal_conv1d=%s fla=%s flashinfer=%s flashinfer_status=%s linear_attention=%s bind=%s:%s",
             executor.model_name,
             args.device,
             executor.gpu_name,
@@ -161,6 +162,7 @@ def main(argv=None):
             executor.sdpa,
             executor.mlp,
             executor.forward_compile,
+            executor.compile_min_tokens,
             executor.fused_gate_up_layers,
             executor.unpadded_full_attention_layers,
             executor.causal_conv1d_version,
