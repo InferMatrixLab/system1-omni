@@ -1144,6 +1144,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "omni-clef"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "http-body-util",
+ "omni-runtime",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "omni-clm"
 version = "0.1.0"
 dependencies = [

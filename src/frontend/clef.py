@@ -1,137 +1,65 @@
-"""Python reference worker for Cloudflare Clef and Clef-flash.
+"""Launch the Rust Clef server.
 
-The Rust frontend remains the public transport layer. This worker owns HTTP
-lifecycle and request orchestration. Wire admission lives in
-``models.clef.protocol``, question and token admission in
-``models.clef.preprocess``, and the pinned joint-schema checkpoint in
-``models.clef.engine``.
+HTTP used to be ``ThreadingHTTPServer`` in this module: one new thread per
+request, and the first CUDA call on that thread paid the context-init tax.
+The public server is now the ``omni-clef`` binary. It admits through
+``omni-runtime`` and scores on one persistent executor process.
 
-Over-long state is rejected. The checkpoint encoder would otherwise drop the
-tail of the state without an error. Image and video fields are rejected;
-this slice does not serve them.
+Running this module replaces the process with that binary. It does not
+bind a port and it does not fall back to a Python HTTP server. ``decide``
+remains importable for the executor and for contract tests.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
-import logging
-import socket
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+import os
+import shutil
+import sys
+from pathlib import Path
 
-from models.clef.engine import DEFAULT_VARIANT, FLA_PREFILL, GDN_PREFILL, VARIANTS, ClefExecutor
-from models.clef.preprocess import validate_questions
-from models.clef.protocol import MAX_BODY, RequestError, parse_body, parse_request
+from models.clef.engine import DEFAULT_VARIANT, FLA_PREFILL, GDN_PREFILL, VARIANTS
+from models.clef.worker import decide
 
-LOG = logging.getLogger(__name__)
+__all__ = ["decide", "main"]
 
-
-def decide(raw: bytes, executor: Any) -> dict[str, Any]:
-    """Admit one complete text request and run it if it fits intact."""
-
-    request = parse_request(parse_body(raw))
-    validate_questions(request)
-    return executor.serve(request.payload)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_MISSING = (
+    "omni-clef is not built. From the repository root run "
+    "`cargo build --release --locked -p omni-clef` and retry. "
+    "This launcher does not start a Python HTTP server."
+)
 
 
-class WorkerServer(ThreadingHTTPServer):
-    daemon_threads = False
+def candidate_binaries() -> list[Path]:
+    """In-tree build outputs, release before debug."""
 
-    def __init__(self, address, executor: Any):
-        self.executor = executor
-        self.inference_lock = threading.Lock()
-        self._executor_closed = False
-        super().__init__(address, Handler)
-
-    def server_close(self):
-        super().server_close()
-        if not self._executor_closed:
-            self.executor.close()
-            self._executor_closed = True
+    return [
+        _REPO_ROOT / "target" / "release" / "omni-clef",
+        _REPO_ROOT / "target" / "debug" / "omni-clef",
+    ]
 
 
-class Handler(BaseHTTPRequestHandler):
-    def setup(self):
-        super().setup()
-        self.connection.settimeout(15)
-
-    def log_message(self, format, *args):
-        # Do not log paths, prompts, or arbitrary request headers.
-        pass
-
-    def send_json(self, status: int, value: dict):
-        raw = json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
-        try:
-            self.wfile.write(raw)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-
-    def _send_request_error(self, exc: RequestError):
-        if exc.body is not None:
-            self.send_json(exc.status, exc.body)
-        else:
-            self.send_json(exc.status, {"detail": str(exc)})
-
-    def do_GET(self):
-        if self.path == "/health":
-            self.send_json(200, self.server.executor.health())
-        else:
-            self.send_json(404, {"detail": "unknown route"})
-
-    def do_POST(self):
-        if self.path != "/v1/systemone":
-            self.send_json(404, {"detail": "unknown route"})
-            return
-        if self.headers.get("Transfer-Encoding"):
-            self.send_json(411, {"detail": "Content-Length is required; chunked requests are unsupported"})
-            return
-        lengths = self.headers.get_all("Content-Length", [])
-        if len(lengths) != 1:
-            self.send_json(411, {"detail": "one Content-Length is required"})
-            return
-        try:
-            length = int(lengths[0])
-        except ValueError:
-            self.send_json(400, {"detail": "invalid Content-Length"})
-            return
-        if length < 0 or length > MAX_BODY:
-            self.send_json(413, {"detail": "request exceeds the 8 MiB body limit"})
-            return
-        if self.headers.get_content_type() != "application/json":
-            self.send_json(415, {"detail": "Content-Type must be application/json"})
-            return
-        try:
-            raw = self.rfile.read(length)
-        except (TimeoutError, socket.timeout):
-            self.send_json(408, {"detail": "request body timed out"})
-            return
-        except OSError:
-            return
-        if len(raw) != length:
-            self.send_json(400, {"detail": "incomplete body"})
-            return
-        if not self.server.inference_lock.acquire(blocking=False):
-            self.send_json(503, {"detail": "worker busy"})
-            return
-        try:
-            self.send_json(200, decide(raw, self.server.executor))
-        except RequestError as exc:
-            self._send_request_error(exc)
-        except Exception as exc:
-            LOG.error("clef inference failed: %s", type(exc).__name__)
-            self.send_json(500, {"detail": "inference failed"})
-        finally:
-            self.server.inference_lock.release()
+def find_binary() -> Path:
+    override = os.environ.get("OMNI_CLEF_BIN")
+    if override:
+        path = Path(override)
+        if not path.is_file():
+            raise SystemExit(f"OMNI_CLEF_BIN is not a file: {path}")
+        return path
+    for candidate in candidate_binaries():
+        if candidate.is_file():
+            return candidate
+    found = shutil.which("omni-clef")
+    if found:
+        return Path(found)
+    raise SystemExit(_MISSING)
 
 
-def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Exec the omni-clef Rust server for the pinned Clef snapshot."
+    )
     parser.add_argument("--model", required=True, help="snapshot directory of the pinned revision")
     parser.add_argument("--variant", default=DEFAULT_VARIANT, choices=sorted(VARIANTS))
     parser.add_argument("--device", default="cuda")
@@ -149,43 +77,28 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def listen(executor: Any, address: tuple[str, int]) -> WorkerServer:
-    """Bind only after one forward warmup succeeds.
-
-    A failure here leaves the port closed, so ``/health`` does not report
-    ready until CUDA init and one text forward have returned.
-    """
-
-    executor.warmup()
-    return WorkerServer(address, executor)
-
-
-def main(argv=None):
+def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
-    logging.basicConfig(level=logging.INFO)
-    executor = ClefExecutor(
+    binary = find_binary()
+    forwarded = [
+        str(binary),
+        "--model",
         args.model,
-        variant=args.variant,
-        device=args.device,
-        gdn_prefill=args.gdn_prefill,
-    )
-    server = None
+        "--variant",
+        args.variant,
+        "--device",
+        args.device,
+        "--gdn-prefill",
+        args.gdn_prefill,
+        "--host",
+        args.host,
+        "--port",
+        str(args.port),
+    ]
     try:
-        server = listen(executor, (args.host, args.port))
-        LOG.info(
-            "%s worker ready on %s:%s",
-            executor.variant.repo_id,
-            args.host,
-            args.port,
-        )
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        if server is not None:
-            server.server_close()
-        else:
-            executor.close()
+        os.execv(str(binary), forwarded)
+    except OSError as exc:
+        raise SystemExit(f"failed to start {binary}: {exc}") from exc
 
 
 if __name__ == "__main__":

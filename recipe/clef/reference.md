@@ -1,10 +1,12 @@
 # Clef reference worker
 
-Serve Cloudflare Clef-flash or Clef on `POST /v1/systemone` by loading the
-pinned snapshot's joint schema model. The contract, hashes and the
-unsupported image, video and native-CUDA paths are in the
-[model README](../../src/models/clef/README.md). Commands below run from the
-repository root.
+Serve Cloudflare Clef-flash or Clef on `POST /v1/systemone`. The HTTP server
+is the Rust binary `omni-clef`. It admits one request at a time and forwards
+the body to one Python executor process. That process loads the pinned
+snapshot's joint schema model and scores every request on its main thread.
+The contract, hashes, and the unsupported image, video, and native joint-head
+paths are in the [model README](../../src/models/clef/README.md). Commands
+below run from the repository root.
 
 Clef-flash is the bring-up variant: about 19.1 GB of safetensors versus
 about 55.0 GB for Clef. Both use the same text contract. The recorded
@@ -85,7 +87,8 @@ Use the directory that command prints as `<snapshot>`. Do not point the
 worker at a different revision; the hash gate refuses it.
 
 ```sh
-PYTHONPATH=src python -m frontend.clef \
+cargo build --release --locked -p omni-clef
+./target/release/omni-clef \
   --model <snapshot> \
   --variant clef-flash \
   --device cuda \
@@ -94,7 +97,11 @@ PYTHONPATH=src python -m frontend.clef \
   --port 8000
 ```
 
-The process runs one text forward, then binds. `GET
+`PYTHONPATH=src python -m frontend.clef` with the same flags execs that
+binary. It does not bind a Python HTTP server. If `omni-clef` is not built,
+the launcher exits before opening a port.
+
+The executor process runs one text forward, then `omni-clef` binds. `GET
 http://127.0.0.1:8000/health` is not served until that forward returns.
 It then returns `status: ready`, `variant: clef-flash`,
 `prompt_mode: non-thinking`, `modalities: ["text"]`,
@@ -139,6 +146,7 @@ loaded repo id.
 PYTHONPATH=src python -m pip install pytest
 PYTHONPATH=src python -m pytest tests/clef -q
 PYTHONPATH=src python -m compileall -q src/models/clef src/frontend/clef.py tests/clef
+cargo test --locked -p omni-clef
 ```
 
 To confirm the checked-in token fixture against a downloaded loader and
@@ -237,8 +245,10 @@ in a commit.
    capability it prints, including 8.9. Do not stop because the name is
    not `NVIDIA H200`, and do not stop because the capability is not 9.0.
    Do not report the run as H800 or as the Public231 leaderboard.
-2. Start `frontend.clef` as above, on loopback port 8000, variant
+2. Start `omni-clef` as above, on loopback port 8000, variant
    `clef-flash`, device `cuda`. Leave that process up for every traversal.
+   The recorded `9030065` and `594528a9` pastes used the previous Python
+   HTTP server. A paste for this server is a new tip.
    `GET /health` is absent until the startup forward returns, then must
    show `status` `ready`. The default `linear_attention` is
    `fla+causal_conv1d`. `flashinfer+fla+causal_conv1d` means the process
@@ -276,7 +286,7 @@ in a commit.
      "precision": "bfloat16",
      "model_revision": "Cloudflare/clef-flash@f0b7d3cd65296abfe459e6c228b618f5d8b26d2f",
      "runtime_revision": "<git rev-parse HEAD of this worker>",
-     "cache_policy": "one request at a time; no prefix cache; no CUDA graph; transformers cache left at its default",
+     "cache_policy": "one request at a time on the executor main thread; Rust FIFO admission; no prefix cache; no CUDA graph; transformers cache left at its default",
      "cuda_evidence": "nvidia-smi name NVIDIA L20X, compute capability as printed (8.9 on the lab host), while the worker was running with --device cuda. Copy /health linear_attention.",
      "reservation": "<allocation id>"
    }

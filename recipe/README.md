@@ -57,13 +57,15 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   five SystemOne question kinds (`choice`/`noul`/`score` plus the `span`/`set`
   extensions) through the Python worker and the Rust frontend on CPU FP32;
   or vllm-sr/Vela-2.0-0.8B at revision `326b01d8` behind its own 10-file gate.
-- [Clef reference worker](clef/reference.md): load pinned Clef-flash (9B) or
-  Clef (27B) and serve text `choice`/`noul`/`score`. Image, video and native
-  CUDA are not served. Operator-reported flash Public231 concurrency-1
-  timing on the L20X-labeled lab host is in the recipe. The primary is
-  tip `594528a9`: p50 164.969 ms, p95 216.755 ms, `/health`
+- [Clef reference worker](clef/reference.md): build `omni-clef`, load pinned
+  Clef-flash (9B) or Clef (27B), and serve text `choice`/`noul`/`score`.
+  The joint head stays in the checkpoint's Python module, on one persistent
+  executor thread. Image, video, and a native joint head are not served.
+  Operator-reported flash Public231 concurrency-1 timing on the L20X-labeled
+  lab host is the previous Python HTTP server. The primary is tip
+  `594528a9`: p50 164.969 ms, p95 216.755 ms, `/health`
   `fla+causal_conv1d`, versus `9030065` run1 p50 247.518 ms, p95 413.025 ms
-  (Δp50 −82.549 ms, Δp95 −196.270 ms).
+  (Δp50 −82.549 ms, Δp95 −196.270 ms). `omni-clef` has no C1 paste.
 
 - [LFM2.5-350M choice worker](lfm2/README.md): score text decisions with independent
   questions, hybrid cache branching and configurable candidate batches.
