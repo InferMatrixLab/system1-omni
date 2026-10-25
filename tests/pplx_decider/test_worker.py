@@ -209,19 +209,39 @@ def test_http_health_and_decision():
         assert health["unpadded_full_attention_layers"] == 16
         assert health["causal_conv1d"] is None
         assert health["fla"] is None
+        assert health["flashinfer"] is None
         assert health["linear_attention"] is None
+        assert health["compute_capability"] is None
+        assert health["gpu_name"] is None
         server.executor.causal_conv1d_version = "1.7.0"
         server.executor.fla_version = "0.5.2"
         server.executor.linear_attention = "fla-chunk"
+        server.executor.compute_capability = "8.9"
+        server.executor.gpu_name = "NVIDIA L20X"
         conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
         conn.request("GET", "/health")
         health = json.loads(conn.getresponse().read())
         conn.close()
+        assert health["status"] == "ready"
         assert health["causal_conv1d"] == "1.7.0"
         assert health["fla"] == "0.5.2"
+        assert health["flashinfer"] is None
         assert health["linear_attention"] == "fla-chunk"
+        assert health["compute_capability"] == "8.9"
+        assert health["gpu_name"] == "NVIDIA L20X"
+        server.executor.flashinfer_version = "0.6.16.post3"
+        server.executor.linear_attention = "flashinfer+fla+causal_conv1d"
+        server.executor.compute_capability = "9.0"
+        conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        conn.request("GET", "/health")
+        health = json.loads(conn.getresponse().read())
+        conn.close()
+        assert health["status"] == "ready"
+        assert health["flashinfer"] == "0.6.16.post3"
+        assert health["linear_attention"] == "flashinfer+fla+causal_conv1d"
+        assert health["compute_capability"] == "9.0"
+        assert health["gpu_name"] == "NVIDIA L20X"
         assert "gdn" not in health
-        assert "flashinfer" not in health
         status, body = post(
             server,
             {"model": "jev-latest", "state": "s", "questions": {"q": {"type": "noul"}}},

@@ -11,6 +11,7 @@ mask. That retarget does not change the hashed files.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import sys
 from pathlib import Path
@@ -32,7 +33,16 @@ from .contract import (
     Request,
 )
 from .conv import assert_qwen_conv_uses_package, prepare_causal_conv1d
-from .gdn import LINEAR_ATTENTION, assert_qwen_chunk_uses_fla, prepare_fla
+from .gdn import (
+    FLASHINFER_LINEAR_ATTENTION,
+    MODELING,
+    assert_qwen_chunk_uses_fla,
+    install_flashinfer_gdn_prefill,
+    prepare_fla,
+    prepare_flashinfer,
+    require_bound_linear_attention,
+    uses_flashinfer_prefill,
+)
 
 # SHA-256 of the files at REVISION, computed in this integration from the
 # public blobs. They match release-manifest.json except the manifest's own
@@ -153,18 +163,46 @@ class PplxExecutor:
         root = Path(checkpoint)
         verify_checkpoint(root)
         # Import conv and FLA before Qwen3.5 modeling freezes the torch refs.
+        # FlashInfer is imported only when this CUDA device is capability 9.0
+        # and the pin is present. A lab GPU named NVIDIA L20X is accepted at
+        # capability 8.9 or 9.0. Ready is not limited to 9.0.
         cuda = device == "cuda"
         self.causal_conv1d_version = prepare_causal_conv1d(required=cuda)
         self.fla_version = prepare_fla(required=cuda)
+        self.flashinfer_version = None
+        self.compute_capability = None
+        self.gpu_name = None
         self.linear_attention = None
+        if cuda:
+            import torch
+
+            requested = torch.device(device)
+            index = requested.index
+            if index is None:
+                index = torch.cuda.current_device()
+            capability = torch.cuda.get_device_capability(index)
+            self.compute_capability = f"{capability[0]}.{capability[1]}"
+            self.gpu_name = torch.cuda.get_device_name(index)
+            if uses_flashinfer_prefill(capability):
+                self.flashinfer_version = prepare_flashinfer()
         decision_model, reference_answer = _import_decision_model(root)
         if self.causal_conv1d_version is not None:
             assert_qwen_conv_uses_package()
         if self.fla_version is not None:
             assert_qwen_chunk_uses_fla()
-            self.linear_attention = LINEAR_ATTENTION
+        if cuda:
+            modeling = importlib.import_module(MODELING)
+            if self.flashinfer_version is not None:
+                install_flashinfer_gdn_prefill(modeling)
+            self.linear_attention = require_bound_linear_attention(modeling)
         self.reference_answer = reference_answer
         self.batch_size = batch_size
+        # FlashInfer's SM90 prefill wrapper accepts one sequence. Question
+        # batches still run; each forward on that bind is one row. The FLA
+        # chunk path keeps the configured batch size.
+        self.forward_batch_size = (
+            1 if self.linear_attention == FLASHINFER_LINEAR_ATTENTION else batch_size
+        )
         self.device = device
         self.model = decision_model(
             root,
@@ -189,12 +227,13 @@ class PplxExecutor:
         answers: dict[str, Any] = {}
         input_tokens = 0
         with torch.inference_mode():
-            for start in range(0, len(rows), self.batch_size):
-                batch = self.model.prepare(rows[start : start + self.batch_size])
+            step = self.forward_batch_size
+            for start in range(0, len(rows), step):
+                batch = self.model.prepare(rows[start : start + step])
                 distributions = (
                     (self.model(batch) / self.model.temperature).softmax(-1).cpu().tolist()
                 )
-                stop = start + self.batch_size
+                stop = start + step
                 for identifier, values, count in zip(
                     identifiers[start:stop],
                     distributions,
