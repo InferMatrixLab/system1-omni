@@ -78,6 +78,7 @@ class Handler(BaseHTTPRequestHandler):
         body["flashinfer"] = getattr(executor, "flashinfer_version", None)
         body["flashinfer_status"] = getattr(executor, "flashinfer_status", None)
         body["linear_attention"] = getattr(executor, "linear_attention", None)
+        body["cu_seqlens_slots"] = getattr(executor, "cu_seqlens_slots", None)
         body["compute_capability"] = getattr(executor, "compute_capability", None)
         body["gpu_name"] = getattr(executor, "gpu_name", None)
         body["sdpa"] = getattr(executor, "sdpa", None)
@@ -158,7 +159,7 @@ def main(argv=None):
     try:
         server = WorkerServer((args.host, args.port), executor)
         LOG.info(
-            "ready model=%s device=%s gpu=%s capability=%s attention=%s sdpa=%s mlp=%s compile=%s compile_min_tokens=%s compile_median=%s compile_last_length=%s compile_eager_forwards=%s compile_compiled_forwards=%s compile_median_frame_delta=%s fused_gate_up_layers=%s unpadded_full_attention_layers=%s causal_conv1d=%s fla=%s flashinfer=%s flashinfer_status=%s linear_attention=%s bind=%s:%s",
+            "ready model=%s device=%s gpu=%s capability=%s attention=%s sdpa=%s mlp=%s compile=%s compile_min_tokens=%s compile_median=%s compile_last_length=%s compile_eager_forwards=%s compile_compiled_forwards=%s compile_median_frame_delta=%s fused_gate_up_layers=%s unpadded_full_attention_layers=%s causal_conv1d=%s fla=%s flashinfer=%s flashinfer_status=%s linear_attention=%s cu_seqlens_slots=%s bind=%s:%s",
             executor.model_name,
             args.device,
             executor.gpu_name,
@@ -180,6 +181,7 @@ def main(argv=None):
             executor.flashinfer_version,
             executor.flashinfer_status,
             executor.linear_attention,
+            executor.cu_seqlens_slots,
             args.host,
             args.port,
         )

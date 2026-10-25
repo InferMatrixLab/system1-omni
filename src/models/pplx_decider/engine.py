@@ -43,6 +43,7 @@ from .contract import (
 )
 from .conv import assert_qwen_conv_uses_package, prepare_causal_conv1d
 from .gdn import (
+    LINEAR_ATTENTION_LAYERS,
     MODELING,
     assert_qwen_chunk_uses_fla,
     gdn_prefill_mode,
@@ -175,11 +176,12 @@ class PplxExecutor:
         # Import conv and FLA before Qwen3.5 modeling freezes the torch refs.
         # Compile tips raised p50 even after the median route proved eager,
         # so startup leaves the forward eager. Capability 9.0 uses
-        # all-sequence FlashInfer with one reused cu_seqlens. PPLX_GDN_PREFILL=fla
-        # is the primary. PPLX_GDN_PREFILL=short is the rejected length
-        # dispatch. cuDNN-first SDPA and the fused gate-up GEMM are not
-        # selectable. A lab GPU named NVIDIA L20X is accepted at capability
-        # 8.9 or 9.0.
+        # all-sequence FlashInfer. The kept primary reused one cu_seqlens.
+        # This candidate keeps one buffer per linear layer.
+        # PPLX_GDN_PREFILL=fla reproduces the prior f968e576 chunk.
+        # PPLX_GDN_PREFILL=short is the rejected length dispatch.
+        # cuDNN-first SDPA and the fused gate-up GEMM are not selectable.
+        # A lab GPU named NVIDIA L20X is accepted at capability 8.9 or 9.0.
         cuda = device == "cuda"
         self.causal_conv1d_version = prepare_causal_conv1d(required=cuda)
         self.fla_version = prepare_fla(required=cuda)
@@ -195,6 +197,7 @@ class PplxExecutor:
         self.compile_min_tokens = compile_min_tokens(self.forward_compile)
         self.compile_median = compile_median(self.forward_compile)
         self.gdn_prefill = "fla"
+        self.cu_seqlens_slots = 0
         self.language_model = None
         if cuda:
             import torch
@@ -217,6 +220,8 @@ class PplxExecutor:
                     self.gdn_prefill = gdn_mode
             else:
                 self.flashinfer_status = "not-selected"
+            if self.flashinfer_status == "bound":
+                self.cu_seqlens_slots = LINEAR_ATTENTION_LAYERS
         decision_model, reference_answer = _import_decision_model(root)
         if self.causal_conv1d_version is not None:
             assert_qwen_conv_uses_package()

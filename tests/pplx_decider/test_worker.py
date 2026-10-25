@@ -222,6 +222,7 @@ def test_http_health_and_decision():
         assert health["flashinfer"] is None
         assert health["flashinfer_status"] is None
         assert health["linear_attention"] is None
+        assert health["cu_seqlens_slots"] is None
         assert health["compute_capability"] is None
         assert health["gpu_name"] is None
         server.executor.causal_conv1d_version = "1.7.0"
@@ -253,6 +254,13 @@ def test_http_health_and_decision():
         assert health["flashinfer"] == "0.6.16.post3"
         assert health["flashinfer_status"] == "bound"
         assert health["linear_attention"] == "flashinfer+fla+causal_conv1d"
+        assert health["cu_seqlens_slots"] is None
+        server.executor.cu_seqlens_slots = 48
+        conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        conn.request("GET", "/health")
+        health = json.loads(conn.getresponse().read())
+        conn.close()
+        assert health["cu_seqlens_slots"] == 48
         assert health["compute_capability"] == "9.0"
         assert health["gpu_name"] == "NVIDIA L20X"
         assert health["sdpa"] is None

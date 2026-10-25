@@ -86,33 +86,41 @@ separate groups. The [pplx-decider recipe](../recipe/pplx_decider/README.md)
 records a Public231 concurrency-1 run on 1× lab L20X (sm_89) at head
 `1ba07d1`: stripped no-thinking twin, warmup 5, concurrency 1, clock
 `successful_latency` / `post_to_body_json_and_schema_validation`. Primary
-run1 was 231/231, p50 98.777 ms, p95 341.202 ms. The kept primary is the
+run1 was 231/231, p50 98.777 ms, p95 341.202 ms. The prior primary is the
 remeasure of head `f968e576` on a lab GPU labeled L20X: warmup 5, concurrency
 1, stock Public231 with `thinking.enabled=false`, metric `successful_latency`,
 231/231, p50 94.077 ms, p95 300.200 ms. `/health` reported
 `causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`,
 `linear_attention=fla-chunk`, and `compute_capability=9.0`. Against run1,
 p50 is −4.700 ms (−4.76%) and p95 is −41.002 ms (−12.02%). An earlier paste
-of 98.037 / 302.569 is not this primary. All-sequence FlashInfer
-`3c72f02` measured 231/231, p50 88.808 ms, p95 300.751 ms (p50 −5.60%, p95
-+0.18%) and failed the gate that both percentiles must improve. It is not
-the primary. Short-sequence FlashInfer `a50b9aa` measured 231/231, p50
-95.446 ms, p95 300.871 ms (p50 +1.46%, p95 +0.22%) and failed the same
-gate. It is not the primary. cuDNN-first SDPA `0dcaa0ac` measured 231/231,
-p50 138.501 ms, p95 332.859 ms (p50 +47.22%, p95 +10.88%) and failed the
-same gate. It is not the primary. Fused gate-up `8b4ee326` measured
-231/231, p50 102.437 ms, p95 304.970 ms (p50 +8.89%, p95 +1.59%) and
-failed the same gate. It is not the primary. Always-on dynamic compile
-`e36b32ed` measured 231/231, p50 97.751 ms, p95 263.124 ms (p50 +3.91%,
-p95 −12.35%) and failed the same gate because p50 rose. It is not the
-primary. The 512-token compile split `7e3b1be` measured 231/231, p50
-100.037 ms, p95 257.084 ms (p50 +6.34%, p95 −14.36%) and failed the same
-gate. p95 improved further and p50 was worse than always-on. It is not
-the primary. Isolated-median compile `34ba5de` measured 231/231, p50
-97.084 ms, p95 256.679 ms (p50 +3.20%, p95 −14.50%) and failed the same
-gate. The 136-token probe was eager and added no compiled frames. It is
-not the primary. The reused-`cu_seqlens` FlashInfer candidate has no sample.
-Both kept measurements stay in this L20X group and do not enter the H800
+of 98.037 / 302.569 is not a primary. The kept primary is `ffae182`:
+231/231, p50 92.844 ms, p95 296.458 ms, p50 −1.31% and p95 −1.25% versus
+`f968e576`. `/health` reported `compile=default`, `compile_median=eager`,
+`sdpa=default`, `mlp=default`, `fused_gate_up_layers=0`,
+`linear_attention=flashinfer+fla+causal_conv1d`, `flashinfer_status=bound`,
+and `flashinfer=0.6.16.post3`. Quality: `choice_acc=0.9065`,
+`noul_acc=0.8784`, `score_mae=0.2035`. Warmup, concurrency, the latency
+metric, and compute capability were not restated in that paste. Uncached
+all-sequence FlashInfer `3c72f02` measured 231/231, p50 88.808 ms, p95
+300.751 ms (p50 −5.60%, p95 +0.18% versus `f968e576`) and failed the gate
+that both percentiles must improve. It is not the primary. Short-sequence
+FlashInfer `a50b9aa` measured 231/231, p50 95.446 ms, p95 300.871 ms
+(p50 +1.46%, p95 +0.22% versus `f968e576`) and failed the same gate. It is
+not the primary. cuDNN-first SDPA `0dcaa0ac` measured 231/231, p50
+138.501 ms, p95 332.859 ms (p50 +47.22%, p95 +10.88%) and failed the same
+gate. It is not the primary. Fused gate-up `8b4ee326` measured 231/231,
+p50 102.437 ms, p95 304.970 ms (p50 +8.89%, p95 +1.59%) and failed the
+same gate. It is not the primary. Always-on dynamic compile `e36b32ed`
+measured 231/231, p50 97.751 ms, p95 263.124 ms (p50 +3.91%, p95 −12.35%)
+and failed the same gate because p50 rose. It is not the primary. The
+512-token compile split `7e3b1be` measured 231/231, p50 100.037 ms, p95
+257.084 ms (p50 +6.34%, p95 −14.36%) and failed the same gate. p95
+improved further and p50 was worse than always-on. It is not the primary.
+Isolated-median compile `34ba5de` measured 231/231, p50 97.084 ms, p95
+256.679 ms (p50 +3.20%, p95 −14.50%) and failed the same gate. The
+136-token probe was eager and added no compiled frames. It is not the
+primary. The 48-slot `cu_seqlens` ring has no sample.
+These L20X measurements stay in this group and do not enter the H800
 table above. Ready is not limited to capability 9.0.
 
 Image replacement, repeated-image/cache workloads and higher

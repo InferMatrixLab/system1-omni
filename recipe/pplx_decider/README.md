@@ -11,11 +11,15 @@ the 11 weight shards plus `readout.safetensors` as 52,173,413,928 bytes
 (about 48.6 GiB). The card asks for roughly 49 GiB of weights plus working
 memory. Plan for that much free disk. A reported load on 1× lab L20X
 (~140 GiB, sm_89) was BF16 resident ~50333 MiB with no OOM. Lab GPUs
-labeled L20X are the H200 target. The kept primary is the remeasure of
-head `f968e576`: 231/231, p50 94.077 ms, p95 300.200 ms, warmup 5,
-concurrency 1, stock Public231 with `thinking.enabled=false`, clock
-`successful_latency`. `/health` reported `linear_attention=fla-chunk`,
-`flashinfer=null`, and `compute_capability=9.0`.
+labeled L20X are the H200 target. The kept primary is head
+`ffae182cc80eaeb023f5e3501fb2dd36b1c65004`: 231/231, p50 92.844 ms,
+p95 296.458 ms. Versus the prior primary `f968e576` 94.077 / 300.200
+that is p50 −1.31% and p95 −1.25%. Warmup, concurrency, and the latency
+metric were not restated in that paste. `/health` reported
+`compile=default`, `compile_median=eager`, `sdpa=default`, `mlp=default`,
+`fused_gate_up_layers=0`, `linear_attention=flashinfer+fla+causal_conv1d`,
+`flashinfer_status=bound`, and `flashinfer=0.6.16.post3`. Quality:
+`choice_acc=0.9065`, `noul_acc=0.8784`, `score_mae=0.2035`.
 
 ## CPU checks
 
@@ -65,8 +69,9 @@ PYTHONPATH=src python3 -m frontend.pplx_decider \
 causal-conv check, the FLA chunk check, the unpadded full-attention
 install, and, on CUDA, the dynamic-compile warmup. It reports `model`, `max_input_tokens` (8192), `modalities`,
 `attention_mode`, `unpadded_full_attention_layers`, `causal_conv1d`, `fla`,
-`flashinfer`, `flashinfer_status`, `linear_attention`, `sdpa`, `mlp`,
-`fused_gate_up_layers`, `compile`, `compute_capability`, and `gpu_name`.
+`flashinfer`, `flashinfer_status`, `linear_attention`, `cu_seqlens_slots`,
+`sdpa`, `mlp`, `fused_gate_up_layers`, `compile`, `compute_capability`,
+and `gpu_name`.
 A null operator field is an explicit partial, not an omitted key. The
 pinned `config.json` lists 16 `full_attention` layers and 64 text layers,
 so a normal load reports 16 unpadded layers. On CUDA, `causal_conv1d` is
@@ -75,20 +80,25 @@ so a normal load reports 16 unpadded layers. On CUDA, `causal_conv1d` is
 `compile_min_tokens` is 0, and `compile_median` is `eager`. CPU reports
 `sdpa=default`, `mlp=default`, `compile=default`,
 `compile_min_tokens=0`, and `compile_median=eager`. Capability 8.9 reports
-`linear_attention` `fla-chunk`, `flashinfer` null, and
-`flashinfer_status=not-selected`, and it is ready. Capability 9.0 with
-`flashinfer-python` 0.6.16.post3 reports `flashinfer=0.6.16.post3`,
-`flashinfer_status=bound`, and
-`linear_attention=flashinfer+fla+causal_conv1d`. The wrapper reuses one
-`cu_seqlens` tensor per device and length. `PPLX_GDN_PREFILL=fla` is the
-primary chunk and reports `flashinfer_status=held`.
+`linear_attention` `fla-chunk`, `flashinfer` null,
+`flashinfer_status=not-selected`, and `cu_seqlens_slots=0`, and it is
+ready. Capability 9.0 with `flashinfer-python` 0.6.16.post3 reports
+`flashinfer=0.6.16.post3`, `flashinfer_status=bound`,
+`linear_attention=flashinfer+fla+causal_conv1d`, and
+`cu_seqlens_slots=48`. The wrapper keeps 48 distinct `cu_seqlens`
+tensors per device and length, one per linear layer, and rotates.
+`PPLX_GDN_PREFILL=fla` reproduces the prior `f968e576` chunk and reports
+`flashinfer_status=held` and `cu_seqlens_slots=0`.
 `PPLX_GDN_PREFILL=short` is the rejected length dispatch: one sequence of
 at most 256 tokens uses FlashInfer, and health then reports
-`linear_attention=flashinfer-short+fla-chunk` with status `bound`. The
-same capability without that package, or when the module does not import,
-stays on `fla-chunk` with status `absent` or `import-failed` and is still
-ready. The kept primary is `fla-chunk` at capability 9.0 with the
-checkpoint SDPA order and the checkpoint's separate gate and up GEMMs.
+`linear_attention=flashinfer-short+fla-chunk` with status `bound` and
+`cu_seqlens_slots=48`. The same capability without that package, or when
+the module does not import, stays on `fla-chunk` with status `absent` or
+`import-failed`, `cu_seqlens_slots=0`, and is still ready. The kept
+primary reused one `cu_seqlens` at capability 9.0. The code in this tree
+reports `cu_seqlens_slots=48` and is the next candidate. It still uses
+the checkpoint SDPA order and the checkpoint's separate gate and up
+GEMMs.
 The checkpoint leaves cuDNN SDPA off. `PPLX_SDPA=cudnn-first` and
 `PPLX_MLP=fused-gate-up` are refused. Compile stays off.
 `PPLX_COMPILE=dynamic` and `PPLX_COMPILE=dynamic-tail` are rejected
@@ -111,21 +121,22 @@ or newer and skips sm_89. The script inserts a missing
 line, and refuses to build if either cubin is still absent. It needs
 nvcc. This tree did not compile it.
 
-The kept primary did not install FlashInfer, left cuDNN SDPA off, left
-the gate and up GEMMs separate, and left the forward eager. The next
-candidate changes one thing: all-sequence FlashInfer reuses one
-`cu_seqlens` tensor per device and length instead of allocating one on
-every linear layer. Leave `PPLX_GDN_PREFILL`, `PPLX_SDPA`, `PPLX_MLP`,
-and `PPLX_COMPILE` unset. Startup refuses `PPLX_SDPA=cudnn-first` and
+The kept primary installed FlashInfer, reused one `cu_seqlens`, left
+cuDNN SDPA off, left the gate and up GEMMs separate, and left the
+forward eager. The next candidate changes one thing: 48 distinct
+`cu_seqlens` tensors per device and length, one per linear layer.
+Leave `PPLX_GDN_PREFILL`, `PPLX_SDPA`, `PPLX_MLP`, and `PPLX_COMPILE`
+unset. Startup refuses `PPLX_SDPA=cudnn-first` and
 `PPLX_MLP=fused-gate-up`. CUDA then reports `sdpa=default`,
 `mlp=default`, `fused_gate_up_layers=0`, `compile=default`,
 `compile_median=eager`, `linear_attention=flashinfer+fla+causal_conv1d`,
-and `flashinfer_status=bound`. `PPLX_GDN_PREFILL=fla` reproduces the
-primary chunk. `PPLX_COMPILE=dynamic` and `PPLX_COMPILE=dynamic-tail`
-are the rejected compile tips. `PPLX_GDN_PREFILL=short` is the rejected
-≤256 dispatch. `install_flashinfer.py` is required for this candidate.
-A new C1 is inconclusive until it reports p50 and p95 against 94.077 /
-300.200, plus `choice_acc`, `noul_acc`, and `score_mae`.
+`flashinfer_status=bound`, and `cu_seqlens_slots=48`.
+`PPLX_GDN_PREFILL=fla` reproduces the prior `f968e576` chunk.
+`PPLX_COMPILE=dynamic` and `PPLX_COMPILE=dynamic-tail` are the rejected
+compile tips. `PPLX_GDN_PREFILL=short` is the rejected ≤256 dispatch.
+`install_flashinfer.py` is required for this candidate. A new C1 is
+inconclusive until it reports p50 and p95 strictly under 92.844 /
+296.458, plus `choice_acc`, `noul_acc`, and `score_mae`.
 
 ```sh
 curl -sS http://127.0.0.1:8000/health
@@ -154,11 +165,13 @@ cap, and record it. Text Public231 does not send images.
 
 Head `1ba07d15b11a8c0796657e4a10b7ba3e62354421` was measured on 1× lab L20X
 (sm_89, ~140 GiB). Head `f968e576aa733a0e6e4b2bc46bb11035e7662c8f` was
-remeasured on a lab GPU labeled L20X and is the kept primary. That
-remeasure reported `compute_capability=9.0`. A load failure is a startup
-failure, not a latency. H800 board numbers use a different clock and stay
-on that board. The next candidate is compared with `f968e576` p50 94.077 ms
-and p95 300.200 ms, not with a new invented target.
+remeasured on a lab GPU labeled L20X and is the prior primary. That
+remeasure reported `compute_capability=9.0`. Head
+`ffae182cc80eaeb023f5e3501fb2dd36b1c65004` is the kept primary. A load
+failure is a startup failure, not a latency. H800 board numbers use a
+different clock and stay on that board. The next candidate is compared
+with `ffae182` p50 92.844 ms and p95 296.458 ms, not with a new invented
+target.
 
 Reported load: BF16 resident ~50333 MiB, no OOM. Warmup 5, concurrency 1,
 clock `successful_latency` / `post_to_body_json_and_schema_validation`.
@@ -176,21 +189,26 @@ the same 231 rows. This head admits `thinking` only when the value is
 | `1ba07d15` run2 | 231/231 | 97.921 ms | 340.804 ms |
 | `1ba07d15` run3 | 231/231 | 98.177 ms | 343.953 ms |
 | `f968e576` earlier paste | 231/231 | 98.037 ms | 302.569 ms |
-| `f968e576` remeasure, primary | 231/231 | 94.077 ms | 300.200 ms |
+| `f968e576` remeasure | 231/231 | 94.077 ms | 300.200 ms |
+| `ffae182` reused `cu_seqlens`, primary | 231/231 | 92.844 ms | 296.458 ms |
 
-The primary row is the later lab remeasure of the same worker. Protocol:
+The primary row is `ffae182`. Versus the prior primary `f968e576`
+94.077 / 300.200, p50 is −1.31% and p95 is −1.25%. `/health` reported
+`compile=default`, `compile_median=eager`, `sdpa=default`, `mlp=default`,
+`fused_gate_up_layers=0`, `linear_attention=flashinfer+fla+causal_conv1d`,
+`flashinfer_status=bound`, and `flashinfer=0.6.16.post3`. Quality:
+`choice_acc=0.9065`, `noul_acc=0.8784`, `score_mae=0.2035`. Warmup,
+concurrency, the latency metric, and compute capability were not restated
+in that paste. The `f968e576` remeasure stays in the table: protocol
 warmup 5, concurrency 1, stock Public231 with `thinking.enabled=false`,
-metric `successful_latency`. Against `1ba07d15` run1, p50 is −4.700 ms
-(−4.76%) and p95 is −41.002 ms (−12.02%). `/health` reported
-`causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`,
-`linear_attention=fla-chunk`, and `compute_capability=9.0`. The gain is
-the FLA chunk path on a capability-9.0 device. FlashInfer was not bound.
-The earlier 98.037 / 302.569 paste is not the primary. Run2, run3, resident
-memory, and a decision-disagreement count were not in the remeasure.
-The next tip has to beat 94.077 / 300.200 on both p50 and p95 in a new C1.
-`3c72f02` did not: p50 improved and p95 did not. `a50b9aa`, `0dcaa0ac`,
-and `8b4ee326` did not either: both percentiles were worse. `f968e576`
-stays the primary.
+metric `successful_latency`, `/health` `linear_attention=fla-chunk`,
+`flashinfer=null`, `compute_capability=9.0`. Against `1ba07d15` run1 that
+remeasure is p50 −4.700 ms (−4.76%) and p95 −41.002 ms (−12.02%). The
+earlier 98.037 / 302.569 paste is not a primary. The next tip has to beat
+92.844 / 296.458 on both p50 and p95. `3c72f02` beat an older p50 and
+missed that older p95. `a50b9aa`, `0dcaa0ac`, and `8b4ee326` missed both
+percentiles of the older primary. The three compile tips improved p95 and
+raised p50. None of those is the primary.
 
 The two-model Public231 export hashes to
 `00d1f10ca1142499a598b5f1c6602d329cce1cef04c961c46fc0318daa2c67d3`
@@ -257,7 +275,8 @@ them and do not raise the timeout after seeing the times.
 6. A second arm through `http://127.0.0.1:8080/v1/systemone` is frontend
    time only. Keep it in different output directories. The Rust frontend's
    own 60 second cap still applies. Do not average it into the worker p50.
-7. The kept primary is the `f968e576` remeasure above. `3c72f02` bound
+7. The kept primary is `ffae182` in the table above. The prior primary
+   is the `f968e576` remeasure. `3c72f02` bound
    FlashInfer on every sequence and failed the gate: p50 88.808 ms, p95
    300.751 ms. `a50b9aa` used FlashInfer only for one sequence of at most
    256 tokens and failed: p50 95.446 ms, p95 300.871 ms.
@@ -271,20 +290,27 @@ them and do not raise the timeout after seeing the times.
    `34ba5de` isolated that median path and failed the same gate: p50
    97.084 ms, p95 256.679 ms. The 136-token probe passed and added no
    compiled frames, so the remaining p50 gap is in-process compile.
-   Do not run another compile split. The next candidate leaves compile
-   off and binds FlashInfer on every sequence, reusing one `cu_seqlens`
-   per device and length. All-sequence FlashInfer on `3c72f02` was p50
-   88.808 ms and p95 300.751 ms. The old wrapper allocated a CUDA
-   `cu_seqlens` on every linear layer, which syncs. That bubble is the
-   hypothesis for the 0.55 ms p95 miss. Unset `PPLX_SDPA`, `PPLX_MLP`,
+   Do not run another compile split. `ffae182` reused one `cu_seqlens`
+   per device and length and passed the gate against `f968e576`: p50
+   92.844 ms, p95 296.458 ms. That is the kept primary. Versus uncached
+   all-sequence FlashInfer `3c72f02` (88.808 / 300.751), p50 moved back
+   and p95 cleared the miss (−4.293 ms). The next candidate leaves
+   compile off and still binds FlashInfer on every sequence. It keeps
+   48 distinct `cu_seqlens` tensors per device and length, one per
+   linear layer, and rotates. 48 is the text-stack linear-layer count,
+   not a fitted cutoff. The hypothesis is that one shared tensor aliased
+   across those layers and gave the median back, while skipping the
+   per-layer allocation is what moved p95. The first forward of a length
+   still allocates the ring. Unset `PPLX_SDPA`, `PPLX_MLP`,
    `PPLX_COMPILE`, and `PPLX_GDN_PREFILL`. `/health` must show
    `sdpa=default`, `mlp=default`, `fused_gate_up_layers=0`,
    `compile=default`, `compile_median=eager`,
-   `linear_attention=flashinfer+fla+causal_conv1d`, and
-   `flashinfer_status=bound` before the run counts. Both p50 and p95
-   have to be strictly under 94.077 / 300.200 before that candidate
-   replaces the primary. Record `choice_acc`, `noul_acc`, and
-   `score_mae`. Until that paste, the candidate is inconclusive.
+   `linear_attention=flashinfer+fla+causal_conv1d`,
+   `flashinfer_status=bound`, and `cu_seqlens_slots=48` before the run
+   counts. Both p50 and p95 have to be strictly under 92.844 / 296.458
+   before that candidate replaces the primary. Record `choice_acc`,
+   `noul_acc`, and `score_mae`. Until that paste, the candidate is
+   inconclusive.
 
 `benchmarks/smoke.jsonl` checks the client, not this model and not Public231.
 
@@ -309,23 +335,26 @@ them and do not raise the timeout after seeing the times.
 | 2026-10-25 | Different lever. The forward is still almost the whole request after the GDN, SDPA-order, and wider-GEMM trials, and the wider GEMM was slower, so GEMM shapes stay as in the checkpoint. Compile the language-model forward with a dynamic sequence length, and warm lengths 32, 256, and 1024 before `/health`. `PPLX_COMPILE=default` stays eager. Inductor is not bit-exact. CUDA graphs are not selected. Tip `e36b32ed9da69b7aec3aaac810614e9efcb47001`. | Public231 C1, 231/231, p50 97.751 ms, p95 263.124 ms. `/health`: `compile=dynamic`, `mlp=default`, `sdpa=default`, `fused_gate_up_layers=0`, `linear_attention=fla-chunk`, `flashinfer=0.6.16.post3`, `flashinfer_status=held`. Quality: `choice_acc≈0.906`, `noul_acc≈0.878`, `score_mae≈0.203`. Ready about 75s (compile+load). Warmup, concurrency, the latency metric, and compute capability were not restated in the paste. | p50 +3.674 ms (+3.91%). p95 −37.076 ms (−12.35%). Gate failed because both percentiles must improve. Primary stays `f968e576`. p95 improved. Do not abandon compile. |
 | 2026-10-25 | Different lever, a compile variant. Always-on dynamic compile cut p95 and raised p50, so sequences of 512 tokens or fewer stay on the eager forward and longer sequences use the compiled forward. 512 sits between the profiled median of about 136 tokens and the profiled tail example of about 2676 tokens. It is not a fitted cutoff and not a FlashInfer policy. Warmup lengths 768, 1024, and 2048 run before `/health`. GDN stays on FLA chunk. SDPA and the gate and up GEMMs stay as in the checkpoint. Tip `7e3b1be19eb9bb41d118bae558a0c0eef6561e16`. | Public231 C1, 231/231, p50 100.037 ms, p95 257.084 ms. Prior always-on `e36b32ed` was p50 97.751 ms, p95 263.124 ms. `/health`: `compile=dynamic-tail`, `compile_min_tokens=512`, `mlp=default`, `sdpa=default`, `fused_gate_up_layers=0`, `linear_attention=fla-chunk`, `flashinfer_status=held`. Quality: `choice_acc=0.906`, `noul_acc=0.878`, `score_mae=0.200`. Warmup, concurrency, the latency metric, the FlashInfer version, and compute capability were not restated in the paste. | p50 +5.960 ms (+6.34%). p95 −43.116 ms (−14.36%). Gate failed. Primary stays `f968e576`. p95 improved further. p50 was worse than always-on. |
 | 2026-10-25 | Different lever, same 512 split. The plain split did not keep the median on the primary eager path. A sequence of 512 tokens or fewer calls the original forward with the Dynamo frame hook suspended and the CUDA math flags captured before `torch.compile` restored. After the long warmup, one 136-token forward must be detected as 136 on the eager route or startup fails. Longer sequences stay compiled. Tip `34ba5de861e0c278d5037090ee5519f78187bb16`. | Public231 C1, 231/231, p50 97.084 ms, p95 256.679 ms. `/health`: `compile=dynamic-tail`, `compile_min_tokens=512`, `compile_median=isolated`, `compile_last_length=136`, `compile_eager_forwards=1`, `compile_compiled_forwards=3`, `compile_median_frame_delta=0`, `sdpa=default`, `mlp=default`, `linear_attention=fla-chunk`, `flashinfer=0.6.16.post3`, `flashinfer_status=held`. The 136-token probe passed and the worker became ready. Quality: `choice_acc=0.9065` (139), `noul_acc=0.8784` (74), `score_mae=0.2003` (18). The eager and compiled counts are the startup probe, not the measured run. | p50 +3.007 ms (+3.20%). p95 −43.521 ms (−14.50%). Gate failed. Both must be strictly under 94.077 / 300.200. Primary stays `f968e576`. The median route was eager, and p50 was still slower. |
-| 2026-10-25 | Different lever, not compile. All-sequence FlashInfer on `3c72f02` was p50 88.808 ms and p95 300.751 ms. The wrapper built a new CUDA `cu_seqlens` on every linear layer, and that allocation syncs. Reuse one tensor per device and length. The forward stays eager. SDPA and the gate and up GEMMs stay as in the checkpoint. `PPLX_GDN_PREFILL=fla` is the primary. | Not run. Samples: 0. | inconclusive |
+| 2026-10-25 | Different lever, not compile. All-sequence FlashInfer on `3c72f02` was p50 88.808 ms and p95 300.751 ms. The wrapper built a new CUDA `cu_seqlens` on every linear layer, and that allocation syncs. Reuse one tensor per device and length. The forward stays eager. SDPA and the gate and up GEMMs stay as in the checkpoint. Tip `ffae182cc80eaeb023f5e3501fb2dd36b1c65004`. | Public231 C1, 231/231, p50 92.844 ms, p95 296.458 ms. Prior primary `f968e576` was 94.077 / 300.200. `/health`: `compile=default`, `compile_median=eager`, `sdpa=default`, `mlp=default`, `fused_gate_up_layers=0`, `linear_attention=flashinfer+fla+causal_conv1d`, `flashinfer_status=bound`, `flashinfer=0.6.16.post3`. Quality: `choice_acc=0.9065`, `noul_acc=0.8784`, `score_mae=0.2035`, the same pair of accuracies and the same `score_mae` as `3c72f02`. Warmup, concurrency, the latency metric, and compute capability were not restated in the paste. | p50 −1.233 ms (−1.31%). p95 −3.742 ms (−1.25%). Gate passed. New primary. Versus `3c72f02` 88.808 / 300.751: p50 +4.036 ms, p95 −4.293 ms. |
+| 2026-10-25 | Different lever, same all-sequence FlashInfer bind. The single reused tensor cleared the p95 miss and gave median back versus the uncached bind. Keep 48 distinct tensors per device and length, one per linear layer, and rotate. The first forward of a length allocates the ring. Later forwards of that length do not allocate. 48 is the text-stack linear-layer count (64 layers, 16 full attention), not a fitted cutoff. The forward stays eager. SDPA and the gate and up GEMMs stay as in the checkpoint. Leave `PPLX_GDN_PREFILL` unset. `/health` adds `cu_seqlens_slots=48`. | Not run. Samples: 0. | inconclusive |
 
 ## Limits
 
-Image parity is unverified. The kept Public231 primary is the `f968e576`
-remeasure in the optimization log: p50 94.077 ms, p95 300.200 ms, on
-`fla-chunk` at compute capability 9.0. The all-sequence FlashInfer bind
-`3c72f02` is not the primary: p50 88.808 ms, p95 300.751 ms. The
-short-sequence FlashInfer bind `a50b9aa` is not the primary: p50 95.446 ms,
-p95 300.871 ms. cuDNN-first SDPA `0dcaa0ac` is not the primary: p50
-138.501 ms, p95 332.859 ms. Fused gate-up `8b4ee326` is not the primary:
-p50 102.437 ms, p95 304.970 ms. Always-on dynamic compile `e36b32ed`
-is not the primary: p50 97.751 ms, p95 263.124 ms. The 512-token compile
-split `7e3b1be` is not the primary: p50 100.037 ms, p95 257.084 ms.
-Isolated-median compile `34ba5de` is not the primary: p50 97.084 ms,
-p95 256.679 ms. Decision agreement against `1ba07d1` was not in the
-primary paste. The reused-`cu_seqlens` FlashInfer candidate has no sample.
+Image parity is unverified. The kept Public231 primary is `ffae182` in
+the optimization log: p50 92.844 ms, p95 296.458 ms, all-sequence
+FlashInfer with one reused `cu_seqlens`. The prior primary `f968e576`
+is p50 94.077 ms, p95 300.200 ms, on `fla-chunk` at compute capability
+9.0. Uncached all-sequence FlashInfer `3c72f02` is not the primary:
+p50 88.808 ms, p95 300.751 ms. The short-sequence FlashInfer bind
+`a50b9aa` is not the primary: p50 95.446 ms, p95 300.871 ms. cuDNN-first
+SDPA `0dcaa0ac` is not the primary: p50 138.501 ms, p95 332.859 ms.
+Fused gate-up `8b4ee326` is not the primary: p50 102.437 ms, p95
+304.970 ms. Always-on dynamic compile `e36b32ed` is not the primary:
+p50 97.751 ms, p95 263.124 ms. The 512-token compile split `7e3b1be`
+is not the primary: p50 100.037 ms, p95 257.084 ms. Isolated-median
+compile `34ba5de` is not the primary: p50 97.084 ms, p95 256.679 ms.
+Decision agreement against `1ba07d1` was not in the primary paste. The
+48-slot `cu_seqlens` ring has no sample.
 The shared Qwen CUDA backend is not used. PR #140 is a separate Rust port of this same contract;
 it does not serve, and its JSON parser rewrites integers outside i64/u64.
 This worker keeps those integers because it uses Python's parser and the

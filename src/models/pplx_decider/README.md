@@ -96,18 +96,28 @@ Inductor is not bit-exact with eager. CUDA startup requires
 also requires `flash-linear-attention` 0.5.2. Lab GPUs labeled NVIDIA L20X
 are the H200 target. Capability 8.9 reports `linear_attention` as `fla-chunk` and is ready.
 Capability 9.0 with `flashinfer-python` 0.6.16.post3 uses all-sequence
-FlashInfer and reuses one `cu_seqlens` per device and length.
-`PPLX_GDN_PREFILL=fla` is the primary chunk.
+FlashInfer and keeps 48 distinct `cu_seqlens` buffers per device and
+length, one per linear layer. The kept primary reused one buffer.
+`PPLX_GDN_PREFILL=fla` reproduces the prior `f968e576` chunk.
 `PPLX_GDN_PREFILL=short` is the rejected one-sequence ≤256 dispatch.
 CuteDSL and CUDA graphs are not used. These kernels are not bit-exact with
-the torch fallbacks. The kept primary is the remeasure of
-`f968e576aa733a0e6e4b2bc46bb11035e7662c8f` on the lab L20X-labeled GPU:
-warmup 5, concurrency 1, stock Public231 with `thinking.enabled=false`,
-metric `successful_latency`, 231/231, p50 94.077 ms, p95 300.200 ms.
-`/health` reported `causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`,
-`linear_attention=fla-chunk`, and `compute_capability=9.0`. Against
-`1ba07d15` run1 that is p50 −4.700 ms (−4.76%) and p95 −41.002 ms
-(−12.02%). An earlier paste of 98.037 / 302.569 is not this primary.
+the torch fallbacks. The kept primary is
+`ffae182cc80eaeb023f5e3501fb2dd36b1c65004`: 231/231, p50 92.844 ms,
+p95 296.458 ms. Versus the prior primary `f968e576` 94.077 / 300.200
+that is p50 −1.31% and p95 −1.25%. `/health` reported `compile=default`,
+`compile_median=eager`, `sdpa=default`, `mlp=default`,
+`fused_gate_up_layers=0`, `linear_attention=flashinfer+fla+causal_conv1d`,
+`flashinfer_status=bound`, and `flashinfer=0.6.16.post3`. Quality:
+`choice_acc=0.9065`, `noul_acc=0.8784`, `score_mae=0.2035`. Warmup,
+concurrency, the latency metric, and compute capability were not
+restated in that paste. The prior primary
+`f968e576aa733a0e6e4b2bc46bb11035e7662c8f` is the remeasure on the lab
+L20X-labeled GPU: warmup 5, concurrency 1, stock Public231 with
+`thinking.enabled=false`, metric `successful_latency`, 231/231, p50
+94.077 ms, p95 300.200 ms, `linear_attention=fla-chunk`,
+`flashinfer=null`, `compute_capability=9.0`. Against `1ba07d15` run1
+that remeasure is p50 −4.700 ms (−4.76%) and p95 −41.002 ms (−12.02%).
+An earlier paste of 98.037 / 302.569 is not a primary.
 Decision disagreements were not in the remeasure. All-sequence FlashInfer
 on `3c72f02` missed the gate (p50 88.808 ms, p95 300.751 ms) and is not
 the primary. Short-sequence FlashInfer on `a50b9aa` missed the gate
@@ -124,8 +134,8 @@ Always-on dynamic compile on `e36b32ed` missed the both-percentiles gate
 `choice_acc=0.906`, `noul_acc=0.878`, `score_mae=0.200`) and is not the
 primary. Isolated-median compile on `34ba5de` missed the gate (p50
 97.084 ms, p95 256.679 ms, `choice_acc=0.9065` (139), `noul_acc=0.8784`
-(74), `score_mae=0.2003` (18)) and is not the primary. The
-reused-`cu_seqlens` FlashInfer candidate has no sample.
+(74), `score_mae=0.2003` (18)) and is not the primary. The 48-slot
+`cu_seqlens` ring has no sample.
 
 The shared Qwen3.5 CUDA language kernels in this repository are causal
 (`src/backends/cuda/qwen3_5/attention.cu`). Their vision-operator tests mention
@@ -137,8 +147,8 @@ backend. A native executor is not in this change.
 | Path | State |
 | --- | --- |
 | CPU contract and HTTP rejection | Implemented; tests do not need weights |
-| CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, checkpoint SDPA order, separate gate and up GEMMs, an eager language-model forward, `causal-conv1d` 1.7.0 with sm_90 and sm_89 cubins, FLA 0.5.2 chunk, and all-sequence FlashInfer on capability 9.0 with one reused `cu_seqlens`. An installed FlashInfer pin is held unless `PPLX_GDN_PREFILL=short`. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
-| Public231 concurrency 1 | Kept primary is the `f968e576` remeasure on the lab L20X-labeled GPU, capability 9.0, `fla-chunk`, `flashinfer` null: 231/231, p50 94.077 ms, p95 300.200 ms. Versus `1ba07d1` run1 98.777 / 341.202: p50 −4.76%, p95 −12.02%. All-sequence FlashInfer `3c72f02` failed the gate: p50 88.808 ms, p95 300.751 ms. Short-sequence FlashInfer `a50b9aa` failed the gate: p50 95.446 ms, p95 300.871 ms. cuDNN-first SDPA `0dcaa0ac` failed the gate: p50 138.501 ms, p95 332.859 ms. Fused gate-up `8b4ee326` failed the gate: p50 102.437 ms, p95 304.970 ms. Always-on dynamic compile `e36b32ed` failed the both-percentiles gate: p50 97.751 ms, p95 263.124 ms. The 512-token split `7e3b1be` failed the gate: p50 100.037 ms, p95 257.084 ms. Isolated-median compile `34ba5de` failed the gate: p50 97.084 ms, p95 256.679 ms. None of those is the primary. The reused-`cu_seqlens` FlashInfer candidate has no sample |
+| CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, checkpoint SDPA order, separate gate and up GEMMs, an eager language-model forward, `causal-conv1d` 1.7.0 with sm_90 and sm_89 cubins, FLA 0.5.2 chunk, and all-sequence FlashInfer on capability 9.0 with 48 `cu_seqlens` slots per device and length. `PPLX_GDN_PREFILL=fla` holds an installed pin and reproduces the prior `f968e576` chunk. `PPLX_GDN_PREFILL=short` is the rejected length dispatch. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
+| Public231 concurrency 1 | Kept primary is `ffae182` on the lab L20X-labeled GPU: 231/231, p50 92.844 ms, p95 296.458 ms, all-sequence FlashInfer, one reused `cu_seqlens`. Versus prior primary `f968e576` 94.077 / 300.200: p50 −1.31%, p95 −1.25%. Quality `choice_acc=0.9065`, `noul_acc=0.8784`, `score_mae=0.2035`. Uncached all-sequence FlashInfer `3c72f02` is not the primary: p50 88.808 ms, p95 300.751 ms. Short-sequence FlashInfer `a50b9aa` failed its gate: p50 95.446 ms, p95 300.871 ms. cuDNN-first SDPA `0dcaa0ac` failed its gate: p50 138.501 ms, p95 332.859 ms. Fused gate-up `8b4ee326` failed its gate: p50 102.437 ms, p95 304.970 ms. Always-on dynamic compile `e36b32ed` failed the both-percentiles gate: p50 97.751 ms, p95 263.124 ms. The 512-token split `7e3b1be` failed its gate: p50 100.037 ms, p95 257.084 ms. Isolated-median compile `34ba5de` failed its gate: p50 97.084 ms, p95 256.679 ms. None of those is the primary. The 48-slot `cu_seqlens` ring has no sample |
 | CPU `device="cpu"` | The checkpoint switches the backbone to float32. Not the measured path |
 | Images | Admitted. No image parity run |
 | Apple GPU | Not supported |

@@ -36,9 +36,17 @@ FI_MODULE = "flashinfer.gdn_prefill"
 GDN_PREFILL = "flashinfer"
 HOPPER = (9, 0)
 FLA_LINEAR_ATTENTION = "fla-chunk"
-# One cu_seqlens per device and length. Building a CUDA tensor from a
-# Python list syncs, and the GDN stack does that once per linear layer.
-_CU_SEQLENS: dict[tuple[int, int], Any] = {}
+# Qwen3.5 27B text stack: 64 layers, 16 full attention, so 48 linear
+# attention layers. One forward calls the GDN kernel once per linear
+# layer. This is that architecture count, not a fitted cutoff.
+LINEAR_ATTENTION_LAYERS = 48
+# One ring of that many CUDA cu_seqlens tensors per device and length.
+# Building a CUDA tensor from a Python list syncs. Sharing one tensor
+# across the in-flight linear layers is the hypothesis for the median
+# giveback on the single-buffer primary. The first forward of a length
+# allocates the ring. Later forwards of that length do not.
+_CU_SEQLENS_POOL: dict[tuple[int, int], list[Any]] = {}
+_CU_SEQLENS_CURSOR: dict[tuple[int, int], int] = {}
 FLASHINFER_LINEAR_ATTENTION = "flashinfer+fla+causal_conv1d"
 SHORT_FLASHINFER_LINEAR_ATTENTION = "flashinfer-short+fla-chunk"
 # Profile anchors on this workload: median about 136 tokens, tail example
@@ -67,9 +75,9 @@ def uses_flashinfer_prefill(capability: tuple[int, int]) -> bool:
 def gdn_prefill_mode(selected: str | None) -> str:
     """Default GDN prefill is all-sequence FlashInfer.
 
-    ``fla`` reproduces the primary. ``short`` is the rejected length
-    dispatch. The all-sequence bind missed p95 by a fraction of a
-    millisecond; startup still selects it, with one reused ``cu_seqlens``.
+    ``fla`` reproduces the prior ``f968e576`` chunk. ``short`` is the
+    rejected length dispatch. The kept primary reuses one ``cu_seqlens``.
+    This candidate keeps a ring of one buffer per linear layer.
     """
 
     chosen = "flashinfer" if selected is None else selected
@@ -164,19 +172,33 @@ def cu_seqlens_key(device_index: int | None, length: int) -> tuple[int, int]:
     return (-1 if device_index is None else int(device_index), int(length))
 
 
-def reuse_cu_seqlens(cache: dict[tuple[int, int], Any], key: tuple[int, int], allocate: Any) -> Any:
-    """Return the cached tensor, allocating at most once per key."""
+def reuse_cu_seqlens_slot(
+    pool: dict[tuple[int, int], list[Any]],
+    cursors: dict[tuple[int, int], int],
+    key: tuple[int, int],
+    slots: int,
+    allocate: Any,
+) -> Any:
+    """Return the next buffer in this key's ring.
 
-    found = cache.get(key)
-    if found is not None:
-        return found
-    created = allocate()
-    cache[key] = created
-    return created
+    The first call allocates ``slots`` tensors. Later calls rotate and
+    do not allocate. ``slots`` is the linear-layer count, so one forward
+    does not hand the same tensor to two layers.
+    """
+
+    found = pool.get(key)
+    if found is None:
+        found = [allocate() for _ in range(slots)]
+        pool[key] = found
+        cursors[key] = 0
+    cursor = cursors[key]
+    chosen = found[cursor]
+    cursors[key] = (cursor + 1) % len(found)
+    return chosen
 
 
 def cached_cu_seqlens(q: Any) -> Any:
-    """Reuse ``[0, length]`` for this device instead of allocating every layer."""
+    """Rotate a per-layer ``[0, length]`` instead of allocating every layer."""
 
     import torch
 
@@ -187,7 +209,13 @@ def cached_cu_seqlens(q: Any) -> Any:
     def allocate() -> Any:
         return torch.tensor([0, length], dtype=torch.int64, device=q.device)
 
-    return reuse_cu_seqlens(_CU_SEQLENS, key, allocate)
+    return reuse_cu_seqlens_slot(
+        _CU_SEQLENS_POOL,
+        _CU_SEQLENS_CURSOR,
+        key,
+        LINEAR_ATTENTION_LAYERS,
+        allocate,
+    )
 
 
 def flashinfer_chunk_gated_delta_rule(
@@ -389,6 +417,6 @@ def require_bound_linear_attention(modeling: Any, *, fla_chunk: Any = None) -> s
         f"pplx-decider linear attention is {bound}, so the worker is not ready. "
         f"Ready accepts {FLA_LINEAR_ATTENTION}, {SHORT_FLASHINFER_LINEAR_ATTENTION}, "
         f"or {FLASHINFER_LINEAR_ATTENTION}. "
-        "Capability 8.9 stays on the FLA chunk. The all-sequence FlashInfer "
-        "bind is not the startup path."
+        "Capability 8.9 stays on the FLA chunk. Capability 9.0 with the "
+        "FlashInfer pin uses the all-sequence bind."
     )

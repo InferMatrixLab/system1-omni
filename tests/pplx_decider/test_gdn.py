@@ -10,6 +10,7 @@ from models.pplx_decider.gdn import (
     FLA_LINEAR_ATTENTION,
     FLA_VERSION,
     FLASHINFER_LINEAR_ATTENTION,
+    LINEAR_ATTENTION_LAYERS,
     SHORT_FLASHINFER_LINEAR_ATTENTION,
     SHORT_FLASHINFER_TOKENS,
     FI_PIN,
@@ -22,7 +23,7 @@ from models.pplx_decider.gdn import (
     require_bound_linear_attention,
     cu_seqlens_key,
     gdn_prefill_mode,
-    reuse_cu_seqlens,
+    reuse_cu_seqlens_slot,
     resolve_flashinfer,
     use_short_flashinfer,
     uses_flashinfer_prefill,
@@ -111,22 +112,30 @@ def test_gdn_prefill_defaults_to_all_sequence_flashinfer():
         gdn_prefill_mode("512")
 
 
-def test_cu_seqlens_is_allocated_once_per_device_and_length():
+def test_cu_seqlens_ring_is_one_slot_per_linear_layer():
+    assert LINEAR_ATTENTION_LAYERS == 48
     assert cu_seqlens_key(None, 136) == (-1, 136)
     assert cu_seqlens_key(0, 2676) == (0, 2676)
-    cache: dict[tuple[int, int], object] = {}
+    pool: dict[tuple[int, int], list[object]] = {}
+    cursors: dict[tuple[int, int], int] = {}
     calls: list[int] = []
 
     def allocate() -> object:
         calls.append(1)
         return object()
 
-    first = reuse_cu_seqlens(cache, (0, 136), allocate)
-    second = reuse_cu_seqlens(cache, (0, 136), allocate)
-    other = reuse_cu_seqlens(cache, (0, 2676), allocate)
-    assert first is second
-    assert first is not other
-    assert calls == [1, 1]
+    first_round = [
+        reuse_cu_seqlens_slot(pool, cursors, (0, 136), LINEAR_ATTENTION_LAYERS, allocate)
+        for _ in range(LINEAR_ATTENTION_LAYERS)
+    ]
+    assert len({id(item) for item in first_round}) == LINEAR_ATTENTION_LAYERS
+    assert len(calls) == LINEAR_ATTENTION_LAYERS
+    wrapped = reuse_cu_seqlens_slot(pool, cursors, (0, 136), LINEAR_ATTENTION_LAYERS, allocate)
+    assert wrapped is first_round[0]
+    assert len(calls) == LINEAR_ATTENTION_LAYERS
+    other = reuse_cu_seqlens_slot(pool, cursors, (0, 2676), LINEAR_ATTENTION_LAYERS, allocate)
+    assert other not in first_round
+    assert len(calls) == LINEAR_ATTENTION_LAYERS * 2
 
 
 def test_short_flashinfer_keeps_the_tail_and_a_batch_on_fla():
