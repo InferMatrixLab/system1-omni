@@ -65,6 +65,37 @@ For optional cache and capture/replay messages, set `CUA_S1_GRAPH_TRACE=1`. Fail
 are unconditional. Requests execute serially through the existing worker runtime;
 this feature does not add batching or concurrent forwards.
 
+## Warming the complete working set
+
+Language scratch growth invalidates earlier language Graphs. Exercise the largest
+input first, then warm every measured sequence length and vision grid. Five
+warmups alone need not cover a heterogeneous workload. With tracing enabled,
+check for timed replays and no new captures or fallback before describing a run
+as stable replay. If the real workload exceeds the cache, include and report
+its capture/eviction costs instead.
+
+Entry and byte limits must both fit the intended working set. The recorded
+8-payload synthetic matrix uses six grids: its 1024-square image alone requests
+262537216 bytes, leaving too little of a 256 MiB budget for the smallest grid.
+The original timed rounds therefore contained 15 vision captures (3/6/6), plus
+5 language captures after scratch growth in the first round. The original
+aggregate latency comparison is not a pure warmed-replay measurement.
+
+For that bounded matrix, explicitly setting `CUA_S1_VISION_CACHE_ENTRIES=8` and
+`CUA_S1_VISION_CACHE_BYTES=1073741824` eliminated timed vision captures after full
+warming; these are workload-specific settings, not new defaults or a total GPU
+memory limit. On RTX 4090 / SM8.9, matched resident eager/Graph p50 was
+116.891/116.399 ms and p95 was 271.109/269.011 ms (24 timed requests per mode,
+3 rounds, concurrency 1). Sampled process maxima were 10138/10202 MiB. This small
+sample does not establish a general acceleration: Graphs reduce submission
+work, while GEMMs, input staging/checks, CPU preprocessing/readout and stream
+synchronization remain. Defaults stay off.
+
+The [follow-up qualification](https://github.com/Levius-Fubuki/system1-omni/releases/download/cua-mm-qualification-20261025/cua-mm-followup-qualification-20261025.tar.gz)
+preserves both cache settings, raw/excluded samples, capture traces, source pins
+and the full-warming protocol. This follow-up uses the unchanged runtime from
+`a14e1027e7de7507e6ff82b3844a916ff19a26b9`.
+
 ## Build and launch
 
 Use the pinned base and multimodal adapter revisions listed in the
