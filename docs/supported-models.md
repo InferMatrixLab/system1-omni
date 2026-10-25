@@ -27,7 +27,7 @@ Models that are being added are also tracked in issues labeled [new model](https
 | CLM-v0.1-8B | [Native Rust engine](../src/models/clm/README.md), `clm-run`, in front of a Qwen3-8B `/v1/embeddings` server | Engine-only agreement **4.5e-06** on identical vectors ([#29](https://github.com/ThinkFlowLab/system1-omni/pull/29), [validation](../recipe/clm/native/VALIDATION.md)); contract checks documented ([#23](https://github.com/ThinkFlowLab/system1-omni/pull/23)) | **Validated on compute capability 8.9** ([#29](https://github.com/ThinkFlowLab/system1-omni/pull/29), [validation](../recipe/clm/native/VALIDATION.md)) | Unverified | Rust to build and a separate Qwen3-8B `/v1/embeddings` server for the encoder; the engine itself has no device-specific code |
 | OmniJev-4B v1.1 | None yet: [checkpoint export and CPU contract](../recipe/omnijev/README.md); the native worker is in progress ([#114](https://github.com/ThinkFlowLab/system1-omni/issues/114)) | Request contract, preparation, heads and finishing checked against the reference ([#120](https://github.com/ThinkFlowLab/system1-omni/pull/120)); no inference | Not yet | Not supported | Python 3.10 reference environment for the export and fixtures |
 | D3 (Decision 3.0) | [Python reference worker](../recipe/d3/reference.md) on the checkpoint's pinned runtime — text, image and video state over `choice`/`noul`/`score`, with the deliberate transport differences documented in the recipe; the native worker is in progress ([#136](https://github.com/ThinkFlowLab/system1-omni/issues/136)) | Unverified | Author-run on NVIDIA A100 (sm_80): serving smoke and reference parity for text and media (exact decisions, max delta 0.0); evidence in the integration and media PRs. Owner: @MrDongsls. | Unverified | Python 3.12, the [pinned runtime requirements](../recipe/d3/requirements.txt), the [pinned package](https://huggingface.co/vllm-sr/d3) (~52 GB); [media budgets and the 64 MiB total request cap](../recipe/d3/reference.md) |
-| Clef-flash (9B) | [Python reference worker](../recipe/clef/reference.md); text `choice`/`noul`/`score`; non-thinking prompt; `thinking.enabled: false` admitted and omitted from the prompt; 16384-token refusal | Contract tests only; no inference | Operator-reported Public231 C1 on NVIDIA L20X (sm_89), HEAD `903006530fb7772bb668bbf192ee4278e273e583`, warmup 5, concurrency 1. Primary run1 p50 247.518 ms, p95 413.025 ms, 231/231. Manifest `public231-no-thinking.jsonl` (`thinking` key stripped). Not re-run here | Not supported | Python 3.12, [card-tested torch 2.11 and transformers 5.10.2](../recipe/clef/requirements.txt), pinned `Cloudflare/clef-flash` snapshot (~19.1 GB) |
+| Clef-flash (9B) | [Python reference worker](../recipe/clef/reference.md); text `choice`/`noul`/`score`; non-thinking prompt; `thinking.enabled: false` admitted and omitted from the prompt; 16384-token refusal | Contract tests only; no inference | Operator-reported Public231 C1 on the L20X-labeled lab host. Baseline `9030065` run1 p50 247.518 ms, p95 413.025 ms, 231/231. Tip `594528a9`: 231/231, p50 164.969 ms, p95 216.755 ms, `/health` `fla+causal_conv1d`. Versus run1: Δp50 −33.35% (−82.5 ms), Δp95 −47.52% (−196.3 ms). Not re-run here | Not supported | Python 3.12, [card-tested torch 2.11 and transformers 5.10.2](../recipe/clef/requirements.txt), pinned `Cloudflare/clef-flash` snapshot (~19.1 GB) |
 | Clef (27B) | Same worker and text contract as Clef-flash, selected with `--variant clef` | Contract tests only; no inference | Not run | Not supported | Same stack; pinned `Cloudflare/clef` snapshot (~55.0 GB). Weights and joint-head config differ from flash |
 
 - **Validated:** covered by the recipe on `main` or by the checks in the linked merged pull request.
@@ -41,17 +41,16 @@ D3's reference worker serves the same three kinds for text, image and video
 state (inline base64 media under the pinned runtime's per-item budgets);
 its media serving evidence is author-run on the A100 above.
 Clef-flash and Clef serve the same three kinds for text only. The worker
-refuses image and video inputs. The flash CUDA cell is an operator-reported
-Public231 concurrency-1 result on a lab NVIDIA L20X at compute capability
-8.9 (primary run1 p50 247.518 ms, p95 413.025 ms, metric
-`successful_latency`, clock `post_to_body_json_and_schema_validation`).
-That cell is the earlier L20X report at that HEAD, and it was not re-run
-for this document. The worker starts on the lab host `nvidia-smi` names
-`NVIDIA L20X`, including when the capability prints 8.9. FlashInfer GDN
+refuses image and video inputs. The flash CUDA cell records two
+operator-reported Public231 concurrency-1 results on the L20X-labeled lab
+host. Baseline `9030065` run1 is p50 247.518 ms, p95 413.025 ms, metric
+`successful_latency`, clock `post_to_body_json_and_schema_validation`.
+Tip `594528a9` is p50 164.969 ms, p95 216.755 ms, 231/231, `/health`
+`linear_attention` `fla+causal_conv1d`, Δp50 −33.35% (−82.5 ms), Δp95
+−47.52% (−196.3 ms). Neither campaign was re-run for this document. The
+worker starts on that host when the capability prints 8.9. FlashInfer GDN
 prefill is used when the reported major is 9, 10, or 12 and the package
-loads; otherwise the ready bind is the FLA chunk plus causal-conv1d.
-`/health` reports which one started. No C1 of the current tip is recorded.
-The 27B variant has no recorded timing.
+loads; that path has no C1. The 27B variant has no recorded timing.
 CLM has a row per path: the merged `clm-serve` recipe exercises those answer shapes with stub
 embeddings and says nothing about decision quality, while the native engine's CUDA row is the
 path through a real Qwen3-8B encoder. Its engine-only figure comes from the same comparison run

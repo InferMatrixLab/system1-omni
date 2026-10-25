@@ -41,9 +41,9 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
 - [Clef reference worker](clef/reference.md): load pinned Clef-flash (9B) or
   Clef (27B) and serve text `choice`/`noul`/`score`. Image, video and native
   CUDA are not served. Operator-reported flash Public231 concurrency-1
-  timing on the lab host named NVIDIA L20X is in the recipe (HEAD `9030065`,
-  run1 p50 247.518 ms, p95 413.025 ms). The current tip has no recorded C1.
-  That host stays eligible when `nvidia-smi` reports capability 8.9.
+  timing on the L20X-labeled lab host is in the recipe: `9030065` run1
+  p50 247.518 ms, p95 413.025 ms; tip `594528a9` p50 164.969 ms, p95
+  216.755 ms, `/health` `fla+causal_conv1d`.
 
 - [LFM2.5-350M choice worker](lfm2/README.md): score text decisions with independent
   questions, hybrid cache branching and configurable candidate batches.

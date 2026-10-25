@@ -150,8 +150,8 @@ L20X at compute capability 8.9, warmup 5, concurrency 1. Stock Public231
 includes a `thinking` field. That HEAD rejected it with HTTP 422
 `Unknown request fields`. The measured manifest was
 `public231-no-thinking.jsonl`, with the `thinking` key stripped. The
-stripped file's SHA-256 was not reported. Run1 is the primary L20X round.
-Do not average the percentiles. Run1 is not a baseline for an H200 delta.
+stripped file's SHA-256 was not reported. Run1 is the baseline for the
+tip `594528a9` comparison below. Do not average the percentiles.
 
 | Round | p50 (ms) | p95 (ms) | Successful |
 | --- | --- | --- | --- |
@@ -160,28 +160,41 @@ Do not average the percentiles. Run1 is not a baseline for an H200 delta.
 | run3 | 242.421 | 410.369 | 231/231 |
 
 The worker now admits `thinking` when it is an object with `enabled` set to
-the JSON boolean `false`, then drops the field before encoding. The next
-H200 campaign should send stock Public231 in that shape. That admission
-has no measured latency delta on these L20X rounds. `enabled: true` stays
-a 422.
+the JSON boolean `false`, then drops the field before encoding. That
+admission has no separate measured latency delta on these `9030065` rounds.
+`enabled: true` stays a 422.
 
 The operator named the metric `successful_latency` and the clock
 `post_to_body_json_and_schema_validation`. These three rounds are that
 measurement. They are not a new campaign.
 
-Those three rounds are the earlier report at HEAD `9030065` on the lab
-host `nvidia-smi` names `NVIDIA L20X`. This tip has no new p50 or p95.
-Do not publish a delta until a remeasure of this tip is pasted.
+Those three rounds are the baseline at HEAD `9030065` on the lab host
+`nvidia-smi` names `NVIDIA L20X`.
 
-## Next measurement: lab host named NVIDIA L20X
+## Public231 C1 of tip `594528a9`
+
+Operator-reported on that same L20X-labeled lab host. Not re-run in the
+environment that edited this recipe. Worker
+`594528a9f9c1ca38ce0dbb58a549191dfbde5bf3`. `/health` `linear_attention`
+was `fla+causal_conv1d`. Successful requests 231/231. p50 164.969 ms. p95
+216.755 ms. Against baseline `9030065` run1 (p50 247.518 ms, p95 413.025 ms):
+Δp50 −33.35% (−82.5 ms), Δp95 −47.52% (−196.3 ms). This run's bind is the
+FLA chunk, not FlashInfer. Answer parity was not part of the paste.
+Warmup count, clock name, manifest hash, driver, and CUDA version were
+not restated in the paste, so they are not copied from the `9030065`
+campaign.
+
+This code tip stays. A later prefill change is a new tip and needs its own
+Public231 C1 paste before another delta is claimed.
+
+## Next code tip on the L20X-labeled host
 
 That host is the measurement machine, including when `nvidia-smi` reports
 compute capability 8.9. Do not require a card whose name is `NVIDIA H200`.
 On a reported 8.9 the ready bind is `fla+causal_conv1d`. When the same
 process sees reported major 9, 10, or 12 and FlashInfer loaded, the ready
 bind is `flashinfer+fla+causal_conv1d`. Record the `/health` string the
-process returns. No Public231 C1 of this tip has been recorded. Answer
-parity against `torch_chunk` is not measured. The standalone GDN timings in
+process returns. The standalone GDN timings in
 [benchmarks/gdn/README.md](../../benchmarks/gdn/README.md) are a different
 experiment and are not a Clef HTTP result.
 
@@ -273,19 +286,19 @@ in a commit.
 9. The clock is the runner's
    `post_to_body_json_and_schema_validation` clock. It is not the H800
    leaderboard clock. Record the `nvidia-smi` name, the printed capability,
-   and `/health` `linear_attention` with the p50 and p95. The table above
-   is the earlier `9030065` report. This tip has no measured p50 or p95
-   until that paste exists.
+   and `/health` `linear_attention` with the p50 and p95. Compare a new
+   code tip with the recorded tip `594528a9` only after that new tip has
+   its own paste. The `9030065` run1 figures remain the baseline of the
+   recorded comparison above.
 
 ## What remains unverified
 
-Image and video inputs, native CUDA, answer parity, and any Public231 C1
-of the current tip. The operator-reported numbers above stay on the clock
-`post_to_body_json_and_schema_validation`, metric `successful_latency`, at
-HEAD `903006530fb7772bb668bbf192ee4278e273e583`. H1, one encode per request,
-is already how that HEAD calls the pinned model, so run1 includes it and
-its isolated effect is unknown. This tip selects FlashInfer when that
-kernel can dispatch and otherwise serves the FLA chunk with
-`causal_conv1d`. Neither bind has a measured p50, p95, or answer-parity
-result on this tip. This environment has no GPU and did not repeat the
-campaign.
+Image and video inputs, native CUDA, and answer parity. The `9030065`
+rounds use metric `successful_latency` and clock
+`post_to_body_json_and_schema_validation`. The tip `594528a9` p50 and p95
+are the operator paste in the section above; this environment has no GPU
+and did not repeat either campaign. H1, one encode per request, is already
+inside the `9030065` baseline, so its isolated effect is unknown. The
+recorded win is the FLA chunk plus `causal_conv1d` on the reported-8.9
+host. FlashInfer on a reported major 9, 10, or 12 has no C1. A later code
+change is unmeasured until its own paste.
