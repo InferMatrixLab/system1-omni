@@ -1293,6 +1293,13 @@ impl Model {
         self.upload_positions(s, input.position_ids)?;
         self.embed_tokens(s, input.token_ids)?;
         self.overwrite_image_rows(s, input, 0)?;
+        self.run_multimodal(t)
+    }
+
+    /// Inputs are staged in owned scratch before capture; producer addresses
+    /// never enter the graph, so host and device inputs can share a capture.
+    fn run_multimodal(&mut self, t: usize) -> Result<Vec<f32>> {
+        let s = self.scratch.as_ref().unwrap();
         if self.graph_enabled {
             if let Some((_, graph)) = self
                 .mm_graphs
@@ -1536,7 +1543,7 @@ impl Model {
         Ok(logprobs)
     }
 
-    /// Eager multimodal execution using borrowed device-resident image rows.
+    /// Multimodal execution using borrowed device-resident image rows.
     /// The producer must finish writes before entry. All queued consumer work is
     /// completed on every exit path, before the external allocation can be reused.
     pub fn forward_multimodal_device(
@@ -1582,8 +1589,7 @@ impl Model {
                 }
                 begin = end;
             }
-            self.run(s, &[t], true, false)?;
-            self.last_hidden(s, t)
+            self.run_multimodal(t)
         })();
         let synced = self.synchronize();
         synced?;

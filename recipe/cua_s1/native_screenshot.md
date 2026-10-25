@@ -76,11 +76,11 @@ multimodal adapter and reports prompt-token usage with zero generated tokens.
 
 ## Execution controls and limits
 
-`CUA_S1_GRAPH=1` enables host-feature language Graph replay;
+`CUA_S1_GRAPH=1` enables language Graph replay for host or resident features;
 `CUA_S1_VISION_GRAPH=1` independently enables vision Graph replay.
 `CUA_S1_DEVICE_FEATURES=1` keeps vision features on the GPU and copies image rows
-directly into language scratch. Its language path remains eager; it can be paired
-with either vision Graph setting. All three controls default off. See the
+directly into language scratch before capture/replay. It can be paired with
+either vision Graph setting. All three controls default off. See the
 [resident-feature contract](native_vision_graph.md#gpu-resident-vision-features)
 for strict control parsing, synchronization and reproduction commands.
 

@@ -104,8 +104,12 @@ export CUA_S1_DEVICE_FEATURES=1
 ```
 
 This switch is independent of `CUA_S1_VISION_GRAPH`. Vision can run eagerly or
-replay a Graph; the resident-feature language path remains eager in both modes.
-The host-feature language path retains the independent `CUA_S1_GRAPH` control.
+replay a Graph; `CUA_S1_GRAPH=1` independently enables language capture/replay
+for both host and resident features. Current token IDs, T/H/W positions and
+image rows are staged before capture/replay into language-owned scratch. Captures
+do not retain the borrowed vision allocation; host/device calls with the same
+sequence length share the existing multimodal cache. Scratch growth and capture
+failure retain the existing invalidation and eager-fallback behavior.
 The resident path reuses one vision output across all questions in the request
 and copies contiguous image-placeholder rows directly into language scratch.
 It avoids the full feature download and per-question feature upload. It still
@@ -142,14 +146,24 @@ The finite-scan test needs only `CUA_S1_CUDA_LIB`; the other tests need all four
 ```sh
 cargo test --release --locked -p omni-qwen3-5-native --lib device_tests \
   -- --ignored --test-threads=1
-CUA_S1_VISION_GRAPH=0 cargo test --release --locked -p omni-cua-s1-native \
+CUA_S1_GRAPH=1 CUA_S1_VISION_GRAPH=0 cargo test --release --locked -p omni-cua-s1-native \
   --lib device_feature_tests -- --ignored --test-threads=1
-CUA_S1_VISION_GRAPH=1 cargo test --release --locked -p omni-cua-s1-native \
+CUA_S1_GRAPH=1 CUA_S1_VISION_GRAPH=1 cargo test --release --locked -p omni-cua-s1-native \
   --lib device_feature_tests -- --ignored --test-threads=1
 cargo test --release --locked -p omni-qwen3-5-native --lib device_vision_graph_ \
   -- --ignored --test-threads=1
 ```
 
+The language-Graph regression also runs with the real library:
+
+```sh
+CUA_S1_TEST_MODEL="$CUA_S1_MODEL" cargo test --release --locked \
+  -p omni-qwen3-5-native --lib device_multimodal_graph_ \
+  -- --ignored --test-threads=1 --nocapture
+```
+
+It checks changed tokens/features/positions, host/device interleaving after
+producer release, scratch growth, and actual recording-error eager fallback.
 These tests compare feature bits, hidden states, logits, probabilities and
 complete responses across changed pixels/goals, repeated questions, different
 grids with equal patch counts, scratch growth and short-request recovery.

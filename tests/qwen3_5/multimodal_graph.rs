@@ -364,3 +364,101 @@ fn graph_recording_failure_keeps_eager_result_and_disables_both_modes() -> Resul
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "requires the Cua-S1 language checkpoint and real CUDA library; run serially"]
+fn device_multimodal_graph_uses_current_rows_and_releases_external_storage() -> Result<()> {
+    let mut model = load_model()?;
+    let image_token = model.cfg.image_token_id.context("image_token_id")?;
+    let text = text_tokens(&model, 4)?;
+    let mut last = Vec::new();
+    for seed in 0..4 {
+        let ids = [text[seed], image_token, image_token, text[(seed + 1) % 4]];
+        let indices = [1, 2];
+        let temporal = [0, 1 + seed as i64, 1 + seed as i64, 5];
+        let height = [0, 1, 2 + seed as i64, 5];
+        let width = [0, 2 + seed as i64, 1, 5];
+        let features: Vec<bf16> = (0..2 * model.cfg.hidden)
+            .map(|i| bf16::from_f32(((i + seed * 7) % 19) as f32 / 18.0 - 0.5))
+            .collect();
+        let input = MultimodalInput {
+            token_ids: &ids,
+            image_token_indices: &indices,
+            image_embeddings: &features,
+            position_ids: [&temporal, &height, &width],
+        };
+        model.graph_enabled = false;
+        let expected = model.forward_multimodal(&input)?;
+        if !last.is_empty() {
+            assert_ne!(expected, last, "changed input must exercise new data");
+        }
+        let bytes: Vec<_> = features.iter().flat_map(|v| v.to_le_bytes()).collect();
+        let source = DeviceBuffer::new(bytes.len())?;
+        unsafe { cuda::upload(source.at(0), &bytes, model.stream)? };
+        model.synchronize()?;
+        let device = DeviceMultimodalInput {
+            token_ids: &ids,
+            image_token_indices: &indices,
+            image_embeddings: source.bf16_matrix(2, model.cfg.hidden)?,
+            position_ids: input.position_ids,
+        };
+        model.graph_enabled = true;
+        assert_hidden_eq(
+            &model.forward_multimodal_device(&device)?,
+            &expected,
+            "device capture/replay",
+        );
+        assert_eq!(
+            model.mm_graphs.len(),
+            1,
+            "device path must cache the shared MM graph"
+        );
+        assert_eq!(
+            model.graph_stats().captures,
+            1,
+            "same shape must not recapture"
+        );
+        assert_eq!(model.graph_stats().replays, 2 * seed as u64);
+        // A capture must not retain the external producer address. Releasing it
+        // and using host input must replay the same graph safely.
+        drop(source);
+        assert_hidden_eq(
+            &model.forward_multimodal(&input)?,
+            &expected,
+            "host replay after producer release",
+        );
+        assert_eq!(model.graph_stats().replays, 2 * seed as u64 + 1);
+        last = expected;
+    }
+    model.prepare_scratch(model.scratch.as_ref().unwrap().cap + 1)?;
+    assert!(model.mm_graphs.is_empty(), "growth must retire captures");
+    let ids = [text[0], image_token, image_token, text[1]];
+    let positions = [0, 1, 1, 2];
+    let source = DeviceBuffer::new(2 * model.cfg.hidden * BF16)?;
+    let bytes = vec![0; 2 * model.cfg.hidden * BF16];
+    unsafe { cuda::upload(source.at(0), &bytes, model.stream)? };
+    model.synchronize()?;
+    let device = DeviceMultimodalInput {
+        token_ids: &ids,
+        image_token_indices: &[1, 2],
+        image_embeddings: source.bf16_matrix(2, model.cfg.hidden)?,
+        position_ids: [&positions; 3],
+    };
+    let captured = model.forward_multimodal_device(&device)?;
+    assert_eq!(model.mm_graphs.len(), 1);
+    assert_eq!(model.graph_stats().captures, 2);
+    let failed = cuda::Graph::capture(model.stream, || {
+        anyhow::bail!("injected device record failure")
+    });
+    assert!(failed.is_err());
+    model.cache_graph(&[4], true, failed)?;
+    assert!(!model.graph_enabled);
+    assert!(model.mm_graphs.is_empty());
+    assert_hidden_eq(
+        &model.forward_multimodal_device(&device)?,
+        &captured,
+        "device eager recovery",
+    );
+    assert!(!model.graph_enabled);
+    Ok(())
+}
