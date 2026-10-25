@@ -86,8 +86,13 @@ separate groups. The [pplx-decider recipe](../recipe/pplx_decider/README.md)
 records a Public231 concurrency-1 run on 1× lab L20X (sm_89) at head
 `1ba07d1`: stripped no-thinking twin, warmup 5, concurrency 1, clock
 `successful_latency` / `post_to_body_json_and_schema_validation`. Primary
-run1 was 231/231, p50 98.777 ms, p95 341.202 ms. That run stays in its own
-group and does not enter the H800 table above. The unpadded-mask change, `thinking.enabled=false`,
-the causal-conv1d sm_90 and sm_89 cubins, the FLA chunk bind, and the capability-9.0 FlashInfer prefill have no measured samples. A lab GPU labeled L20X remains the target host. Ready is not limited to capability 9.0.
+run1 was 231/231, p50 98.777 ms, p95 341.202 ms. Head `f968e576` on a lab
+GPU labeled L20X, same workload family, `/health` `linear_attention=fla-chunk`,
+`causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`: 231/231, p50 98.037 ms,
+p95 302.569 ms. Against that primary, p50 is −0.74 ms (−0.75%) and p95 is
+−38.6 ms (−11.32%). The tip is kept. The paste is one pair and does not time
+the FlashInfer bind. Both runs stay in this L20X group and do not enter the
+H800 table above. Ready is not limited to capability 9.0.
+
 Image replacement, repeated-image/cache workloads and higher
 concurrency have not been measured here; add their own frozen inputs before ranking.

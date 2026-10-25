@@ -11,8 +11,9 @@ the 11 weight shards plus `readout.safetensors` as 52,173,413,928 bytes
 (about 48.6 GiB). The card asks for roughly 49 GiB of weights plus working
 memory. Plan for that much free disk. A reported load on 1× lab L20X
 (~140 GiB, sm_89) was BF16 resident ~50333 MiB with no OOM. Lab GPUs
-labeled L20X are the H200 target. The next Public231 C1 is on that host.
-Record the name and the compute capability. It is not measured yet.
+labeled L20X are the H200 target. Head `f968e576` has a verified Public231
+C1 on that host: 231/231, p50 98.037 ms, p95 302.569 ms, with
+`linear_attention=fla-chunk` and `flashinfer` null.
 
 ## CPU checks
 
@@ -112,12 +113,11 @@ cap, and record it. Text Public231 does not send images.
 ## Public231 concurrency 1
 
 Head `1ba07d15b11a8c0796657e4a10b7ba3e62354421` was measured on 1× lab L20X
-(sm_89, ~140 GiB). Lab GPUs labeled L20X are the H200 target for the next
-measurement. Record `nvidia-smi` name and compute capability with that
-run. A load failure is a startup failure, not a latency. H800 board
-numbers use a different clock and stay on that board. Do not claim a win
-until a Public231 C1 p50/p95 from that lab host is pasted. The `1ba07d1`
-primary stays the recorded sample for that head.
+(sm_89, ~140 GiB). Head `f968e576aa733a0e6e4b2bc46bb11035e7662c8f` was
+remeasured on a lab GPU labeled L20X and is kept. A load failure is a
+startup failure, not a latency. H800 board numbers use a different clock
+and stay on that board. The `1ba07d1` run1 primary remains the comparison
+baseline.
 
 Reported load: BF16 resident ~50333 MiB, no OOM. Warmup 5, concurrency 1,
 clock `successful_latency` / `post_to_body_json_and_schema_validation`.
@@ -131,9 +131,20 @@ the same 231 rows. This head admits `thinking` only when the value is
 
 | Round | Successful | p50 | p95 |
 | --- | --- | --- | --- |
-| run1, primary | 231/231 | 98.777 ms | 341.202 ms |
-| run2 | 231/231 | 97.921 ms | 340.804 ms |
-| run3 | 231/231 | 98.177 ms | 343.953 ms |
+| `1ba07d15` run1, primary | 231/231 | 98.777 ms | 341.202 ms |
+| `1ba07d15` run2 | 231/231 | 97.921 ms | 340.804 ms |
+| `1ba07d15` run3 | 231/231 | 98.177 ms | 343.953 ms |
+| `f968e576` verified C1 | 231/231 | 98.037 ms | 302.569 ms |
+
+The `f968e576` row is the owner-verified lab paste against `1ba07d15` run1.
+Delta p50 is −0.74 ms (−0.75%), called flat. Delta p95 is −38.6 ms
+(−11.32%), called a win. `/health` on that run reported
+`linear_attention=fla-chunk`, `causal_conv1d=1.7.0`, `fla=0.5.2`, and
+`flashinfer=null`, so the sample is the FLA chunk path. It does not time
+the capability-9.0 FlashInfer bind. The paste does not include run2, run3,
+`compute_capability`, resident memory, or a decision-disagreement count.
+Those remain unverified. The tip stays. A later optimize commit needs its
+own C1, aimed at the remaining ~98 ms forward floor.
 
 The two-model Public231 export hashes to
 `00d1f10ca1142499a598b5f1c6602d329cce1cef04c961c46fc0318daa2c67d3`
@@ -200,17 +211,13 @@ them and do not raise the timeout after seeing the times.
 6. A second arm through `http://127.0.0.1:8080/v1/systemone` is frontend
    time only. Keep it in different output directories. The Rust frontend's
    own 60 second cap still applies. Do not average it into the worker p50.
-7. Remeasure this head on the lab L20X-labeled GPU, warmup 5, concurrency 1,
-   three rounds, clock `successful_latency` /
-   `post_to_body_json_and_schema_validation`. Record `nvidia-smi` name,
-   compute capability, and `/health` `causal_conv1d`, `fla`, `flashinfer`,
-   `linear_attention`, `compute_capability`, and `gpu_name`. Capability
-   8.9 is ready at `fla-chunk`. Capability 9.0 is ready at
-   `flashinfer+fla+causal_conv1d` when that pin imported, and at
-   `fla-chunk` when `flashinfer` is null. Count decision disagreements
-   against `1ba07d1` `responses.jsonl`. The head also contains the
-   unpadded full-attention mask and `thinking.enabled=false`, so a pasted
-   delta is the whole head. Samples: 0. No latency claim before that paste.
+7. The lab paste for `f968e576` is recorded above. Keep that tip. The next
+   optimize commit targets the remaining ~98 ms forward floor and needs its
+   own Public231 C1 on the lab L20X-labeled GPU before it replaces this
+   result. Record `/health` `causal_conv1d`, `fla`, `flashinfer`,
+   `linear_attention`, `compute_capability`, and `gpu_name`. Count decision
+   disagreements against `1ba07d1` `responses.jsonl`. A pasted delta is the
+   whole head.
 
 `benchmarks/smoke.jsonl` checks the client, not this model and not Public231.
 
@@ -226,12 +233,13 @@ them and do not raise the timeout after seeing the times.
 | 2026-10-25 | Install `causal-conv1d` 1.7.0 and add an sm_89 cubin the upstream gencode omits. CUDA startup refuses a missing package, a cubin without the visible GPU arch, or a Qwen conv still bound to `F.conv1d`. The package path is not bit-exact with that fallback. | No CUDA device in this environment. Samples: 0. `778609f` is still unverified. | not measured |
 | 2026-10-25 | Classification C1 follows the sm_89 vLLM/SGLang mapping: FLA/Triton chunk plus `causal-conv1d`. The installer inserts the sm_89 cubin upstream omits and still refuses `F.conv1d`. `/health` reports `linear_attention=fla-chunk`. FlashInfer, CuteDSL, and CUDA graphs are not on this path. Unpadded full-attention masks and `thinking.enabled=false` are already in the branch. | No L20X in this environment. Samples: 0. Remeasure against primary 98.777 / 341.202 when the host is back. | not measured |
 | 2026-10-25 | Lab L20X-labeled GPUs are the H200 target. Keep sm_90 and sm_89 cubins. Capability 9.0 binds FlashInfer `chunk_gated_delta_rule` (FLA L2 norm, float32 gate, `use_cp` false, one sequence) when `flashinfer-python` 0.6.16.post3 imports. Capability 8.9, and capability 9.0 without that package, stay ready on `fla-chunk` plus `causal_conv1d`. `/health` reports `flashinfer`, `linear_attention`, `compute_capability`, and `gpu_name`. Ready is not limited to capability 9.0. | No CUDA device in this environment. Samples: 0. No latency claim. | not measured |
+| 2026-10-25 | Keep head `f968e576`. The whole head, including unpadded full attention, `thinking.enabled=false`, `causal-conv1d` 1.7.0, and FLA chunk, was verified on the lab L20X-labeled GPU. `/health` reported `linear_attention=fla-chunk`, `causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`. FlashInfer was not the bind under test. | Owner-verified Public231 C1, 231/231, p50 98.037 ms, p95 302.569 ms, versus `1ba07d15` run1 p50 98.777 ms, p95 341.202 ms. One pasted pair. Decision disagreements, extra rounds, capability, and resident memory were not in the paste. | p50 −0.74 ms (−0.75%), flat. p95 −38.6 ms (−11.32%), win. Tip kept. |
 
 ## Limits
 
-Image parity is unverified. The CUDA forward of head `1ba07d1` has the
-Public231 numbers in the optimization log; decision agreement of the
-unpadded-mask head against that head is not measured. The shared Qwen CUDA
+Image parity is unverified. Head `f968e576` has the owner-verified
+Public231 C1 in the optimization log. Decision agreement against `1ba07d1`
+was not in that paste. The shared Qwen CUDA
 backend is not used. PR #140 is a separate Rust port of this same contract;
 it does not serve, and its JSON parser rewrites integers outside i64/u64.
 This worker keeps those integers because it uses Python's parser and the

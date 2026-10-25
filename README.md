@@ -166,8 +166,8 @@ v1.1 has its checkpoint export and CPU contract, with no worker yet. D3
 (Decision 3.0) has a Python reference worker that runs the checkpoint's own
 pinned runtime for text, image and video state. pplx-decider-v1.1-27b has a
 Python reference worker for the pinned Perplexity checkpoint. Public231
-concurrency-1 latency for head `1ba07d1` is recorded in the recipe; the
-later unpadded-mask head is not measured:
+concurrency-1 latency for heads `1ba07d1` and `f968e576` is recorded in
+the recipe:
 
 | Model | Status |
 | --- | --- |
@@ -184,7 +184,7 @@ later unpadded-mask head is not measured:
 | LFM2.5-350M | [Transformers worker](recipe/lfm2/README.md); text state and independent choice questions |
 | OmniJev-4B v1.1 | [Checkpoint export and CPU contract](recipe/omnijev/README.md) only; the native worker is in progress ([#114](https://github.com/ThinkFlowLab/system1-omni/issues/114)) |
 | D3 (Decision 3.0) | [Python reference worker](recipe/d3/reference.md) on the checkpoint's pinned runtime; `choice`/`noul`/`score` over text, image and video state; author-run on A100 for text and media serving (see the integration and media PRs) |
-| pplx-decider-v1.1-27b | [Python reference worker](recipe/pplx_decider/README.md) on the pinned checkpoint; `choice`/`noul`/`score` text plus up to four images. Lab L20X-labeled GPUs are the H200 target: capability 8.9 stays on FLA chunk plus causal_conv1d, and capability 9.0 can bind FlashInfer prefill. Head `1ba07d1` on 1× lab L20X (sm_89): Public231 C1 primary p50 98.777 ms, p95 341.202 ms, 231/231. Later heads have no sample |
+| pplx-decider-v1.1-27b | [Python reference worker](recipe/pplx_decider/README.md) on the pinned checkpoint; `choice`/`noul`/`score` text plus up to four images. Lab L20X-labeled GPUs are the H200 target: capability 8.9 stays on FLA chunk plus causal_conv1d, and capability 9.0 can bind FlashInfer prefill. Head `1ba07d1` primary: p50 98.777 ms, p95 341.202 ms. Head `f968e576` on that host with `fla-chunk` and `flashinfer` null: 231/231, p50 98.037 ms, p95 302.569 ms. Tip kept |
 
 [Supported models and hardware](docs/supported-models.md) lists the devices
 and where each worker has been run.
