@@ -65,29 +65,32 @@ PYTHONPATH=src python3 -m frontend.pplx_decider \
 causal-conv check, the FLA chunk check, and the unpadded full-attention
 install. It reports `model`, `max_input_tokens` (8192), `modalities`,
 `attention_mode`, `unpadded_full_attention_layers`, `causal_conv1d`, `fla`,
-`flashinfer`, `flashinfer_status`, `linear_attention`, `compute_capability`,
-and `gpu_name`. A null operator field is an explicit partial, not an
-omitted key. The pinned `config.json` lists 16 `full_attention` layers,
-so that field is 16 after a normal load. On CUDA, `causal_conv1d` is
-`1.7.0` and `fla` is `0.5.2`. Capability 8.9 reports `linear_attention`
-`fla-chunk`, `flashinfer` null, and `flashinfer_status=not-selected`, and
-it is ready. Capability 9.0 with `flashinfer-python` 0.6.16.post3 reports
-`linear_attention` `flashinfer-short+fla-chunk` and
-`flashinfer_status=bound`. One sequence of at most 256 tokens uses
-FlashInfer. A longer sequence, or a forward with more than one sequence,
-uses FLA chunk. `PPLX_GDN_PREFILL=fla` reports `flashinfer_status=held`
-and `linear_attention=fla-chunk` even when the pin is installed. The same
-capability without that package, or when the module does not import, stays
-on `fla-chunk` with status `absent` or `import-failed` and is still ready.
-The kept primary is `fla-chunk` at capability 9.0. The all-sequence
-FlashInfer bind missed the p95 gate and is not the startup path. A device name of
-`NVIDIA L20X` is accepted at either capability. Startup raises if causal_conv1d or FLA
-is missing, the conv cubin has no image for the visible GPU, the loaded
-FlashInfer version is not 0.6.16.post3, or Transformers still bound
-`F.conv1d` or the PyTorch chunk reference. That last case is what logs
-`falling back to its reference PyTorch implementation` on the first
-forward. It does not report a filesystem path. CuteDSL and CUDA graphs
-are not used. The FlashInfer bind forwards one question at a time.
+`flashinfer`, `flashinfer_status`, `linear_attention`, `sdpa`,
+`compute_capability`, and `gpu_name`. A null operator field is an explicit
+partial, not an omitted key. The pinned `config.json` lists 16
+`full_attention` layers, so that field is 16 after a normal load. On CUDA,
+`causal_conv1d` is `1.7.0`, `fla` is `0.5.2`, and `sdpa` is `cudnn-first`
+unless `PPLX_SDPA=default`. CPU reports `sdpa=default`. Capability 8.9
+reports `linear_attention` `fla-chunk`, `flashinfer` null, and
+`flashinfer_status=not-selected`, and it is ready. Capability 9.0 with
+`flashinfer-python` 0.6.16.post3 reports `flashinfer=0.6.16.post3` and, by
+default, `flashinfer_status=held` and `linear_attention=fla-chunk`.
+`PPLX_GDN_PREFILL=short` is the rejected length dispatch: one sequence of
+at most 256 tokens uses FlashInfer, and health then reports
+`linear_attention=flashinfer-short+fla-chunk` with status `bound`. The
+same capability without that package, or when the module does not import,
+stays on `fla-chunk` with status `absent` or `import-failed` and is still
+ready. The kept primary is `fla-chunk` at capability 9.0. CUDA startup
+enables cuDNN SDPA for the forward, prefers it, then flash, mem-efficient,
+and math, and restores the previous flag. Math remains a fallback. Flash,
+math, and cuDNN SDPA are not bit-exact. A device name of `NVIDIA L20X` is
+accepted at either capability. Startup raises if causal_conv1d or FLA is
+missing, the conv cubin has no image for the visible GPU, the loaded
+FlashInfer version is not 0.6.16.post3, `PPLX_GDN_PREFILL` or `PPLX_SDPA`
+is an unknown value, or Transformers still bound `F.conv1d` or the PyTorch
+chunk reference. That last case is what logs `falling back to its
+reference PyTorch implementation` on the first forward. It does not report
+a filesystem path. CuteDSL and CUDA graphs are not used.
 
 `install_causal_conv1d.py` builds [causal-conv1d 1.7.0](https://pypi.org/project/causal-conv1d/1.7.0/)
 against the installed torch. That release emits sm_90 when nvcc is 11.8
@@ -96,19 +99,15 @@ or newer and skips sm_89. The script inserts a missing
 line, and refuses to build if either cubin is still absent. It needs
 nvcc. This tree did not compile it.
 
-The kept primary did not install FlashInfer. To try the next candidate,
-after the causal-conv1d install and before starting the worker:
-
-```sh
-PYTHONPATH=src python3 recipe/pplx_decider/install_flashinfer.py
-```
-
-That script installs `flashinfer-python==0.6.16.post3` from PyPI. The
-all-sequence bind of that pin missed the gate. The next candidate uses it
-only for one sequence of at most 256 tokens. Set `PPLX_GDN_PREFILL=fla`
-to reproduce the primary on a machine where the pin is already installed.
-A new C1 is inconclusive until it reports p50 and p95 against 94.077 /
-300.200.
+The kept primary did not install FlashInfer and left cuDNN SDPA off. The
+next candidate does not change GDN and does not need another FlashInfer
+install. Leave `PPLX_GDN_PREFILL` unset so an already installed pin stays
+`held` on FLA chunk. CUDA startup then reports `sdpa=cudnn-first`.
+`PPLX_SDPA=default` reproduces the primary SDPA order.
+`PPLX_GDN_PREFILL=short` is the rejected ≤256 dispatch, not this candidate.
+`install_flashinfer.py` remains optional. A new C1 is inconclusive until
+it reports p50 and p95 against 94.077 / 300.200, plus `choice_acc`,
+`noul_acc`, and `score_mae`.
 
 ```sh
 curl -sS http://127.0.0.1:8000/health
@@ -171,8 +170,8 @@ the FLA chunk path on a capability-9.0 device. FlashInfer was not bound.
 The earlier 98.037 / 302.569 paste is not the primary. Run2, run3, resident
 memory, and a decision-disagreement count were not in the remeasure.
 The next tip has to beat 94.077 / 300.200 on both p50 and p95 in a new C1.
-`3c72f02` did not. p50 improved and p95 did not, so `f968e576` stays the
-primary.
+`3c72f02` did not: p50 improved and p95 did not. `a50b9aa` did not either:
+both percentiles were worse. `f968e576` stays the primary.
 
 The two-model Public231 export hashes to
 `00d1f10ca1142499a598b5f1c6602d329cce1cef04c961c46fc0318daa2c67d3`
@@ -241,14 +240,17 @@ them and do not raise the timeout after seeing the times.
    own 60 second cap still applies. Do not average it into the worker p50.
 7. The kept primary is the `f968e576` remeasure above. `3c72f02` bound
    FlashInfer on every sequence and failed the gate: p50 88.808 ms, p95
-   300.751 ms. The next candidate is a different lever: FlashInfer only for
-   one sequence of at most 256 tokens, FLA chunk otherwise.
-   `PPLX_GDN_PREFILL=fla` reproduces the primary. A new Public231 C1 has to
-   beat p50 94.077 ms and p95 300.200 ms before that candidate replaces the
-   primary. Record `/health` `causal_conv1d`, `fla`, `flashinfer`,
-   `flashinfer_status`, `linear_attention`, `compute_capability`, and
-   `gpu_name`, plus `choice_acc`, `noul_acc`, and `score_mae` when the run
-   reports them. Until that paste, the candidate is inconclusive.
+   300.751 ms. `a50b9aaa9f7ee546c6cfba5c231fff6dd3ff9716` used FlashInfer
+   only for one sequence of at most 256 tokens and also failed: p50
+   95.446 ms, p95 300.871 ms. Do not try another length cutoff. The next
+   candidate keeps GDN on FLA chunk, including when the pin is installed
+   (`flashinfer_status=held`), and prefers cuDNN SDPA on CUDA.
+   `PPLX_SDPA=default` reproduces the primary SDPA order. A new Public231
+   C1 has to beat p50 94.077 ms and p95 300.200 ms before that candidate
+   replaces the primary. Record `/health` `causal_conv1d`, `fla`,
+   `flashinfer`, `flashinfer_status`, `linear_attention`, `sdpa`,
+   `compute_capability`, and `gpu_name`, plus `choice_acc`, `noul_acc`,
+   and `score_mae`. Until that paste, the candidate is inconclusive.
 
 `benchmarks/smoke.jsonl` checks the client, not this model and not Public231.
 
@@ -267,16 +269,18 @@ them and do not raise the timeout after seeing the times.
 | 2026-10-25 | Keep head `f968e576`. The whole head, including unpadded full attention, `thinking.enabled=false`, `causal-conv1d` 1.7.0, and FLA chunk, was verified on the lab L20X-labeled GPU. `/health` reported `linear_attention=fla-chunk`, `causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`. FlashInfer was not the bind under test. | Owner-verified Public231 C1, 231/231, p50 98.037 ms, p95 302.569 ms, versus `1ba07d15` run1 p50 98.777 ms, p95 341.202 ms. One pasted pair. Decision disagreements, extra rounds, capability, and resident memory were not in the paste. | p50 −0.74 ms (−0.75%), flat. p95 −38.6 ms (−11.32%). Superseded as primary by the remeasure below. |
 | 2026-10-25 | Remeasure the same worker `f968e576` on the lab L20X-labeled GPU. No new kernel. Stock Public231 with `thinking.enabled=false`, warmup 5, concurrency 1, metric `successful_latency`. `/health`: `causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`, `linear_attention=fla-chunk`, `compute_capability=9.0`. | 231/231, p50 94.077 ms, p95 300.200 ms versus `1ba07d15` run1 98.777 / 341.202. | p50 −4.700 ms (−4.76%), p95 −41.002 ms (−12.02%). New primary. |
 | 2026-10-25 | One lever: bind FlashInfer 0.6.16.post3 for every GDN prefill on capability 9.0. Tip `3c72f02682616c58fdbb38e7fcdf320af20c33df`. | Lab L20X-labeled host. Warmup 5, concurrency 1, stock Public231, `thinking.enabled=false`. 231/231, p50 88.808 ms, p95 300.751 ms. `/health`: `causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=0.6.16.post3`, `flashinfer_status=bound`, `linear_attention=flashinfer+fla+causal_conv1d`, `compute_capability=9.0`. Quality on this tip only: `choice_acc=0.9065`, `noul_acc=0.8784`, `score_mae=0.2035`. Primary quality was not in the paste. | p50 −5.269 ms (−5.60%). p95 +0.551 ms (+0.18%). Gate failed. Primary stays `f968e576`. |
-| 2026-10-25 | Different lever: FlashInfer only when the forward is one sequence of at most 256 tokens. Longer sequences and multi-sequence forwards stay on FLA chunk. 256 is between the profiled median length of about 136 tokens and the profiled tail example of about 2676 tokens. It is not a fitted cutoff. `PPLX_GDN_PREFILL=fla` holds the pin. | Not run. Samples: 0. | inconclusive |
+| 2026-10-25 | Different lever: FlashInfer only when the forward is one sequence of at most 256 tokens. Longer sequences and multi-sequence forwards stay on FLA chunk. Tip `a50b9aaa9f7ee546c6cfba5c231fff6dd3ff9716`. 256 is between the profiled median length of about 136 tokens and the profiled tail example of about 2676 tokens. It is not a fitted cutoff. | Public231 C1, 231/231, p50 95.446 ms, p95 300.871 ms. `/health`: `linear_attention=flashinfer-short+fla-chunk`, `flashinfer=0.6.16.post3`, `flashinfer_status=bound`, `causal_conv1d=1.7.0`, `fla=0.5.2`, `compute_capability=9.0`. Quality: `choice_acc=0.9065`, `noul_acc=0.8784`. `score_mae` was not in the paste. Warmup, concurrency, and the latency metric were not restated in the paste. | p50 +1.369 ms (+1.46%). p95 +0.671 ms (+0.22%). Gate failed. Primary stays `f968e576`. |
+| 2026-10-25 | Different lever, not another length cutoff. GDN stays on FLA chunk even when the FlashInfer pin is installed (`flashinfer_status=held`). CUDA forwards prefer cuDNN SDPA, then flash, mem-efficient, and math, and restore the previous cuDNN flag. `PPLX_SDPA=default` leaves the checkpoint order. Math stays as a fallback. | Not run. Samples: 0. | inconclusive |
 
 ## Limits
 
 Image parity is unverified. The kept Public231 primary is the `f968e576`
 remeasure in the optimization log: p50 94.077 ms, p95 300.200 ms, on
 `fla-chunk` at compute capability 9.0. The all-sequence FlashInfer bind
-`3c72f02` is not the primary: p50 88.808 ms, p95 300.751 ms. Decision
-agreement against `1ba07d1` was not in the primary paste. The short-sequence
-dispatch candidate has no sample. The shared Qwen CUDA
+`3c72f02` is not the primary: p50 88.808 ms, p95 300.751 ms. The
+short-sequence FlashInfer bind `a50b9aa` is not the primary: p50 95.446 ms,
+p95 300.871 ms. Decision agreement against `1ba07d1` was not in the primary
+paste. The cuDNN-first SDPA candidate has no sample. The shared Qwen CUDA
 backend is not used. PR #140 is a separate Rust port of this same contract;
 it does not serve, and its JSON parser rewrites integers outside i64/u64.
 This worker keeps those integers because it uses Python's parser and the

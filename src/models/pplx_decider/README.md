@@ -84,29 +84,31 @@ and replaces the checkpoint pre-hook. An all-true padding mask omits the
 explicit full-attention mask so Transformers 5.17 SDPA can use its
 grouped-query kernel (`head_dim` 256). Any false padding bit keeps
 `padding[:, None, None, :].bool()`. The linear-attention mask is unchanged.
-cuDNN SDPA stays off, which is the checkpoint setting. Flash and math SDPA
-are not bit-exact. CUDA startup requires `causal-conv1d` 1.7.0, imported
-before Qwen3.5 modeling, and refuses the `F.conv1d` fallback. The build
-keeps an sm_90 cubin and an sm_89 cubin. It also requires
-`flash-linear-attention` 0.5.2. Lab GPUs labeled NVIDIA L20X are the H200
-target. Capability 8.9, and capability 9.0 when FlashInfer is absent, report
-`linear_attention` as `fla-chunk` and are ready. Capability 9.0 with
-`flashinfer-python` 0.6.16.post3 installs short-sequence dispatch:
-FlashInfer for one sequence of at most 256 tokens, FLA chunk otherwise.
-`PPLX_GDN_PREFILL=fla` stays on `fla-chunk`. The all-sequence FlashInfer
-bind is not the startup path. CuteDSL and CUDA graphs are not used. These kernels
-are not bit-exact with the torch fallbacks. The kept primary is the
-remeasure of `f968e576aa733a0e6e4b2bc46bb11035e7662c8f` on the lab
-L20X-labeled GPU: warmup 5, concurrency 1, stock Public231 with
-`thinking.enabled=false`, metric `successful_latency`, 231/231, p50
-94.077 ms, p95 300.200 ms. `/health` reported `causal_conv1d=1.7.0`,
-`fla=0.5.2`, `flashinfer=null`, `linear_attention=fla-chunk`, and
-`compute_capability=9.0`. Against `1ba07d15` run1 that is p50 −4.700 ms
-(−4.76%) and p95 −41.002 ms (−12.02%). An earlier paste of 98.037 /
-302.569 is not this primary. Decision disagreements were not in the
-remeasure. All-sequence FlashInfer on `3c72f02` missed the gate
-(p50 88.808 ms, p95 300.751 ms) and is not the primary. The short-sequence
-dispatch candidate has no sample.
+CUDA startup prefers cuDNN SDPA for the forward and restores the previous
+flag. `PPLX_SDPA=default` leaves the checkpoint's cuDNN-off order. Flash,
+math, and cuDNN SDPA are not bit-exact. CUDA startup requires
+`causal-conv1d` 1.7.0, imported before Qwen3.5 modeling, and refuses the
+`F.conv1d` fallback. The build keeps an sm_90 cubin and an sm_89 cubin. It
+also requires `flash-linear-attention` 0.5.2. Lab GPUs labeled NVIDIA L20X
+are the H200 target. Capability 8.9, and capability 9.0 by default, report
+`linear_attention` as `fla-chunk` and are ready. An installed
+`flashinfer-python` 0.6.16.post3 pin is held unless
+`PPLX_GDN_PREFILL=short`, which is the rejected one-sequence ≤256
+dispatch. The all-sequence FlashInfer bind is not the startup path.
+CuteDSL and CUDA graphs are not used. These kernels are not bit-exact with
+the torch fallbacks. The kept primary is the remeasure of
+`f968e576aa733a0e6e4b2bc46bb11035e7662c8f` on the lab L20X-labeled GPU:
+warmup 5, concurrency 1, stock Public231 with `thinking.enabled=false`,
+metric `successful_latency`, 231/231, p50 94.077 ms, p95 300.200 ms.
+`/health` reported `causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`,
+`linear_attention=fla-chunk`, and `compute_capability=9.0`. Against
+`1ba07d15` run1 that is p50 −4.700 ms (−4.76%) and p95 −41.002 ms
+(−12.02%). An earlier paste of 98.037 / 302.569 is not this primary.
+Decision disagreements were not in the remeasure. All-sequence FlashInfer
+on `3c72f02` missed the gate (p50 88.808 ms, p95 300.751 ms) and is not
+the primary. Short-sequence FlashInfer on `a50b9aa` missed the gate
+(p50 95.446 ms, p95 300.871 ms, `choice_acc=0.9065`, `noul_acc=0.8784`)
+and is not the primary. The cuDNN-first SDPA candidate has no sample.
 
 The shared Qwen3.5 CUDA language kernels in this repository are causal
 (`src/backends/cuda/qwen3_5/attention.cu`). Their vision-operator tests mention
@@ -118,8 +120,8 @@ backend. A native executor is not in this change.
 | Path | State |
 | --- | --- |
 | CPU contract and HTTP rejection | Implemented; tests do not need weights |
-| CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, `causal-conv1d` 1.7.0 with sm_90 and sm_89 cubins, and FLA 0.5.2 chunk. Capability 9.0 with the FlashInfer pin uses short-sequence dispatch. `PPLX_GDN_PREFILL=fla` stays on FLA chunk. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
-| Public231 concurrency 1 | Kept primary is the `f968e576` remeasure on the lab L20X-labeled GPU, capability 9.0, `fla-chunk`, `flashinfer` null: 231/231, p50 94.077 ms, p95 300.200 ms. Versus `1ba07d1` run1 98.777 / 341.202: p50 −4.76%, p95 −12.02%. All-sequence FlashInfer `3c72f02` failed the gate: p50 88.808 ms, p95 300.751 ms. Not the primary |
+| CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, cuDNN-first SDPA unless `PPLX_SDPA=default`, `causal-conv1d` 1.7.0 with sm_90 and sm_89 cubins, and FLA 0.5.2 chunk. An installed FlashInfer pin is held unless `PPLX_GDN_PREFILL=short`. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
+| Public231 concurrency 1 | Kept primary is the `f968e576` remeasure on the lab L20X-labeled GPU, capability 9.0, `fla-chunk`, `flashinfer` null: 231/231, p50 94.077 ms, p95 300.200 ms. Versus `1ba07d1` run1 98.777 / 341.202: p50 −4.76%, p95 −12.02%. All-sequence FlashInfer `3c72f02` failed the gate: p50 88.808 ms, p95 300.751 ms. Short-sequence FlashInfer `a50b9aa` failed the gate: p50 95.446 ms, p95 300.871 ms. Neither is the primary |
 | CPU `device="cpu"` | The checkpoint switches the backbone to float32. Not the measured path |
 | Images | Admitted. No image parity run |
 | Apple GPU | Not supported |
