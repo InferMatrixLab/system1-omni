@@ -62,7 +62,10 @@ FLA chunk and either FlashInfer dispatch. CuteDSL and CUDA graphs are
 not selected.
 
 Cua-S1 and Open-Jev compute their decision heads on the CPU after downloading
-the final hidden state. Decider projects its selected LM-head rows on CUDA.
+the final hidden state. Cua-S1 screenshots can opt into request-local
+aligned token/position prefix reuse with fixed GEMMs, host features and language
+Graph off. The snapshot belongs to one request, suffixes execute independently,
+and the existing letter head and token accounting are preserved. Decider projects its selected LM-head rows on CUDA.
 JEMM uses the shared Qwen executor with separate unmerged
 FP32 adapters and framework-reference arithmetic. It computes selected BF16
 label-head logits on CUDA, then calibrates typed answers on the CPU. JEMM admits

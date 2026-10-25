@@ -94,3 +94,42 @@ Recorded RTX 4090 evidence covers native screenshot parity and Graph regressions
 the resident-feature comparison covers host/device output equality on its fixed
 real-screenshot corpus. These scopes do not establish general GUI task accuracy
 or native equivalence to every reference precision and environment.
+
+## Request-local language prefix reuse
+
+`CUA_S1_MM_PREFIX=shared` opts into sharing the aligned language prefix of all
+questions in one screenshot request. Unset or `off` keeps the existing independent
+forwards. `fixed` runs complete prompts independently with the same fixed GEMM
+algorithms as `shared`, providing the numerical control. Other values fail before
+checkpoint or CUDA loading.
+
+```sh
+export CUA_S1_MM_PREFIX=shared
+export CUA_S1_GRAPH=0 CUA_S1_DEVICE_FEATURES=0
+# Start omni-cua-s1-vision using the pinned artifacts above.
+```
+
+The planner compares prepared token IDs and all three position axes, rounds the
+common prefix down to 64 tokens, and leaves a nonempty suffix for each question.
+It captures attention K/V, GDN recurrent state and convolution history once, then
+continues each suffix independently in request order. The snapshot is released
+within that request; even a repeated screenshot is recomputed on the next call.
+One question, or less than 64 shared tokens, uses complete fixed passes.
+
+Both opt-in modes require host features and language Graph off; vision Graph
+remains independently selectable. They keep the existing prompt, CPU letter head,
+answer order and usage accounting. Fixed GEMMs can round differently from default
+execution: compare `shared` with `fixed` for continuation parity, and separately
+report probability drift/decision changes against `off`. No automatic mode or
+cross-request cache is included.
+
+CPU control/planner tests run in the ordinary Cua suite. On a reserved GPU with
+the four artifact variables above, run the exact model and recovery checks:
+
+```sh
+cargo test --release --locked -p omni-cua-s1-native --lib prefix_tests \
+  -- --ignored --test-threads=1 --nocapture
+```
+
+The screenshot corpus is a numerical and execution regression; it does not
+establish general GUI task accuracy or a speedup for every request.
