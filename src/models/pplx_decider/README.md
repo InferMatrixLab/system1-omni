@@ -85,12 +85,18 @@ explicit full-attention mask so Transformers 5.17 SDPA can use its
 grouped-query kernel (`head_dim` 256). Any false padding bit keeps
 `padding[:, None, None, :].bool()`. The linear-attention mask is unchanged.
 cuDNN SDPA stays off, which is the checkpoint setting. Flash and math SDPA
-are not bit-exact. CUDA startup also requires `causal-conv1d` 1.7.0, built
-with an sm_89 image, imported before Qwen3.5 modeling so the conv is not
-the `F.conv1d` fallback. That kernel is not bit-exact with the fallback.
-A later Public231 sample has to count decision disagreements against head
-`1ba07d15b11a8c0796657e4a10b7ba3e62354421`. That latency delta is not
-measured in this tree.
+are not bit-exact. CUDA startup requires `causal-conv1d` 1.7.0, imported
+before Qwen3.5 modeling, and refuses the `F.conv1d` fallback. The build
+keeps the Hopper `sm_90` cubin. It also requires
+`flash-linear-attention` 0.5.2 so the chunk GDN path is not the PyTorch
+reference. On SM90 with linear head dim 128, startup then points that
+chunk call at `flashinfer.gdn_prefill.chunk_gated_delta_rule` (the vLLM
+auto path and SGLang's validated SM90 default). If FlashInfer does not
+import, `/health` stays `gdn=fla-chunk` with `flashinfer` null. CuteDSL
+and CUDA graphs are not used. These kernels are not bit-exact with the
+torch fallbacks. A later Public231 sample has to count decision
+disagreements against head `1ba07d15b11a8c0796657e4a10b7ba3e62354421`.
+No H200 latency is measured in this tree.
 
 The shared Qwen3.5 CUDA language kernels in this repository are causal
 (`src/backends/cuda/qwen3_5/attention.cu`). Their vision-operator tests mention
@@ -102,8 +108,8 @@ backend. A native executor is not in this change.
 | Path | State |
 | --- | --- |
 | CPU contract and HTTP rejection | Implemented; tests do not need weights |
-| CUDA reference worker | Checkpoint `device="cuda"` loader, plus the unpadded full-attention hook above. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
-| Public231 concurrency 1 on sm_89 | Head `1ba07d1`, stripped no-thinking twin, warmup 5, concurrency 1. Primary run1: 231/231, p50 98.777 ms, p95 341.202 ms. The unpadded-mask head has no measured samples |
+| CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, `causal-conv1d` 1.7.0, FLA 0.5.2 chunk, and FlashInfer GDN prefill on SM90. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM. The operator target is now H200 (sm_90); that load is not an H200 measurement |
+| Public231 concurrency 1 | Head `1ba07d1` on L20X, stripped no-thinking twin, warmup 5, concurrency 1. Primary run1: 231/231, p50 98.777 ms, p95 341.202 ms. No H200 sample, and no win against that primary |
 | CPU `device="cpu"` | The checkpoint switches the backbone to float32. Not the measured path |
 | Images | Admitted. No image parity run |
 | Apple GPU | Not supported |

@@ -73,9 +73,10 @@ class Handler(BaseHTTPRequestHandler):
         layers = getattr(executor, "unpadded_full_attention_layers", None)
         if layers is not None:
             body["unpadded_full_attention_layers"] = layers
-        conv = getattr(executor, "causal_conv1d_version", None)
-        if conv is not None:
-            body["causal_conv1d"] = conv
+        body["causal_conv1d"] = getattr(executor, "causal_conv1d_version", None)
+        body["fla"] = getattr(executor, "fla_version", None)
+        body["gdn"] = getattr(executor, "gdn_backend", None)
+        body["flashinfer"] = getattr(executor, "flashinfer_version", None)
         self.send_json(200, body)
 
     def do_POST(self):
@@ -144,12 +145,15 @@ def main(argv=None):
     try:
         server = WorkerServer((args.host, args.port), executor)
         LOG.info(
-            "ready model=%s device=%s attention=%s unpadded_full_attention_layers=%s causal_conv1d=%s bind=%s:%s",
+            "ready model=%s device=%s attention=%s unpadded_full_attention_layers=%s causal_conv1d=%s fla=%s gdn=%s flashinfer=%s bind=%s:%s",
             executor.model_name,
             args.device,
             executor.attention_mode,
             executor.unpadded_full_attention_layers,
             executor.causal_conv1d_version,
+            executor.fla_version,
+            executor.gdn_backend,
+            executor.flashinfer_version,
             args.host,
             args.port,
         )

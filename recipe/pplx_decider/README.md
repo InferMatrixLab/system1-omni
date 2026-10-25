@@ -10,8 +10,8 @@ Run the commands from the repository root. `release-manifest.json` records
 the 11 weight shards plus `readout.safetensors` as 52,173,413,928 bytes
 (about 48.6 GiB). The card asks for roughly 49 GiB of weights plus working
 memory. Plan for that much free disk. A reported load on 1× lab L20X
-(~140 GiB, sm_89) was BF16 resident ~50333 MiB with no OOM. The measured
-device is that L20X.
+(~140 GiB, sm_89) was BF16 resident ~50333 MiB with no OOM. That load is
+not the operator target. The operator target is H200 (sm_90).
 
 ## CPU checks
 
@@ -58,20 +58,30 @@ PYTHONPATH=src python3 -m frontend.pplx_decider \
 ```
 
 `/health` is ready only after the hash gate, the weight load, the
-causal-conv check, and the unpadded full-attention install. It reports
-`model`, `max_input_tokens` (8192), `modalities`, `attention_mode`,
-`unpadded_full_attention_layers`, and `causal_conv1d`. The pinned
-`config.json` lists 16 `full_attention` layers, so that field is 16 after
-a normal load. On CUDA, `causal_conv1d` is `1.7.0`. Startup raises if the
-package is missing, the cubin has no image for the visible GPU, or
-Transformers still bound `F.conv1d`. That last case is what logs
-`falling back to its reference PyTorch implementation` on the first
-forward. It does not report a filesystem path.
+causal-conv check, the FLA chunk check, and the unpadded full-attention
+install. It reports `model`, `max_input_tokens` (8192), `modalities`,
+`attention_mode`, `unpadded_full_attention_layers`, `causal_conv1d`,
+`fla`, `gdn`, and `flashinfer`. A null operator field is an explicit
+partial, not an omitted key. The pinned `config.json` lists 16
+`full_attention` layers, so that field is 16 after a normal load. On
+CUDA, `causal_conv1d` is `1.7.0` and `fla` is `0.5.2`. Startup raises if
+either package is missing, the conv cubin has no image for the visible
+GPU, or Transformers still bound `F.conv1d` or the PyTorch chunk
+reference. That last case is what logs `falling back to its reference
+PyTorch implementation` on the first forward. It does not report a
+filesystem path.
+
+On SM90 with linear head dim 128, `gdn` is `flashinfer` when
+`flashinfer.gdn_prefill.chunk_gated_delta_rule` imports, and `fla-chunk`
+when it does not. `flashinfer` is that package's version, or null in the
+partial. Install FlashInfer before startup for the Hopper path. SGLang's
+GDN prefill wants `flashinfer>=0.6.14`. This worker does not select
+CuteDSL and does not capture a CUDA graph.
 
 `install_causal_conv1d.py` builds [causal-conv1d 1.7.0](https://pypi.org/project/causal-conv1d/1.7.0/)
-against the installed torch. That release's gencode list has sm_87 and
-sm_90 and no sm_89, so the script adds `arch=compute_89,code=sm_89` before
-the build. It needs nvcc. This tree did not compile it.
+against the installed torch. That release emits `arch=compute_90,code=sm_90`
+when nvcc is 11.8 or newer. The script inserts that Hopper cubin if the
+sdist omitted it. It needs nvcc. This tree did not compile it.
 
 ```sh
 curl -sS http://127.0.0.1:8000/health
@@ -96,12 +106,13 @@ default cap of 2048×2048 pixels, which is wider than the 512×512 training
 cap. Pass `--max-image-pixels 262144` only when reproducing that training
 cap, and record it. Text Public231 does not send images.
 
-## Public231 concurrency 1 (sm_89)
+## Public231 concurrency 1
 
 Head `1ba07d15b11a8c0796657e4a10b7ba3e62354421` was measured on 1× lab L20X
-(sm_89, ~140 GiB). Keep this group on that device. A load failure is a
-startup failure, not a latency. H800 board numbers use a different clock
-and stay on that board.
+(sm_89, ~140 GiB). That group stays on that device and is not an H200
+result. The next measurement is H200 (sm_90). A load failure is a startup
+failure, not a latency. H800 board numbers use a different clock and stay
+on that board. Do not claim a win until an H200 C1 is pasted.
 
 Reported load: BF16 resident ~50333 MiB, no OOM. Warmup 5, concurrency 1,
 clock `successful_latency` / `post_to_body_json_and_schema_validation`.
@@ -184,13 +195,13 @@ them and do not raise the timeout after seeing the times.
 6. A second arm through `http://127.0.0.1:8080/v1/systemone` is frontend
    time only. Keep it in different output directories. The Rust frontend's
    own 60 second cap still applies. Do not average it into the worker p50.
-7. Remeasure this head on the same L20X, warmup 5, concurrency 1, three
+7. Remeasure this head on H200 (sm_90), warmup 5, concurrency 1, three
    rounds, clock `successful_latency` /
-   `post_to_body_json_and_schema_validation`. Compare with primary run1
-   p50 98.777 ms and p95 341.202 ms. Count decision disagreements against
-   `1ba07d1` `responses.jsonl`. `causal_conv1d` and the unpadded mask are
-   both in this head, so the delta is not the conv alone. Samples: 0 until
-   that paste. No further optimize commits before it.
+   `post_to_body_json_and_schema_validation`. Compare with the L20X primary
+   only as a different device, not as a speedup. Record `/health`
+   `causal_conv1d`, `fla`, `gdn`, and `flashinfer`. Count decision
+   disagreements against `1ba07d1` `responses.jsonl`. Samples on H200: 0.
+   No win claim until that paste.
 
 `benchmarks/smoke.jsonl` checks the client, not this model and not Public231.
 
@@ -203,7 +214,8 @@ them and do not raise the timeout after seeing the times.
 | 2026-10-25 | Omit the explicit full-attention mask when every padding bit is true, and set full-attention `is_causal` false, so Transformers 5.17 can take the grouped-query SDPA kernel (`head_dim` 256). Padded batches keep the bool mask. Linear attention is unchanged. Flash and math are not bit-exact. | No CUDA device in this environment. Head `b6fa9d0`. Samples: 0. | not measured |
 | 2026-10-25 | Admit stock Public231 `thinking` only when it is `{"enabled": false}`. No kernel change. | No CUDA device in this environment. Head `778609f`. Samples: 0. Baseline primary stays `1ba07d1` run1. | not measured |
 | 2026-10-25 | In-process profile of the `1ba07d1` primary. About 136 tokens at p50: total ~89 ms, forward CUDA 87.7 ms (~98%), prepare 1.4 ms, parse/post/answer <0.3 ms. No decode. Short-sequence floor ~88–91 ms. A ~2676-token prompt forwarded in ~327 ms and drives p95. Sinks named by the profile: the 27B HF backbone forward; short-sequence launch and HF SDPA plus GDN with no CUDA graphs; missing `causal_conv1d` (Transformers fallback warning, generic depthwise conv in the trace). | Owner profile of the primary run. Not a new C1 sample. | n/a |
-| 2026-10-25 | Install `causal-conv1d` 1.7.0 and add an sm_89 cubin the upstream gencode omits. CUDA startup refuses a missing package, a cubin without the visible GPU arch, or a Qwen conv still bound to `F.conv1d`. The package path is not bit-exact with that fallback. Hold further optimize commits until an L20X C1 p50/p95 of this head is pasted against primary 98.777 / 341.202. | No CUDA device in this environment. Samples: 0. `778609f` is still unverified. | not measured |
+| 2026-10-25 | Install `causal-conv1d` 1.7.0 and add an sm_89 cubin the upstream gencode omits. CUDA startup refuses a missing package, a cubin without the visible GPU arch, or a Qwen conv still bound to `F.conv1d`. The package path is not bit-exact with that fallback. | No CUDA device in this environment. Samples: 0. `778609f` is still unverified. | not measured |
+| 2026-10-25 | Retarget the operator path to H200 (sm_90). Keep the upstream sm_90 cubin (insert it only if a sdist dropped the line). Import FLA 0.5.2 before modeling and refuse the PyTorch chunk fallback on CUDA. On SM90 with linear head dim 128, bind `flashinfer.gdn_prefill.chunk_gated_delta_rule` the way vLLM auto and SGLang's validated SM90 default do; otherwise leave `gdn=fla-chunk` and `flashinfer` null. No CuteDSL. No CUDA graph. | No H200 in this environment. Samples: 0. The L20X primary is not a win on this path. | not measured |
 
 ## Limits
 

@@ -207,13 +207,30 @@ def test_http_health_and_decision():
         health = json.loads(conn.getresponse().read())
         conn.close()
         assert health["unpadded_full_attention_layers"] == 16
-        assert "causal_conv1d" not in health
+        assert health["causal_conv1d"] is None
+        assert health["fla"] is None
+        assert health["gdn"] is None
+        assert health["flashinfer"] is None
         server.executor.causal_conv1d_version = "1.7.0"
+        server.executor.fla_version = "0.5.2"
+        server.executor.gdn_backend = "fla-chunk"
         conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
         conn.request("GET", "/health")
         health = json.loads(conn.getresponse().read())
         conn.close()
         assert health["causal_conv1d"] == "1.7.0"
+        assert health["fla"] == "0.5.2"
+        assert health["gdn"] == "fla-chunk"
+        assert health["flashinfer"] is None
+        server.executor.gdn_backend = "flashinfer"
+        server.executor.flashinfer_version = "0.6.6"
+        conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        conn.request("GET", "/health")
+        health = json.loads(conn.getresponse().read())
+        conn.close()
+        assert health["gdn"] == "flashinfer"
+        assert health["flashinfer"] == "0.6.6"
+        assert health["fla"] == "0.5.2"
         status, body = post(
             server,
             {"model": "jev-latest", "state": "s", "questions": {"q": {"type": "noul"}}},
