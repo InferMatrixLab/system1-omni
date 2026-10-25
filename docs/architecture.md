@@ -31,10 +31,11 @@ are causal. Its readout is a separate 255-row tensor. After that load, the
 worker marks those full-attention modules noncausal and omits the explicit
 SDPA mask when the padding mask is all true. Linear-attention chunk prefill
 on the lab L20X-labeled GPU uses FLA 0.5.2 plus causal_conv1d, including
-when that GPU reports capability 8.9. Capability 9.0 binds FlashInfer's
-chunk prefill when flashinfer-python 0.6.16.post3 imports, and stays on
-the FLA chunk when it does not. Ready accepts either bind. CuteDSL and
-CUDA graphs are not selected.
+when that GPU reports capability 8.9. Capability 9.0 with
+flashinfer-python 0.6.16.post3 uses FlashInfer only for one sequence of
+at most 256 tokens and FLA chunk otherwise. `PPLX_GDN_PREFILL=fla` stays
+on the FLA chunk. Ready accepts that dispatch and the FLA chunk. CuteDSL
+and CUDA graphs are not selected.
 
 Cua-S1 and Open-Jev compute their decision heads on the CPU after downloading
 the final hidden state. Decider projects its selected LM-head rows on CUDA.
