@@ -1,10 +1,10 @@
-"""Build causal-conv1d 1.7.0 with an sm_89 cubin and install it here.
+"""Build causal-conv1d 1.7.0 with sm_90 and sm_89 cubins and install it here.
 
 The checkpoint requirements pin flash-linear-attention 0.5.2 and do not
-install this package. Upstream 1.7.0 emits sm_90 when nvcc is 11.8 or
-newer and skips sm_89, so a plain pip install has no L20X image. This
-script inserts ``arch=compute_89,code=sm_89`` and keeps or inserts sm_90,
-then installs with the torch already in the environment.
+install this package. Lab GPUs labeled L20X are the H200 target and may
+report capability 9.0 or 8.9. Upstream 1.7.0 emits sm_90 when nvcc is
+11.8 or newer and skips sm_89. This script inserts a missing sm_90 line
+and an sm_89 line, then refuses to build if either cubin is absent.
 """
 
 from __future__ import annotations
@@ -37,8 +37,10 @@ def main() -> None:
             archive.extractall(root)
         setup = next(root.glob("causal_conv1d-*/setup.py"))
         patched = ensure_prefill_gencode(setup.read_text(encoding="utf-8"))
-        if "compute_89" not in patched:
-            raise SystemExit("refusing to build causal_conv1d without an sm_89 cubin")
+        if "compute_90" not in patched or "compute_89" not in patched:
+            raise SystemExit(
+                "refusing to build causal_conv1d without sm_90 and sm_89 cubins"
+            )
         setup.write_text(patched, encoding="utf-8")
         subprocess.check_call(
             [

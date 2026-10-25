@@ -8,12 +8,13 @@ condition that skips the warning.
 
 ``causal-conv1d`` 1.7.0 is the release that satisfies
 ``flash-linear-attention==0.5.2``'s ``conv1d`` extra (``causal-conv1d>=1.4.0``).
-Upstream 1.7.0 has no ``sm_89`` cubin. The L20X classification path needs
-``arch=compute_89,code=sm_89``, so the installer inserts it. The same
-pass keeps ``sm_90`` when a sdist already emits it, and inserts that line
-when it does not. CUDA startup reads the compiled extension and refuses a
-binary that lacks the visible device's architecture. It also refuses to
-become ready when Qwen's conv is still the ``F.conv1d`` fallback.
+Lab GPUs labeled ``NVIDIA L20X`` are the H200 target. That label can report
+capability 9.0 or 8.9, so the installer keeps ``arch=compute_90,code=sm_90``
+and ``arch=compute_89,code=sm_89``. Upstream 1.7.0 emits the sm_90 cubin
+when nvcc is 11.8 or newer and skips sm_89. CUDA startup reads the compiled
+extension and refuses a binary that lacks the visible device's architecture.
+It does not refuse capability 8.9. It also refuses to become ready when
+Qwen's conv is still the ``F.conv1d`` fallback.
 """
 
 from __future__ import annotations
@@ -58,7 +59,11 @@ def ensure_sm90_gencode(setup_text: str) -> str:
 
 
 def ensure_prefill_gencode(setup_text: str) -> str:
-    """sm_89 for the L20X path, plus sm_90 when the sdist omitted it."""
+    """Insert sm_90, then sm_89, when the sdist omitted either cubin.
+
+    Capability 9.0 and capability 8.9 both stay buildable. The device
+    name is not consulted.
+    """
 
     return ensure_sm89_gencode(ensure_sm90_gencode(setup_text))
 

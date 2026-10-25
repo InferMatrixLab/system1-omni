@@ -60,6 +60,15 @@ def test_sm90_gencode_refuses_an_unknown_setup():
         ensure_sm90_gencode("cc_flag = []\n")
 
 
+def test_both_cubins_are_inserted_when_the_sdist_has_neither():
+    patched = ensure_prefill_gencode(UPSTREAM)
+    assert "arch=compute_90,code=sm_90" in patched
+    assert "arch=compute_89,code=sm_89" in patched
+    assert patched.index("compute_87") < patched.index("compute_89")
+    assert patched.index("compute_89") < patched.index("compute_90")
+    assert ensure_prefill_gencode(patched) == patched
+
+
 def test_sm89_is_inserted_beside_an_existing_sm90_line():
     upstream = UPSTREAM + '        cc_flag.append("arch=compute_90,code=sm_90")\n'
     patched = ensure_prefill_gencode(upstream)
