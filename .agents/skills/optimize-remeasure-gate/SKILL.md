@@ -1,6 +1,6 @@
 ---
 name: optimize-remeasure-gate
-description: Gate continuous optimization after a measured Public231 C1 baseline, including Cloud Agent and coding-agent loops. Use when a new tip must not land on the previous tip until that tip has an L20X remeasure, evidence is complete or explicitly INCONCLUSIVE, quality and contract checks are green, and the pull request stays draft until a separate owner yes.
+description: Gate continuous optimization after a measured Public231 C1 baseline, including Cloud Agent and coding-agent loops. Use when a new tip must not land on the previous tip until that tip is remeasured with the same protocol on the same named hardware, evidence is complete or explicitly INCONCLUSIVE, quality and contract checks are green, and the pull request stays draft until a separate owner yes.
 ---
 
 # Optimize only against a remeasured tip
@@ -23,7 +23,7 @@ edit, and again before every later tip:
 - pooled p50 and p95 in milliseconds
 - serving pass rate (`successful_requests / planned_requests`)
 - clock basis `post_to_body_json_and_schema_validation`
-- hardware label L20X / sm_89
+- measured device name and compute capability
 
 Those are the primary figures. Per-round values stay attached so a pooled
 number can be checked. A recalled or rounded figure, a single round, or a
@@ -32,15 +32,20 @@ percentile averaged across rounds is not a baseline.
 ## One tip, then remeasure
 
 A tip is one optimization commit on the draft branch. Do not add another
-commit on top of it until that tip has its own L20X Public231 C1 remeasure:
-warmup 5, concurrency 1, three measured rounds, same manifest and clock as
-the baseline. The remeasure SHA must be the tip SHA. A measurement of an
-older commit does not clear the tip.
+commit on top of it until that tip has its own Public231 C1 remeasure. The
+gate requires the same measurement protocol and the same named hardware as
+the baseline, not a particular SKU.
+
+Same measurement protocol means warmup 5, concurrency 1, three measured
+rounds, the same manifest, and the same clock
+(`post_to_body_json_and_schema_validation`). Same named hardware means the
+same measured device name and the same compute capability. The remeasure SHA
+must be the tip SHA. A measurement of an older commit does not clear the tip.
 
 Keep controls matched to the baseline (manifest, precision, request order,
 cache policy, thinking treatment, server shape). State any necessary
 difference. Do not reset the comparison by changing the clock, the quantile
-method, or the hardware label.
+method, or the named hardware.
 
 ## INCONCLUSIVE stops the loop
 
@@ -51,7 +56,11 @@ these are true:
 - fewer than three measured rounds finished
 - `evidence_complete` is not true, or warmup failed
 - any measured request failed, was incomplete, or was unattempted
-- the device is not confirmed L20X / sm_89
+- the measured device name or compute capability is missing on the baseline
+  or the tip
+- the tip's device name or compute capability differs from the baseline, so
+  the two sides are not the same named hardware
+- the tip does not use the same measurement protocol as the baseline
 - the clock basis is missing or is not
   `post_to_body_json_and_schema_validation`
 - the measured SHA is not the tip SHA
@@ -83,7 +92,7 @@ Before the agent proposes the next change, give it this record:
 - baseline SHA, pooled p50, pooled p95, pass rate
 - tip SHA, pooled p50, pooled p95, pass rate
 - p50 and p95 delta (tip minus baseline), in milliseconds
-- clock basis and L20X / sm_89
+- clock basis, measured device name, and compute capability
 - verdict: improved, regressed, or INCONCLUSIVE
 - quality/contract result
 

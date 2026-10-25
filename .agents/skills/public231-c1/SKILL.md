@@ -1,9 +1,9 @@
 ---
 name: public231-c1
-description: Measure Public231 C1 request latency for a model or pull request on lab L20X (sm_89). Use when a campaign needs warmup 5, concurrency 1, three measured rounds, SHA, pass rate, and p50/p95 on the bench.py clock, including how to treat a thinking field and what a room post may contain.
+description: Measure Public231 C1 request latency for a model or pull request. Use when a campaign needs warmup 5, concurrency 1, three measured rounds, SHA, pass rate, and p50/p95 on the bench.py clock, with the measured device name and compute capability recorded. Includes how to treat a thinking field and what a room post may contain.
 ---
 
-# Public231 C1 on lab L20X
+# Public231 C1
 
 Measure one deployment of the frozen 231-task Public231 text workload at
 concurrency 1. Read [the benchmark protocol](../../../benchmarks/README.md) and
@@ -13,18 +13,27 @@ concurrency 1. Read [the benchmark protocol](../../../benchmarks/README.md) and
 This skill records a measurement. It does not authorize a merge, a hardware
 relabel, or a room post that contains operator metadata.
 
-## Hardware label
+## Measured hardware
 
-Report the device as **L20X / sm_89**. Do not call it H200.
+Record the device name and compute capability the run actually measured, in
+the run evidence (`gpu` in the runner metadata, plus the compute capability
+from the worker or device log). This protocol does not require a particular
+SKU. A run on another device is still a C1 run when the rest of the protocol
+is intact.
 
-Older notes correct a different archived part whose driver string was
-`NVIDIA L20X` while the compute capability was 9.0. Those corrections live in
-[the GDN note](../../../benchmarks/gdn/README.md),
+A comparison between paired runs, including a baseline and a later tip, is
+valid only when both sides use this same measurement protocol and the same
+named hardware: the same device name and the same compute capability.
+Different hardware is a separate group. It does not by itself make either
+run inconclusive.
+
+Do not replace the measured name or compute capability with a different SKU.
+Archived notes in [the GDN note](../../../benchmarks/gdn/README.md),
 [the prefill-batching note](../../../benchmarks/prefill_batching/README.md), and
-[the Open-Jev 27B validation](../../../recipe/open_jev/validation.md). They do
-not apply to this protocol. If the worker or device log shows a compute
-capability other than 8.9, stop and mark the hardware identity unverified.
-Do not substitute H200.
+[the Open-Jev 27B validation](../../../recipe/open_jev/validation.md) disagree
+about a driver string versus a corrected label for those campaigns. Copy the
+pair this run measured. If the device name or compute capability cannot be
+read, leave it missing. Do not invent it.
 
 ## Freeze the run
 
@@ -117,7 +126,7 @@ publish a speedup across those clocks.
 Publish:
 
 - full `runtime_revision` SHA and `manifest_sha256`
-- hardware label L20X / sm_89
+- measured device name and compute capability
 - thinking treatment (`enabled: false` or stripped)
 - per-round and pooled p50/p95 in milliseconds
 - serving pass rate: `successful_requests / planned_requests`, plus failed,
@@ -130,14 +139,15 @@ separately. They are not the serving pass rate, and a fast success subset is
 not a ranked result.
 
 A round is not a C1 baseline when warmup failed, `evidence_complete` is false,
-any measured request failed or was incomplete, or the hardware label is not
-L20X / sm_89. Call that run **INCONCLUSIVE** and do not repair hashes or
-counts to make it look complete.
+any measured request failed or was incomplete, or the device name or compute
+capability was not recorded. Call that run **INCONCLUSIVE** and do not repair
+hashes or counts to make it look complete. The device being a particular SKU
+is not a reason to mark the run INCONCLUSIVE.
 
 ## Room posts
 
-Post metrics only: model or PR, SHA, L20X / sm_89, warmup 5, concurrency 1,
-three rounds, clock basis, thinking treatment, pass rate, and p50/p95, plus
-INCONCLUSIVE when that is the result. Omit hostnames, SSH targets, usernames,
-filesystem paths, and reservation-tool names. Local output directories stay
-local.
+Post metrics only: model or PR, SHA, measured device name and compute
+capability, warmup 5, concurrency 1, three rounds, clock basis, thinking
+treatment, pass rate, and p50/p95, plus INCONCLUSIVE when that is the result.
+Omit hostnames, SSH targets, usernames, filesystem paths, and reservation-tool
+names. Local output directories stay local.

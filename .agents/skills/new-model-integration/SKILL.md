@@ -73,8 +73,9 @@ or reservation-tool names in the recipe.
 ## 4. Public231 C1
 
 When the draft serves the model, measure it with
-[public231-c1](../public231-c1/SKILL.md) on lab L20X / sm_89. Record the
-draft SHA, serving pass rate, and pooled p50/p95. A recipe that does not yet
+[public231-c1](../public231-c1/SKILL.md). Record the draft SHA, the measured
+device name and compute capability, the serving pass rate, and pooled p50/p95.
+The protocol does not require a particular SKU. A recipe that does not yet
 serve stays explicit about that: do not invent a C1 result. CPU contract tests
 are not a latency baseline.
 
@@ -82,9 +83,10 @@ are not a latency baseline.
 
 Further latency work stays on this model's draft branch. Run it under
 [optimize-remeasure-gate](../optimize-remeasure-gate/SKILL.md): paste the C1
-p50/p95 first, and do not stack the next tip commit until that tip has its own
-L20X remeasure. Incomplete evidence is INCONCLUSIVE. Quality and contract
-checks stay green. Feed each delta back to the agent before the next edit.
+p50/p95 first, and do not stack the next tip commit until that tip is
+remeasured with the same protocol on the same named hardware. Incomplete
+evidence is INCONCLUSIVE. Quality and contract checks stay green. Feed each
+delta back to the agent before the next edit.
 
 Optimized execution remains a separate milestone from reference serving and
 from native bring-up. Promote a number into the supported-model matrix only
