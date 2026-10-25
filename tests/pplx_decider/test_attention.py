@@ -10,6 +10,7 @@ from models.pplx_decider.attention import (
     mask_inputs_unpadded,
     noncausal_attention_mask,
     omit_explicit_full_attention_mask,
+    sdpa_preference,
 )
 
 
@@ -130,6 +131,18 @@ def test_install_rejects_non_sdpa_before_changing_modules():
         install_unpadded_full_attention(model)
     assert model.layers[1].self_attn.is_causal is True
     assert model._forward_pre_hooks[7] is mask_inputs
+
+
+def test_sdpa_preference_is_cudnn_first_only_on_cuda():
+    assert sdpa_preference("cuda", None) == "cudnn-first"
+    assert sdpa_preference("cuda", "cudnn-first") == "cudnn-first"
+    assert sdpa_preference("cuda", "default") == "default"
+    assert sdpa_preference("cpu", None) == "default"
+    assert sdpa_preference("cpu", "cudnn-first") == "default"
+    with pytest.raises(RuntimeError, match="cudnn-first or default"):
+        sdpa_preference("cuda", "flash")
+    with pytest.raises(RuntimeError, match="cudnn-first or default"):
+        sdpa_preference("cpu", "flash")
 
 
 def test_second_install_fails_closed():

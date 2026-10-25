@@ -201,6 +201,7 @@ def test_http_health_and_decision():
         assert health["max_input_tokens"] == 8192
         assert "text" in health["modalities"]
         assert "unpadded_full_attention_layers" not in health
+        assert health["sdpa"] is None
         server.executor.unpadded_full_attention_layers = 16
         conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
         conn.request("GET", "/health")
@@ -245,6 +246,13 @@ def test_http_health_and_decision():
         assert health["linear_attention"] == "flashinfer+fla+causal_conv1d"
         assert health["compute_capability"] == "9.0"
         assert health["gpu_name"] == "NVIDIA L20X"
+        assert health["sdpa"] is None
+        server.executor.sdpa = "cudnn-first"
+        conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        conn.request("GET", "/health")
+        health = json.loads(conn.getresponse().read())
+        conn.close()
+        assert health["sdpa"] == "cudnn-first"
         assert "gdn" not in health
         status, body = post(
             server,

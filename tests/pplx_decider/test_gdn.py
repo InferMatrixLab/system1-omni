@@ -20,6 +20,7 @@ from models.pplx_decider.gdn import (
     install_flashinfer_gdn_prefill,
     install_short_flashinfer_prefill,
     require_bound_linear_attention,
+    gdn_prefill_mode,
     resolve_flashinfer,
     use_short_flashinfer,
     uses_flashinfer_prefill,
@@ -97,6 +98,14 @@ def test_capability_9_0_stays_ready_when_flashinfer_is_absent():
     assert status == "bound"
     with pytest.raises(RuntimeError, match="0.6.16.post3"):
         resolve_flashinfer("0.6.15", imported=True)
+
+
+def test_gdn_prefill_defaults_to_fla_and_rejects_another_cutoff():
+    assert gdn_prefill_mode(None) == "fla"
+    assert gdn_prefill_mode("fla") == "fla"
+    assert gdn_prefill_mode("short") == "short"
+    with pytest.raises(RuntimeError, match="fla or short"):
+        gdn_prefill_mode("512")
 
 
 def test_short_flashinfer_keeps_the_tail_and_a_batch_on_fla():

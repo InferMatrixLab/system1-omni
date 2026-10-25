@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .attention import install_unpadded_full_attention
+from .attention import install_unpadded_full_attention, sdpa_context, sdpa_preference
 from .contract import (
     ATTENTION_MODE,
     BASE_MODEL,
@@ -37,6 +37,7 @@ from .conv import assert_qwen_conv_uses_package, prepare_causal_conv1d
 from .gdn import (
     MODELING,
     assert_qwen_chunk_uses_fla,
+    gdn_prefill_mode,
     install_short_flashinfer_prefill,
     prepare_fla,
     prepare_flashinfer,
@@ -163,9 +164,10 @@ class PplxExecutor:
         root = Path(checkpoint)
         verify_checkpoint(root)
         # Import conv and FLA before Qwen3.5 modeling freezes the torch refs.
-        # Capability 9.0 with the FlashInfer pin installs short-sequence
-        # dispatch. PPLX_GDN_PREFILL=fla holds that pin and stays on FLA chunk.
-        # A lab GPU named NVIDIA L20X is accepted at capability 8.9 or 9.0.
+        # Both measured FlashInfer policies missed the gate, so the default
+        # stays on FLA chunk. PPLX_GDN_PREFILL=short opts into the rejected
+        # length dispatch. A lab GPU named NVIDIA L20X is accepted at
+        # capability 8.9 or 9.0.
         cuda = device == "cuda"
         self.causal_conv1d_version = prepare_causal_conv1d(required=cuda)
         self.fla_version = prepare_fla(required=cuda)
@@ -174,6 +176,7 @@ class PplxExecutor:
         self.compute_capability = None
         self.gpu_name = None
         self.linear_attention = None
+        self.sdpa = sdpa_preference(device, os.environ.get("PPLX_SDPA"))
         if cuda:
             import torch
 
@@ -186,9 +189,11 @@ class PplxExecutor:
             self.gpu_name = torch.cuda.get_device_name(index)
             if uses_flashinfer_prefill(capability):
                 self.flashinfer_version, self.flashinfer_status = prepare_flashinfer()
-                # The all-sequence bind missed the p95 gate. PPLX_GDN_PREFILL=fla
-                # keeps the primary chunk even when the pin is installed.
-                if self.flashinfer_status == "bound" and os.environ.get("PPLX_GDN_PREFILL") == "fla":
+                # Both FlashInfer policies missed the gate. The default stays
+                # on FLA chunk. PPLX_GDN_PREFILL=short opts back into the
+                # rejected length dispatch.
+                gdn_mode = gdn_prefill_mode(os.environ.get("PPLX_GDN_PREFILL"))
+                if self.flashinfer_status == "bound" and gdn_mode != "short":
                     self.flashinfer_status = "held"
             else:
                 self.flashinfer_status = "not-selected"
@@ -204,9 +209,6 @@ class PplxExecutor:
             self.linear_attention = require_bound_linear_attention(modeling)
         self.reference_answer = reference_answer
         self.batch_size = batch_size
-        # One forward may contain several questions. The short-sequence
-        # dispatcher sends a single short row to FlashInfer and every other
-        # shape to FLA, so the configured batch size stays in force.
         self.forward_batch_size = batch_size
         self.device = device
         self.model = decision_model(
@@ -231,7 +233,7 @@ class PplxExecutor:
         ]
         answers: dict[str, Any] = {}
         input_tokens = 0
-        with torch.inference_mode():
+        with torch.inference_mode(), sdpa_context(self.sdpa):
             step = self.forward_batch_size
             for start in range(0, len(rows), step):
                 batch = self.model.prepare(rows[start : start + step])

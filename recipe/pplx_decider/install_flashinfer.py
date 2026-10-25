@@ -2,9 +2,9 @@
 
 Head ``f968e576`` was ready on compute capability 9.0 with ``flashinfer``
 null and ``linear_attention=fla-chunk``. That result is the primary.
-This script installs the pin so a later capability-9.0 process can bind
-FlashInfer GDN prefill. Startup still becomes ready on the FLA chunk when
-the package is absent or its module does not import.
+This script installs the pin. Startup holds it on FLA chunk unless
+``PPLX_GDN_PREFILL=short``. The worker is still ready on the FLA chunk
+when the package is absent or its module does not import.
 """
 
 from __future__ import annotations

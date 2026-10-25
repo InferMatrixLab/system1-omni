@@ -61,6 +61,19 @@ def uses_flashinfer_prefill(capability: tuple[int, int]) -> bool:
     return capability == HOPPER
 
 
+def gdn_prefill_mode(selected: str | None) -> str:
+    """Default GDN prefill is FLA chunk.
+
+    ``short`` is the rejected length dispatch. Both measured FlashInfer
+    policies missed the gate, so startup does not select them.
+    """
+
+    chosen = "fla" if selected is None else selected
+    if chosen not in {"fla", "short"}:
+        raise RuntimeError("PPLX_GDN_PREFILL must be fla or short")
+    return chosen
+
+
 def fla_chunk_function():
     import fla.ops.gated_delta_rule as gated
 
