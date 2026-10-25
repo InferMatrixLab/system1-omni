@@ -1,6 +1,6 @@
 ---
 name: public231-c1
-description: Measure Public231 C1 request latency for a model or pull request. Use when a campaign needs warmup 5, concurrency 1, three measured rounds, SHA, pass rate, and p50/p95 on the bench.py clock, with the measured device name and compute capability recorded. Includes how to treat a thinking field and what a room post may contain.
+description: Measure Public231 C1 request latency for a model or pull request. Use when a campaign needs warmup 5, concurrency 1, three measured rounds, SHA, pass rate, and p50/p95 on the bench.py clock. Every paste records measured device and compute capability. The documented production target is H200 / SM90; a different measured identity stays a valid run and pairs only with that same recorded identity. Includes how to treat a thinking field and what a room post may contain.
 ---
 
 # Public231 C1
@@ -15,25 +15,39 @@ relabel, or a room post that contains operator metadata.
 
 ## Measured hardware
 
-Record the device name and compute capability the run actually measured, in
-the run evidence (`gpu` in the runner metadata, plus the compute capability
-from the worker or device log). This protocol does not require a particular
-SKU. A run on another device is still a C1 run when the rest of the protocol
-is intact.
+The production GPU, when a document is naming that intended target, is
+**H200 / SM90**. That is the preferred label in examples. It is not a gate.
+A run is not INCONCLUSIVE because `device` is not H200, not L20X, or not
+another SKU, and not because `compute capability` is not SM90 or not sm_89.
 
-A comparison between paired runs, including a baseline and a later tip, is
-valid only when both sides use this same measurement protocol and the same
-named hardware: the same device name and the same compute capability.
-Different hardware is a separate group. It does not by itself make either
-run inconclusive.
+Every paste of a run records both measured fields:
 
-Do not replace the measured name or compute capability with a different SKU.
-Archived notes in [the GDN note](../../../benchmarks/gdn/README.md),
+- `device`: the device-name string the host reported. `nvidia-smi` is the
+  source. The runner metadata field for that string is `gpu`.
+- `compute capability`: the capability from the worker or device log.
+
+Preferred production paste:
+
+```text
+device: H200
+compute capability: SM90
+```
+
+If `nvidia-smi` prints a different name, paste that string as `device` and
+paste the capability that was actually reported. Do not rewrite either field
+to H200 / SM90, and do not rewrite them to L20X / sm_89. Archived notes in
+[the GDN note](../../../benchmarks/gdn/README.md),
 [the prefill-batching note](../../../benchmarks/prefill_batching/README.md), and
 [the Open-Jev 27B validation](../../../recipe/open_jev/validation.md) disagree
-about a driver string versus a corrected label for those campaigns. Copy the
-pair this run measured. If the device name or compute capability cannot be
-read, leave it missing. Do not invent it.
+about a driver string versus a corrected label for those campaigns. This
+protocol keeps the string this host printed. If either field cannot be read,
+leave it missing. Do not invent it.
+
+Paired runs, including a baseline and a later tip, compare only when both
+sides use this same measurement protocol and the same named hardware: the
+same recorded `device` string and the same recorded `compute capability`.
+A different recorded identity is a separate group. It does not by itself make
+either run inconclusive.
 
 ## Freeze the run
 
@@ -126,7 +140,7 @@ publish a speedup across those clocks.
 Publish:
 
 - full `runtime_revision` SHA and `manifest_sha256`
-- measured device name and compute capability
+- `device` and `compute capability` (both, on every paste)
 - thinking treatment (`enabled: false` or stripped)
 - per-round and pooled p50/p95 in milliseconds
 - serving pass rate: `successful_requests / planned_requests`, plus failed,
@@ -139,15 +153,17 @@ separately. They are not the serving pass rate, and a fast success subset is
 not a ranked result.
 
 A round is not a C1 baseline when warmup failed, `evidence_complete` is false,
-any measured request failed or was incomplete, or the device name or compute
-capability was not recorded. Call that run **INCONCLUSIVE** and do not repair
-hashes or counts to make it look complete. The device being a particular SKU
-is not a reason to mark the run INCONCLUSIVE.
+any measured request failed or was incomplete, or `device` or
+`compute capability` was not recorded. Call that run **INCONCLUSIVE** and do
+not repair hashes or counts to make it look complete. Failing to match H200,
+SM90, L20X, or sm_89 is not a reason to mark the run INCONCLUSIVE.
 
 ## Room posts
 
-Post metrics only: model or PR, SHA, measured device name and compute
-capability, warmup 5, concurrency 1, three rounds, clock basis, thinking
-treatment, pass rate, and p50/p95, plus INCONCLUSIVE when that is the result.
+Post metrics only: model or PR, SHA, `device`, `compute capability`, warmup 5,
+concurrency 1, three rounds, clock basis, thinking treatment, pass rate, and
+p50/p95, plus INCONCLUSIVE when that is the result. A production-target
+example is `device: H200` and `compute capability: SM90`; if the host string
+differs, post the recorded pair instead.
 Omit hostnames, SSH targets, usernames, filesystem paths, and reservation-tool
 names. Local output directories stay local.

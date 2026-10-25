@@ -66,26 +66,33 @@ host notes:
 - run the model's validation commands and read the stated limits
 - see which hardware was actually tested, named as that hardware
 
-GPU claims name the measured device and compute capability. Do not describe
-untested hardware as validated. Do not put hostnames, SSH targets, usernames,
-or reservation-tool names in the recipe.
+GPU claims name the measured `device` and `compute capability`. When the
+recipe is documenting the production target, the preferred label is
+**H200 / SM90**. If the host reported a different nvidia-smi string, the
+recipe records that string and the measured capability, and does not rewrite
+them. Do not describe untested hardware as validated. Do not put hostnames,
+SSH targets, usernames, or reservation-tool names in the recipe.
 
 ## 4. Public231 C1
 
 When the draft serves the model, measure it with
-[public231-c1](../public231-c1/SKILL.md). Record the draft SHA, the measured
-device name and compute capability, the serving pass rate, and pooled p50/p95.
-The protocol does not require a particular SKU. A recipe that does not yet
-serve stays explicit about that: do not invent a C1 result. CPU contract tests
-are not a latency baseline.
+[public231-c1](../public231-c1/SKILL.md). Every paste records the draft SHA,
+`device`, `compute capability`, the serving pass rate, and pooled p50/p95.
+The documented production target is H200 / SM90. The protocol does not treat
+a different measured identity as INCONCLUSIVE; paired runs still have to share
+the recorded identity. A recipe that does not yet serve stays explicit about
+that: do not invent a C1 result. CPU contract tests are not a latency baseline.
 
 ## 5. Continuous optimization on the same branch
 
 Further latency work stays on this model's draft branch. Run it under
 [optimize-remeasure-gate](../optimize-remeasure-gate/SKILL.md): paste the C1
-p50/p95 first, and do not stack the next tip commit until that tip is
-remeasured with the same protocol on the same named hardware. Incomplete
-evidence is INCONCLUSIVE. Quality and contract checks stay green. Feed each
+p50/p95, `device`, and `compute capability` first, and do not stack the next
+tip commit until that tip is remeasured with the same protocol on the same
+named hardware. Incomplete evidence is INCONCLUSIVE. Quality and contract
+checks stay green. Each tip states its RSI phase (bring-up/scheduling,
+parallelism/comms, kernel, or launch/post) and which alternatives were
+considered versus the primary; without that it is not merge-clean. Feed each
 delta back to the agent before the next edit.
 
 Optimized execution remains a separate milestone from reference serving and
