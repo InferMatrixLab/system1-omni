@@ -1,7 +1,12 @@
 //! Batch-one, unpadded inputs at the adapted-vision / language-model boundary.
 
+use crate::cuda::DeviceBf16Matrix;
 use anyhow::{Result, ensure};
 use half::bf16;
+
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/device_inputs.rs"]
+mod device_input_tests;
 
 /// Image rows are already adapted to the language hidden size, in placeholder
 /// order. Positions are the T/H/W slices of an int64 `[3, 1, sequence]` tensor.
@@ -22,6 +27,28 @@ impl MultimodalInput<'_> {
         image_token: u32,
         max_position: usize,
     ) -> Result<()> {
+        self.validate_metadata(
+            hidden,
+            vocab,
+            image_token,
+            max_position,
+            self.image_embeddings.len(),
+        )?;
+        ensure!(
+            self.image_embeddings.iter().all(|x| x.is_finite()),
+            "non-finite image embedding"
+        );
+        self.validate_positions(max_position)
+    }
+
+    fn validate_metadata(
+        &self,
+        hidden: usize,
+        vocab: usize,
+        image_token: u32,
+        max_position: usize,
+        embedding_elements: usize,
+    ) -> Result<()> {
         let t = self.token_ids.len();
         ensure!(t > 0 && t <= max_position, "empty or oversized prompt");
         ensure!(
@@ -39,13 +66,14 @@ impl MultimodalInput<'_> {
             "image indices must exactly match the ordered placeholders"
         );
         ensure!(
-            Some(self.image_embeddings.len()) == expected.len().checked_mul(hidden),
+            Some(embedding_elements) == expected.len().checked_mul(hidden),
             "image embedding shape mismatch"
         );
-        ensure!(
-            self.image_embeddings.iter().all(|x| x.is_finite()),
-            "non-finite image embedding"
-        );
+        Ok(())
+    }
+
+    fn validate_positions(&self, max_position: usize) -> Result<()> {
+        let t = self.token_ids.len();
         ensure!(
             self.position_ids.iter().all(|axis| axis.len() == t),
             "position_ids must have shape [3, 1, sequence]"
@@ -58,6 +86,87 @@ impl MultimodalInput<'_> {
             "position outside the configured range"
         );
         Ok(())
+    }
+}
+
+/// Qwen3.5's T/H/W rotary positions (Transformers 5.17.0 `get_rope_index`, Apache-2.0;
+/// see `../../../cua_s1/native/THIRD_PARTY_NOTICES.md`) for a sequence
+/// with one contiguous span of `image_token` matching `grid` (`[1, h, w]` patches,
+/// merged 2×2): text before the span counts up, each merged patch takes the span's
+/// start plus its row (H) and column (W), and text after the span continues from the
+/// image's largest position plus one.
+pub fn image_positions(ids: &[u32], image_token: u32, grid: [usize; 3]) -> Result<[Vec<i64>; 3]> {
+    let [t, h, w] = grid;
+    ensure!(
+        t == 1 && h > 0 && w > 0 && h.is_multiple_of(2) && w.is_multiple_of(2),
+        "expected one image with even, nonzero spatial grid"
+    );
+    let count = (h / 2)
+        .checked_mul(w / 2)
+        .ok_or_else(|| anyhow::anyhow!("grid overflow"))?;
+    let start = ids
+        .iter()
+        .position(|&id| id == image_token)
+        .ok_or_else(|| anyhow::anyhow!("missing image placeholders"))?;
+    let end = start
+        .checked_add(count)
+        .ok_or_else(|| anyhow::anyhow!("grid overflow"))?;
+    ensure!(
+        end <= ids.len()
+            && ids[start..end].iter().all(|&id| id == image_token)
+            && ids[end..].iter().all(|&id| id != image_token),
+        "image placeholders must be one contiguous span matching the grid"
+    );
+    let mut positions: [Vec<i64>; 3] = std::array::from_fn(|_| (0..start as i64).collect());
+    for y in 0..h / 2 {
+        for x in 0..w / 2 {
+            positions[0].push(start as i64);
+            positions[1].push((start + y) as i64);
+            positions[2].push((start + x) as i64);
+        }
+    }
+    let next = start + h.max(w) / 2;
+    for axis in &mut positions {
+        axis.extend((next..next + ids.len() - end).map(|p| p as i64));
+    }
+    Ok(positions)
+}
+
+/// The same prompt/position boundary with borrowed, contiguous device BF16 rows.
+/// Vision completion precedes consumption; language execution synchronizes before
+/// returning, including errors, so the producer borrow can then be released.
+pub struct DeviceMultimodalInput<'a> {
+    pub token_ids: &'a [u32],
+    pub image_token_indices: &'a [usize],
+    pub image_embeddings: DeviceBf16Matrix<'a>,
+    pub position_ids: [&'a [i64]; 3],
+}
+
+impl DeviceMultimodalInput<'_> {
+    pub fn validate(
+        &self,
+        hidden: usize,
+        vocab: usize,
+        image_token: u32,
+        max_position: usize,
+        device: i32,
+    ) -> Result<()> {
+        self.image_embeddings
+            .layout()
+            .validate(self.image_token_indices.len(), hidden, device)?;
+        let elements = self
+            .image_token_indices
+            .len()
+            .checked_mul(hidden)
+            .ok_or_else(|| anyhow::anyhow!("image embedding shape overflow"))?;
+        let metadata = MultimodalInput {
+            token_ids: self.token_ids,
+            image_token_indices: self.image_token_indices,
+            image_embeddings: &[],
+            position_ids: self.position_ids,
+        };
+        metadata.validate_metadata(hidden, vocab, image_token, max_position, elements)?;
+        metadata.validate_positions(max_position)
     }
 }
 

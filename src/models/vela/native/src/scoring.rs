@@ -4,7 +4,6 @@
 //! predict-level answers. Parity target: the `head-input-*.json`
 //! fixtures' `predict.answers`.
 
-
 use serde_json::Value;
 
 /// The package's `calibration.json` as typed lookup.
