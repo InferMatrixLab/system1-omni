@@ -32,14 +32,7 @@ from .contract import (
     Request,
 )
 from .conv import assert_qwen_conv_uses_package, prepare_causal_conv1d
-from .gdn import (
-    assert_qwen_chunk_uses_fla,
-    bind_flashinfer_prefill,
-    flashinfer_prefill_available,
-    linear_head_dims,
-    prepare_fla,
-    select_gdn_prefill,
-)
+from .gdn import LINEAR_ATTENTION, assert_qwen_chunk_uses_fla, prepare_fla
 
 # SHA-256 of the files at REVISION, computed in this integration from the
 # public blobs. They match release-manifest.json except the manifest's own
@@ -159,32 +152,17 @@ class PplxExecutor:
             raise ValueError("batch_size must be positive")
         root = Path(checkpoint)
         verify_checkpoint(root)
-        text_config = json.loads((root / "config.json").read_text(encoding="utf-8"))
-        key_dim, value_dim = linear_head_dims(text_config)
         # Import conv and FLA before Qwen3.5 modeling freezes the torch refs.
         cuda = device == "cuda"
         self.causal_conv1d_version = prepare_causal_conv1d(required=cuda)
         self.fla_version = prepare_fla(required=cuda)
-        self.gdn_backend = None
-        self.flashinfer_version = None
+        self.linear_attention = None
         decision_model, reference_answer = _import_decision_model(root)
         if self.causal_conv1d_version is not None:
             assert_qwen_conv_uses_package()
         if self.fla_version is not None:
             assert_qwen_chunk_uses_fla()
-            self.gdn_backend = "fla-chunk"
-            if cuda:
-                import torch
-
-                choice = select_gdn_prefill(
-                    torch.cuda.get_device_capability(),
-                    key_dim,
-                    value_dim,
-                    flashinfer_available=flashinfer_prefill_available(),
-                )
-                if choice == "flashinfer":
-                    self.flashinfer_version = bind_flashinfer_prefill()
-                    self.gdn_backend = choice
+            self.linear_attention = LINEAR_ATTENTION
         self.reference_answer = reference_answer
         self.batch_size = batch_size
         self.device = device

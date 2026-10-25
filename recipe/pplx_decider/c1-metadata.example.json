@@ -8,5 +8,5 @@
   "runtime_revision": "FILL git rev-parse HEAD",
   "cache_policy": "one request at a time; questions inside a request batched by 8; no prefix cache",
   "cuda_evidence": "FILL worker log device=cuda plus memory before and after load",
-  "reservation": "FILL device index and sm_90 confirmation only; no host, user, or tool names"
+  "reservation": "FILL device index and sm_89 confirmation only; no host, user, or tool names"
 }

@@ -30,8 +30,8 @@ noncausal, and the language kernels in `src/backends/cuda/qwen3_5/attention.cu`
 are causal. Its readout is a separate 255-row tensor. After that load, the
 worker marks those full-attention modules noncausal and omits the explicit
 SDPA mask when the padding mask is all true. Linear-attention chunk prefill
-uses FlashInfer on SM90 when that package imports and the linear head dim is
-128, and the pinned FLA chunk kernel otherwise. It does not capture a CUDA graph.
+uses the pinned FLA/Triton kernel. It does not load FlashInfer or CuteDSL
+and does not capture a CUDA graph.
 
 Cua-S1 and Open-Jev compute their decision heads on the CPU after downloading
 the final hidden state. Decider projects its selected LM-head rows on CUDA.
