@@ -166,7 +166,7 @@ v1.1 has its checkpoint export and CPU contract, with no worker yet. D3
 (Decision 3.0) has a Python reference worker that runs the checkpoint's own
 pinned runtime for text, image and video state. pplx-decider-v1.1-27b has a
 Python reference worker for the pinned Perplexity checkpoint. Public231
-concurrency-1 latency for heads `1ba07d1`, `f968e576`, and `ffae182` is recorded in
+concurrency-1 latency for heads `1ba07d1`, `f968e576`, `ffae182`, and `4b99b73` is recorded in
 the recipe:
 
 | Model | Status |
@@ -184,7 +184,7 @@ the recipe:
 | LFM2.5-350M | [Transformers worker](recipe/lfm2/README.md); text state and independent choice questions |
 | OmniJev-4B v1.1 | [Checkpoint export and CPU contract](recipe/omnijev/README.md) only; the native worker is in progress ([#114](https://github.com/ThinkFlowLab/system1-omni/issues/114)) |
 | D3 (Decision 3.0) | [Python reference worker](recipe/d3/reference.md) on the checkpoint's pinned runtime; `choice`/`noul`/`score` over text, image and video state; author-run on A100 for text and media serving (see the integration and media PRs) |
-| pplx-decider-v1.1-27b | [Python reference worker](recipe/pplx_decider/README.md) on the pinned checkpoint; `choice`/`noul`/`score` text plus up to four images. Lab L20X-labeled GPUs are the H200 target. Kept Public231 primary is `ffae182`: 231/231, p50 92.844 ms, p95 296.458 ms, all-sequence FlashInfer with one reused `cu_seqlens` (p50 −1.31%, p95 −1.25% versus `f968e576` 94.077 / 300.200). Uncached all-sequence FlashInfer `3c72f02` is not the primary (p50 88.808 ms, p95 300.751 ms). Short-sequence FlashInfer `a50b9aa` missed its gate (p50 95.446 ms, p95 300.871 ms). cuDNN-first SDPA `0dcaa0ac` missed its gate (p50 138.501 ms, p95 332.859 ms). Fused gate-up `8b4ee326` missed its gate (p50 102.437 ms, p95 304.970 ms). Always-on dynamic compile `e36b32ed` missed the both-percentiles gate (p50 97.751 ms, p95 263.124 ms; p95 improved). The 512-token split `7e3b1be` missed its gate (p50 100.037 ms, p95 257.084 ms). Isolated-median compile `34ba5de` missed its gate (p50 97.084 ms, p95 256.679 ms; the 136-token probe was eager). The 48-slot `cu_seqlens` ring has no C1 |
+| pplx-decider-v1.1-27b | [Python reference worker](recipe/pplx_decider/README.md) on the pinned checkpoint; `choice`/`noul`/`score` text plus up to four images. Lab L20X-labeled GPUs are the H200 target. Kept Public231 primary is `4b99b73`: 231/231, p50 88.942 ms, p95 295.797 ms, all-sequence FlashInfer with a 48-slot `cu_seqlens` ring (p50 −4.20%, p95 −0.22% versus `ffae182` 92.844 / 296.458). Uncached all-sequence FlashInfer `3c72f02` is not the primary (p50 88.808 ms, p95 300.751 ms). Short-sequence FlashInfer `a50b9aa` missed its gate (p50 95.446 ms, p95 300.871 ms). cuDNN-first SDPA `0dcaa0ac` missed its gate (p50 138.501 ms, p95 332.859 ms). Fused gate-up `8b4ee326` missed its gate (p50 102.437 ms, p95 304.970 ms). Always-on dynamic compile `e36b32ed` missed the both-percentiles gate (p50 97.751 ms, p95 263.124 ms; p95 improved). The 512-token split `7e3b1be` missed its gate (p50 100.037 ms, p95 257.084 ms). Isolated-median compile `34ba5de` missed its gate (p50 97.084 ms, p95 256.679 ms; the 136-token probe was eager). The FlashInfer state-workspace ring has no C1 |
 
 [Supported models and hardware](docs/supported-models.md) lists the devices
 and where each worker has been run.

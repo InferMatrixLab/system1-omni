@@ -93,14 +93,17 @@ remeasure of head `f968e576` on a lab GPU labeled L20X: warmup 5, concurrency
 `causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`,
 `linear_attention=fla-chunk`, and `compute_capability=9.0`. Against run1,
 p50 is −4.700 ms (−4.76%) and p95 is −41.002 ms (−12.02%). An earlier paste
-of 98.037 / 302.569 is not a primary. The kept primary is `ffae182`:
-231/231, p50 92.844 ms, p95 296.458 ms, p50 −1.31% and p95 −1.25% versus
-`f968e576`. `/health` reported `compile=default`, `compile_median=eager`,
+of 98.037 / 302.569 is not a primary. `ffae182` measured 231/231, p50
+92.844 ms, p95 296.458 ms, p50 −1.31% and p95 −1.25% versus `f968e576`.
+The kept primary is `4b99b73`: 231/231, p50 88.942 ms, p95 295.797 ms,
+p50 −4.20% (−3.902 ms) and p95 −0.22% (−0.661 ms) versus `ffae182`.
+`/health` reported `compile=default`, `compile_median=eager`,
 `sdpa=default`, `mlp=default`, `fused_gate_up_layers=0`,
 `linear_attention=flashinfer+fla+causal_conv1d`, `flashinfer_status=bound`,
-and `flashinfer=0.6.16.post3`. Quality: `choice_acc=0.9065`,
-`noul_acc=0.8784`, `score_mae=0.2035`. Warmup, concurrency, the latency
-metric, and compute capability were not restated in that paste. Uncached
+`flashinfer=0.6.16.post3`, and `cu_seqlens_slots=48`. Quality:
+`choice_acc=0.9065` (139), `noul_acc=0.8784` (74), `score_mae=0.2035`
+(18). Warmup, concurrency, the latency metric, and compute capability
+were not restated in that paste. Uncached
 all-sequence FlashInfer `3c72f02` measured 231/231, p50 88.808 ms, p95
 300.751 ms (p50 −5.60%, p95 +0.18% versus `f968e576`) and failed the gate
 that both percentiles must improve. It is not the primary. Short-sequence
@@ -119,7 +122,7 @@ improved further and p50 was worse than always-on. It is not the primary.
 Isolated-median compile `34ba5de` measured 231/231, p50 97.084 ms, p95
 256.679 ms (p50 +3.20%, p95 −14.50%) and failed the same gate. The
 136-token probe was eager and added no compiled frames. It is not the
-primary. The 48-slot `cu_seqlens` ring has no sample.
+primary. The FlashInfer state-workspace ring has no sample.
 These L20X measurements stay in this group and do not enter the H800
 table above. Ready is not limited to capability 9.0.
 

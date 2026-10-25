@@ -45,8 +45,14 @@ LINEAR_ATTENTION_LAYERS = 48
 # across the in-flight linear layers is the hypothesis for the median
 # giveback on the single-buffer primary. The first forward of a length
 # allocates the ring. Later forwards of that length do not.
-_CU_SEQLENS_POOL: dict[tuple[int, int], list[Any]] = {}
-_CU_SEQLENS_CURSOR: dict[tuple[int, int], int] = {}
+_CU_SEQLENS_POOL: dict[tuple[int, ...], list[Any]] = {}
+_CU_SEQLENS_CURSOR: dict[tuple[int, ...], int] = {}
+# FlashInfer 0.6.16 allocates a float32 recurrent-state workspace on every
+# SM90 call, including when the caller does not ask for the final state.
+# One ring of that workspace per device and head shape. The shape does not
+# depend on sequence length. The first forward allocates the ring.
+_GDN_STATE_POOL: dict[tuple[int, ...], list[Any]] = {}
+_GDN_STATE_CURSOR: dict[tuple[int, ...], int] = {}
 FLASHINFER_LINEAR_ATTENTION = "flashinfer+fla+causal_conv1d"
 SHORT_FLASHINFER_LINEAR_ATTENTION = "flashinfer-short+fla-chunk"
 # Profile anchors on this workload: median about 136 tokens, tail example
@@ -76,8 +82,8 @@ def gdn_prefill_mode(selected: str | None) -> str:
     """Default GDN prefill is all-sequence FlashInfer.
 
     ``fla`` reproduces the prior ``f968e576`` chunk. ``short`` is the
-    rejected length dispatch. The kept primary reuses one ``cu_seqlens``.
-    This candidate keeps a ring of one buffer per linear layer.
+    rejected length dispatch. The kept primary rotates 48 ``cu_seqlens``
+    buffers. This candidate also rotates the FlashInfer state workspace.
     """
 
     chosen = "flashinfer" if selected is None else selected
@@ -173,9 +179,9 @@ def cu_seqlens_key(device_index: int | None, length: int) -> tuple[int, int]:
 
 
 def reuse_cu_seqlens_slot(
-    pool: dict[tuple[int, int], list[Any]],
-    cursors: dict[tuple[int, int], int],
-    key: tuple[int, int],
+    pool: dict[tuple[int, ...], list[Any]],
+    cursors: dict[tuple[int, ...], int],
+    key: tuple[int, ...],
     slots: int,
     allocate: Any,
 ) -> Any:
@@ -212,6 +218,42 @@ def cached_cu_seqlens(q: Any) -> Any:
     return reuse_cu_seqlens_slot(
         _CU_SEQLENS_POOL,
         _CU_SEQLENS_CURSOR,
+        key,
+        LINEAR_ATTENTION_LAYERS,
+        allocate,
+    )
+
+
+def gdn_state_key(device_index: int | None, heads: int, head_size: int) -> tuple[int, int, int]:
+    """Cache identity for the FlashInfer recurrent-state workspace."""
+
+    return (
+        -1 if device_index is None else int(device_index),
+        int(heads),
+        int(head_size),
+    )
+
+
+def cached_gdn_state(q: Any, v: Any) -> Any:
+    """Rotate the float32 state workspace FlashInfer would allocate per layer.
+
+    The buffer is uninitialized. FlashInfer's own allocator uses
+    ``torch.empty`` for this tensor, and the kernel does not read it when
+    ``initial_state`` is omitted.
+    """
+
+    import torch
+
+    heads = max(int(q.shape[1]), int(v.shape[1]))
+    head_size = int(q.shape[2])
+    key = gdn_state_key(q.device.index, heads, head_size)
+
+    def allocate() -> Any:
+        return torch.empty((1, heads, head_size, head_size), dtype=torch.float32, device=q.device)
+
+    return reuse_cu_seqlens_slot(
+        _GDN_STATE_POOL,
+        _GDN_STATE_CURSOR,
         key,
         LINEAR_ATTENTION_LAYERS,
         allocate,
@@ -266,6 +308,7 @@ def flashinfer_chunk_gated_delta_rule(
         cu_seqlens = cached_cu_seqlens(q)
     else:
         cu_seqlens = cu_seqlens.to(device=q.device, dtype=torch.int64)
+    output_state = cached_gdn_state(q, v)
     result = chunk_gated_delta_rule_fi(
         q=q,
         k=k,
@@ -278,6 +321,7 @@ def flashinfer_chunk_gated_delta_rule(
         cu_seqlens=cu_seqlens,
         use_qk_l2norm_in_kernel=False,
         use_cp=False,
+        output_state=output_state,
     )
     return result.unsqueeze(0), None
 

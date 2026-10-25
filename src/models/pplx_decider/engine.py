@@ -176,8 +176,8 @@ class PplxExecutor:
         # Import conv and FLA before Qwen3.5 modeling freezes the torch refs.
         # Compile tips raised p50 even after the median route proved eager,
         # so startup leaves the forward eager. Capability 9.0 uses
-        # all-sequence FlashInfer. The kept primary reused one cu_seqlens.
-        # This candidate keeps one buffer per linear layer.
+        # all-sequence FlashInfer. The kept primary rotates 48 cu_seqlens
+        # buffers. This candidate also rotates the FlashInfer state workspace.
         # PPLX_GDN_PREFILL=fla reproduces the prior f968e576 chunk.
         # PPLX_GDN_PREFILL=short is the rejected length dispatch.
         # cuDNN-first SDPA and the fused gate-up GEMM are not selectable.
@@ -198,6 +198,7 @@ class PplxExecutor:
         self.compile_median = compile_median(self.forward_compile)
         self.gdn_prefill = "fla"
         self.cu_seqlens_slots = 0
+        self.gdn_state_slots = 0
         self.language_model = None
         if cuda:
             import torch
@@ -222,6 +223,7 @@ class PplxExecutor:
                 self.flashinfer_status = "not-selected"
             if self.flashinfer_status == "bound":
                 self.cu_seqlens_slots = LINEAR_ATTENTION_LAYERS
+                self.gdn_state_slots = LINEAR_ATTENTION_LAYERS
         decision_model, reference_answer = _import_decision_model(root)
         if self.causal_conv1d_version is not None:
             assert_qwen_conv_uses_package()
