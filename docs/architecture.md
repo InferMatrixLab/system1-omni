@@ -36,11 +36,13 @@ by default. An installed flashinfer-python 0.6.16.post3 pin is held
 (`flashinfer_status=held`) unless `PPLX_GDN_PREFILL=short`, which is the
 rejected one-sequence ≤256 dispatch. SDPA stays on the checkpoint order.
 `PPLX_SDPA=cudnn-first` and `PPLX_MLP=fused-gate-up` are refused.
-Always-on dynamic compile cut p95 and raised p50. CUDA compiles the
-language-model forward only when the sequence is longer than 512 tokens
-unless `PPLX_COMPILE=default`. `PPLX_COMPILE=dynamic` is the rejected
-always-on path. Ready accepts the FLA chunk and either FlashInfer
-dispatch. CuteDSL and CUDA graphs are not selected.
+Always-on dynamic compile and the plain 512-token split cut p95 and
+raised p50. CUDA compiles the language-model forward only when the
+sequence is longer than 512 tokens unless `PPLX_COMPILE=default`.
+Shorter sequences suspend Dynamo and restore the pre-compile CUDA flags.
+`PPLX_COMPILE=dynamic` is the rejected always-on path. Ready accepts the
+FLA chunk and either FlashInfer dispatch. CuteDSL and CUDA graphs are
+not selected.
 
 Cua-S1 and Open-Jev compute their decision heads on the CPU after downloading
 the final hidden state. Decider projects its selected LM-head rows on CUDA.

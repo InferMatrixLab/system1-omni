@@ -85,6 +85,11 @@ class Handler(BaseHTTPRequestHandler):
         body["fused_gate_up_layers"] = getattr(executor, "fused_gate_up_layers", None)
         body["compile"] = getattr(executor, "forward_compile", None)
         body["compile_min_tokens"] = getattr(executor, "compile_min_tokens", None)
+        body["compile_median"] = getattr(executor, "compile_median", None)
+        body["compile_last_length"] = getattr(executor, "compile_last_length", None)
+        body["compile_eager_forwards"] = getattr(executor, "compile_eager_forwards", None)
+        body["compile_compiled_forwards"] = getattr(executor, "compile_compiled_forwards", None)
+        body["compile_median_frame_delta"] = getattr(executor, "compile_median_frame_delta", None)
         self.send_json(200, body)
 
     def do_POST(self):
@@ -153,7 +158,7 @@ def main(argv=None):
     try:
         server = WorkerServer((args.host, args.port), executor)
         LOG.info(
-            "ready model=%s device=%s gpu=%s capability=%s attention=%s sdpa=%s mlp=%s compile=%s compile_min_tokens=%s fused_gate_up_layers=%s unpadded_full_attention_layers=%s causal_conv1d=%s fla=%s flashinfer=%s flashinfer_status=%s linear_attention=%s bind=%s:%s",
+            "ready model=%s device=%s gpu=%s capability=%s attention=%s sdpa=%s mlp=%s compile=%s compile_min_tokens=%s compile_median=%s compile_last_length=%s compile_eager_forwards=%s compile_compiled_forwards=%s compile_median_frame_delta=%s fused_gate_up_layers=%s unpadded_full_attention_layers=%s causal_conv1d=%s fla=%s flashinfer=%s flashinfer_status=%s linear_attention=%s bind=%s:%s",
             executor.model_name,
             args.device,
             executor.gpu_name,
@@ -163,6 +168,11 @@ def main(argv=None):
             executor.mlp,
             executor.forward_compile,
             executor.compile_min_tokens,
+            executor.compile_median,
+            executor.compile_last_length,
+            executor.compile_eager_forwards,
+            executor.compile_compiled_forwards,
+            executor.compile_median_frame_delta,
             executor.fused_gate_up_layers,
             executor.unpadded_full_attention_layers,
             executor.causal_conv1d_version,

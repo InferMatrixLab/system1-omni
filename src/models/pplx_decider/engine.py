@@ -20,6 +20,7 @@ from typing import Any
 
 from .attention import install_unpadded_full_attention, sdpa_preference
 from .compile_forward import (
+    compile_median,
     compile_min_tokens,
     compile_preference,
     install_compiled_forward,
@@ -175,9 +176,10 @@ class PplxExecutor:
         # stays on FLA chunk. PPLX_GDN_PREFILL=short opts into the rejected
         # length dispatch. cuDNN-first SDPA and the fused gate-up GEMM also
         # missed the gate and are not selectable. Always-on dynamic compile
-        # cut p95 and raised p50, so CUDA compiles only sequences longer
-        # than 512 tokens unless PPLX_COMPILE=default. A lab GPU named
-        # NVIDIA L20X is accepted at capability 8.9 or 9.0.
+        # and the plain 512-token split both cut p95 and raised p50, so
+        # CUDA still compiles only sequences longer than 512 tokens, and
+        # the shorter path suspends Dynamo unless PPLX_COMPILE=default.
+        # A lab GPU named NVIDIA L20X is accepted at capability 8.9 or 9.0.
         cuda = device == "cuda"
         self.causal_conv1d_version = prepare_causal_conv1d(required=cuda)
         self.fla_version = prepare_fla(required=cuda)
@@ -191,6 +193,8 @@ class PplxExecutor:
         self.fused_gate_up_layers = 0
         self.forward_compile = compile_preference(device, os.environ.get("PPLX_COMPILE"))
         self.compile_min_tokens = compile_min_tokens(self.forward_compile)
+        self.compile_median = compile_median(self.forward_compile)
+        self.language_model = None
         if cuda:
             import torch
 
@@ -233,10 +237,33 @@ class PplxExecutor:
         # Hashed files stay byte-identical. This only retargets the loaded
         # full-attention modules and the noncausal pre-hook.
         language_model = self.model.backbone.language_model
+        self.language_model = language_model
         self.unpadded_full_attention_layers = install_unpadded_full_attention(language_model)
         if self.forward_compile != "default":
             install_compiled_forward(language_model, self.forward_compile)
             warmup_compiled_forward(self.model.backbone, device, self.forward_compile)
+
+    def _language_stat(self, name: str, default: Any) -> Any:
+        language_model = getattr(self, "language_model", None)
+        if language_model is None:
+            return default
+        return getattr(language_model, name, default)
+
+    @property
+    def compile_eager_forwards(self) -> int:
+        return int(self._language_stat("pplx_compile_eager_forwards", 0) or 0)
+
+    @property
+    def compile_compiled_forwards(self) -> int:
+        return int(self._language_stat("pplx_compile_compiled_forwards", 0) or 0)
+
+    @property
+    def compile_last_length(self) -> int | None:
+        return self._language_stat("pplx_last_length", None)
+
+    @property
+    def compile_median_frame_delta(self) -> int | None:
+        return self._language_stat("pplx_median_frame_delta", None)
 
     def evaluate(self, request: Request) -> dict[str, Any]:
         import torch

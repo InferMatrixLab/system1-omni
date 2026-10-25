@@ -206,6 +206,11 @@ def test_http_health_and_decision():
         assert health["fused_gate_up_layers"] is None
         assert health["compile"] is None
         assert health["compile_min_tokens"] is None
+        assert health["compile_median"] is None
+        assert health["compile_last_length"] is None
+        assert health["compile_eager_forwards"] is None
+        assert health["compile_compiled_forwards"] is None
+        assert health["compile_median_frame_delta"] is None
         server.executor.unpadded_full_attention_layers = 16
         conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
         conn.request("GET", "/health")
@@ -283,6 +288,20 @@ def test_http_health_and_decision():
         conn.close()
         assert health["compile"] == "dynamic-tail"
         assert health["compile_min_tokens"] == 512
+        server.executor.compile_median = "isolated"
+        server.executor.compile_last_length = 136
+        server.executor.compile_eager_forwards = 1
+        server.executor.compile_compiled_forwards = 3
+        server.executor.compile_median_frame_delta = 0
+        conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        conn.request("GET", "/health")
+        health = json.loads(conn.getresponse().read())
+        conn.close()
+        assert health["compile_median"] == "isolated"
+        assert health["compile_last_length"] == 136
+        assert health["compile_eager_forwards"] == 1
+        assert health["compile_compiled_forwards"] == 3
+        assert health["compile_median_frame_delta"] == 0
         assert "gdn" not in health
         status, body = post(
             server,
