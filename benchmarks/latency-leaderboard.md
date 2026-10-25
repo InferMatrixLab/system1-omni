@@ -86,13 +86,16 @@ separate groups. The [pplx-decider recipe](../recipe/pplx_decider/README.md)
 records a Public231 concurrency-1 run on 1× lab L20X (sm_89) at head
 `1ba07d1`: stripped no-thinking twin, warmup 5, concurrency 1, clock
 `successful_latency` / `post_to_body_json_and_schema_validation`. Primary
-run1 was 231/231, p50 98.777 ms, p95 341.202 ms. Head `f968e576` on a lab
-GPU labeled L20X, same workload family, `/health` `linear_attention=fla-chunk`,
-`causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`: 231/231, p50 98.037 ms,
-p95 302.569 ms. Against that primary, p50 is −0.74 ms (−0.75%) and p95 is
-−38.6 ms (−11.32%). The tip is kept. The paste is one pair and does not time
-the FlashInfer bind. Both runs stay in this L20X group and do not enter the
-H800 table above. Ready is not limited to capability 9.0.
+run1 was 231/231, p50 98.777 ms, p95 341.202 ms. The kept primary is the
+remeasure of head `f968e576` on a lab GPU labeled L20X: warmup 5, concurrency
+1, stock Public231 with `thinking.enabled=false`, metric `successful_latency`,
+231/231, p50 94.077 ms, p95 300.200 ms. `/health` reported
+`causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`,
+`linear_attention=fla-chunk`, and `compute_capability=9.0`. Against run1,
+p50 is −4.700 ms (−4.76%) and p95 is −41.002 ms (−12.02%). An earlier paste
+of 98.037 / 302.569 is not this primary. The FlashInfer install candidate
+has no sample. Both measured runs stay in this L20X group and do not enter
+the H800 table above. Ready is not limited to capability 9.0.
 
 Image replacement, repeated-image/cache workloads and higher
 concurrency have not been measured here; add their own frozen inputs before ranking.

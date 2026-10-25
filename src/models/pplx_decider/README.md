@@ -94,12 +94,16 @@ target. Capability 8.9, and capability 9.0 when FlashInfer is absent, report
 `flashinfer-python` 0.6.16.post3 replaces the chunk global with FlashInfer's
 GDN prefill and reports `flashinfer+fla+causal_conv1d`. That prefill is one
 sequence per forward. CuteDSL and CUDA graphs are not used. These kernels
-are not bit-exact with the torch fallbacks. Head
-`f968e576aa733a0e6e4b2bc46bb11035e7662c8f` has an owner-verified Public231
-C1 on the lab L20X-labeled GPU: 231/231, p50 98.037 ms, p95 302.569 ms,
-`linear_attention=fla-chunk`, `flashinfer` null. Against `1ba07d15` run1
-that is p50 −0.74 ms (−0.75%) and p95 −38.6 ms (−11.32%). The tip is kept.
-Decision disagreements were not in the paste.
+are not bit-exact with the torch fallbacks. The kept primary is the
+remeasure of `f968e576aa733a0e6e4b2bc46bb11035e7662c8f` on the lab
+L20X-labeled GPU: warmup 5, concurrency 1, stock Public231 with
+`thinking.enabled=false`, metric `successful_latency`, 231/231, p50
+94.077 ms, p95 300.200 ms. `/health` reported `causal_conv1d=1.7.0`,
+`fla=0.5.2`, `flashinfer=null`, `linear_attention=fla-chunk`, and
+`compute_capability=9.0`. Against `1ba07d15` run1 that is p50 −4.700 ms
+(−4.76%) and p95 −41.002 ms (−12.02%). An earlier paste of 98.037 /
+302.569 is not this primary. Decision disagreements were not in the
+remeasure. The FlashInfer install candidate has no sample.
 
 The shared Qwen3.5 CUDA language kernels in this repository are causal
 (`src/backends/cuda/qwen3_5/attention.cu`). Their vision-operator tests mention
@@ -112,7 +116,7 @@ backend. A native executor is not in this change.
 | --- | --- |
 | CPU contract and HTTP rejection | Implemented; tests do not need weights |
 | CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, `causal-conv1d` 1.7.0 with sm_90 and sm_89 cubins, and FLA 0.5.2 chunk. Capability 9.0 also binds FlashInfer 0.6.16.post3 when that pin imports. Ready accepts either bind. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
-| Public231 concurrency 1 | Head `1ba07d1` run1 on L20X: 231/231, p50 98.777 ms, p95 341.202 ms. Head `f968e576` on the lab L20X-labeled GPU, `/health` `fla-chunk` and `flashinfer` null: 231/231, p50 98.037 ms, p95 302.569 ms. p50 flat (−0.75%), p95 win (−11.32%). Tip kept. FlashInfer bind and decision agreement are not in that paste |
+| Public231 concurrency 1 | Kept primary is the `f968e576` remeasure on the lab L20X-labeled GPU, capability 9.0, `fla-chunk`, `flashinfer` null: 231/231, p50 94.077 ms, p95 300.200 ms. Versus `1ba07d1` run1 98.777 / 341.202: p50 −4.76%, p95 −12.02%. FlashInfer candidate is inconclusive |
 | CPU `device="cpu"` | The checkpoint switches the backbone to float32. Not the measured path |
 | Images | Admitted. No image parity run |
 | Apple GPU | Not supported |

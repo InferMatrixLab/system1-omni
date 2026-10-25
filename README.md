@@ -184,7 +184,7 @@ the recipe:
 | LFM2.5-350M | [Transformers worker](recipe/lfm2/README.md); text state and independent choice questions |
 | OmniJev-4B v1.1 | [Checkpoint export and CPU contract](recipe/omnijev/README.md) only; the native worker is in progress ([#114](https://github.com/ThinkFlowLab/system1-omni/issues/114)) |
 | D3 (Decision 3.0) | [Python reference worker](recipe/d3/reference.md) on the checkpoint's pinned runtime; `choice`/`noul`/`score` over text, image and video state; author-run on A100 for text and media serving (see the integration and media PRs) |
-| pplx-decider-v1.1-27b | [Python reference worker](recipe/pplx_decider/README.md) on the pinned checkpoint; `choice`/`noul`/`score` text plus up to four images. Lab L20X-labeled GPUs are the H200 target: capability 8.9 stays on FLA chunk plus causal_conv1d, and capability 9.0 can bind FlashInfer prefill. Head `1ba07d1` primary: p50 98.777 ms, p95 341.202 ms. Head `f968e576` on that host with `fla-chunk` and `flashinfer` null: 231/231, p50 98.037 ms, p95 302.569 ms. Tip kept |
+| pplx-decider-v1.1-27b | [Python reference worker](recipe/pplx_decider/README.md) on the pinned checkpoint; `choice`/`noul`/`score` text plus up to four images. Lab L20X-labeled GPUs are the H200 target. Kept Public231 primary is the `f968e576` remeasure: 231/231, p50 94.077 ms, p95 300.200 ms, `fla-chunk`, `flashinfer` null, compute capability 9.0. Versus `1ba07d1` run1 98.777 / 341.202: p50 −4.76%, p95 −12.02% |
 
 [Supported models and hardware](docs/supported-models.md) lists the devices
 and where each worker has been run.

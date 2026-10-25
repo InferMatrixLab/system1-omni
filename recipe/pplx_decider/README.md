@@ -11,9 +11,11 @@ the 11 weight shards plus `readout.safetensors` as 52,173,413,928 bytes
 (about 48.6 GiB). The card asks for roughly 49 GiB of weights plus working
 memory. Plan for that much free disk. A reported load on 1× lab L20X
 (~140 GiB, sm_89) was BF16 resident ~50333 MiB with no OOM. Lab GPUs
-labeled L20X are the H200 target. Head `f968e576` has a verified Public231
-C1 on that host: 231/231, p50 98.037 ms, p95 302.569 ms, with
-`linear_attention=fla-chunk` and `flashinfer` null.
+labeled L20X are the H200 target. The kept primary is the remeasure of
+head `f968e576`: 231/231, p50 94.077 ms, p95 300.200 ms, warmup 5,
+concurrency 1, stock Public231 with `thinking.enabled=false`, clock
+`successful_latency`. `/health` reported `linear_attention=fla-chunk`,
+`flashinfer=null`, and `compute_capability=9.0`.
 
 ## CPU checks
 
@@ -63,16 +65,19 @@ PYTHONPATH=src python3 -m frontend.pplx_decider \
 causal-conv check, the FLA chunk check, and the unpadded full-attention
 install. It reports `model`, `max_input_tokens` (8192), `modalities`,
 `attention_mode`, `unpadded_full_attention_layers`, `causal_conv1d`, `fla`,
-`flashinfer`, `linear_attention`, `compute_capability`, and `gpu_name`.
-A null operator field is an explicit partial, not an omitted key. The
-pinned `config.json` lists 16 `full_attention` layers, so that field is
-16 after a normal load. On CUDA, `causal_conv1d` is `1.7.0` and `fla` is
-`0.5.2`. Capability 8.9 reports `linear_attention` `fla-chunk` and
-`flashinfer` null, and it is ready. Capability 9.0 with
-`flashinfer-python` 0.6.16.post3 reports `linear_attention`
-`flashinfer+fla+causal_conv1d`. The same capability without that package
-stays on `fla-chunk` and is still ready. A device name of `NVIDIA L20X`
-is accepted at either capability. Startup raises if causal_conv1d or FLA
+`flashinfer`, `flashinfer_status`, `linear_attention`, `compute_capability`,
+and `gpu_name`. A null operator field is an explicit partial, not an
+omitted key. The pinned `config.json` lists 16 `full_attention` layers,
+so that field is 16 after a normal load. On CUDA, `causal_conv1d` is
+`1.7.0` and `fla` is `0.5.2`. Capability 8.9 reports `linear_attention`
+`fla-chunk`, `flashinfer` null, and `flashinfer_status=not-selected`, and
+it is ready. Capability 9.0 with `flashinfer-python` 0.6.16.post3 reports
+`linear_attention` `flashinfer+fla+causal_conv1d` and
+`flashinfer_status=bound`. The same capability without that package, or
+when the module does not import, stays on `fla-chunk` with status
+`absent` or `import-failed` and is still ready. The kept primary was that
+ready state at capability 9.0 with `flashinfer` null. A device name of
+`NVIDIA L20X` is accepted at either capability. Startup raises if causal_conv1d or FLA
 is missing, the conv cubin has no image for the visible GPU, the loaded
 FlashInfer version is not 0.6.16.post3, or Transformers still bound
 `F.conv1d` or the PyTorch chunk reference. That last case is what logs
@@ -86,6 +91,18 @@ or newer and skips sm_89. The script inserts a missing
 `arch=compute_90,code=sm_90` line and an `arch=compute_89,code=sm_89`
 line, and refuses to build if either cubin is still absent. It needs
 nvcc. This tree did not compile it.
+
+The kept primary did not install FlashInfer. To try the next candidate,
+after the causal-conv1d install and before starting the worker:
+
+```sh
+PYTHONPATH=src python3 recipe/pplx_decider/install_flashinfer.py
+```
+
+That script installs `flashinfer-python==0.6.16.post3` from PyPI. A new
+C1 is inconclusive until it reports p50 and p95 against 94.077 / 300.200
+and `/health` shows whether the pin bound. Omit the script to reproduce
+the primary.
 
 ```sh
 curl -sS http://127.0.0.1:8000/health
@@ -114,10 +131,11 @@ cap, and record it. Text Public231 does not send images.
 
 Head `1ba07d15b11a8c0796657e4a10b7ba3e62354421` was measured on 1× lab L20X
 (sm_89, ~140 GiB). Head `f968e576aa733a0e6e4b2bc46bb11035e7662c8f` was
-remeasured on a lab GPU labeled L20X and is kept. A load failure is a
-startup failure, not a latency. H800 board numbers use a different clock
-and stay on that board. The `1ba07d1` run1 primary remains the comparison
-baseline.
+remeasured on a lab GPU labeled L20X and is the kept primary. That
+remeasure reported `compute_capability=9.0`. A load failure is a startup
+failure, not a latency. H800 board numbers use a different clock and stay
+on that board. The next candidate is compared with `f968e576` p50 94.077 ms
+and p95 300.200 ms, not with a new invented target.
 
 Reported load: BF16 resident ~50333 MiB, no OOM. Warmup 5, concurrency 1,
 clock `successful_latency` / `post_to_body_json_and_schema_validation`.
@@ -134,17 +152,19 @@ the same 231 rows. This head admits `thinking` only when the value is
 | `1ba07d15` run1, primary | 231/231 | 98.777 ms | 341.202 ms |
 | `1ba07d15` run2 | 231/231 | 97.921 ms | 340.804 ms |
 | `1ba07d15` run3 | 231/231 | 98.177 ms | 343.953 ms |
-| `f968e576` verified C1 | 231/231 | 98.037 ms | 302.569 ms |
+| `f968e576` earlier paste | 231/231 | 98.037 ms | 302.569 ms |
+| `f968e576` remeasure, primary | 231/231 | 94.077 ms | 300.200 ms |
 
-The `f968e576` row is the owner-verified lab paste against `1ba07d15` run1.
-Delta p50 is −0.74 ms (−0.75%), called flat. Delta p95 is −38.6 ms
-(−11.32%), called a win. `/health` on that run reported
-`linear_attention=fla-chunk`, `causal_conv1d=1.7.0`, `fla=0.5.2`, and
-`flashinfer=null`, so the sample is the FLA chunk path. It does not time
-the capability-9.0 FlashInfer bind. The paste does not include run2, run3,
-`compute_capability`, resident memory, or a decision-disagreement count.
-Those remain unverified. The tip stays. A later optimize commit needs its
-own C1, aimed at the remaining ~98 ms forward floor.
+The primary row is the later lab remeasure of the same worker. Protocol:
+warmup 5, concurrency 1, stock Public231 with `thinking.enabled=false`,
+metric `successful_latency`. Against `1ba07d15` run1, p50 is −4.700 ms
+(−4.76%) and p95 is −41.002 ms (−12.02%). `/health` reported
+`causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`,
+`linear_attention=fla-chunk`, and `compute_capability=9.0`. The gain is
+the FLA chunk path on a capability-9.0 device. FlashInfer was not bound.
+The earlier 98.037 / 302.569 paste is not the primary. Run2, run3, resident
+memory, and a decision-disagreement count were not in the remeasure.
+The next tip has to beat 94.077 / 300.200 on both p50 and p95 in a new C1.
 
 The two-model Public231 export hashes to
 `00d1f10ca1142499a598b5f1c6602d329cce1cef04c961c46fc0318daa2c67d3`
@@ -211,13 +231,15 @@ them and do not raise the timeout after seeing the times.
 6. A second arm through `http://127.0.0.1:8080/v1/systemone` is frontend
    time only. Keep it in different output directories. The Rust frontend's
    own 60 second cap still applies. Do not average it into the worker p50.
-7. The lab paste for `f968e576` is recorded above. Keep that tip. The next
-   optimize commit targets the remaining ~98 ms forward floor and needs its
-   own Public231 C1 on the lab L20X-labeled GPU before it replaces this
-   result. Record `/health` `causal_conv1d`, `fla`, `flashinfer`,
-   `linear_attention`, `compute_capability`, and `gpu_name`. Count decision
-   disagreements against `1ba07d1` `responses.jsonl`. A pasted delta is the
-   whole head.
+7. The kept primary is the `f968e576` remeasure above. The next candidate
+   installs `flashinfer-python==0.6.16.post3` and binds it on capability
+   9.0. Ready remains `fla-chunk` when `/health` shows `flashinfer` null.
+   A new Public231 C1 has to beat p50 94.077 ms and p95 300.200 ms before
+   that candidate replaces the primary. Record `/health` `causal_conv1d`,
+   `fla`, `flashinfer`, `flashinfer_status`, `linear_attention`,
+   `compute_capability`, and `gpu_name`. Count decision disagreements
+   against `1ba07d1` `responses.jsonl`. Until that paste, the candidate is
+   inconclusive.
 
 `benchmarks/smoke.jsonl` checks the client, not this model and not Public231.
 
@@ -233,13 +255,17 @@ them and do not raise the timeout after seeing the times.
 | 2026-10-25 | Install `causal-conv1d` 1.7.0 and add an sm_89 cubin the upstream gencode omits. CUDA startup refuses a missing package, a cubin without the visible GPU arch, or a Qwen conv still bound to `F.conv1d`. The package path is not bit-exact with that fallback. | No CUDA device in this environment. Samples: 0. `778609f` is still unverified. | not measured |
 | 2026-10-25 | Classification C1 follows the sm_89 vLLM/SGLang mapping: FLA/Triton chunk plus `causal-conv1d`. The installer inserts the sm_89 cubin upstream omits and still refuses `F.conv1d`. `/health` reports `linear_attention=fla-chunk`. FlashInfer, CuteDSL, and CUDA graphs are not on this path. Unpadded full-attention masks and `thinking.enabled=false` are already in the branch. | No L20X in this environment. Samples: 0. Remeasure against primary 98.777 / 341.202 when the host is back. | not measured |
 | 2026-10-25 | Lab L20X-labeled GPUs are the H200 target. Keep sm_90 and sm_89 cubins. Capability 9.0 binds FlashInfer `chunk_gated_delta_rule` (FLA L2 norm, float32 gate, `use_cp` false, one sequence) when `flashinfer-python` 0.6.16.post3 imports. Capability 8.9, and capability 9.0 without that package, stay ready on `fla-chunk` plus `causal_conv1d`. `/health` reports `flashinfer`, `linear_attention`, `compute_capability`, and `gpu_name`. Ready is not limited to capability 9.0. | No CUDA device in this environment. Samples: 0. No latency claim. | not measured |
-| 2026-10-25 | Keep head `f968e576`. The whole head, including unpadded full attention, `thinking.enabled=false`, `causal-conv1d` 1.7.0, and FLA chunk, was verified on the lab L20X-labeled GPU. `/health` reported `linear_attention=fla-chunk`, `causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`. FlashInfer was not the bind under test. | Owner-verified Public231 C1, 231/231, p50 98.037 ms, p95 302.569 ms, versus `1ba07d15` run1 p50 98.777 ms, p95 341.202 ms. One pasted pair. Decision disagreements, extra rounds, capability, and resident memory were not in the paste. | p50 −0.74 ms (−0.75%), flat. p95 −38.6 ms (−11.32%), win. Tip kept. |
+| 2026-10-25 | Keep head `f968e576`. The whole head, including unpadded full attention, `thinking.enabled=false`, `causal-conv1d` 1.7.0, and FLA chunk, was verified on the lab L20X-labeled GPU. `/health` reported `linear_attention=fla-chunk`, `causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`. FlashInfer was not the bind under test. | Owner-verified Public231 C1, 231/231, p50 98.037 ms, p95 302.569 ms, versus `1ba07d15` run1 p50 98.777 ms, p95 341.202 ms. One pasted pair. Decision disagreements, extra rounds, capability, and resident memory were not in the paste. | p50 −0.74 ms (−0.75%), flat. p95 −38.6 ms (−11.32%). Superseded as primary by the remeasure below. |
+| 2026-10-25 | Remeasure the same worker `f968e576` on the lab L20X-labeled GPU. No new kernel. Stock Public231 with `thinking.enabled=false`, warmup 5, concurrency 1, metric `successful_latency`. `/health`: `causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`, `linear_attention=fla-chunk`, `compute_capability=9.0`. | 231/231, p50 94.077 ms, p95 300.200 ms versus `1ba07d15` run1 98.777 / 341.202. | p50 −4.700 ms (−4.76%), p95 −41.002 ms (−12.02%). New primary. |
+| 2026-10-25 | Next candidate, one lever: install `flashinfer-python==0.6.16.post3` so capability 9.0 can bind FlashInfer GDN prefill. `flashinfer_status` reports `bound`, `absent`, `import-failed`, or `not-selected`. Ready stays on `fla-chunk` unless the pin imports. Hypothesis: a bound run beats 94.077 / 300.200 on both p50 and p95. The separate native-kernel microbench is not this comparison. | Not run. Samples: 0. | inconclusive |
 
 ## Limits
 
-Image parity is unverified. Head `f968e576` has the owner-verified
-Public231 C1 in the optimization log. Decision agreement against `1ba07d1`
-was not in that paste. The shared Qwen CUDA
+Image parity is unverified. The kept Public231 primary is the `f968e576`
+remeasure in the optimization log: p50 94.077 ms, p95 300.200 ms, on
+`fla-chunk` at compute capability 9.0. Decision agreement against
+`1ba07d1` was not in that paste. The FlashInfer install is inconclusive.
+The shared Qwen CUDA
 backend is not used. PR #140 is a separate Rust port of this same contract;
 it does not serve, and its JSON parser rewrites integers outside i64/u64.
 This worker keeps those integers because it uses Python's parser and the
