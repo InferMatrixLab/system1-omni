@@ -27,6 +27,7 @@ from .compile_forward import (
     warmup_compiled_forward,
 )
 from .mlp import mlp_preference
+from .rmsnorm import RMS_NORM_EAGER, RMS_NORM_FLA, install_fused_residual_rms_norm
 from .contract import (
     ATTENTION_MODE,
     BASE_MODEL,
@@ -177,7 +178,8 @@ class PplxExecutor:
         # Compile tips raised p50 even after the median route proved eager,
         # so startup leaves the forward eager. Capability 9.0 uses
         # all-sequence FlashInfer. The kept primary rotates 48 cu_seqlens
-        # buffers. This candidate also rotates the FlashInfer state workspace.
+        # buffers. FlashInfer allocates its own state workspace. CUDA
+        # replaces the zero-centered residual RMSNorms with one FLA kernel.
         # PPLX_GDN_PREFILL=fla reproduces the prior f968e576 chunk.
         # PPLX_GDN_PREFILL=short is the rejected length dispatch.
         # cuDNN-first SDPA and the fused gate-up GEMM are not selectable.
@@ -193,12 +195,13 @@ class PplxExecutor:
         self.sdpa = sdpa_preference(device, os.environ.get("PPLX_SDPA"))
         self.mlp = mlp_preference(device, os.environ.get("PPLX_MLP"))
         self.fused_gate_up_layers = 0
+        self.rms_norm = RMS_NORM_EAGER
+        self.fused_rms_norm_layers = 0
         self.forward_compile = compile_preference(device, os.environ.get("PPLX_COMPILE"))
         self.compile_min_tokens = compile_min_tokens(self.forward_compile)
         self.compile_median = compile_median(self.forward_compile)
         self.gdn_prefill = "fla"
         self.cu_seqlens_slots = 0
-        self.gdn_state_slots = 0
         self.language_model = None
         if cuda:
             import torch
@@ -223,7 +226,6 @@ class PplxExecutor:
                 self.flashinfer_status = "not-selected"
             if self.flashinfer_status == "bound":
                 self.cu_seqlens_slots = LINEAR_ATTENTION_LAYERS
-                self.gdn_state_slots = LINEAR_ATTENTION_LAYERS
         decision_model, reference_answer = _import_decision_model(root)
         if self.causal_conv1d_version is not None:
             assert_qwen_conv_uses_package()
@@ -250,6 +252,9 @@ class PplxExecutor:
         language_model = self.model.backbone.language_model
         self.language_model = language_model
         self.unpadded_full_attention_layers = install_unpadded_full_attention(language_model)
+        if cuda:
+            self.fused_rms_norm_layers = install_fused_residual_rms_norm(language_model)
+            self.rms_norm = RMS_NORM_FLA
         if self.forward_compile != "default":
             install_compiled_forward(language_model, self.forward_compile)
             warmup_compiled_forward(self.model.backbone, device, self.forward_compile)

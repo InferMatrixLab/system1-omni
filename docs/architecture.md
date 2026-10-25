@@ -33,8 +33,10 @@ SDPA mask when the padding mask is all true. Linear-attention chunk prefill
 on the lab L20X-labeled GPU uses FLA 0.5.2 plus causal_conv1d, including
 when that GPU reports capability 8.9. Capability 9.0 uses all-sequence FlashInfer when
 `flashinfer-python` 0.6.16.post3 imports. The kept primary rotates 48
-`cu_seqlens` buffers per device and length. This candidate also rotates
-48 FlashInfer recurrent-state workspaces per device and head shape.
+`cu_seqlens` buffers per device and length. This candidate keeps that
+ring and replaces the zero-centered residual RMSNorms with one FLA
+kernel. FlashInfer allocates its own state workspace. The 48-slot state
+ring `17a7b120` missed the gate.
 `PPLX_GDN_PREFILL=fla` reproduces the prior `f968e576` chunk.
 `PPLX_GDN_PREFILL=short` is the rejected one-sequence ≤256
 dispatch. Capability 8.9, and capability 9.0 without that package, stay

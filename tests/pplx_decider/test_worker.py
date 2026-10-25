@@ -223,7 +223,9 @@ def test_http_health_and_decision():
         assert health["flashinfer_status"] is None
         assert health["linear_attention"] is None
         assert health["cu_seqlens_slots"] is None
-        assert health["gdn_state_slots"] is None
+        assert health["rms_norm"] is None
+        assert health["fused_rms_norm_layers"] is None
+        assert "gdn_state_slots" not in health
         assert health["compute_capability"] is None
         assert health["gpu_name"] is None
         server.executor.causal_conv1d_version = "1.7.0"
@@ -262,13 +264,17 @@ def test_http_health_and_decision():
         health = json.loads(conn.getresponse().read())
         conn.close()
         assert health["cu_seqlens_slots"] == 48
-        assert health["gdn_state_slots"] is None
-        server.executor.gdn_state_slots = 48
+        assert health["rms_norm"] is None
+        assert "gdn_state_slots" not in health
+        server.executor.rms_norm = "fla"
+        server.executor.fused_rms_norm_layers = 129
         conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
         conn.request("GET", "/health")
         health = json.loads(conn.getresponse().read())
         conn.close()
-        assert health["gdn_state_slots"] == 48
+        assert health["rms_norm"] == "fla"
+        assert health["fused_rms_norm_layers"] == 129
+        assert "gdn_state_slots" not in health
         assert health["compute_capability"] == "9.0"
         assert health["gpu_name"] == "NVIDIA L20X"
         assert health["sdpa"] is None

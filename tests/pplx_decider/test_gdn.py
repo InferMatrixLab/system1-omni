@@ -22,7 +22,6 @@ from models.pplx_decider.gdn import (
     install_short_flashinfer_prefill,
     require_bound_linear_attention,
     cu_seqlens_key,
-    gdn_state_key,
     gdn_prefill_mode,
     reuse_cu_seqlens_slot,
     resolve_flashinfer,
@@ -136,28 +135,6 @@ def test_cu_seqlens_ring_is_one_slot_per_linear_layer():
     assert len(calls) == LINEAR_ATTENTION_LAYERS
     other = reuse_cu_seqlens_slot(pool, cursors, (0, 2676), LINEAR_ATTENTION_LAYERS, allocate)
     assert other not in first_round
-    assert len(calls) == LINEAR_ATTENTION_LAYERS * 2
-
-
-def test_gdn_state_ring_does_not_depend_on_sequence_length():
-    assert gdn_state_key(None, 48, 128) == (-1, 48, 128)
-    assert gdn_state_key(0, 48, 128) == (0, 48, 128)
-    pool: dict[tuple[int, ...], list[object]] = {}
-    cursors: dict[tuple[int, ...], int] = {}
-    calls: list[int] = []
-
-    def allocate() -> object:
-        calls.append(1)
-        return object()
-
-    first = reuse_cu_seqlens_slot(pool, cursors, gdn_state_key(0, 48, 128), LINEAR_ATTENTION_LAYERS, allocate)
-    second = reuse_cu_seqlens_slot(pool, cursors, gdn_state_key(0, 48, 128), LINEAR_ATTENTION_LAYERS, allocate)
-    assert first is not second
-    assert len(calls) == LINEAR_ATTENTION_LAYERS
-    other_heads = reuse_cu_seqlens_slot(
-        pool, cursors, gdn_state_key(0, 32, 128), LINEAR_ATTENTION_LAYERS, allocate
-    )
-    assert other_heads is not first
     assert len(calls) == LINEAR_ATTENTION_LAYERS * 2
 
 
