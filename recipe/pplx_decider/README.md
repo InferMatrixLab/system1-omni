@@ -62,17 +62,17 @@ PYTHONPATH=src python3 -m frontend.pplx_decider \
 ```
 
 `/health` is ready only after the hash gate, the weight load, the
-causal-conv check, the FLA chunk check, and the unpadded full-attention
-install. It reports `model`, `max_input_tokens` (8192), `modalities`,
+causal-conv check, the FLA chunk check, the unpadded full-attention
+install, and, on CUDA, the dynamic-compile warmup. It reports `model`, `max_input_tokens` (8192), `modalities`,
 `attention_mode`, `unpadded_full_attention_layers`, `causal_conv1d`, `fla`,
 `flashinfer`, `flashinfer_status`, `linear_attention`, `sdpa`, `mlp`,
-`fused_gate_up_layers`, `compute_capability`, and `gpu_name`. A null
-operator field is an explicit partial, not an omitted key. The pinned
-`config.json` lists 16 `full_attention` layers and 64 text layers, so a
-normal load reports 16 unpadded layers. On CUDA, `causal_conv1d` is
-`1.7.0`, `fla` is `0.5.2`, `sdpa` is `default`, and `mlp` is
-`fused-gate-up`. A normal CUDA load reports `fused_gate_up_layers` 64.
-CPU reports `sdpa=default` and `mlp=default`. Capability 8.9 reports
+`fused_gate_up_layers`, `compile`, `compute_capability`, and `gpu_name`.
+A null operator field is an explicit partial, not an omitted key. The
+pinned `config.json` lists 16 `full_attention` layers and 64 text layers,
+so a normal load reports 16 unpadded layers. On CUDA, `causal_conv1d` is
+`1.7.0`, `fla` is `0.5.2`, `sdpa` is `default`, `mlp` is `default`,
+`fused_gate_up_layers` is 0, and `compile` is `dynamic`. CPU reports
+`sdpa=default`, `mlp=default`, and `compile=default`. Capability 8.9 reports
 `linear_attention` `fla-chunk`, `flashinfer` null, and
 `flashinfer_status=not-selected`, and it is ready. Capability 9.0 with
 `flashinfer-python` 0.6.16.post3 reports `flashinfer=0.6.16.post3` and, by
@@ -83,17 +83,22 @@ at most 256 tokens uses FlashInfer, and health then reports
 same capability without that package, or when the module does not import,
 stays on `fla-chunk` with status `absent` or `import-failed` and is still
 ready. The kept primary is `fla-chunk` at capability 9.0 with the
-checkpoint SDPA order. The checkpoint leaves cuDNN SDPA off.
-`PPLX_SDPA=cudnn-first` is refused. `PPLX_MLP=default` keeps the separate
-gate and up GEMMs. The fused GEMM is not bit-exact with those two. A
-device name of `NVIDIA L20X` is accepted at either capability. Startup
-raises if causal_conv1d or FLA is missing, the conv cubin has no image for
-the visible GPU, the loaded FlashInfer version is not 0.6.16.post3,
-`PPLX_GDN_PREFILL` or `PPLX_MLP` is an unknown value, `PPLX_SDPA` is set
-to anything but `default`, or Transformers still bound `F.conv1d` or the
+checkpoint SDPA order and the checkpoint's separate gate and up GEMMs.
+The checkpoint leaves cuDNN SDPA off. `PPLX_SDPA=cudnn-first` and
+`PPLX_MLP=fused-gate-up` are refused. CUDA compiles the language-model
+forward with a dynamic sequence length and runs text-only warmup lengths
+32, 256, and 1024 before `/health`. `PPLX_COMPILE=default` leaves that
+forward eager. Inductor is not bit-exact with eager. A device name of
+`NVIDIA L20X` is accepted at either capability. Startup raises if
+causal_conv1d or FLA is missing, the conv cubin has no image for the
+visible GPU, the loaded FlashInfer version is not 0.6.16.post3,
+`PPLX_GDN_PREFILL` is an unknown value, `PPLX_SDPA` or `PPLX_MLP` is set
+to anything but `default`, `PPLX_COMPILE` is an unknown value, the dynamic
+compile records no frames, or Transformers still bound `F.conv1d` or the
 PyTorch chunk reference. That last case is what logs `falling back to its
 reference PyTorch implementation` on the first forward. It does not report
-a filesystem path. CuteDSL and CUDA graphs are not used.
+a filesystem path. CuteDSL and CUDA graphs are not used. `/health` stays
+down through the compile, so a long pause before ready is that compile.
 
 `install_causal_conv1d.py` builds [causal-conv1d 1.7.0](https://pypi.org/project/causal-conv1d/1.7.0/)
 against the installed torch. That release emits sm_90 when nvcc is 11.8
@@ -102,15 +107,19 @@ or newer and skips sm_89. The script inserts a missing
 line, and refuses to build if either cubin is still absent. It needs
 nvcc. This tree did not compile it.
 
-The kept primary did not install FlashInfer and left cuDNN SDPA off. The
-next candidate does not change GDN or SDPA order. Leave `PPLX_GDN_PREFILL`
-and `PPLX_SDPA` unset. An already installed pin stays `held` on FLA chunk,
-and startup refuses `PPLX_SDPA=cudnn-first`. CUDA then reports
-`sdpa=default` and `mlp=fused-gate-up`. `PPLX_MLP=default` reproduces the
-primary MLP. `PPLX_GDN_PREFILL=short` is the rejected ≤256 dispatch, not
-this candidate. `install_flashinfer.py` remains optional. A new C1 is
-inconclusive until it reports p50 and p95 against 94.077 / 300.200, plus
-`choice_acc`, `noul_acc`, and `score_mae`.
+The kept primary did not install FlashInfer, left cuDNN SDPA off, and
+left the gate and up GEMMs separate. The next candidate does not change
+GDN, SDPA order, or those GEMM shapes. Leave `PPLX_GDN_PREFILL`,
+`PPLX_SDPA`, `PPLX_MLP`, and `PPLX_COMPILE` unset. An already installed
+pin stays `held` on FLA chunk. Startup refuses `PPLX_SDPA=cudnn-first`
+and `PPLX_MLP=fused-gate-up`. CUDA then reports `sdpa=default`,
+`mlp=default`, `fused_gate_up_layers=0`, and `compile=dynamic`.
+`PPLX_COMPILE=default` reproduces the eager primary forward.
+`PPLX_GDN_PREFILL=short` is the rejected ≤256 dispatch, not this
+candidate. `install_flashinfer.py` remains optional. Wait for `/health`
+before the benchmark; the compile runs first. A new C1 is inconclusive
+until it reports p50 and p95 against 94.077 / 300.200, plus `choice_acc`,
+`noul_acc`, and `score_mae`.
 
 ```sh
 curl -sS http://127.0.0.1:8000/health
@@ -173,8 +182,9 @@ the FLA chunk path on a capability-9.0 device. FlashInfer was not bound.
 The earlier 98.037 / 302.569 paste is not the primary. Run2, run3, resident
 memory, and a decision-disagreement count were not in the remeasure.
 The next tip has to beat 94.077 / 300.200 on both p50 and p95 in a new C1.
-`3c72f02` did not: p50 improved and p95 did not. `a50b9aa` and `0dcaa0ac`
-did not either: both percentiles were worse. `f968e576` stays the primary.
+`3c72f02` did not: p50 improved and p95 did not. `a50b9aa`, `0dcaa0ac`,
+and `8b4ee326` did not either: both percentiles were worse. `f968e576`
+stays the primary.
 
 The two-model Public231 export hashes to
 `00d1f10ca1142499a598b5f1c6602d329cce1cef04c961c46fc0318daa2c67d3`
@@ -246,11 +256,14 @@ them and do not raise the timeout after seeing the times.
    300.751 ms. `a50b9aa` used FlashInfer only for one sequence of at most
    256 tokens and failed: p50 95.446 ms, p95 300.871 ms.
    `0dcaa0ac` preferred cuDNN SDPA and failed: p50 138.501 ms, p95
-   332.859 ms. Do not try another length cutoff or another SDPA order.
-   The next candidate keeps GDN on FLA chunk (`flashinfer_status=held`
-   when the pin is installed) and the checkpoint SDPA order, and fuses
-   the text MLP gate and up GEMMs. Unset `PPLX_SDPA` and `PPLX_MLP`.
-   `/health` must show `sdpa=default`, `mlp=fused-gate-up`,
+   332.859 ms. `8b4ee326` fused the text MLP gate and up GEMMs and
+   failed: p50 102.437 ms, p95 304.970 ms. Do not try another length
+   cutoff, another SDPA order, or that wider GEMM. The next candidate
+   keeps GDN on FLA chunk, the checkpoint SDPA order, and the separate
+   gate and up GEMMs, and compiles the language-model forward with a
+   dynamic sequence length before `/health`. Unset `PPLX_SDPA`,
+   `PPLX_MLP`, and `PPLX_COMPILE`. `/health` must show `sdpa=default`,
+   `mlp=default`, `fused_gate_up_layers=0`, `compile=dynamic`,
    `linear_attention=fla-chunk`, and `flashinfer_status=held` before the
    run counts. A new Public231 C1 has to beat p50 94.077 ms and p95
    300.200 ms before that candidate replaces the primary. Record
@@ -276,7 +289,8 @@ them and do not raise the timeout after seeing the times.
 | 2026-10-25 | One lever: bind FlashInfer 0.6.16.post3 for every GDN prefill on capability 9.0. Tip `3c72f02682616c58fdbb38e7fcdf320af20c33df`. | Lab L20X-labeled host. Warmup 5, concurrency 1, stock Public231, `thinking.enabled=false`. 231/231, p50 88.808 ms, p95 300.751 ms. `/health`: `causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=0.6.16.post3`, `flashinfer_status=bound`, `linear_attention=flashinfer+fla+causal_conv1d`, `compute_capability=9.0`. Quality on this tip only: `choice_acc=0.9065`, `noul_acc=0.8784`, `score_mae=0.2035`. Primary quality was not in the paste. | p50 −5.269 ms (−5.60%). p95 +0.551 ms (+0.18%). Gate failed. Primary stays `f968e576`. |
 | 2026-10-25 | Different lever: FlashInfer only when the forward is one sequence of at most 256 tokens. Longer sequences and multi-sequence forwards stay on FLA chunk. Tip `a50b9aaa9f7ee546c6cfba5c231fff6dd3ff9716`. 256 is between the profiled median length of about 136 tokens and the profiled tail example of about 2676 tokens. It is not a fitted cutoff. | Public231 C1, 231/231, p50 95.446 ms, p95 300.871 ms. `/health`: `linear_attention=flashinfer-short+fla-chunk`, `flashinfer=0.6.16.post3`, `flashinfer_status=bound`, `causal_conv1d=1.7.0`, `fla=0.5.2`, `compute_capability=9.0`. Quality: `choice_acc=0.9065`, `noul_acc=0.8784`. `score_mae` was not in the paste. Warmup, concurrency, and the latency metric were not restated in the paste. | p50 +1.369 ms (+1.46%). p95 +0.671 ms (+0.22%). Gate failed. Primary stays `f968e576`. |
 | 2026-10-25 | Different lever, not another length cutoff. GDN stays on FLA chunk even when the FlashInfer pin is installed (`flashinfer_status=held`). CUDA forwards prefer cuDNN SDPA, then flash, mem-efficient, and math. Tip `0dcaa0ac12187a8881237739773c145d11906cbc`. | Public231 C1, 231/231, p50 138.501 ms, p95 332.859 ms. `/health`: `linear_attention=fla-chunk`, `flashinfer=0.6.16.post3`, `flashinfer_status=held`, `sdpa=cudnn-first`, `compute_capability=9.0`. Quality: `choice_acc=0.9065`, `noul_acc=0.8784`, `score_mae=0.2050`. Warmup, concurrency, and the latency metric were not restated in the paste. | p50 +44.424 ms (+47.22%). p95 +32.659 ms (+10.88%). Gate failed. Primary stays `f968e576`. Do not pursue cuDNN-first without a new hypothesis. |
-| 2026-10-25 | Different lever, not SDPA order and not a short FlashInfer cutoff. GDN stays on FLA chunk (`flashinfer_status=held` when the pin is installed). SDPA stays on the checkpoint order, which leaves cuDNN off. CUDA fuses each text MLP `gate_proj` and `up_proj` into one GEMM. `PPLX_MLP=default` keeps the two checkpoint GEMMs. The fused GEMM is not bit-exact. | Not run. Samples: 0. | inconclusive |
+| 2026-10-25 | Different lever, not SDPA order and not a short FlashInfer cutoff. GDN stays on FLA chunk. SDPA stays on the checkpoint order. CUDA fuses each text MLP `gate_proj` and `up_proj` into one GEMM. Tip `8b4ee32604be6945d797d4d066a2e0d74111fb60`. | Public231 C1, 231/231, p50 102.437 ms, p95 304.970 ms. `/health`: `linear_attention=fla-chunk`, `flashinfer=0.6.16.post3`, `flashinfer_status=held`, `sdpa=default`, `mlp=fused-gate-up`, `fused_gate_up_layers=64`, `compute_capability=9.0`. Quality: `choice_acc=0.9065`, `noul_acc=0.8784`, `score_mae=0.2027`. Warmup, concurrency, and the latency metric were not restated in the paste. | p50 +8.360 ms (+8.89%). p95 +4.770 ms (+1.59%). Gate failed. Primary stays `f968e576`. |
+| 2026-10-25 | Different lever. The forward is still almost the whole request after the GDN, SDPA-order, and wider-GEMM trials, and the wider GEMM was slower, so GEMM shapes stay as in the checkpoint. Compile the language-model forward with a dynamic sequence length, and warm lengths 32, 256, and 1024 before `/health`. `PPLX_COMPILE=default` stays eager. Inductor is not bit-exact. CUDA graphs are not selected. | Not run. Samples: 0. | inconclusive |
 
 ## Limits
 
@@ -286,9 +300,10 @@ remeasure in the optimization log: p50 94.077 ms, p95 300.200 ms, on
 `3c72f02` is not the primary: p50 88.808 ms, p95 300.751 ms. The
 short-sequence FlashInfer bind `a50b9aa` is not the primary: p50 95.446 ms,
 p95 300.871 ms. cuDNN-first SDPA `0dcaa0ac` is not the primary: p50
-138.501 ms, p95 332.859 ms. Decision agreement against `1ba07d1` was not
-in the primary paste. The fused gate-up candidate has no sample. The
-shared Qwen CUDA backend is not used. PR #140 is a separate Rust port of this same contract;
+138.501 ms, p95 332.859 ms. Fused gate-up `8b4ee326` is not the primary:
+p50 102.437 ms, p95 304.970 ms. Decision agreement against `1ba07d1` was
+not in the primary paste. The dynamic-compile candidate has no sample.
+The shared Qwen CUDA backend is not used. PR #140 is a separate Rust port of this same contract;
 it does not serve, and its JSON parser rewrites integers outside i64/u64.
 This worker keeps those integers because it uses Python's parser and the
 checkpoint's `json.dumps`.

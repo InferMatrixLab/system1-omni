@@ -100,8 +100,10 @@ the primary. Short-sequence FlashInfer `a50b9aa` measured 231/231, p50
 95.446 ms, p95 300.871 ms (p50 +1.46%, p95 +0.22%) and failed the same
 gate. It is not the primary. cuDNN-first SDPA `0dcaa0ac` measured 231/231,
 p50 138.501 ms, p95 332.859 ms (p50 +47.22%, p95 +10.88%) and failed the
-same gate. It is not the primary. The fused gate-up candidate has no
-sample.
+same gate. It is not the primary. Fused gate-up `8b4ee326` measured
+231/231, p50 102.437 ms, p95 304.970 ms (p50 +8.89%, p95 +1.59%) and
+failed the same gate. It is not the primary. The dynamic-compile
+candidate has no sample.
 Both kept measurements stay in this L20X group and do not enter the H800
 table above. Ready is not limited to capability 9.0.
 

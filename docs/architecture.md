@@ -35,9 +35,10 @@ when that GPU reports capability 8.9. Capability 9.0 stays on FLA chunk
 by default. An installed flashinfer-python 0.6.16.post3 pin is held
 (`flashinfer_status=held`) unless `PPLX_GDN_PREFILL=short`, which is the
 rejected one-sequence ≤256 dispatch. SDPA stays on the checkpoint order.
-`PPLX_SDPA=cudnn-first` is refused. CUDA fuses each text MLP gate and up
-projection unless `PPLX_MLP=default`. Ready accepts the FLA chunk and
-either FlashInfer dispatch. CuteDSL and CUDA graphs are not selected.
+`PPLX_SDPA=cudnn-first` and `PPLX_MLP=fused-gate-up` are refused. CUDA
+compiles the language-model forward with a dynamic sequence length unless
+`PPLX_COMPILE=default`. Ready accepts the FLA chunk and either FlashInfer
+dispatch. CuteDSL and CUDA graphs are not selected.
 
 Cua-S1 and Open-Jev compute their decision heads on the CPU after downloading
 the final hidden state. Decider projects its selected LM-head rows on CUDA.
