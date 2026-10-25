@@ -7,7 +7,7 @@ import pytest
 from models.pplx_decider.conv import (
     CAUSAL_CONV1D_VERSION,
     binds_package,
-    ensure_sm89_gencode,
+    ensure_sm90_gencode,
     extension_supports_arch,
     version_matches,
 )
@@ -41,22 +41,27 @@ def test_version_pin_is_1_7_0():
     assert not version_matches("1.6.2")
 
 
-def test_sm89_gencode_is_inserted_once():
-    patched = ensure_sm89_gencode(UPSTREAM)
-    assert 'arch=compute_89,code=sm_89' in patched
-    assert patched.index("compute_87") < patched.index("compute_89")
-    assert ensure_sm89_gencode(patched) == patched
+def test_sm90_gencode_is_inserted_once_when_missing():
+    patched = ensure_sm90_gencode(UPSTREAM)
+    assert 'arch=compute_90,code=sm_90' in patched
+    assert patched.index("compute_87") < patched.index("compute_90")
+    assert ensure_sm90_gencode(patched) == patched
 
 
-def test_sm89_gencode_refuses_an_unknown_setup():
+def test_upstream_sm90_line_is_left_unchanged():
+    upstream = UPSTREAM + '        cc_flag.append("arch=compute_90,code=sm_90")\n'
+    assert ensure_sm90_gencode(upstream) == upstream
+
+
+def test_sm90_gencode_refuses_an_unknown_setup():
     with pytest.raises(RuntimeError, match="sm_87"):
-        ensure_sm89_gencode("cc_flag = []\n")
+        ensure_sm90_gencode("cc_flag = []\n")
 
 
 def test_extension_arch_bytes():
-    assert extension_supports_arch(b"fatbin sm_89 cubin", 8, 9)
+    assert extension_supports_arch(b"fatbin sm_90 cubin", 9, 0)
     assert extension_supports_arch(b"compute_90", 9, 0)
-    assert not extension_supports_arch(b"sm_80 sm_90", 8, 9)
+    assert not extension_supports_arch(b"sm_80 sm_87", 9, 0)
 
 
 def test_binds_package_through_a_closure_and_forward():

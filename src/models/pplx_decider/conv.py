@@ -8,9 +8,10 @@ condition that skips the warning.
 
 ``causal-conv1d`` 1.7.0 is the release that satisfies
 ``flash-linear-attention==0.5.2``'s ``conv1d`` extra (``causal-conv1d>=1.4.0``).
-Its ``setup.py`` gencode list has no ``sm_89``. The recipe installer adds
-``arch=compute_89,code=sm_89`` before building. CUDA startup reads the
-compiled extension and refuses a binary that lacks the visible device's
+Upstream 1.7.0 emits ``arch=compute_90,code=sm_90`` when nvcc is 11.8 or
+newer, which is the Hopper cubin H200 runs. The recipe installer inserts
+that cubin if a sdist dropped the line. CUDA startup reads the compiled
+extension and refuses a binary that lacks the visible device's
 architecture.
 """
 
@@ -21,9 +22,9 @@ from typing import Any
 
 CAUSAL_CONV1D_VERSION = "1.7.0"
 _SM87_LINE = 'cc_flag.append("arch=compute_87,code=sm_87")\n'
-_SM89_BLOCK = (
+_SM90_BLOCK = (
     '        cc_flag.append("-gencode")\n'
-    '        cc_flag.append("arch=compute_89,code=sm_89")\n'
+    '        cc_flag.append("arch=compute_90,code=sm_90")\n'
 )
 
 
@@ -31,14 +32,14 @@ def version_matches(installed: str, required: str = CAUSAL_CONV1D_VERSION) -> bo
     return installed.split("+", 1)[0] == required
 
 
-def ensure_sm89_gencode(setup_text: str) -> str:
-    """Insert an sm_89 cubin next to the upstream sm_87 gencode line."""
+def ensure_sm90_gencode(setup_text: str) -> str:
+    """Leave upstream's sm_90 cubin in place, or insert one after sm_87."""
 
-    if "compute_89" in setup_text:
+    if "compute_90" in setup_text:
         return setup_text
     if _SM87_LINE not in setup_text:
         raise RuntimeError("causal-conv1d setup.py has no sm_87 gencode line")
-    return setup_text.replace(_SM87_LINE, _SM87_LINE + _SM89_BLOCK, 1)
+    return setup_text.replace(_SM87_LINE, _SM87_LINE + _SM90_BLOCK, 1)
 
 
 def extension_supports_arch(blob: bytes, major: int, minor: int) -> bool:

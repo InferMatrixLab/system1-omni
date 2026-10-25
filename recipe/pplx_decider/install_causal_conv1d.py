@@ -1,9 +1,10 @@
-"""Build causal-conv1d 1.7.0 with an sm_89 cubin and install it here.
+"""Build causal-conv1d 1.7.0 with an sm_90 cubin and install it here.
 
 The checkpoint requirements pin flash-linear-attention 0.5.2 and do not
-install this package. Upstream 1.7.0 gencode includes sm_87 and sm_90 and
-skips sm_89, so a plain pip install has no L20X image. This script adds
-that cubin, then installs with the torch already in the environment.
+install this package. Upstream 1.7.0 already emits
+``arch=compute_90,code=sm_90`` when nvcc is 11.8 or newer. This script
+inserts that Hopper cubin if the sdist omitted it, then installs with the
+torch already in the environment. The target GPU is H200 (sm_90).
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-from models.pplx_decider.conv import CAUSAL_CONV1D_VERSION, ensure_sm89_gencode
+from models.pplx_decider.conv import CAUSAL_CONV1D_VERSION, ensure_sm90_gencode
 
 PIN = f"causal-conv1d=={CAUSAL_CONV1D_VERSION}"
 
@@ -35,7 +36,7 @@ def main() -> None:
         with tarfile.open(archives[0]) as archive:
             archive.extractall(root)
         setup = next(root.glob("causal_conv1d-*/setup.py"))
-        setup.write_text(ensure_sm89_gencode(setup.read_text(encoding="utf-8")), encoding="utf-8")
+        setup.write_text(ensure_sm90_gencode(setup.read_text(encoding="utf-8")), encoding="utf-8")
         subprocess.check_call(
             [
                 sys.executable,
