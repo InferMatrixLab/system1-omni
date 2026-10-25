@@ -437,6 +437,11 @@ impl DeviceBuffer {
         assert!(offset <= self.bytes);
         self.ptr.wrapping_byte_add(offset)
     }
+
+    /// Bytes passed to the allocator. Zero is an empty buffer with no `cudaMalloc`.
+    pub fn byte_len(&self) -> usize {
+        self.bytes
+    }
 }
 
 /// Checked metadata; constructing metadata alone never creates a device view.

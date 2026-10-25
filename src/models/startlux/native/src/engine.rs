@@ -22,8 +22,9 @@ impl Engine {
         let decision = read_json(&dir.join("decision_config.json"))?;
         contract::require_instant_configs(&config, &decision)
             .map_err(|err| anyhow::anyhow!("{err}"))?;
+        let serve_limit = settings.max_model_len;
         let processor = Processor::load(dir, settings)?;
-        let executor = Executor::load(dir, library).await?;
+        let executor = Executor::load(dir, library, serve_limit).await?;
         Ok(Self {
             processor,
             scheduler: SerialScheduler::default(),

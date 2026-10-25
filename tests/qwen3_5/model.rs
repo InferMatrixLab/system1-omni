@@ -41,6 +41,59 @@ fn runs_keep_every_prompt_and_end_prefixes_on_chunks() {
     }
 }
 
+fn instant_4b_scratch_config() -> Config {
+    Config {
+        hidden: 2560,
+        intermediate: 9216,
+        eps: 1e-6,
+        full_attention: vec![false; 32],
+        heads: 16,
+        kv_heads: 4,
+        head_dim: 256,
+        rotary_half: 32,
+        rope_theta: 10_000_000.0,
+        mrope_section: [11, 11, 10],
+        max_positions: 262_144,
+        image_token_id: None,
+        lin_k_heads: 16,
+        lin_v_heads: 32,
+        lin_k_dim: 128,
+        lin_v_dim: 128,
+    }
+}
+
+#[test]
+fn prompt_scratch_quantum_and_default_bytes_match_the_allocator() {
+    assert_eq!(PROMPT_SCRATCH_TOKEN_QUANTUM, 1024);
+    assert_eq!(prompt_scratch_token_cap(0), 0);
+    assert_eq!(prompt_scratch_token_cap(1), 1024);
+    assert_eq!(prompt_scratch_token_cap(1024), 1024);
+    assert_eq!(prompt_scratch_token_cap(1025), 2048);
+    assert_eq!(prompt_scratch_token_cap(65_536), 65_536);
+    assert_eq!(prompt_scratch_token_cap(262_144), 262_144);
+
+    // gdn_prefill.cu Layout, checked by hand: T=1 H=1 and T=1024 H=32.
+    assert_eq!(default_gdn_workspace_floats(1, 1), 34_880);
+    assert_eq!(default_gdn_workspace_floats(1024, 32), 17_826_304);
+    // Chunk padding is 64, so 1000 and 1024 share a workspace. Scratch regions do not.
+    assert_eq!(
+        default_gdn_workspace_floats(1000, 32),
+        default_gdn_workspace_floats(1024, 32)
+    );
+
+    let cfg = instant_4b_scratch_config();
+    for cap in [1usize, 1000, 1024, 1025, 65_536, 262_144] {
+        let ws = default_gdn_workspace_floats(cap, cfg.lin_v_heads);
+        let (_offsets, bytes) = scratch_regions(&cfg, cap, ws);
+        assert_eq!(prompt_scratch_device_bytes(&cfg, cap), bytes, "cap {cap}");
+    }
+    // The byte function does not quantize. Callers round up before asking.
+    assert!(prompt_scratch_device_bytes(&cfg, 1000) < prompt_scratch_device_bytes(&cfg, 1024));
+    assert_eq!(prompt_scratch_device_bytes(&cfg, 1024), 251_205_632);
+    assert_eq!(prompt_scratch_device_bytes(&cfg, 65_536), 16_077_160_448);
+    assert_eq!(prompt_scratch_device_bytes(&cfg, 262_144), 64_308_641_792);
+}
+
 #[test]
 fn token_logprob_is_a_log_softmax_over_the_vocabulary_only() {
     let vocab = 1001;

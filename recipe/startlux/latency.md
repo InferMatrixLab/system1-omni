@@ -183,12 +183,15 @@ tables on the bench clock (`prepare` and the knockout encoder each used to
 clone). `encode` takes `&self`, so those handles are `Arc` clones. Hypothesis:
 that copy was large next to a short L20X prefill. Measured delta: none.
 
-Device scratch grows to the next multiple of 1024 tokens on the first prompt
-that exceeds the current cap, with a stream sync inside the request. Process
-warmup is one short choice, and `bench.py` warms five manifest rows, so a
-later longer Public231 prompt can allocate during a measured traversal.
-A static count of the Instant 4B scratch layout (the byte offsets in
-`Scratch::new`, including `cs1_gdn_workspace_floats`) is about 240 MiB at
-1024 tokens and about 15 GiB at 65536 tokens, before the weight arena.
-That 65536-token buffer is not reserved. L20X free memory was not measured.
-Hypothesis: the in-request realloc can move p95. Measured delta: none.
+Device scratch grows to the next multiple of 1024 tokens when a prompt
+exceeds the current cap, with a stream sync inside that request. Startup
+reserves a cap for the serve limit (`STARTLUX_MAX_MODEL_LEN`, default
+65536) using that same quantum, before the short warmup request. The
+default reservation is 16077160448 bytes (15332.375 MiB). The 1024-token
+buffer is 251205632 bytes, so the pre-size is 15825954816 bytes more.
+Raising the serve limit to 262144 reserves 64308641792 bytes. Grow remains
+in `prepare_scratch` for a forward longer than the reservation. Prompts over
+the serve limit still return 422 and do not allocate. Weights and the GEMM
+workspace are not in this figure.
+L20X free memory was not measured. Hypothesis: moving that realloc off the
+request path can move p95. Measured delta: none.

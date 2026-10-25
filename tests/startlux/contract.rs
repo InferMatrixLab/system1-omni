@@ -1,6 +1,7 @@
 use omni_startlux_native::contract::{
     self, DEFAULT_MAX_MODEL_LEN, Kind, Prepared, RequestError, Settings, WIDE_RESIDUAL,
 };
+use omni_startlux_native::executor;
 use serde_json::{Value, json};
 
 fn chars(text: &str) -> Result<Vec<u32>, String> {
@@ -450,4 +451,32 @@ fn temperatures_and_confidence_follow_the_pinned_readout() {
     assert_eq!(Kind::Noul.temperature(), contract::TEMP_NOUL);
     assert_eq!(contract::WEIGHTS_REVISION.len(), 40);
     assert_eq!(contract::CODE_REVISION.len(), 40);
+}
+
+#[test]
+fn scratch_presize_follows_the_serve_limit() {
+    let default = executor::scratch_presize(DEFAULT_MAX_MODEL_LEN).unwrap();
+    assert_eq!(default.tokens, 65_536);
+    assert_eq!(default.bytes, 16_077_160_448);
+    assert_eq!(default.warmup_quantum_bytes, 251_205_632);
+    assert_eq!(default.extra_bytes(), 15_825_954_816);
+
+    // The ceiling moves with the serve limit. It is not a fixed bench length.
+    assert_eq!(executor::scratch_presize(1).unwrap().tokens, 1_024);
+    assert_eq!(executor::scratch_presize(1_000).unwrap().tokens, 1_024);
+    assert_eq!(
+        executor::scratch_presize(1_000).unwrap().bytes,
+        default.warmup_quantum_bytes
+    );
+    assert_eq!(executor::scratch_presize(1_025).unwrap().tokens, 2_048);
+    assert_eq!(executor::scratch_presize(1_025).unwrap().bytes, 502_411_264);
+    assert_eq!(executor::scratch_presize(3_000).unwrap().tokens, 3_072);
+    assert_eq!(executor::scratch_presize(8_192).unwrap().tokens, 8_192);
+    let native = executor::scratch_presize(contract::NATIVE_CONTEXT).unwrap();
+    assert_eq!(native.tokens, 262_144);
+    assert_eq!(native.bytes, 64_308_641_792);
+    assert!(native.bytes > default.bytes);
+
+    assert!(executor::scratch_presize(0).is_err());
+    assert!(executor::scratch_presize(contract::NATIVE_CONTEXT + 1).is_err());
 }

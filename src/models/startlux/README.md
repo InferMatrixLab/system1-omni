@@ -47,6 +47,18 @@ context cap 65536 tokens (the vLLM release `max-model-len`). The model
 context is 262144; `STARTLUX_MAX_MODEL_LEN` can raise the cap up to that.
 Prompts over the cap return 422. Nothing is truncated.
 
+Startup reserves prompt scratch for that serve limit before the short warmup
+request. The cap is the limit rounded up to the same 1024-token quantum
+on-demand growth uses. It is not a benchmark sample length. The default
+65536-token reservation is 16077160448 bytes (15332.375 MiB) for the Instant
+4B default-kernel scratch buffer. A 1024-token scratch is 251205632 bytes, so
+the default pre-size holds 15825954816 bytes more than that warmup quantum.
+Raising the serve limit to 262144 reserves 64308641792 bytes. Prompts over
+the serve limit still return 422 and do not allocate. A forward that asks
+for more tokens than the reservation still grows the buffer, with the same
+stream sync as before. The count excludes weights, LoRA work, and the GEMM
+workspace.
+
 `think_mode` `never` and `plain` are accepted. `auto`, `always`, `hybrid`,
 and `think` return 422. A string `state` is copied unchanged. Other JSON
 states use pinned `prompt.py` `json.dumps(..., ensure_ascii=False)`: UTF-8

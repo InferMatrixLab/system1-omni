@@ -57,7 +57,8 @@ STARTLUX_PORT=8000 \
   ./target/release/omni-startlux-native
 ```
 
-The process loads the checkpoint, runs one warmup decision, then listens.
+The process loads the checkpoint, reserves prompt scratch for the serve
+limit, runs one warmup decision, then listens.
 Startup prints the CC BY-NC line. `GET /health` reports `ready`, the model
 id, `prompt_attention: bidirectional`, the license, and the weights pin.
 
@@ -67,9 +68,20 @@ id, `prompt_attention: bidirectional`, the license, and the weights pin.
 | `STARTLUX_CUDA_LIB` | `libqwen3_5_cuda.so` beside the binary | Shared CUDA library |
 | `STARTLUX_HOST` | `127.0.0.1` | Listen address |
 | `STARTLUX_PORT` | `8000` | Listen port, so `OMNI_JEV_BACKEND_URL=http://127.0.0.1:8000` matches |
-| `STARTLUX_MAX_MODEL_LEN` | `65536` | Reject longer prompts. `1..=262144` |
+| `STARTLUX_MAX_MODEL_LEN` | `65536` | Reject longer prompts, and the startup scratch ceiling. `1..=262144` |
 | `STARTLUX_NONE_CHECK` | on | `0` turns off the extra "None of the above" option |
 | `STARTLUX_ALLOW_NONE` | off | `1` allows `choice: null` when that extra option wins |
+
+`STARTLUX_MAX_MODEL_LEN` is the startup scratch ceiling. The worker rounds
+it up to the next multiple of 1024 tokens and allocates that scratch before
+warmup. The default 65536-token reservation is 16077160448 bytes
+(15332.375 MiB). A 1024-token scratch is 251205632 bytes, so the default
+pre-size is 15825954816 bytes more. Prompts the cap accepts do not grow it
+again, and prompts over the serve limit still return 422 without allocating.
+A forward longer than the reservation still grows on demand. Raising the serve limit to
+262144 reserves 64308641792 bytes (61329.500 MiB). This count is the
+default-kernel scratch device buffer, not the weight arena and not the GEMM
+workspace. The startup log prints the allocated byte count.
 
 The body limit is 32 MiB. A larger body is 413. The content type must be
 `application/json`. Bad JSON is 400. Contract errors are 422 with

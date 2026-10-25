@@ -27,6 +27,15 @@ use crate::lora::{self, Group};
 const ALIGN: usize = 256;
 const BF16: usize = 2;
 const F32: usize = 4;
+/// On-demand prompt scratch rounds its token cap up to this many tokens.
+pub const PROMPT_SCRATCH_TOKEN_QUANTUM: usize = 1024;
+
+/// Token cap used when prompt scratch is created or grown for `tokens`.
+/// Zero stays zero. Every positive length rounds up to
+/// [`PROMPT_SCRATCH_TOKEN_QUANTUM`].
+pub fn prompt_scratch_token_cap(tokens: usize) -> usize {
+    tokens.next_multiple_of(PROMPT_SCRATCH_TOKEN_QUANTUM)
+}
 const GEMM_WORKSPACE: usize = 32 << 20;
 /// Rows at which `forward_shared` fixes each weight shape's GEMM algorithm (see
 /// cs1_gemm_create_fixed); its branches run tens of tokens.
@@ -450,6 +459,85 @@ impl Widths {
     }
 }
 
+/// Float count of `cs1_gdn_workspace_floats` (`gdn_prefill.cu` `Layout`).
+/// Chunks are 64 tokens, key and value head dims are 128, each region is
+/// 256-byte aligned, and the result is `(bytes + 3) / 4`.
+fn default_gdn_workspace_floats(tokens: usize, value_heads: usize) -> usize {
+    const CHUNK: usize = 64;
+    const KEY: usize = 128;
+    const VALUE: usize = 128;
+    let chunks = tokens.div_ceil(CHUNK);
+    let padded = chunks * CHUNK;
+    let heads = value_heads;
+    let mut at = 0usize;
+    let mut take = |bytes: usize| {
+        at = (at + bytes).div_ceil(256) * 256;
+    };
+    take(heads * padded * VALUE * 2);
+    take(heads * padded * KEY * 2);
+    take(heads * padded * KEY * 2);
+    take(heads * padded * KEY * 2);
+    take(heads * chunks * CHUNK * CHUNK * 4);
+    take(heads * chunks * CHUNK * CHUNK * 2);
+    take(heads * chunks * 4);
+    take(heads * chunks * KEY * VALUE * 2);
+    take(heads * padded * VALUE * 2);
+    at.div_ceil(4)
+}
+
+/// Offsets of the prompt-scratch regions and the device-buffer length.
+/// `ws_floats` is the workspace the active GDN/attention path reported.
+fn scratch_regions(cfg: &Config, cap: usize, ws_floats: usize) -> ([usize; 24], usize) {
+    let (h, kd, vd, hv) = (cfg.hidden, cfg.key_dim(), cfg.value_dim(), cfg.lin_v_heads);
+    let (hq, hk, hd) = (cfg.heads, cfg.kv_heads, cfg.head_dim);
+    let w = Widths::of(cfg);
+    let mut next = 0usize;
+    let mut take = |bytes: usize| {
+        let off = next;
+        next = (off + bytes).next_multiple_of(ALIGN);
+        off
+    };
+    let offsets = [
+        take(cap * 4),
+        take(cap * h * BF16),
+        take(cap * h * BF16),
+        take(cap * h * BF16),
+        take(cap * w.gdn_in * BF16),
+        take(cap * hv * BF16),
+        take(cap * hv * F32),
+        take(cap * kd * BF16),
+        take(cap * kd * BF16),
+        take(cap * vd * BF16),
+        take(cap * vd * BF16),
+        take(cap * vd * BF16),
+        take(ws_floats * F32),
+        take(cap * w.attn_in * BF16),
+        take(cap * hq * hd * BF16),
+        take(cap * hq * hd * BF16),
+        take(cap * hk * hd * BF16),
+        take(cap * hq * hd * BF16),
+        take(cap * 2 * cfg.intermediate * BF16),
+        take(cap * cfg.intermediate * BF16),
+        take(cap * cfg.rotary_half * BF16),
+        take(cap * cfg.rotary_half * BF16),
+        take(cap * cfg.rotary_half * BF16),
+        take(cap * cfg.rotary_half * BF16),
+    ];
+    (offsets, next)
+}
+
+/// Device bytes of one default-kernel prompt scratch whose token cap is `cap`.
+///
+/// Callers that mirror on-demand growth pass [`prompt_scratch_token_cap`] first.
+/// The count is the scratch device buffer only: the same region list the
+/// allocator uses, plus the default GDN workspace (`cs1_gdn_workspace_floats`).
+/// It excludes LoRA work, the weight arena, and the GEMM workspace. Reference
+/// numerics and FP32 GDN can request a larger workspace than this function reports.
+pub fn prompt_scratch_device_bytes(cfg: &Config, cap: usize) -> usize {
+    let ws = default_gdn_workspace_floats(cap, cfg.lin_v_heads);
+    scratch_regions(cfg, cap, ws).1
+}
+
 /// Per-request buffers for up to `cap` tokens, as byte offsets into one allocation,
 /// plus the rotary tables for positions below `cap`.
 struct Scratch {
@@ -491,15 +579,8 @@ impl Scratch {
         reference: Option<&cuda::Reference>,
         fp32_gdn: Option<&cuda::Fp32Gdn>,
     ) -> Result<Self> {
-        let (h, kd, vd, hv) = (cfg.hidden, cfg.key_dim(), cfg.value_dim(), cfg.lin_v_heads);
-        let (hq, hk, hd) = (cfg.heads, cfg.kv_heads, cfg.head_dim);
-        let w = Widths::of(cfg);
-        let mut next = 0usize;
-        let mut take = |bytes: usize| {
-            let off = next;
-            next = (off + bytes).next_multiple_of(ALIGN);
-            off
-        };
+        let hv = cfg.lin_v_heads;
+        let hq = cfg.heads;
         // SAFETY: pure function of its arguments.
         let ws_floats = if let Some(reference) = reference {
             // SAFETY: capacity and heads derive from validated architecture/request limits.
@@ -511,40 +592,19 @@ impl Scratch {
                 gdn.max(attention)
             }
         } else {
-            unsafe { (cuda::api().cs1_gdn_workspace_floats)(cap as i32, hv as i32) }
+            // SAFETY: the CUDA library is loaded for this model. The Rust mirror is
+            // checked in debug builds; release keeps this symbol as the allocator input.
+            let ws = unsafe { (cuda::api().cs1_gdn_workspace_floats)(cap as i32, hv as i32) };
+            debug_assert_eq!(ws, default_gdn_workspace_floats(cap, hv));
+            ws
         };
         let ws_floats = if let Some(gdn) = fp32_gdn {
             ws_floats.max(gdn.workspace_floats(cap, hv)?)
         } else {
             ws_floats
         };
-        let offsets = [
-            take(cap * 4),
-            take(cap * h * BF16),
-            take(cap * h * BF16),
-            take(cap * h * BF16),
-            take(cap * w.gdn_in * BF16),
-            take(cap * hv * BF16),
-            take(cap * hv * F32),
-            take(cap * kd * BF16),
-            take(cap * kd * BF16),
-            take(cap * vd * BF16),
-            take(cap * vd * BF16),
-            take(cap * vd * BF16),
-            take(ws_floats * F32),
-            take(cap * w.attn_in * BF16),
-            take(cap * hq * hd * BF16),
-            take(cap * hq * hd * BF16),
-            take(cap * hk * hd * BF16),
-            take(cap * hq * hd * BF16),
-            take(cap * 2 * cfg.intermediate * BF16),
-            take(cap * cfg.intermediate * BF16),
-            take(cap * cfg.rotary_half * BF16),
-            take(cap * cfg.rotary_half * BF16),
-            take(cap * cfg.rotary_half * BF16),
-            take(cap * cfg.rotary_half * BF16),
-        ];
-        let buf = DeviceBuffer::new(next)?;
+        let (offsets, bytes) = scratch_regions(cfg, cap, ws_floats);
+        let buf = DeviceBuffer::new(bytes)?;
         let [
             ids,
             res,
@@ -676,6 +736,13 @@ impl PrefixState {
 /// Rows of logits computed at once by `forward_multimodal_readout`; with the fixed GEMM
 /// algorithms, a row's logits do not depend on how many share the call.
 const VOCAB_ROWS: usize = 64;
+
+/// Token cap and device-buffer bytes of one reserved prompt scratch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PromptScratchSize {
+    pub tokens: usize,
+    pub bytes: usize,
+}
 
 /// What `Model::forward_multimodal_readout` reads from one prefill.
 #[derive(Debug, Clone)]
@@ -1153,6 +1220,9 @@ impl Model {
         cuda::synchronize(self.stream)
     }
 
+    /// Grow prompt scratch so it holds `t` tokens. A startup reservation may
+    /// already cover `t`. A longer prompt still reallocates to the next
+    /// [`PROMPT_SCRATCH_TOKEN_QUANTUM`] and syncs this stream before the forward.
     fn prepare_scratch(&mut self, t: usize) -> Result<()> {
         cuda::set_device(0)?;
         if self.scratch.as_ref().is_none_or(|s| t > s.cap) {
@@ -1165,7 +1235,7 @@ impl Model {
             self.scratch = None;
             self.scratch = Some(Scratch::new(
                 &self.cfg,
-                t.next_multiple_of(1024),
+                prompt_scratch_token_cap(t),
                 self.stream,
                 self.lora.as_ref(),
                 self.reference,
@@ -1173,6 +1243,42 @@ impl Model {
             )?);
         }
         Ok(())
+    }
+
+    /// Allocate prompt scratch for `tokens` when the current cap is smaller.
+    ///
+    /// The reserved cap is [`prompt_scratch_token_cap`]. This does not remove
+    /// on-demand growth: a later prompt longer than that cap still reallocates
+    /// in `prepare_scratch`, including its stream sync. `tokens` must be in
+    /// `1..=max_position_embeddings`, and the quantized cap must stay inside
+    /// that context.
+    pub fn reserve_prompt_scratch(&mut self, tokens: usize) -> Result<PromptScratchSize> {
+        ensure!(tokens > 0, "cannot reserve an empty prompt scratch");
+        ensure!(
+            tokens <= self.cfg.max_positions,
+            "prompt scratch pre-size exceeds max_position_embeddings ({})",
+            self.cfg.max_positions
+        );
+        let cap = prompt_scratch_token_cap(tokens);
+        ensure!(
+            cap <= self.cfg.max_positions,
+            "aligned prompt scratch cap {cap} exceeds max_position_embeddings ({})",
+            self.cfg.max_positions
+        );
+        self.prepare_scratch(tokens)?;
+        let scratch = self
+            .scratch
+            .as_ref()
+            .context("prompt scratch was not reserved")?;
+        ensure!(
+            scratch.cap >= cap,
+            "prompt scratch cap {} is below {cap}",
+            scratch.cap
+        );
+        Ok(PromptScratchSize {
+            tokens: scratch.cap,
+            bytes: scratch.buf.byte_len(),
+        })
     }
 
     /// The final-norm hidden state at the last position, as float32.

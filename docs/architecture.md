@@ -12,7 +12,9 @@ to separately running workers. Cua-S1, Open-Jev, Decider, and StartLux Instant
 [Qwen3.5/3.8 executor](../src/models/qwen3_5/native/), which accepts
 single prompts and bounded packed prefill. StartLux Instant uses a
 bidirectional full-attention call on each prompt; its GDN stays causal, and
-it does not pack prompts or cache prefixes. Cua-S1 and Open-Jev-9B use
+it does not pack prompts or cache prefixes. At startup it reserves prompt
+scratch for its serve limit, rounded up to the 1024-token grow quantum; a
+forward longer than that reservation still grows the buffer. Cua-S1 and Open-Jev-9B use
 single-prompt calls; Open-Jev-27B-v1.1 packs candidates within one request for
 input and gate/up GEMMs while preserving per-sequence mixers and output/down GEMM
 shapes. Decider optionally packs up to four complete rows and 4096 tokens within
