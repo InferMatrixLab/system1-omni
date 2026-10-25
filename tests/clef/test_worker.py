@@ -1,10 +1,11 @@
 import json
+import time
 from http.client import HTTPConnection
 from threading import Thread
 
 import pytest
 
-from frontend.clef import WorkerServer, decide
+from frontend.clef import WorkerServer, decide, listen
 from models.clef.postprocess import systemone_answer
 from models.clef.preprocess import enforce_limit, measure
 from models.clef.protocol import MAX_BODY, Request, RequestError
@@ -200,6 +201,64 @@ def test_transport_errors(server):
     assert response.status == 404
     response.read()
     conn.close()
+
+
+def test_listen_binds_only_after_warmup(monkeypatch):
+    order = []
+
+    class Executor:
+        def __init__(self):
+            self.warmed = False
+
+        def warmup(self):
+            order.append("warmup")
+            self.warmed = True
+
+        def close(self):
+            order.append("close")
+
+    original = WorkerServer.__init__
+
+    def init(self, address, executor):
+        assert executor.warmed
+        order.append("bind")
+        original(self, address, executor)
+
+    monkeypatch.setattr(WorkerServer, "__init__", init)
+    server = listen(Executor(), ("127.0.0.1", 0))
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        assert order == ["warmup", "bind"]
+    finally:
+        stop(server)
+
+    class Failing:
+        def warmup(self):
+            order.append("fail")
+            raise RuntimeError("cuda init")
+
+        def close(self):
+            pass
+
+    with pytest.raises(RuntimeError, match="cuda init"):
+        listen(Failing(), ("127.0.0.1", 0))
+    # stop() closes the first executor before the failing warmup runs.
+    assert order == ["warmup", "bind", "close", "fail"]
+
+
+def test_stalled_body_does_not_hold_the_inference_lock(server):
+    payload = json.dumps(three_kinds()).encode("utf-8")
+    stalled = HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+    stalled.putrequest("POST", "/v1/systemone", skip_accept_encoding=True)
+    stalled.putheader("Content-Type", "application/json")
+    stalled.putheader("Content-Length", str(len(payload)))
+    stalled.endheaders()
+    time.sleep(0.2)
+    status, raw = post(server, payload)
+    stalled.close()
+    assert status == 200
+    assert json.loads(raw)["answers"]["urgent"]["noul"] == 0.25
 
 
 def test_busy_and_inference_failure(server):

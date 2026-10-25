@@ -35,34 +35,41 @@ The requirements pin `causal-conv1d>=1.5`, `flash-linear-attention==0.5.2`,
 and `flashinfer-python==0.6.16.post3`. The worker imports `causal_conv1d`,
 then `fla.ops.gated_delta_rule`, then tries `flashinfer.gdn_prefill`, and
 only then imports `transformers.models.qwen3_5.modeling_qwen3_5`. That
-order binds `FusedRMSNormGated` and `causal_conv1d_fn`. When the reported
-compute capability major is 9, 10, or 12 and FlashInfer loaded, startup
+order binds `FusedRMSNormGated` and `causal_conv1d_fn`. The default
+prefill is the FLA chunk. `--gdn-prefill flashinfer` is opt-in: startup
 replaces the modeling module's `chunk_gated_delta_rule` with the FlashInfer
 GDN prefill wrapper before `load_release_model` builds each
-`Qwen3_5GatedDeltaNet`, because the layer copies that global at init.
+`Qwen3_5GatedDeltaNet` only when that flag is set, the package imports,
+and the reported capability major is 9, 10, or 12. The layer copies that
+global at init.
 
 `causal-conv1d` and `flash-linear-attention` are required. Startup raises
 when either is missing, when flash-linear-attention is not exactly `0.5.2`,
 when causal-conv1d is older than 1.5, or when `causal_conv1d_fn` and a
 chunk kernel did not bind. A missing or different FlashInfer install does
-not, by itself, refuse ready. `/health` `linear_attention` is the bind that
-started: `flashinfer+fla+causal_conv1d` or `fla+causal_conv1d`. The PyTorch
-`torch_chunk_gated_delta_rule` and `F.conv1d` paths are not served.
+not, by itself, refuse the default FLA path. Requesting
+`--gdn-prefill flashinfer` without that package, or on a device whose
+reported major is not 9, 10, or 12, refuses startup. `/health`
+`linear_attention` is the bind that started:
+`fla+causal_conv1d` by default, or `flashinfer+fla+causal_conv1d` when the
+opt-in flag bound. The PyTorch `torch_chunk_gated_delta_rule` and
+`F.conv1d` paths are not served.
 
 FlashInfer prefill calls `flashinfer.gdn_prefill.chunk_gated_delta_rule`
 with `use_cp=False`. Q and K L2 normalization uses FLA `l2norm_fwd`, and
 FlashInfer's `use_qk_l2norm_in_kernel` flag stays false. Log-space `g` is
 exponentiated. The call is one sequence and does not continue a recurrent
 state. FlashInfer 0.6.16 does not dispatch that kernel when the device
-reports capability 8.9, so those processes keep the FLA chunk. vLLM's
-separate CuteDSL prefill backend, CUDA graphs, and `torch.compile` are
-not used.
+reports capability 8.9. vLLM's separate CuteDSL prefill backend, CUDA
+graphs, and `torch.compile` are not used.
 
 The lab host is the machine `nvidia-smi` names `NVIDIA L20X`, including
 when it reports compute capability 8.9. Startup does not require the name
-`NVIDIA H200` and does not refuse ready because the capability is not 9.0.
-No Public231 C1 of this tip has been measured. Answer parity against
-`torch_chunk` is not measured.
+`NVIDIA H200` and does not refuse the default FLA path because the
+capability is not 9.0. The measured primary is that FLA path. FlashInfer
+GDN prefill has no measured forward and no answer parity against
+`fla+causal_conv1d`. That parity run is the named follow-up blocker
+before `--gdn-prefill flashinfer` can become the default.
 
 ```sh
 python - <<'PY'
@@ -82,15 +89,18 @@ PYTHONPATH=src python -m frontend.clef \
   --model <snapshot> \
   --variant clef-flash \
   --device cuda \
+  --gdn-prefill fla \
   --host 127.0.0.1 \
   --port 8000
 ```
 
-Readiness is the process log line after `load_release_model` returns.
-`GET http://127.0.0.1:8000/health` then returns `status: ready`,
-`variant: clef-flash`, `prompt_mode: non-thinking`, `modalities: ["text"]`
-and `max_input_tokens: 16384`. The first `POST` is the first forward. That
-forward was not run in this change.
+The process runs one text forward, then binds. `GET
+http://127.0.0.1:8000/health` is not served until that forward returns.
+It then returns `status: ready`, `variant: clef-flash`,
+`prompt_mode: non-thinking`, `modalities: ["text"]`,
+`max_input_tokens: 16384`, and `linear_attention: fla+causal_conv1d` on
+the default flag. A CUDA init failure exits before the port opens. That
+startup forward was not run in this editing environment.
 
 For the 27B checkpoint, download `Cloudflare/clef` at
 `a30162b99d68a481d8bd75d38df069a0cf83df40` and pass `--variant clef`.
@@ -200,10 +210,11 @@ with p50 164.969 ms and p95 216.755 ms.
 
 That host is the measurement machine, including when `nvidia-smi` reports
 compute capability 8.9. Do not require a card whose name is `NVIDIA H200`.
-On a reported 8.9 the ready bind is `fla+causal_conv1d`. When the same
-process sees reported major 9, 10, or 12 and FlashInfer loaded, the ready
-bind is `flashinfer+fla+causal_conv1d`. Record the `/health` string the
-process returns. The standalone GDN timings in
+On a reported 8.9 the ready bind is `fla+causal_conv1d`. That is also the
+default on reported majors 9, 10, and 12. `flashinfer+fla+causal_conv1d`
+is ready only when the process was started with `--gdn-prefill flashinfer`
+and that kernel could bind. Record the `/health` string the process
+returns. The standalone GDN timings in
 [benchmarks/gdn/README.md](../../benchmarks/gdn/README.md) are a different
 experiment and are not a Clef HTTP result.
 
@@ -228,11 +239,13 @@ in a commit.
    Do not report the run as H800 or as the Public231 leaderboard.
 2. Start `frontend.clef` as above, on loopback port 8000, variant
    `clef-flash`, device `cuda`. Leave that process up for every traversal.
-   `GET /health` must show `status` `ready`. `linear_attention` is
-   `fla+causal_conv1d` or `flashinfer+fla+causal_conv1d`, whichever the
-   process bound. Record that string. A process that exits at startup did
-   not bind `causal_conv1d_fn` and a chunk kernel. Do not measure a
-   process that is still on the PyTorch chunk or `F.conv1d` path.
+   `GET /health` is absent until the startup forward returns, then must
+   show `status` `ready`. The default `linear_attention` is
+   `fla+causal_conv1d`. `flashinfer+fla+causal_conv1d` means the process
+   was started with `--gdn-prefill flashinfer`. Record that string. A
+   process that exits at startup did not bind `causal_conv1d_fn` and a
+   chunk kernel. Do not measure a process that is still on the PyTorch
+   chunk or `F.conv1d` path.
 3. Obtain the frozen Public231 request manifest whose file SHA-256 is
    `00d1f10ca1142499a598b5f1c6602d329cce1cef04c961c46fc0318daa2c67d3`.
    That is the JSONL byte hash cited for the JevBench `7ce310c7` export in
@@ -318,8 +331,11 @@ environment has no GPU and did not repeat either campaign. H1, one encode
 per request, is already inside the `9030065` baseline, so its isolated
 effect is unknown. The recorded win, and the primary a later tip has to
 beat, is the FLA chunk plus `causal_conv1d` on the reported-8.9 host:
-p50 164.969 ms, p95 216.755 ms. FlashInfer on a reported major 9, 10, or
-12 has no C1. FlashInfer's GDN prefill does not dispatch when the reported
-major is 8, so this primary stays on the FLA chunk. Full attention is
-already Transformers SDPA at head dimension 256. No further kernel change
-is in this tree. A later code change is unmeasured until its own paste.
+p50 164.969 ms, p95 216.755 ms. The default prefill remains that FLA
+chunk, including on reported majors 9, 10, and 12. `--gdn-prefill
+flashinfer` is opt-in. It has no measured forward and no answer parity
+against `fla+causal_conv1d`; that parity run is the named follow-up
+blocker before the flag becomes the default. The startup forward that
+runs before `/health` is separate from the client warmup in the C1
+protocol and has no latency claim. A later code change is unmeasured
+until its own paste.

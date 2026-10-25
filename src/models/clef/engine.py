@@ -213,18 +213,55 @@ def bound_linear_attention(modeling: Any) -> str:
     return "torch_chunk"
 
 
-def select_gdn_prefill(capability: tuple[int, int] | None) -> str:
-    """Choose FlashInfer only when its GDN prefill kernel can dispatch.
+def select_gdn_prefill(
+    capability: tuple[int, int] | None, requested: str = FLA_PREFILL
+) -> str:
+    """Choose the prefill bind. The default is the measured FLA chunk.
 
-    Reported majors 9, 10, and 12 take FlashInfer. A device that reports
-    8.9 stays on the FLA chunk, including the lab cards ``nvidia-smi`` names
-    ``NVIDIA L20X``. The printed name is not a gate, and a capability other
-    than 9.0 is not a reason to refuse ready.
+    FlashInfer is opt-in. It is returned only when ``requested`` is
+    ``flashinfer`` and the reported major is 9, 10, or 12. A device that
+    reports 8.9 stays on the FLA chunk, including the lab cards
+    ``nvidia-smi`` names ``NVIDIA L20X``. The printed name is not a gate,
+    and a capability other than 9.0 is not a reason to refuse the FLA path.
     """
 
-    if capability is not None and capability[0] in FLASHINFER_ARCH_MAJORS:
+    if requested not in (FLA_PREFILL, GDN_PREFILL):
+        raise ValueError(f"gdn prefill must be {FLA_PREFILL!r} or {GDN_PREFILL!r}")
+    if (
+        requested == GDN_PREFILL
+        and capability is not None
+        and capability[0] in FLASHINFER_ARCH_MAJORS
+    ):
         return GDN_PREFILL
     return FLA_PREFILL
+
+
+def resolve_gdn_prefill(
+    capability: tuple[int, int] | None, requested: str, flashinfer_loaded: bool
+) -> str:
+    """Return the bind, or refuse an opt-in FlashInfer request that cannot run.
+
+    The default request stays on FLA even when FlashInfer imported and the
+    reported major is 9, 10, or 12. That path has no forward and no answer
+    parity against ``fla+causal_conv1d``, so it is not selected by itself.
+    """
+
+    backend = select_gdn_prefill(capability, requested)
+    if requested == GDN_PREFILL and backend != GDN_PREFILL:
+        printed = "unavailable" if capability is None else f"{capability[0]}.{capability[1]}"
+        raise RuntimeError(
+            "Clef FlashInfer GDN prefill was requested with --gdn-prefill "
+            f"flashinfer, but this device reports capability {printed}. "
+            "That kernel is selected only for reported majors 9, 10, and 12. "
+            "The measured path is --gdn-prefill fla."
+        )
+    if requested == GDN_PREFILL and not flashinfer_loaded:
+        raise RuntimeError(
+            "Clef FlashInfer GDN prefill was requested, but "
+            f"{FI_DISTRIBUTION}=={FI_VERSION} did not import. "
+            "The measured path is --gdn-prefill fla."
+        )
+    return backend
 
 
 def cuda_capability(device: str) -> tuple[int, int]:
@@ -251,15 +288,17 @@ def bind_selected_prefill(modeling: Any, backend: str, flashinfer_loaded: bool) 
         install_flashinfer_gdn_prefill(modeling)
 
 
-def activate_gdn_prefill(device: str, flashinfer_loaded: bool) -> None:
-    """Bind the prefill that this CUDA device can run."""
+def activate_gdn_prefill(
+    device: str, flashinfer_loaded: bool, requested: str = FLA_PREFILL
+) -> None:
+    """Bind the requested prefill. The default is the FLA chunk."""
 
     modeling = sys.modules.get(MODELING)
     if modeling is None:
         raise RuntimeError(f"{MODELING} is not imported.")
     bind_selected_prefill(
         modeling,
-        select_gdn_prefill(cuda_capability(device)),
+        resolve_gdn_prefill(cuda_capability(device), requested, flashinfer_loaded),
         flashinfer_loaded,
     )
 
@@ -490,16 +529,26 @@ def load_joint_schema_module(path: Path) -> Any:
 class ClefExecutor:
     """Load and run one immutable pinned Clef snapshot."""
 
-    def __init__(self, snapshot: str | Path, variant: str = DEFAULT_VARIANT, device: str = "cuda") -> None:
+    def __init__(
+        self,
+        snapshot: str | Path,
+        variant: str = DEFAULT_VARIANT,
+        device: str = "cuda",
+        gdn_prefill: str = FLA_PREFILL,
+    ) -> None:
         if variant not in VARIANTS:
             raise ValueError(f"variant must be one of {sorted(VARIANTS)}")
+        if gdn_prefill not in (FLA_PREFILL, GDN_PREFILL):
+            raise ValueError(f"gdn_prefill must be {FLA_PREFILL!r} or {GDN_PREFILL!r}")
         self.variant = VARIANTS[variant]
         self.root = Path(snapshot)
         self.device = device
+        self.gdn_prefill_request = gdn_prefill
         self.max_length = MAX_INPUT_TOKENS
+        self._warmed = False
         verify_snapshot(self.root, self.variant)
         flashinfer_loaded = require_fast_linear_attention()
-        activate_gdn_prefill(device, flashinfer_loaded)
+        activate_gdn_prefill(device, flashinfer_loaded, gdn_prefill)
         self.module = load_joint_schema_module(self.root / EXECUTABLE)
         self.model, self.processor = self.module.load_release_model(self.root, device=device)
         self.linear_attention = require_bound_linear_attention(sys.modules.get(MODELING))
@@ -562,9 +611,31 @@ class ClefExecutor:
             "usage": {"input_tokens": len(encoded.input_ids), "output_tokens": 0},
         }
 
+    def warmup(self) -> None:
+        """Run one text forward before this process reports ready.
+
+        The HTTP server is not bound until this returns. A CUDA context or
+        kernel failure exits startup instead of the first live request.
+        The answer is discarded and is not a latency sample.
+        """
+
+        self.serve(
+            {
+                "model": self.variant.name,
+                "state": "warmup",
+                "questions": {
+                    "ready": {
+                        "type": "noul",
+                        "instructions": "Is warmup complete?",
+                    }
+                },
+            }
+        )
+        self._warmed = True
+
     def health(self) -> dict[str, Any]:
         return {
-            "status": "ready",
+            "status": "ready" if self._warmed else "loading",
             "model": self.variant.repo_id,
             "variant": self.variant.name,
             "revision": self.variant.revision,

@@ -9,16 +9,20 @@ tokenizers>=0.22
 # The processor loads with the backbone. Image and video requests are rejected
 # by this worker; pillow is still imported by the pinned processor.
 pillow>=10
-# Import order is causal_conv1d, then fla.ops.gated_delta_rule, then
-# flashinfer.gdn_prefill, and only then modeling_qwen3_5. FLA must be
-# importable first so Transformers binds FusedRMSNormGated instead of the
-# PyTorch norm. The worker then replaces the chunk global with FlashInfer
-# GDN prefill (use_cp false, fused SM90) before layers copy it.
+# Import order is causal_conv1d, then fla.ops.gated_delta_rule, then an
+# attempted flashinfer.gdn_prefill import, and only then modeling_qwen3_5.
+# FLA must be importable first so Transformers binds FusedRMSNormGated
+# instead of the PyTorch norm. The default leaves the FLA chunk in place.
+# --gdn-prefill flashinfer replaces that global with FlashInfer GDN prefill
+# (use_cp false) before layers copy it.
 # causal_conv1d_fn stays the convolution. Startup refuses torch_chunk and
-# F.conv1d. FlashInfer replaces the chunk only when the reported capability
-# major is 9, 10, or 12 and this package imports. A device that reports 8.9,
+# F.conv1d. The default prefill is the FLA chunk. --gdn-prefill flashinfer
+# replaces the chunk only when that flag is set, this package imports, and
+# the reported capability major is 9, 10, or 12. A device that reports 8.9,
 # including nvidia-smi name NVIDIA L20X, stays on the FLA chunk and still
 # becomes ready. The device name is not required to be NVIDIA H200.
+# FlashInfer has no measured forward and no answer parity against the FLA
+# path. That parity run is the follow-up blocker before the flag is default.
 # vLLM's separate CuteDSL prefill backend, CUDA graphs, and torch.compile
 # are not selected. The recorded L20X-labeled C1 primary is tip 594528a9
 # on the FLA chunk: warmup 5, concurrency 1, stock Public231 with

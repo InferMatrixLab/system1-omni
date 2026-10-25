@@ -21,7 +21,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from models.clef.engine import DEFAULT_VARIANT, VARIANTS, ClefExecutor
+from models.clef.engine import DEFAULT_VARIANT, FLA_PREFILL, GDN_PREFILL, VARIANTS, ClefExecutor
 from models.clef.preprocess import validate_questions
 from models.clef.protocol import MAX_BODY, RequestError, parse_body, parse_request
 
@@ -106,19 +106,23 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get_content_type() != "application/json":
             self.send_json(415, {"detail": "Content-Type must be application/json"})
             return
+        try:
+            raw = self.rfile.read(length)
+        except (TimeoutError, socket.timeout):
+            self.send_json(408, {"detail": "request body timed out"})
+            return
+        except OSError:
+            return
+        if len(raw) != length:
+            self.send_json(400, {"detail": "incomplete body"})
+            return
         if not self.server.inference_lock.acquire(blocking=False):
             self.send_json(503, {"detail": "worker busy"})
             return
         try:
-            raw = self.rfile.read(length)
-            if len(raw) != length:
-                self.send_json(400, {"detail": "incomplete body"})
-                return
             self.send_json(200, decide(raw, self.server.executor))
         except RequestError as exc:
             self._send_request_error(exc)
-        except (TimeoutError, socket.timeout):
-            self.send_json(408, {"detail": "request body timed out"})
         except Exception as exc:
             LOG.error("clef inference failed: %s", type(exc).__name__)
             self.send_json(500, {"detail": "inference failed"})
@@ -131,18 +135,43 @@ def parse_args(argv=None):
     parser.add_argument("--model", required=True, help="snapshot directory of the pinned revision")
     parser.add_argument("--variant", default=DEFAULT_VARIANT, choices=sorted(VARIANTS))
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--gdn-prefill",
+        default=FLA_PREFILL,
+        choices=(FLA_PREFILL, GDN_PREFILL),
+        help=(
+            "Linear-attention prefill. fla is the measured default. "
+            "flashinfer is opt-in and has no answer parity against that path."
+        ),
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     return parser.parse_args(argv)
 
 
+def listen(executor: Any, address: tuple[str, int]) -> WorkerServer:
+    """Bind only after one forward warmup succeeds.
+
+    A failure here leaves the port closed, so ``/health`` does not report
+    ready until CUDA init and one text forward have returned.
+    """
+
+    executor.warmup()
+    return WorkerServer(address, executor)
+
+
 def main(argv=None):
     args = parse_args(argv)
     logging.basicConfig(level=logging.INFO)
-    executor = ClefExecutor(args.model, variant=args.variant, device=args.device)
+    executor = ClefExecutor(
+        args.model,
+        variant=args.variant,
+        device=args.device,
+        gdn_prefill=args.gdn_prefill,
+    )
     server = None
     try:
-        server = WorkerServer((args.host, args.port), executor)
+        server = listen(executor, (args.host, args.port))
         LOG.info(
             "%s worker ready on %s:%s",
             executor.variant.repo_id,

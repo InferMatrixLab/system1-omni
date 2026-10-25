@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -106,6 +107,7 @@ def test_linear_attention_name_follows_the_bound_callables():
         flashinfer_chunk_gated_delta_rule,
         install_flashinfer_gdn_prefill,
         require_bound_linear_attention,
+        resolve_gdn_prefill,
         select_gdn_prefill,
     )
 
@@ -131,20 +133,34 @@ def test_linear_attention_name_follows_the_bound_callables():
     with pytest.raises(RuntimeError, match="chunk_gated_delta_rule"):
         install_flashinfer_gdn_prefill(conv_only)
     assert select_gdn_prefill((8, 9)) == "fla"
-    assert select_gdn_prefill((9, 0)) == "flashinfer"
-    assert select_gdn_prefill((10, 0)) == "flashinfer"
-    assert select_gdn_prefill((12, 0)) == "flashinfer"
+    assert select_gdn_prefill((9, 0)) == "fla"
+    assert select_gdn_prefill((10, 0)) == "fla"
+    assert select_gdn_prefill((12, 0)) == "fla"
     assert select_gdn_prefill(None) == "fla"
+    assert select_gdn_prefill((9, 0), "flashinfer") == "flashinfer"
+    assert select_gdn_prefill((10, 0), "flashinfer") == "flashinfer"
+    assert select_gdn_prefill((12, 0), "flashinfer") == "flashinfer"
+    assert select_gdn_prefill((8, 9), "flashinfer") == "fla"
+    assert select_gdn_prefill(None, "flashinfer") == "fla"
+    assert resolve_gdn_prefill((9, 0), "fla", True) == "fla"
+    assert resolve_gdn_prefill((9, 0), "flashinfer", True) == "flashinfer"
+    with pytest.raises(RuntimeError, match="reports capability 8.9"):
+        resolve_gdn_prefill((8, 9), "flashinfer", True)
+    with pytest.raises(RuntimeError, match="did not import"):
+        resolve_gdn_prefill((9, 0), "flashinfer", False)
     reported_89 = _bound_pair()
     original_chunk = reported_89.chunk_gated_delta_rule
-    bind_selected_prefill(reported_89, select_gdn_prefill((8, 9)), True)
+    bind_selected_prefill(reported_89, select_gdn_prefill((8, 9), "flashinfer"), True)
     assert reported_89.chunk_gated_delta_rule is original_chunk
     assert require_bound_linear_attention(reported_89) == "fla+causal_conv1d"
+    default_90 = _bound_pair()
+    bind_selected_prefill(default_90, select_gdn_prefill((9, 0)), True)
+    assert require_bound_linear_attention(default_90) == "fla+causal_conv1d"
     reported_90 = _bound_pair()
-    bind_selected_prefill(reported_90, select_gdn_prefill((9, 0)), True)
+    bind_selected_prefill(reported_90, select_gdn_prefill((9, 0), "flashinfer"), True)
     assert require_bound_linear_attention(reported_90) == "flashinfer+fla+causal_conv1d"
     unloaded_fi = _bound_pair()
-    bind_selected_prefill(unloaded_fi, select_gdn_prefill((9, 0)), False)
+    bind_selected_prefill(unloaded_fi, select_gdn_prefill((9, 0), "flashinfer"), False)
     assert require_bound_linear_attention(unloaded_fi) == "fla+causal_conv1d"
     with pytest.raises(RuntimeError, match="one sequence"):
         flashinfer_chunk_gated_delta_rule(object(), object(), object())
@@ -152,7 +168,10 @@ def test_linear_attention_name_follows_the_bound_callables():
         flashinfer_chunk_gated_delta_rule(object(), object(), object(), output_final_state=True)
 
 
-def test_linear_attention_pins_and_startup_fail_closed():
+def test_linear_attention_pins_and_startup_fail_closed(monkeypatch):
+    import importlib.metadata
+
+    from models.clef import engine
     from models.clef.engine import (
         FI_VERSION,
         FLA_VERSION,
@@ -174,5 +193,11 @@ def test_linear_attention_pins_and_startup_fail_closed():
         check_distribution_version("0.6.16", exact=FI_VERSION)
     with pytest.raises(RuntimeError, match="required >=1.5"):
         check_distribution_version("1.4.9", minimum=(1, 5))
+
+    def missing(name):
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.delitem(sys.modules, engine.MODELING, raising=False)
+    monkeypatch.setattr(engine.importlib.metadata, "version", missing)
     with pytest.raises(RuntimeError, match="not installed"):
         require_fast_linear_attention()

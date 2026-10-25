@@ -50,9 +50,10 @@ with `thinking.enabled` false, metric `successful_latency`, p50 164.969 ms,
 p95 216.755 ms, 231/231, `/health` `linear_attention` `fla+causal_conv1d`,
 Δp50 −82.549 ms (−33.35%), Δp95 −196.270 ms (−47.52%). The tip paste does
 not restate the clock name. Neither campaign was re-run for this document. The
-worker starts on that host when the capability prints 8.9. FlashInfer GDN
-prefill is used when the reported major is 9, 10, or 12 and the package
-loads; that path has no C1. The 27B variant has no recorded timing.
+worker starts on that host when the capability prints 8.9. The default
+prefill is the FLA chunk. `--gdn-prefill flashinfer` is opt-in and is the
+named follow-up blocker: it has no measured forward and no answer parity
+against `fla+causal_conv1d`. The 27B variant has no recorded timing.
 CLM has a row per path: the merged `clm-serve` recipe exercises those answer shapes with stub
 embeddings and says nothing about decision quality, while the native engine's CUDA row is the
 path through a real Qwen3-8B encoder. Its engine-only figure comes from the same comparison run
