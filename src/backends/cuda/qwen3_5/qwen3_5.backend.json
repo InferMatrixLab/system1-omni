@@ -29,7 +29,8 @@
     "src/models/jev_vl/native/",
     "src/models/decider/native/",
     "src/models/jemm/native/",
-    "src/models/startlux/native/"
+    "src/models/startlux/native/",
+    "src/models/omnijev/native/"
   ],
   "build": {
     "script": "build.sh",
