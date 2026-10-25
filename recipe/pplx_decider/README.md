@@ -74,8 +74,8 @@ so a normal load reports 16 unpadded layers. On CUDA, `causal_conv1d` is
 `fused_gate_up_layers` is 0, `compile` is `dynamic-tail`,
 `compile_min_tokens` is 512, and `compile_median` is `isolated`.
 After warmup, `compile_last_length` is 136. CPU reports
-`sdpa=default`, `mlp=default`, `compile=default`, and
-`compile_min_tokens=0`. Capability 8.9 reports
+`sdpa=default`, `mlp=default`, `compile=default`,
+`compile_min_tokens=0`, and `compile_median=eager`. Capability 8.9 reports
 `linear_attention` `fla-chunk`, `flashinfer` null, and
 `flashinfer_status=not-selected`, and it is ready. Capability 9.0 with
 `flashinfer-python` 0.6.16.post3 reports `flashinfer=0.6.16.post3` and, by
