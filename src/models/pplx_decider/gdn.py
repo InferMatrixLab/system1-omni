@@ -107,10 +107,9 @@ def gdn_prefill_mode(selected: str | None) -> str:
 
     ``fla`` reproduces the prior ``f968e576`` chunk. ``short`` is the
     rejected length dispatch. The kept primary rotates 48 ``cu_seqlens``
-    buffers, passes ``use_cp`` false, and repeats q and k up to the value
-    heads. This candidate keeps that ring and ``use_cp`` false, and does
-    not repeat. FlashInfer allocates its own state workspace. Residual
-    RMSNorm stays eager.
+    buffers, passes ``use_cp`` false, and does not repeat q and k.
+    FlashInfer allocates its own state workspace. Residual RMSNorm stays
+    eager.
     """
 
     chosen = "flashinfer" if selected is None else selected

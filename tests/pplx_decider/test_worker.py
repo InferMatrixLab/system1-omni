@@ -204,6 +204,7 @@ def test_http_health_and_decision():
         assert health["sdpa"] is None
         assert health["mlp"] is None
         assert health["fused_gate_up_layers"] is None
+        assert health["fused_swiglu_layers"] is None
         assert health["compile"] is None
         assert health["compile_min_tokens"] is None
         assert health["compile_median"] is None
@@ -281,6 +282,7 @@ def test_http_health_and_decision():
         assert health["gdn_qk_contiguous"] is None
         assert health["gated_norm"] is None
         assert health["fused_gated_norm_layers"] is None
+        assert health["fused_swiglu_layers"] is None
         assert "gdn_state_slots" not in health
         server.executor.rms_norm = "fla-long"
         server.executor.fused_rms_norm_layers = 129
@@ -319,7 +321,23 @@ def test_http_health_and_decision():
         assert health["gdn_qk_contiguous"] is True
         assert health["gated_norm"] == "fla"
         assert health["fused_gated_norm_layers"] == 48
+        assert health["fused_swiglu_layers"] is None
         assert "gdn_state_slots" not in health
+        server.executor.gated_norm = "eager"
+        server.executor.fused_gated_norm_layers = 0
+        server.executor.mlp = "swiglu"
+        server.executor.fused_swiglu_layers = 64
+        server.executor.fused_gate_up_layers = 0
+        conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        conn.request("GET", "/health")
+        health = json.loads(conn.getresponse().read())
+        conn.close()
+        assert health["gated_norm"] == "eager"
+        assert health["fused_gated_norm_layers"] == 0
+        assert health["mlp"] == "swiglu"
+        assert health["fused_swiglu_layers"] == 64
+        assert health["fused_gate_up_layers"] == 0
+        assert health["rms_norm"] == "eager"
         assert health["compute_capability"] == "9.0"
         assert health["gpu_name"] == "NVIDIA L20X"
         assert health["sdpa"] is None

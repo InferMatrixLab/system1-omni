@@ -146,8 +146,11 @@ Quality: `choice_acc=0.906` (139), `noul_acc=0.878` (74),
 `choice_acc=0.906` (139), `noul_acc=0.878` (74),
 `score_mae=0.204` (18). It is not the primary. Grouped-value
 `3ecdf5a` returned 0/231, `stop_reason=warmup_failed`, with no p50
-or p95. Quality was N/A. It is not a latency result. The fused
-linear gated-norm candidate has no sample.
+or p95. Quality was N/A. It is not a latency result. FLA fused gated RMSNorm `801ef7b` measured 231/231, p50 89.172 ms,
+p95 274.790 ms (p50 +1.58%, p95 −5.63%) and failed the same gate.
+Quality: `choice_acc=0.9065` (139), `noul_acc=0.8784` (74),
+`score_mae=0.1992` (18). It is not the primary. The SwiGLU MLP
+candidate has no sample.
 These L20X measurements stay in this group and do not enter the H800
 table above. Ready is not limited to capability 9.0.
 

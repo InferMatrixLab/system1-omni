@@ -1,10 +1,15 @@
 """FLA gated RMSNorm on the 48 linear-attention output norms.
 
-Residual RMSNorm stays eager. Always-on residual fusion ``3afb472`` and
-the 512-token gate ``705ae089`` missed the median on a different op:
-hidden size 5120, no gate. This path is ``Qwen3_5RMSNormGated`` at head
-dim 128. The checkpoint does not pass ``use_kernels=True``, and kernels
-0.16 only annotates that class, so the kept primary still runs the eager
+``801ef7b`` installed this on the all-sequence path and missed the
+median: p50 89.172 ms (+1.390 ms) and p95 274.790 ms (−16.393 ms)
+against ``fcf5e2b`` 87.782 / 291.183. The engine does not call
+``install_fused_gated_norm``. Do not length-gate it. Always-on residual
+fusion ``3afb472`` and the 512-token gate ``705ae089`` missed the same
+way. This module stays as the rejected implementation.
+
+Residual RMSNorm stays eager. The checkpoint does not pass
+``use_kernels=True``, and kernels 0.16 only annotates
+``Qwen3_5RMSNormGated``, so the kept primary still runs the eager
 chain: fp32 variance, a cast, the weight multiply, and SiLU(gate).
 
 FLA 0.5.2 ``layer_norm_gated_fwd`` is one kernel. For ``D<=512`` its

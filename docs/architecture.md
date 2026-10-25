@@ -35,9 +35,12 @@ when that GPU reports capability 8.9. Capability 9.0 uses all-sequence FlashInfe
 `flashinfer-python` 0.6.16.post3 imports. The kept primary rotates 48
 `cu_seqlens` buffers per device and length, passes `use_cp` false,
 skips the q/k repeat, and packs q and k before FLA's L2-norm view.
-`3ecdf5a` crashed in warmup on the unpacked view. This candidate
-keeps that path and fuses the 48 linear gated RMSNorms. Residual
-RMSNorm stays eager.
+`3ecdf5a` crashed in warmup on the unpacked view. `801ef7b` fused
+the 48 linear gated RMSNorms and missed the median, so that kernel
+stays off. This candidate keeps the packed path and replaces
+`silu(gate) * up` with FLA `swiglu_fwd` on the 64 text MLPs. Gate
+and up GEMMs stay separate. Residual RMSNorm and the gated output
+norm stay eager.
 `use_cp=auto` on `a6f4d9a` missed both percentiles.
 Always-on fusion `3afb472` and the 512-token
 gate `705ae089` both missed the median.

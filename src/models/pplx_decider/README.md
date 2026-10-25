@@ -102,9 +102,12 @@ stays eager. `use_cp` stays false. The kept primary skips the q/k
 repeat on the 48 linear layers and packs those heads before FLA's
 L2-norm view (`gdn_layout=gva`, `gva_layers=48`,
 `gdn_qk_contiguous` true). `3ecdf5a` crashed in warmup on the
-unpacked view. The candidate keeps that path and fuses the 48 linear
-gated RMSNorms (`gated_norm=fla`, `fused_gated_norm_layers=48`).
-Residual `rms_norm` stays eager.
+unpacked view. `801ef7b` fused those gated RMSNorms and missed
+the median (p50 89.172 ms, p95 274.790 ms), so that kernel stays
+off. The candidate keeps the packed GVA path and replaces
+`silu(gate) * up` with FLA `swiglu_fwd` (`mlp=swiglu`,
+`fused_swiglu_layers=64`). Gate and up stay separate GEMMs.
+`gated_norm` stays `eager`. Residual `rms_norm` stays eager.
 `PPLX_GDN_PREFILL=fla` reproduces the prior `f968e576` chunk.
 `PPLX_GDN_PREFILL=short` is the rejected one-sequence ≤256 dispatch.
 CuteDSL and CUDA graphs are not used. These kernels are not bit-exact with
@@ -160,7 +163,7 @@ the gate (p50 112.294 ms, p95 299.419 ms, `choice_acc=0.906` (139),
 primary. Grouped-value `3ecdf5a` crashed in warmup (0/231,
 `stop_reason=warmup_failed`, p50 and p95 none, quality N/A) and is
 not a latency result. The packed-q/k tip `fcf5e2b` is the primary.
-The fused linear gated-norm candidate has no sample.
+FLA fused gated RMSNorm `801ef7b` is not the primary: 231/231, p50 89.172 ms, p95 274.790 ms. The SwiGLU MLP candidate has no sample.
 
 The shared Qwen3.5 CUDA language kernels in this repository are causal
 (`src/backends/cuda/qwen3_5/attention.cu`). Their vision-operator tests mention
@@ -173,7 +176,7 @@ backend. A native executor is not in this change.
 | --- | --- |
 | CPU contract and HTTP rejection | Implemented; tests do not need weights |
 | CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, checkpoint SDPA order, separate gate and up GEMMs, an eager language-model forward, eager residual RMSNorms, FLA gated RMSNorm on the 48 linear output norms, FlashInfer `use_cp` false, unrepeated q/k heads packed before the L2-norm view, `causal-conv1d` 1.7.0 with sm_90 and sm_89 cubins, FLA 0.5.2 chunk, and all-sequence FlashInfer on capability 9.0 with 48 `cu_seqlens` slots per device and length. FlashInfer allocates its own state workspace. `PPLX_GDN_PREFILL=fla` holds an installed pin and reproduces the prior `f968e576` chunk. `PPLX_GDN_PREFILL=short` is the rejected length dispatch. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
-| Public231 concurrency 1 | Kept primary is `fcf5e2b`: 231/231, p50 87.782 ms, p95 291.183 ms, grouped-value FlashInfer with q and k packed before the L2 view, 48-slot `cu_seqlens`. Versus prior primary `4b99b73` 88.942 / 295.797: p50 −1.30% (−1.160 ms), p95 −1.56% (−4.614 ms). Quality `choice_acc=0.9065` (139), `noul_acc=0.8784` (74), `score_mae=0.2035` (18). `4b99b73` versus `ffae182` 92.844 / 296.458 was p50 −4.20%, p95 −0.22%. `ffae182` versus `f968e576` 94.077 / 300.200 was p50 −1.31%, p95 −1.25%. Uncached all-sequence FlashInfer `3c72f02` is not the primary: p50 88.808 ms, p95 300.751 ms. Short-sequence FlashInfer `a50b9aa` failed its gate: p50 95.446 ms, p95 300.871 ms. cuDNN-first SDPA `0dcaa0ac` failed its gate: p50 138.501 ms, p95 332.859 ms. Fused gate-up `8b4ee326` failed its gate: p50 102.437 ms, p95 304.970 ms. Always-on dynamic compile `e36b32ed` failed the both-percentiles gate: p50 97.751 ms, p95 263.124 ms. The 512-token split `7e3b1be` failed its gate: p50 100.037 ms, p95 257.084 ms. Isolated-median compile `34ba5de` failed its gate: p50 97.084 ms, p95 256.679 ms. The FlashInfer state-workspace ring `17a7b120` failed its gate: p50 89.165 ms, p95 295.723 ms. Always-on FLA residual RMSNorm `3afb472` failed its gate: p50 93.935 ms, p95 274.902 ms. Length-gated FLA residual RMSNorm `705ae089` failed its gate: p50 94.604 ms, p95 274.835 ms. None of those is the primary. `use_cp=auto` `a6f4d9a` failed its gate: p50 112.294 ms, p95 299.419 ms. Grouped-value `3ecdf5a` crashed in warmup (0/231, no p50 or p95). The fused linear gated-norm candidate has no sample |
+| Public231 concurrency 1 | Kept primary is `fcf5e2b`: 231/231, p50 87.782 ms, p95 291.183 ms, grouped-value FlashInfer with q and k packed before the L2 view, 48-slot `cu_seqlens`. Versus prior primary `4b99b73` 88.942 / 295.797: p50 −1.30% (−1.160 ms), p95 −1.56% (−4.614 ms). Quality `choice_acc=0.9065` (139), `noul_acc=0.8784` (74), `score_mae=0.2035` (18). `4b99b73` versus `ffae182` 92.844 / 296.458 was p50 −4.20%, p95 −0.22%. `ffae182` versus `f968e576` 94.077 / 300.200 was p50 −1.31%, p95 −1.25%. Uncached all-sequence FlashInfer `3c72f02` is not the primary: p50 88.808 ms, p95 300.751 ms. Short-sequence FlashInfer `a50b9aa` failed its gate: p50 95.446 ms, p95 300.871 ms. cuDNN-first SDPA `0dcaa0ac` failed its gate: p50 138.501 ms, p95 332.859 ms. Fused gate-up `8b4ee326` failed its gate: p50 102.437 ms, p95 304.970 ms. Always-on dynamic compile `e36b32ed` failed the both-percentiles gate: p50 97.751 ms, p95 263.124 ms. The 512-token split `7e3b1be` failed its gate: p50 100.037 ms, p95 257.084 ms. Isolated-median compile `34ba5de` failed its gate: p50 97.084 ms, p95 256.679 ms. The FlashInfer state-workspace ring `17a7b120` failed its gate: p50 89.165 ms, p95 295.723 ms. Always-on FLA residual RMSNorm `3afb472` failed its gate: p50 93.935 ms, p95 274.902 ms. Length-gated FLA residual RMSNorm `705ae089` failed its gate: p50 94.604 ms, p95 274.835 ms. None of those is the primary. `use_cp=auto` `a6f4d9a` failed its gate: p50 112.294 ms, p95 299.419 ms. Grouped-value `3ecdf5a` crashed in warmup (0/231, no p50 or p95). FLA fused gated RMSNorm `801ef7b` missed the gate (231/231, p50 89.172 ms, p95 274.790 ms) and is not the primary. The SwiGLU MLP candidate has no sample |
 | CPU `device="cpu"` | The checkpoint switches the backbone to float32. Not the measured path |
 | Images | Admitted. No image parity run |
 | Apple GPU | Not supported |

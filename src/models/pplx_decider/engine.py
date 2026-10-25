@@ -43,12 +43,8 @@ from .contract import (
     Request,
 )
 from .conv import assert_qwen_conv_uses_package, prepare_causal_conv1d
-from .gated_norm import (
-    GATED_NORM_EAGER,
-    GATED_NORM_FLA,
-    install_fused_gated_norm,
-    warm_fused_gated_norm,
-)
+from .gated_norm import GATED_NORM_EAGER
+from .swiglu import MLP_SWIGLU, install_swiglu_mlp, warm_swiglu_mlp
 from .gdn import (
     GDN_LAYOUT_GVA,
     GDN_LAYOUT_REPEAT,
@@ -191,10 +187,12 @@ class PplxExecutor:
         # buffers, passes use_cp false, skips the q/k repeat, and packs
         # those heads before FLA's L2 norm. use_cp auto missed both
         # percentiles, so it stays false. 3ecdf5a crashed because the
-        # unpacked reshape hit that view. This candidate keeps that path
-        # and replaces the 48 linear gated RMSNorms with one FLA kernel.
-        # Residual RMSNorm stays eager. FlashInfer allocates its own
-        # state workspace.
+        # unpacked reshape hit that view. 801ef7b fused the linear
+        # gated RMSNorm and missed p50, so that kernel stays off.
+        # This candidate keeps GVA and replaces silu(gate)*up with
+        # FLA swiglu_fwd. The gate and up GEMMs stay separate.
+        # Residual RMSNorm and the gated output norm stay eager.
+        # FlashInfer allocates its own state workspace.
         # PPLX_GDN_PREFILL=fla reproduces the prior f968e576 chunk.
         # PPLX_GDN_PREFILL=short is the rejected length dispatch.
         # cuDNN-first SDPA and the fused gate-up GEMM are not selectable.
@@ -220,6 +218,7 @@ class PplxExecutor:
         self.gdn_qk_contiguous = False
         self.gated_norm = GATED_NORM_EAGER
         self.fused_gated_norm_layers = 0
+        self.fused_swiglu_layers = 0
         self.forward_compile = compile_preference(device, os.environ.get("PPLX_COMPILE"))
         self.compile_min_tokens = compile_min_tokens(self.forward_compile)
         self.compile_median = compile_median(self.forward_compile)
@@ -281,9 +280,9 @@ class PplxExecutor:
             self.gva_layers = install_gva_prefill(language_model)
             self.gdn_layout = GDN_LAYOUT_GVA
             self.gdn_qk_contiguous = True
-            self.fused_gated_norm_layers = install_fused_gated_norm(language_model)
-            self.gated_norm = GATED_NORM_FLA
-            warm_fused_gated_norm(language_model)
+            self.fused_swiglu_layers = install_swiglu_mlp(language_model)
+            self.mlp = MLP_SWIGLU
+            warm_swiglu_mlp(language_model)
         if self.forward_compile != "default":
             install_compiled_forward(language_model, self.forward_compile)
             warmup_compiled_forward(self.model.backbone, device, self.forward_compile)

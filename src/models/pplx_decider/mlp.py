@@ -2,7 +2,8 @@
 
 The fused gate-up GEMM was measured on ``8b4ee326`` and missed the gate.
 It is not selectable. Startup keeps the checkpoint's separate gate and up
-projections.
+projections. The SwiGLU elementwise lever does not set ``PPLX_MLP`` and
+does not stack those GEMMs.
 """
 
 from __future__ import annotations
