@@ -21,7 +21,9 @@ from models.pplx_decider.gdn import (
     install_flashinfer_gdn_prefill,
     install_short_flashinfer_prefill,
     require_bound_linear_attention,
+    GDN_USE_CP,
     cu_seqlens_key,
+    cp_heuristic_matches,
     gdn_prefill_mode,
     reuse_cu_seqlens_slot,
     resolve_flashinfer,
@@ -166,3 +168,14 @@ def test_flashinfer_wrapper_rejects_a_batch_and_a_state():
 
     with pytest.raises(RuntimeError, match="recurrent state"):
         flashinfer_chunk_gated_delta_rule(One(), One(), One(), initial_state=object())
+
+
+def test_flashinfer_use_cp_is_auto_for_this_head_count_on_h200():
+    assert GDN_USE_CP == "auto"
+    # 48 value heads, one sequence. H200 has 132 SMs. HBM threshold is work * 2 < sms.
+    assert cp_heuristic_matches(48, 132, "NVIDIA L20X")
+    assert cp_heuristic_matches(48, 132, "NVIDIA H200")
+    assert not cp_heuristic_matches(48, 96, "NVIDIA L20X")
+    assert not cp_heuristic_matches(48, 132, "NVIDIA GeForce RTX 4090")
+    with pytest.raises(ValueError, match="positive"):
+        cp_heuristic_matches(0, 132, "NVIDIA L20X")

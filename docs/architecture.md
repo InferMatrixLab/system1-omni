@@ -33,9 +33,10 @@ SDPA mask when the padding mask is all true. Linear-attention chunk prefill
 on the lab L20X-labeled GPU uses FLA 0.5.2 plus causal_conv1d, including
 when that GPU reports capability 8.9. Capability 9.0 uses all-sequence FlashInfer when
 `flashinfer-python` 0.6.16.post3 imports. The kept primary rotates 48
-`cu_seqlens` buffers per device and length. This candidate keeps that
-ring. Residual RMSNorm stays eager at 512 tokens or fewer and uses one
-FLA kernel above that. Always-on fusion `3afb472` missed the median.
+`cu_seqlens` buffers per device and length and passes `use_cp` false.
+This candidate keeps that ring, leaves residual RMSNorm eager, and
+passes `use_cp=auto`. Always-on fusion `3afb472` and the 512-token
+gate `705ae089` both missed the median.
 FlashInfer allocates its own state workspace. The 48-slot state
 ring `17a7b120` missed the gate.
 `PPLX_GDN_PREFILL=fla` reproduces the prior `f968e576` chunk.

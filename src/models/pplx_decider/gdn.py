@@ -12,9 +12,10 @@ Import ``causal_conv1d``, then ``fla.ops.gated_delta_rule``, then
 then Qwen3.5 modeling. Transformers 5.17 calls
 ``torch_chunk_gated_delta_rule``. The FlashInfer path replaces that global
 before the checkpoint constructs layers. The call is one sequence, no
-recurrent state, ``use_cp`` false, log-space ``g`` exponentiated to
-float32, and Q/K L2 norm from ``fla.modules.l2norm.l2norm_fwd`` with
-FlashInfer's own flag left false. CuteDSL, CUDA graphs, and
+recurrent state, log-space ``g`` exponentiated to float32, and Q/K L2
+norm from ``fla.modules.l2norm.l2norm_fwd`` with FlashInfer's own flag
+left false. ``use_cp`` is ``auto``. The kept primary passed false, so
+the low-parallelism kernel never ran. CuteDSL, CUDA graphs, and
 ``torch.compile`` are not selected.
 """
 
@@ -34,6 +35,11 @@ FI_VERSION = "0.6.16.post3"
 FI_PIN = f"{FI_DISTRIBUTION}=={FI_VERSION}"
 FI_MODULE = "flashinfer.gdn_prefill"
 GDN_PREFILL = "flashinfer"
+# FlashInfer 0.6.16 defaults this to "auto" and selects the CP kernel when
+# num_seqs * num_sab_heads is below half the SM count on an HBM device
+# (one third on GDDR). The kept primary forced false. num_sab_heads is
+# linear_num_value_heads because the checkpoint repeats q and k first.
+GDN_USE_CP = "auto"
 HOPPER = (9, 0)
 FLA_LINEAR_ATTENTION = "fla-chunk"
 # Qwen3.5 27B text stack: 64 layers, 16 full attention, so 48 linear
@@ -72,12 +78,36 @@ def uses_flashinfer_prefill(capability: tuple[int, int]) -> bool:
     return capability == HOPPER
 
 
+_GDDR_MARKERS = ("geforce", "rtx", "workstation")
+
+
+def cp_heuristic_matches(num_parallel_work: int, num_sms: int, device_name: str) -> bool:
+    """Return FlashInfer 0.6.16's host-side CP decision.
+
+    ``should_use_cp_host`` selects CP when ``work * denominator < sms``.
+    The denominator is 2 on HBM, including a device named NVIDIA L20X, and
+    3 when the name contains geforce, rtx, or workstation. ``work`` is
+    ``num_seqs * num_sab_heads``. This worker's FlashInfer path is one
+    sequence, and ``num_sab_heads`` is ``linear_num_value_heads``.
+    """
+
+    if num_parallel_work < 1 or num_sms < 1:
+        raise ValueError("CP heuristic needs a positive head-batch product and SM count")
+    if not isinstance(device_name, str):
+        raise TypeError("device_name must be str")
+    lowered = device_name.lower()
+    denominator = 3 if any(marker in lowered for marker in _GDDR_MARKERS) else 2
+    return num_parallel_work * denominator < num_sms
+
+
 def gdn_prefill_mode(selected: str | None) -> str:
     """Default GDN prefill is all-sequence FlashInfer.
 
     ``fla`` reproduces the prior ``f968e576`` chunk. ``short`` is the
     rejected length dispatch. The kept primary rotates 48 ``cu_seqlens``
-    buffers. FlashInfer allocates its own state workspace.
+    buffers and passes ``use_cp`` false. This candidate passes ``auto``.
+    FlashInfer allocates its own state workspace. Residual RMSNorm stays
+    eager.
     """
 
     chosen = "flashinfer" if selected is None else selected
@@ -235,7 +265,8 @@ def flashinfer_chunk_gated_delta_rule(
 
     Transformers 5.17 calls this with FLA's ``[B, T, H, D]`` layout and a
     log-space decay ``g``. FlashInfer 0.6.16 wants ``[T, H, D]``, a float32
-    multiplicative gate, and a non-null ``cu_seqlens``. ``use_cp`` is false.
+    multiplicative gate, and a non-null ``cu_seqlens``. ``use_cp`` is
+    ``auto``, so a low head count can take the CP kernel.
     """
 
     del kwargs
@@ -277,7 +308,7 @@ def flashinfer_chunk_gated_delta_rule(
         output_final_state=False,
         cu_seqlens=cu_seqlens,
         use_qk_l2norm_in_kernel=False,
-        use_cp=False,
+        use_cp=GDN_USE_CP,
     )
     return result.unsqueeze(0), None
 

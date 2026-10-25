@@ -27,12 +27,7 @@ from .compile_forward import (
     warmup_compiled_forward,
 )
 from .mlp import mlp_preference
-from .rmsnorm import (
-    FLA_RMS_MIN_TOKENS,
-    RMS_NORM_EAGER,
-    RMS_NORM_FLA_LONG,
-    install_fused_residual_rms_norm,
-)
+from .rmsnorm import RMS_NORM_EAGER
 from .contract import (
     ATTENTION_MODE,
     BASE_MODEL,
@@ -49,9 +44,11 @@ from .contract import (
 )
 from .conv import assert_qwen_conv_uses_package, prepare_causal_conv1d
 from .gdn import (
+    GDN_USE_CP,
     LINEAR_ATTENTION_LAYERS,
     MODELING,
     assert_qwen_chunk_uses_fla,
+    cp_heuristic_matches,
     gdn_prefill_mode,
     install_flashinfer_gdn_prefill,
     install_short_flashinfer_prefill,
@@ -183,10 +180,10 @@ class PplxExecutor:
         # Compile tips raised p50 even after the median route proved eager,
         # so startup leaves the forward eager. Capability 9.0 uses
         # all-sequence FlashInfer. The kept primary rotates 48 cu_seqlens
-        # buffers. FlashInfer allocates its own state workspace. CUDA
-        # keeps residual RMSNorm eager at 512 tokens or fewer and uses
-        # one FLA kernel above that. Always-on fusion missed p50.
-        # PPLX_GDN_PREFILL=fla reproduces the prior f968e576 chunk.
+        # buffers and passes use_cp false. This candidate passes auto.
+        # FlashInfer allocates its own state workspace. Residual RMSNorm
+        # stays eager: always-on fusion and the 512-token gate both missed
+        # p50. PPLX_GDN_PREFILL=fla reproduces the prior f968e576 chunk.
         # PPLX_GDN_PREFILL=short is the rejected length dispatch.
         # cuDNN-first SDPA and the fused gate-up GEMM are not selectable.
         # A lab GPU named NVIDIA L20X is accepted at capability 8.9 or 9.0.
@@ -204,6 +201,9 @@ class PplxExecutor:
         self.rms_norm = RMS_NORM_EAGER
         self.fused_rms_norm_layers = 0
         self.fused_rms_norm_min_tokens = 0
+        self.gdn_use_cp = "off"
+        self.gdn_cp_heuristic = None
+        self._cuda_index = None
         self.forward_compile = compile_preference(device, os.environ.get("PPLX_COMPILE"))
         self.compile_min_tokens = compile_min_tokens(self.forward_compile)
         self.compile_median = compile_median(self.forward_compile)
@@ -217,6 +217,7 @@ class PplxExecutor:
             index = requested.index
             if index is None:
                 index = torch.cuda.current_device()
+            self._cuda_index = index
             capability = torch.cuda.get_device_capability(index)
             self.compute_capability = f"{capability[0]}.{capability[1]}"
             self.gpu_name = torch.cuda.get_device_name(index)
@@ -233,6 +234,8 @@ class PplxExecutor:
                 self.flashinfer_status = "not-selected"
             if self.flashinfer_status == "bound":
                 self.cu_seqlens_slots = LINEAR_ATTENTION_LAYERS
+            if self.flashinfer_status == "bound" and self.gdn_prefill != "fla":
+                self.gdn_use_cp = GDN_USE_CP
         decision_model, reference_answer = _import_decision_model(root)
         if self.causal_conv1d_version is not None:
             assert_qwen_conv_uses_package()
@@ -259,10 +262,17 @@ class PplxExecutor:
         language_model = self.model.backbone.language_model
         self.language_model = language_model
         self.unpadded_full_attention_layers = install_unpadded_full_attention(language_model)
-        if cuda:
-            self.fused_rms_norm_layers = install_fused_residual_rms_norm(language_model)
-            self.rms_norm = RMS_NORM_FLA_LONG
-            self.fused_rms_norm_min_tokens = FLA_RMS_MIN_TOKENS
+        if self.gdn_use_cp == GDN_USE_CP:
+            import torch
+
+            config = getattr(language_model, "config", None)
+            heads = getattr(config, "linear_num_value_heads", None)
+            if type(heads) is not int or heads < 1:
+                raise RuntimeError(
+                    "FlashInfer CP dispatch needs linear_num_value_heads on the text config"
+                )
+            sms = torch.cuda.get_device_properties(self._cuda_index).multi_processor_count
+            self.gdn_cp_heuristic = cp_heuristic_matches(heads, int(sms), self.gpu_name or "")
         if self.forward_compile != "default":
             install_compiled_forward(language_model, self.forward_compile)
             warmup_compiled_forward(self.model.backbone, device, self.forward_compile)

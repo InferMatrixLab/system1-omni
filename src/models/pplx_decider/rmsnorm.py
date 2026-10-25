@@ -1,4 +1,10 @@
-"""Length-gated FLA residual RMSNorm.
+"""Rejected length-gated FLA residual RMSNorm. The engine does not install it.
+
+Always-on fusion ``3afb472`` was p50 93.935 ms and p95 274.902 ms.
+The 512-token gate ``705ae089`` was p50 94.604 ms and p95 274.835 ms.
+Both missed the median against ``4b99b73`` at 88.942 / 295.797. Do not
+wire this module back without a new hypothesis that keeps p50 under
+88.942 ms.
 
 ``Qwen3_5RMSNorm`` computes ``rms(x.float()) * (1 + weight.float())`` and
 casts back. Eager runs that as a kernel chain, twice per text layer plus
@@ -6,15 +12,8 @@ once on the final hidden state. FLA 0.5.2 ``layer_norm_fwd`` is one
 kernel. Its autotune key ignores sequence length when the normalized
 dimension is above 512. This checkpoint's hidden size is 5120. Query
 and key norms are head_dim 256 and stay eager. The gated RMSNorm stays
-eager.
-
-Always-on fusion on ``3afb472`` cut p95 by 20.895 ms and raised p50 by
-4.993 ms. The median of this workload is about 136 tokens, and the tail
-example is about 2676. Sequences of 512 tokens or fewer keep the
-original eager forward. Longer sequences call the FLA kernel. 512 sits
-between those two profiled lengths. It is not a fitted cutoff. The
-short path is the saved checkpoint method, not a compiled region and
-not a second CUDA-flag mode.
+eager. The functions below are the rejected implementation, kept so the
+CPU contract of that attempt stays tested.
 
 ``evaluate`` runs under ``torch.inference_mode``. FLA's autograd
 ``rms_norm`` calls ``save_for_backward`` and would raise, so the long

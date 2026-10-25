@@ -82,6 +82,8 @@ class Handler(BaseHTTPRequestHandler):
         body["rms_norm"] = getattr(executor, "rms_norm", None)
         body["fused_rms_norm_layers"] = getattr(executor, "fused_rms_norm_layers", None)
         body["fused_rms_norm_min_tokens"] = getattr(executor, "fused_rms_norm_min_tokens", None)
+        body["gdn_use_cp"] = getattr(executor, "gdn_use_cp", None)
+        body["gdn_cp_heuristic"] = getattr(executor, "gdn_cp_heuristic", None)
         body["compute_capability"] = getattr(executor, "compute_capability", None)
         body["gpu_name"] = getattr(executor, "gpu_name", None)
         body["sdpa"] = getattr(executor, "sdpa", None)
@@ -162,7 +164,7 @@ def main(argv=None):
     try:
         server = WorkerServer((args.host, args.port), executor)
         LOG.info(
-            "ready model=%s device=%s gpu=%s capability=%s attention=%s sdpa=%s mlp=%s compile=%s compile_min_tokens=%s compile_median=%s compile_last_length=%s compile_eager_forwards=%s compile_compiled_forwards=%s compile_median_frame_delta=%s fused_gate_up_layers=%s rms_norm=%s fused_rms_norm_layers=%s fused_rms_norm_min_tokens=%s unpadded_full_attention_layers=%s causal_conv1d=%s fla=%s flashinfer=%s flashinfer_status=%s linear_attention=%s cu_seqlens_slots=%s bind=%s:%s",
+            "ready model=%s device=%s gpu=%s capability=%s attention=%s sdpa=%s mlp=%s compile=%s compile_min_tokens=%s compile_median=%s compile_last_length=%s compile_eager_forwards=%s compile_compiled_forwards=%s compile_median_frame_delta=%s fused_gate_up_layers=%s rms_norm=%s fused_rms_norm_layers=%s fused_rms_norm_min_tokens=%s gdn_use_cp=%s gdn_cp_heuristic=%s unpadded_full_attention_layers=%s causal_conv1d=%s fla=%s flashinfer=%s flashinfer_status=%s linear_attention=%s cu_seqlens_slots=%s bind=%s:%s",
             executor.model_name,
             args.device,
             executor.gpu_name,
@@ -181,6 +183,8 @@ def main(argv=None):
             executor.rms_norm,
             executor.fused_rms_norm_layers,
             executor.fused_rms_norm_min_tokens,
+            executor.gdn_use_cp,
+            executor.gdn_cp_heuristic,
             executor.unpadded_full_attention_layers,
             executor.causal_conv1d_version,
             executor.fla_version,
