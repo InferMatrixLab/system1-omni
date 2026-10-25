@@ -7,28 +7,34 @@ design. Concrete input/output types follow each executor's supported layout.
 ## Implementation status
 
 The [Rust frontend](../src/frontend/README.md) currently forwards HTTP requests
-to separately running workers. Cua-S1 and Open-Jev have native Rust/CUDA workers
+to separately running workers. Cua-S1, Open-Jev and Decider have native Rust/CUDA workers
 that share the [Qwen3.5/3.8 executor](../src/models/qwen3_5/native/), which accepts
 single prompts and bounded packed prefill. Cua-S1 and Open-Jev-9B use
 single-prompt calls; Open-Jev-27B-v1.1 packs candidates within one request for
 input and gate/up GEMMs while preserving per-sequence mixers and output/down GEMM
-shapes. The executor can also run prompts that share token prefixes, each prefix
-once (below); no worker uses that yet.
+shapes. Decider optionally packs up to four complete rows and 4096 tokens within
+one request, or selects request-local shared prefixes through the same canonical
+continuation path used by JEV-VL (below). Both optimizations default off.
 [Laya's native worker](../src/models/laya/README.md)
-uses a separate Hopper CUDA backend for one complete padded request. All three
+uses a separate Hopper CUDA backend for one complete padded request. These workers
 coordinate independent processors and executors through
 `prepare` → `execute` → `finish` and use the
 [native runtime](../src/runtime/README.md) for FIFO admission and blocking dispatch
-per loaded executor. Shared processing orchestration, batch budgets,
-compatibility grouping and dynamic batching are planned.
+per loaded executor. The [Decider native worker](../recipe/decider/README.md)
+also uses this runtime and can opt into outstanding-request and processed-token
+budgets plus HTTP request deadlines. Shared processing orchestration,
+cross-request batch assembly, compatibility grouping and dynamic batching are planned.
 
 Cua-S1 and Open-Jev compute their decision heads on the CPU after downloading
-the final hidden state. JEMM uses the shared Qwen executor with separate unmerged
+the final hidden state. Decider projects its selected LM-head rows on CUDA.
+JEMM uses the shared Qwen executor with separate unmerged
 FP32 adapters and framework-reference arithmetic. It computes selected BF16
 label-head logits on CUDA, then calibrates typed answers on the CPU. JEMM admits
 one complete text or 1–4-image request and synchronizes both model streams before
 releasing its resources. See its [model contract](../src/models/jemm/README.md).
-Laya computes its scorer and action head on CUDA. Its fixed-shape
+Decider projects selected tied-embedding rows on CUDA with BF16 output rounding
+before FP32 calibration and CPU response assembly. Laya computes its scorer and
+action head on CUDA. Its fixed-shape
 Graph captures Encoder/Decision; gather, scorer/action head and synchronized
 readback remain outside capture. Native Metal remains planned; Python workers
 retain their documented reference/serving roles.
@@ -63,6 +69,7 @@ and candidate identity, usage, and response metadata outside the executor.
 | --- | --- | --- | --- |
 | Cua-S1 | One unpadded token-ID vector and option count per question, in request order. | One FP32 answer-letter logit vector per question. | Per-question softmax, choice/confidence, ordered answers, and token usage. |
 | Open-Jev | Token-ID vectors grouped by question, then independent candidate, in request order. | One FP32 learned scalar per candidate in the same grouping. | Add the `noul` false logit of zero, calibrate across each complete question, and restore typed answers, usage, and metadata. |
+| Decider | Complete independent token-ID rows in question order; Score expands one no/yes row per level. | One BF16-projection-rounded FP32 selected-label logit vector per row. | Per-type calibration, whole-Score normalization, ordered typed answers and unique-prefix token usage. |
 | Laya | One padded request: token IDs, true lengths, question types and ordered option markers; at most 16 questions, 512 tokens per row and 2048 markers. | Per-question FP32 option logits and two action logits copied back after GPU heads. | Calibrate and decode ordered `choice`, `score` and `noul` answers, usage and metadata. |
 | JEMM | Ordered token IDs, three-axis positions, candidate counts and optional shared image patches for one complete request. | Per-question selected BF16 label logits copied back as FP32. | Apply checksum-covered text/image calibration and reconstruct ordered `choice`, `score` and `noul` answers and usage. |
 
@@ -72,9 +79,11 @@ Open-Jev's model-specific batch adapter packs up to 16 independent candidates an
 execute alone. It restores question/candidate grouping before normalization.
 Laya batches questions within one request. Shared runtime
 admission precedes blocking dispatch: Cua-S1 admits one question forward at a
-time; Open-Jev and Laya admit one complete request. Cua-S1's CPU letter projection
+time; Open-Jev, Decider and Laya admit one complete request. Cua-S1's CPU letter projection
 stays outside admission; Open-Jev's scalar heads and Laya's GPU heads and
-synchronized readback remain inside their request unit. Qwen model mutexes guard
+synchronized readback remain inside their request unit. Decider includes every
+backbone row and CUDA head projection, synchronizes both streams and retires
+failed state before releasing admission. Qwen model mutexes guard
 mutable state. Laya's dedicated owning thread confines its non-Send CUDA state
 and receives admitted work over a rendezvous channel. Cancellation after
 dispatch retains the scheduler permit until execution completes. Laya
@@ -92,10 +101,11 @@ warmup before readiness remain model-specific and unchanged.
 
 The experimental [JEV-VL worker](../recipe/jev_vl/README.md) also uses the shared
 Qwen executor. It admits one official single-decision request at a time, reads
-selected LM-head rows, and can retain image-prefix state across requests. Image
-features must be prepared offline. Its `{kind, state, question, options}` contract
-is distinct from the existing `{model, state, questions}` envelope; frontend
-transport alone does not adapt those schemas.
+selected LM-head rows, and can retain image-prefix state across requests. Images
+are either prepared offline by Transformers or supplied inline and encoded
+inside the worker by the shared native vision backend. Its `{kind, state,
+question, options}` contract is distinct from the existing `{model, state,
+questions}` envelope; frontend transport alone does not adapt those schemas.
 
 ## Layer ownership and implementation language
 
@@ -147,7 +157,14 @@ executor, with FIFO waiting. Engines own scheduler instances; model-specific
 execution adapters declare the unit and submit owned closures. Waiting is async,
 so queued requests do not occupy blocking threads waiting for a model lock.
 Schedulers are local to each worker/executor; this does not coordinate separate
-processes. Queue-length limits and token budgets are not implemented yet.
+processes. Workers can separately opt into the runtime's `BoundedAdmission` for
+outstanding-request and caller-defined cost budgets. Decider's HTTP adapter
+reserves requests before upload/preparation and complete prepared-row tokens
+before execution, then carries those reservations in `ExecutionContext` through
+blocking work. The worker selects configuration and the processor defines token
+cost; shared runtime primitives own capacity accounting, cancellation/deadline
+checks and FIFO execution admission. These request budgets do not add
+cross-request batching or replace the scheduler's single execution permit.
 
 - Batch only work accepted by the same loaded executor, with compatible
   checkpoint/adapter identity, device, dtype, and input layout. Models declare

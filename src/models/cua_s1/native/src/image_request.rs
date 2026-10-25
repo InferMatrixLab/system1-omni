@@ -1,11 +1,9 @@
 //! Bounded PNG/JPEG screenshot request mapping for the native worker.
 use crate::contract::Question;
 use anyhow::{Context, Result, ensure};
-use base64::Engine;
 use serde_json::{Map, Value};
 
 pub const MAX_BODY: usize = 8 * 1024 * 1024;
-pub const MAX_IMAGE_BYTES: usize = 4 * 1024 * 1024;
 pub const MODEL_ID: &str =
     "cua-ai/cua-s1-4b-0.2@16818868b0cc7813808aae4e87b417657046ab79:multimodal";
 
@@ -77,34 +75,11 @@ pub fn parse_image_body(body: &Map<String, Value>) -> Result<ImageRequest> {
         .get("image")
         .and_then(Value::as_str)
         .context("state.image must be a data URL")?;
-    let (prefix, encoded) = url.split_once(',').context("invalid image data URL")?;
-    let format = match prefix {
-        "data:image/png;base64" => image::ImageFormat::Png,
-        "data:image/jpeg;base64" => image::ImageFormat::Jpeg,
-        _ => anyhow::bail!("only inline PNG/JPEG images are supported"),
-    };
-    ensure!(
-        encoded.len() <= 4 * MAX_IMAGE_BYTES.div_ceil(3),
-        "encoded image exceeds 4 MiB"
-    );
-    let raw = base64::engine::general_purpose::STANDARD
-        .decode(encoded)
-        .context("invalid base64 image")?;
-    ensure!(raw.len() <= MAX_IMAGE_BYTES, "image exceeds 4 MiB");
-    let image = omni_qwen3_5_native::image_decode::decode_rgb8(
-        &raw,
-        format,
-        &omni_qwen3_5_native::image_decode::DecodeLimits {
-            max_side: 2048,
-            max_pixels: 1_048_576,
-            max_aspect: 200,
-            max_alloc: 32 * 1024 * 1024,
-        },
-    )?;
+    let decoded = omni_qwen3_5_native::image_decode::decode_data_url(url)?;
     Ok(ImageRequest {
-        width: image.width,
-        height: image.height,
-        rgb: image.rgb,
+        width: decoded.width,
+        height: decoded.height,
+        rgb: decoded.rgb,
         questions,
     })
 }
@@ -144,6 +119,7 @@ fn checked_text(value: &Value) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
     use serde_json::json;
 
     fn parse_jpeg(raw: &[u8]) -> Result<ImageRequest> {
