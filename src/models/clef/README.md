@@ -150,15 +150,25 @@ label this run as H200. Percentiles are not averaged across rounds.
 | run2 | 247.404 | 426.231 | 231/231 |
 | run3 | 242.421 | 410.369 | 231/231 |
 
-The `thinking.enabled: false` admission in the current tree strips that
-field before encoding. It has no measured p50 or p95 delta against run1.
-Answer parity against another implementation was not part of this report.
+The `thinking.enabled: false` admission strips that field before encoding.
+It has no measured p50 or p95 delta against run1. The operator named the
+metric `successful_latency` and the clock
+`post_to_body_json_and_schema_validation`. Answer parity against another
+implementation was not part of this report.
+
+`flash-linear-attention==0.5.2` and `causal-conv1d>=1.5` are installed by
+the recipe. Transformers 5.10.2 binds them, if they import first, instead
+of the PyTorch chunked gated-delta rule and the conv1d fallback. `/health`
+field `linear_attention` is that binding. Their p50 and p95 delta against
+run1 is not measured, and their answer parity against `torch_chunk` is not
+measured.
 
 | Id | Change | Expected effect | Delta vs run1 |
 | --- | --- | --- | --- |
 | H1 | One `encode_record` per request, then the pinned forward. The handler does not tokenize the schema again before that encode. | Removes a second BPE pass from the critical path. Prefill and the joint head still dominate. | Included in HEAD `9030065`. Isolated delta unknown |
-| H2 | Fuse the joint head's per-question Python loop. | Fewer small launches after prefill. Needs a forked head and numerical parity against the pinned module. | Not implemented. Held until an L20X measurement can cite a delta |
-| H3 | `torch.compile` or CUDA graphs on the Qwen3.5 backbone. | Uncertain on the linear-attention layers. | Not implemented. Held until an L20X measurement can cite a delta |
+| H2 | Fuse the joint head's per-question Python loop. | Fewer small launches after prefill. Needs a forked head and numerical parity against the pinned module. | Not implemented. No measured L20X delta |
+| H3 | `torch.compile` or CUDA graphs on the Qwen3.5 backbone. | Uncertain on the linear-attention layers. | Not implemented. No measured L20X delta |
+| H4 | Let Transformers bind `flash-linear-attention` 0.5.2 and `causal-conv1d` for the 24 linear-attention layers. | Replaces the PyTorch chunk loop. The recipe installs the packages. A process that already imported the modeling module does not rebind. | Not measured |
 
 ## Status
 

@@ -7,8 +7,8 @@ unsupported image, video and native-CUDA paths are in the
 repository root.
 
 Clef-flash is the bring-up variant: about 19.1 GB of safetensors versus
-about 55.0 GB for Clef. Both use the same text contract. This recipe does
-not record a GPU run.
+about 55.0 GB for Clef. Both use the same text contract. The recorded
+Public231 concurrency-1 result is later in this recipe.
 
 ## Pins
 
@@ -131,6 +131,19 @@ the JSON boolean `false`, then drops the field before encoding. A stock
 Public231 request in that shape is the next comparison against run1. That
 admission has no measured latency delta. `enabled: true` stays a 422.
 
+The operator named the metric `successful_latency` and the clock
+`post_to_body_json_and_schema_validation`. These three rounds are that
+measurement. They are not a new campaign.
+
+`recipe/clef/requirements.txt` now installs `flash-linear-attention==0.5.2`
+and `causal-conv1d>=1.5`. Transformers 5.10.2 uses those packages, when
+they import before `modeling_qwen3_5`, in place of
+`torch_chunk_gated_delta_rule` and the conv1d fallback. `/health` reports
+the binding in `linear_attention` (`torch_chunk` when neither bound).
+Restart the worker after installing them. The p50 and p95 delta of that
+binding against run1 is not measured. Answer parity against the torch
+fallback is not measured. Do not publish a speedup from an unmeasured run.
+
 This is the operator checklist for a concurrency-1 latency measurement of
 the flash worker. It uses the existing
 [benchmark runner](../../benchmarks/README.md). The client does not reserve
@@ -218,8 +231,10 @@ in a commit.
 
 Image and video inputs, native CUDA, answer parity, and any latency delta
 after HEAD `903006530fb7772bb668bbf192ee4278e273e583`. The operator-reported
-C1 numbers above are the baseline. H1, one encode per request, is already
-how that HEAD calls the pinned model, so run1 includes it and its isolated
-effect is unknown. Further serve-path changes stay out until an L20X run
-can cite a p50 and p95 delta against run1. This environment has no GPU and
-did not repeat the campaign.
+C1 numbers above are the baseline, on the clock
+`post_to_body_json_and_schema_validation`, metric `successful_latency`.
+H1, one encode per request, is already how that HEAD calls the pinned
+model, so run1 includes it and its isolated effect is unknown. The recipe
+now installs the fast linear-attention packages. That binding has no
+measured p50, p95, or answer-parity delta against run1. This environment
+has no GPU and did not repeat the campaign.

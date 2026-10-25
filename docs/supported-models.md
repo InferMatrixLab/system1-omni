@@ -43,9 +43,12 @@ its media serving evidence is author-run on the A100 above.
 Clef-flash and Clef serve the same three kinds for text only. The worker
 refuses image and video inputs. The flash CUDA cell is an operator-reported
 Public231 concurrency-1 result on a lab NVIDIA L20X at compute capability
-8.9 (primary run1 p50 247.518 ms, p95 413.025 ms). It is not an H200 or
-H800 figure, and it was not re-run for this document. The 27B variant has
-no recorded timing.
+8.9 (primary run1 p50 247.518 ms, p95 413.025 ms, metric
+`successful_latency`, clock `post_to_body_json_and_schema_validation`).
+It is not an H200 or H800 figure, and it was not re-run for this document.
+The recipe installs flash-linear-attention and causal-conv1d for the next
+run; that binding has no measured latency or answer-parity delta. The 27B
+variant has no recorded timing.
 CLM has a row per path: the merged `clm-serve` recipe exercises those answer shapes with stub
 embeddings and says nothing about decision quality, while the native engine's CUDA row is the
 path through a real Qwen3-8B encoder. Its engine-only figure comes from the same comparison run

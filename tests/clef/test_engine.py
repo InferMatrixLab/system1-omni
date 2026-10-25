@@ -89,3 +89,25 @@ def test_response_token_count_must_match_admission():
     assert require_token_agreement(12, response) is response
     with pytest.raises(RuntimeError, match="encoder returned 9"):
         require_token_agreement(12, {"usage": {"input_tokens": 9}})
+
+
+def test_linear_attention_name_follows_the_bound_callables():
+    from models.clef.engine import activate_linear_attention, bound_linear_attention
+
+    assert bound_linear_attention(None) == "unloaded"
+    assert bound_linear_attention(object()) == "torch_chunk"
+    assert (
+        bound_linear_attention(type("M", (), {"chunk_gated_delta_rule": object()})())
+        == "fla"
+    )
+    assert (
+        bound_linear_attention(type("M", (), {"causal_conv1d_fn": object()})())
+        == "causal_conv1d"
+    )
+    both = type(
+        "M",
+        (),
+        {"chunk_gated_delta_rule": object(), "causal_conv1d_fn": object()},
+    )()
+    assert bound_linear_attention(both) == "fla+causal_conv1d"
+    activate_linear_attention()

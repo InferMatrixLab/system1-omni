@@ -14,8 +14,10 @@ Neither snapshot is an Open-Jev export: the decision head is
 from __future__ import annotations
 
 import hashlib
+import importlib
 import importlib.util
 import json
+import logging
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +38,8 @@ SHARED_FILES = {
     "processor_config.json": PROCESSOR_CONFIG_SHA256,
 }
 EXECUTABLE = "joint_schema_model.py"
+MODELING = "transformers.models.qwen3_5.modeling_qwen3_5"
+LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -168,6 +172,46 @@ def require_token_agreement(admitted: int, response: dict[str, Any]) -> dict[str
     return response
 
 
+def bound_linear_attention(modeling: Any) -> str:
+    """Name the linear-attention implementation Transformers actually bound.
+
+    ``modeling_qwen3_5`` keeps the fast callables as module globals when the
+    optional packages imported, and ``None`` when it kept the PyTorch
+    fallback. The report is that binding, not an install attempt.
+    """
+
+    if modeling is None:
+        return "unloaded"
+
+    fla = getattr(modeling, "chunk_gated_delta_rule", None) is not None
+    conv = getattr(modeling, "causal_conv1d_fn", None) is not None
+    if fla and conv:
+        return "fla+causal_conv1d"
+    if fla:
+        return "fla"
+    if conv:
+        return "causal_conv1d"
+    return "torch_chunk"
+
+
+def activate_linear_attention() -> None:
+    """Import the optional kernels before Transformers binds Qwen3.5.
+
+    The modeling module chooses ``chunk_gated_delta_rule`` and
+    ``causal_conv1d_fn`` once, at import. A later install does not move a
+    process that already imported the module. A failed import leaves the
+    PyTorch fallback in place.
+    """
+
+    if MODELING in sys.modules:
+        return
+    for name in ("causal_conv1d", "fla.ops.gated_delta_rule"):
+        try:
+            importlib.import_module(name)
+        except (ImportError, OSError) as exc:
+            LOG.info("clef linear-attention package %s is not active: %s", name, type(exc).__name__)
+
+
 def load_joint_schema_module(path: Path) -> Any:
     """Import one verified ``joint_schema_model.py`` without putting its directory on ``sys.path``."""
 
@@ -191,8 +235,10 @@ class ClefExecutor:
         self.device = device
         self.max_length = MAX_INPUT_TOKENS
         verify_snapshot(self.root, self.variant)
+        activate_linear_attention()
         self.module = load_joint_schema_module(self.root / EXECUTABLE)
         self.model, self.processor = self.module.load_release_model(self.root, device=device)
+        self.linear_attention = bound_linear_attention(sys.modules.get(MODELING))
         if self.processor.tokenizer.pad_token_id is None:
             raise ValueError("tokenizer pad_token_id is required")
 
@@ -262,6 +308,7 @@ class ClefExecutor:
             "max_input_tokens": self.max_length,
             "modalities": ["text"],
             "prompt_mode": "non-thinking",
+            "linear_attention": self.linear_attention,
         }
 
     def close(self) -> None:
