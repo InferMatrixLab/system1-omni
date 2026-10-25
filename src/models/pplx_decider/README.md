@@ -76,6 +76,16 @@ Full-attention layers run in the checkpoint's noncausal mode. Linear-attention
 layers stay recurrent. Pooling is the last token. The readout is the separate
 BF16 `[255, 5120]` tensor in `readout.safetensors`, not an `lm_head`.
 
+After load, `attention.py` marks full-attention modules `is_causal = False`
+and replaces the checkpoint pre-hook. An all-true padding mask omits the
+explicit full-attention mask so Transformers 5.17 SDPA can use its
+grouped-query kernel (`head_dim` 256). Any false padding bit keeps
+`padding[:, None, None, :].bool()`. The linear-attention mask is unchanged.
+cuDNN SDPA stays off, which is the checkpoint setting. Flash and math SDPA
+are not bit-exact, so a later Public231 sample has to count decision
+disagreements against head `1ba07d15b11a8c0796657e4a10b7ba3e62354421`.
+That latency delta is not measured in this tree.
+
 The shared Qwen3.5 CUDA language kernels in this repository are causal
 (`src/backends/cuda/qwen3_5/attention.cu`). Their vision-operator tests mention
 noncausal attention for a different kernel. This worker does not call that
@@ -86,8 +96,8 @@ backend. A native executor is not in this change.
 | Path | State |
 | --- | --- |
 | CPU contract and HTTP rejection | Implemented; tests do not need weights |
-| CUDA reference worker | Code path is the checkpoint's `device="cuda"` loader. Not run here |
-| Public231 concurrency 1 on sm_89 | Procedure only. No p50 or p95 |
+| CUDA reference worker | Checkpoint `device="cuda"` loader, plus the unpadded full-attention hook above. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
+| Public231 concurrency 1 on sm_89 | Head `1ba07d1`, stripped no-thinking twin, warmup 5, concurrency 1. Primary run1: 231/231, p50 98.777 ms, p95 341.202 ms. The unpadded-mask head has no measured samples |
 | CPU `device="cpu"` | The checkpoint switches the backbone to float32. Not the measured path |
 | Images | Admitted. No image parity run |
 | Apple GPU | Not supported |
@@ -95,5 +105,6 @@ backend. A native executor is not in this change.
 Weight shards were not re-hashed here. `release-manifest.json` at this
 revision records the 11 shards plus `readout.safetensors` as 52,173,413,928
 bytes together. `readout.safetensors` itself was hashed (2,611,288 bytes).
-The card asks for roughly 49 GiB of weights plus working memory. A 48 GB
-device cannot be assumed to load that resident set.
+The card asks for roughly 49 GiB of weights plus working memory. The reported
+load on 1× lab L20X (~140 GiB) was ~50333 MiB resident. That run does not
+measure a 48 GB card.

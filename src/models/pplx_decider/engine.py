@@ -3,7 +3,9 @@
 The executor hashes the files it executes, or that define the request
 contract, before importing them. Weight shards are not read here: hashing
 about 49 GiB is a separate operator step in the recipe, and it is not part
-of the latency clock.
+of the latency clock. After load, full-attention modules are marked
+noncausal and an all-true padding mask no longer becomes an explicit SDPA
+mask. That retarget does not change the hashed files.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .attention import install_unpadded_full_attention
 from .contract import (
     ATTENTION_MODE,
     BASE_MODEL,
@@ -155,6 +158,11 @@ class PplxExecutor:
             root,
             device=device,
             max_image_pixels=max_image_pixels,
+        )
+        # Hashed files stay byte-identical. This only retargets the loaded
+        # full-attention modules and the noncausal pre-hook.
+        self.unpadded_full_attention_layers = install_unpadded_full_attention(
+            self.model.backbone.language_model
         )
 
     def evaluate(self, request: Request) -> dict[str, Any]:

@@ -9,8 +9,9 @@ existing Rust frontend. The contract is
 Run the commands from the repository root. `release-manifest.json` records
 the 11 weight shards plus `readout.safetensors` as 52,173,413,928 bytes
 (about 48.6 GiB). The card asks for roughly 49 GiB of weights plus working
-memory. Plan for that much free disk. This recipe does not claim that a
-48 GB device can load the resident set.
+memory. Plan for that much free disk. A reported load on 1× lab L20X
+(~140 GiB, sm_89) was BF16 resident ~50333 MiB with no OOM. The measured
+device is that L20X.
 
 ## CPU checks
 
@@ -55,9 +56,12 @@ PYTHONPATH=src python3 -m frontend.pplx_decider \
   --port 8000
 ```
 
-`/health` is ready only after the hash gate and the weight load. It reports
-`model`, `max_input_tokens` (8192), `modalities` and `attention_mode`. It
-does not report a filesystem path.
+`/health` is ready only after the hash gate, the weight load, and the
+unpadded full-attention install. It reports `model`, `max_input_tokens`
+(8192), `modalities`, `attention_mode`, and
+`unpadded_full_attention_layers`. The pinned `config.json` lists 16
+`full_attention` layers, so that field is 16 after a normal load. It does
+not report a filesystem path.
 
 ```sh
 curl -sS http://127.0.0.1:8000/health
@@ -84,15 +88,33 @@ cap, and record it. Text Public231 does not send images.
 
 ## Public231 concurrency 1 (sm_89)
 
-No CUDA device was available while this recipe was added, so there is no
-p50 or p95. Do not copy H800 or H200 numbers into this group, and do not
-rename the device. A load failure is a startup failure, not a latency.
+Head `1ba07d15b11a8c0796657e4a10b7ba3e62354421` was measured on 1× lab L20X
+(sm_89, ~140 GiB). Keep this group on that device. A load failure is a
+startup failure, not a latency. H800 board numbers use a different clock
+and stay on that board.
 
-The manifest is the Public231 JSONL whose bytes hash to
+Reported load: BF16 resident ~50333 MiB, no OOM. Warmup 5, concurrency 1,
+clock `successful_latency` / `post_to_body_json_and_schema_validation`.
+Rows that still contain `thinking` return HTTP 422
+`unknown request fields: ['thinking']`. The measured workload is the
+stripped no-thinking twin of the same 231 rows. The worker still rejects
+`thinking`.
+
+| Round | Successful | p50 | p95 |
+| --- | --- | --- | --- |
+| run1, primary | 231/231 | 98.777 ms | 341.202 ms |
+| run2 | 231/231 | 97.921 ms | 340.804 ms |
+| run3 | 231/231 | 98.177 ms | 343.953 ms |
+
+The two-model Public231 export hashes to
 `00d1f10ca1142499a598b5f1c6602d329cce1cef04c961c46fc0318daa2c67d3`
 ([latency leaderboard](../../benchmarks/latency-leaderboard.md)). That hash
-is the two-model export, not the canonical task-record hash. If `validate`
-prints a different digest, stop.
+is not the canonical task-record hash. The measured file is the stripped
+twin: the same 231 rows with the `thinking` field removed. Its SHA-256 was
+not in the latency report. Point `PUBLIC231_JSONL` at that twin, record the
+digest `validate` prints, and stop if the row count is not 231 or if any
+row still has `thinking`. The export that still contains `thinking` returns
+422 and is not this measurement.
 
 Clock, quantiles and the three-traversal budget are the existing runner in
 [benchmarks/README.md](../../benchmarks/README.md): client latency includes
@@ -149,6 +171,11 @@ them and do not raise the timeout after seeing the times.
 6. A second arm through `http://127.0.0.1:8080/v1/systemone` is frontend
    time only. Keep it in different output directories. The Rust frontend's
    own 60 second cap still applies. Do not average it into the worker p50.
+7. Remeasure the unpadded full-attention head on the same stripped twin,
+   the same clock, warmup 5, concurrency 1, and three rounds. Compare
+   `responses.jsonl` answers with the `1ba07d1` rounds and report how many
+   decisions differ. A latency table without that count is an unfinished
+   delta. Samples for this head: 0 until that run exists.
 
 `benchmarks/smoke.jsonl` checks the client, not this model and not Public231.
 
@@ -156,12 +183,16 @@ them and do not raise the timeout after seeing the times.
 
 | Date | Hypothesis | Measurement | p50 / p95 delta |
 | --- | --- | --- | --- |
-| 2026-10-24 | None applied. The BF16 resident set may exceed a 48 GB sm_89 card; that is untested. | No CUDA device in the implementation environment. Samples: 0. | none |
+| 2026-10-24 | No kernel change. Asked whether the BF16 resident set fits a 48 GB sm_89 card. | No CUDA device in the implementation environment. Samples: 0. | none |
+| 2026-10-25 | Baseline at `1ba07d15b11a8c0796657e4a10b7ba3e62354421`. The checkpoint supplies an all-ones full-attention mask, so SDPA stays on the masked math kernel. | 1× lab L20X, sm_89, ~140 GiB. BF16 resident ~50333 MiB, no OOM. Warmup 5, concurrency 1, clock `successful_latency` / `post_to_body_json_and_schema_validation`. Stripped no-thinking twin. run1 231/231, p50 98.777 ms, p95 341.202 ms (primary). run2 231/231, p50 97.921 ms, p95 340.804 ms. run3 231/231, p50 98.177 ms, p95 343.953 ms. | baseline |
+| 2026-10-25 | Omit the explicit full-attention mask when every padding bit is true, and set full-attention `is_causal` false, so Transformers 5.17 can take the grouped-query SDPA kernel (`head_dim` 256). Padded batches keep the bool mask. Linear attention is unchanged. Flash and math are not bit-exact. | No CUDA device in this environment. Samples: 0. | not measured |
 
 ## Limits
 
-Images and the CUDA forward are unverified. The shared Qwen CUDA backend is
-not used. PR #140 is a separate Rust port of this same contract; it does not
-serve, and its JSON parser rewrites integers outside i64/u64. This worker
-keeps those integers because it uses Python's parser and the checkpoint's
-`json.dumps`.
+Image parity is unverified. The CUDA forward of head `1ba07d1` has the
+Public231 numbers in the optimization log; decision agreement of the
+unpadded-mask head against that head is not measured. The shared Qwen CUDA
+backend is not used. PR #140 is a separate Rust port of this same contract;
+it does not serve, and its JSON parser rewrites integers outside i64/u64.
+This worker keeps those integers because it uses Python's parser and the
+checkpoint's `json.dumps`.

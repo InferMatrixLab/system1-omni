@@ -63,16 +63,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(404, {"detail": "unknown route"})
             return
         executor = self.server.executor
-        self.send_json(
-            200,
-            {
-                "status": "ready",
-                "model": executor.model_name,
-                "max_input_tokens": executor.max_length,
-                "modalities": list(executor.modalities),
-                "attention_mode": executor.attention_mode,
-            },
-        )
+        body = {
+            "status": "ready",
+            "model": executor.model_name,
+            "max_input_tokens": executor.max_length,
+            "modalities": list(executor.modalities),
+            "attention_mode": executor.attention_mode,
+        }
+        layers = getattr(executor, "unpadded_full_attention_layers", None)
+        if layers is not None:
+            body["unpadded_full_attention_layers"] = layers
+        self.send_json(200, body)
 
     def do_POST(self):
         if self.path != "/v1/systemone":
@@ -140,10 +141,11 @@ def main(argv=None):
     try:
         server = WorkerServer((args.host, args.port), executor)
         LOG.info(
-            "ready model=%s device=%s attention=%s bind=%s:%s",
+            "ready model=%s device=%s attention=%s unpadded_full_attention_layers=%s bind=%s:%s",
             executor.model_name,
             args.device,
             executor.attention_mode,
+            executor.unpadded_full_attention_layers,
             args.host,
             args.port,
         )

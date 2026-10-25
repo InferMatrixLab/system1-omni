@@ -200,6 +200,13 @@ def test_http_health_and_decision():
         assert health["model"] == MODEL_NAME
         assert health["max_input_tokens"] == 8192
         assert "text" in health["modalities"]
+        assert "unpadded_full_attention_layers" not in health
+        server.executor.unpadded_full_attention_layers = 16
+        conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        conn.request("GET", "/health")
+        health = json.loads(conn.getresponse().read())
+        conn.close()
+        assert health["unpadded_full_attention_layers"] == 16
         status, body = post(
             server,
             {"model": "jev-latest", "state": "s", "questions": {"q": {"type": "noul"}}},

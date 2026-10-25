@@ -37,7 +37,8 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
 - [pplx-decider reference worker](pplx_decider/README.md): pin
   perplexity-ai/pplx-decider-v1.1-27b, serve `choice`/`noul`/`score` through
   the checkpoint runtime, and measure Public231 concurrency 1 only on the
-  recorded sm_89 device. CUDA latency is not measured in this tree.
+  recorded sm_89 device. Head `1ba07d1` has a reported L20X primary; the
+  unpadded-mask head's delta is not measured in this tree.
 - [D3 reference worker](d3/reference.md): download the pinned vllm-sr/d3 package,
   verify its runtime manifest, and serve `choice`/`noul`/`score` decisions over
   text, image and video state through the Python worker and the Rust frontend
