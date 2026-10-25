@@ -1,4 +1,8 @@
 // Full-attention layers of Qwen3.5: q/k preparation and causal attention.
+// `flash_kernel<Gated, true>` is the StartLux Instant prompt mask: every query
+// reads every key in the same prompt. The `<Gated, false>` specialization is the
+// causal kernel used by Cua-S1, Open-Jev, Decider and JEMM; its mask and early
+// key cutoff stay compile-time constants.
 //
 // cs1_attention is a FlashAttention-2 style kernel on tensor cores (mma.sync
 // m16n8k16, bfloat16 in, float32 accumulation): a block takes 64 queries of one head,
@@ -81,7 +85,7 @@ constexpr int SMEM_BYTES = (BM + 2 * BN) * LDS * 2;
 // q_base offsets row 0 of the q/gate/out buffers: this launch covers the window
 // [q_base, T_total) while k/v cover [0, T_total). Used by the cached-prefix
 // continuation; q_base = 0 reduces to the plain full pass.
-template <bool Gated>
+template <bool Gated, bool Bidirectional = false>
 __global__ void __launch_bounds__(THREADS)
     flash_kernel(const bf16* __restrict__ q, const bf16* __restrict__ k, const bf16* __restrict__ v, int ldv,
                  const bf16* __restrict__ gate, bf16* __restrict__ out, int T, int Hq, int Hk,
@@ -107,7 +111,8 @@ __global__ void __launch_bounds__(THREADS)
     for (int n = 0; n < D / 8; n++) o[n][0] = o[n][1] = o[n][2] = o[n][3] = 0.f;
     float m[2] = {-INFINITY, -INFINITY}, l[2] = {0.f, 0.f};
 
-    const int kv_end = min(T, q0 + BM);
+    // Causal blocks stop at their last query. A bidirectional prompt reads every key.
+    const int kv_end = Bidirectional ? T : min(T, q0 + BM);
     for (int k0 = 0; k0 < kv_end; k0 += BN) {
         for (int c = tid; c < BN * (D / 8); c += THREADS) {
             const int r = c / (D / 8), col = (c % (D / 8)) * 8, s = k0 + r;
@@ -122,8 +127,8 @@ __global__ void __launch_bounds__(THREADS)
         cp_async_wait<1>();  // Q and K
         __syncthreads();
 
-        // keys past every query of this warp contribute nothing
-        const bool active = k0 <= row0 + 15;
+        // Causal warps skip keys past their queries. Bidirectional warps cannot.
+        const bool active = Bidirectional || k0 <= row0 + 15;
         float sc[BN / 8][4];
 #pragma unroll
         for (int n = 0; n < BN / 8; n++) sc[n][0] = sc[n][1] = sc[n][2] = sc[n][3] = 0.f;
@@ -150,7 +155,8 @@ __global__ void __launch_bounds__(THREADS)
 #pragma unroll
                 for (int e = 0; e < 4; e++) {
                     const int key = k0 + n * 8 + 2 * t + (e & 1), row = row0 + g + (e >> 1) * 8;
-                    sc[n][e] = (key <= row && key < T) ? sc[n][e] * scale_log2 : -INFINITY;
+                    const bool visible = Bidirectional ? (key < T) : (key <= row && key < T);
+                    sc[n][e] = visible ? sc[n][e] * scale_log2 : -INFINITY;
                     mx[e >> 1] = fmaxf(mx[e >> 1], sc[n][e]);
                 }
             }
@@ -233,20 +239,22 @@ __global__ void __launch_bounds__(THREADS)
     }
 }
 
-template <bool Gated>
+template <bool Gated, bool Bidirectional = false>
 int launch(const void* q, const void* k, const void* v, int ldv, const void* gate, void* out,
            int T, int Hq, int Hk, int Dh, float scale, int q_base, void* stream) {
     if (Dh != D || Hk <= 0 || Hq <= 0 || Hq % Hk != 0 || ldv % 8 != 0 || ldv < Hk * Dh || T < 0)
         return cudaErrorInvalidValue;
     if (q_base < 0 || q_base % BM || q_base > T) return cudaErrorInvalidValue;
+    // Prefix continuation is causal. Instant reads each prompt whole from row 0.
+    if (Bidirectional && q_base != 0) return cudaErrorInvalidValue;
     if (T == q_base) return cudaSuccess;
     if (Gated && gate == nullptr) return cudaErrorInvalidValue;
     // Once per specialization (for the device current at the first call).
     static const cudaError_t configured = cudaFuncSetAttribute(
-        flash_kernel<Gated>, cudaFuncAttributeMaxDynamicSharedMemorySize, SMEM_BYTES);
+        flash_kernel<Gated, Bidirectional>, cudaFuncAttributeMaxDynamicSharedMemorySize, SMEM_BYTES);
     if (configured != cudaSuccess) return configured;
     constexpr float LOG2E = 1.4426950408889634f;
-    flash_kernel<Gated><<<dim3((T - q_base + BM - 1) / BM, Hq), THREADS, SMEM_BYTES,
+    flash_kernel<Gated, Bidirectional><<<dim3((T - q_base + BM - 1) / BM, Hq), THREADS, SMEM_BYTES,
                          static_cast<cudaStream_t>(stream)>>>(
         static_cast<const bf16*>(q), static_cast<const bf16*>(k), static_cast<const bf16*>(v), ldv,
         static_cast<const bf16*>(gate), static_cast<bf16*>(out), T, Hq, Hk, scale * LOG2E, q_base);
@@ -284,6 +292,14 @@ extern "C" int cs1_attention(const void* q, const void* k, const void* v, int ld
 extern "C" int cs1_attention_gated(const void* q, const void* k, const void* v, int ldv, const void* gate,
                                    void* out, int T, int Hq, int Hk, int Dh, float scale, void* stream) {
     return flash::launch<true>(q, k, v, ldv, gate, out, T, Hq, Hk, Dh, scale, 0, stream);
+}
+
+// Additive ABI 9 symbol. Full-attention prompt mask for StartLux Instant:
+// query q reads key k when both are inside the prompt. GDN stays on the causal path.
+extern "C" int cs1_attention_gated_bidirectional(const void* q, const void* k, const void* v, int ldv,
+                                                 const void* gate, void* out, int T, int Hq, int Hk, int Dh,
+                                                 float scale, void* stream) {
+    return flash::launch<true, true>(q, k, v, ldv, gate, out, T, Hq, Hk, Dh, scale, 0, stream);
 }
 
 // Same layout contract as the full pass; only the covered query rows differ:

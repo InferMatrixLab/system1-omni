@@ -1286,14 +1286,18 @@ name = "omni-omnijev-native"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "base64 0.22.1",
+ "half",
  "image",
  "libm",
  "omni-qwen3-5-native",
+ "omni-runtime",
  "safetensors 0.8.0",
  "serde_json",
  "sha2 0.10.9",
  "tokenizers 0.22.2",
+ "tokio",
 ]
 
 [[package]]
@@ -1314,7 +1318,9 @@ name = "omni-qwen3-5-native"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "half",
+ "image",
  "libloading",
  "memmap2",
  "safetensors 0.8.0",
@@ -1329,6 +1335,22 @@ name = "omni-runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "tokio",
+]
+
+[[package]]
+name = "omni-startlux-native"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "half",
+ "memmap2",
+ "omni-qwen3-5-native",
+ "omni-runtime",
+ "safetensors 0.8.0",
+ "serde_json",
+ "tokenizers 0.22.2",
  "tokio",
 ]
 

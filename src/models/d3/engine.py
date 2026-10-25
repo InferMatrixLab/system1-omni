@@ -11,9 +11,11 @@ the upstream default, whose ``verify_package`` walks only the 39-entry
 ``files_sha256`` table and skips hashing files over 64 MiB in fast mode — the
 executor hashes every file of the manifest's ``runtime.files_sha256`` table
 in full before importing anything from the package directory, and refuses
-unlisted importable entries (an extra ``*.py`` file or ``__init__.py``
-package) in the package root: that root goes first on ``sys.path``, so such
-an entry would shadow a dependency the pinned runtime imports. Hash
+unlisted importable entries (an extra source, ``.pyc`` or extension module,
+or an ``__init__.py`` package) and any ``__pycache__`` in the package root:
+that root goes first on ``sys.path``, so such an entry would shadow a
+dependency the pinned runtime imports, and a stale bytecode cache would
+execute in place of the verified source. Hash
 agreement proves only internal consistency — a later snapshot ships a
 self-consistent table of its own — so the gate first requires the manifest
 to carry exactly the repo id and runtime digests checked in for
@@ -26,6 +28,7 @@ import hashlib
 import json
 import sys
 import threading
+from importlib.machinery import EXTENSION_SUFFIXES, SOURCE_SUFFIXES
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +37,7 @@ REFERENCE_REVISION = "cbff3a3cb0b074b6585fe9f747b9f9f5557a0e75"
 MANIFEST_NAME = "MODEL_MANIFEST.json"
 MANIFEST_SCHEMA = "d3-package-manifest/1"
 VERIFY_MODES = ("fast", "full", "none")
+IMPORTABLE_FILE_SUFFIXES = frozenset(SOURCE_SUFFIXES) | {".pyc"} | frozenset(EXTENSION_SUFFIXES)
 # The runtime.files_sha256 table of REFERENCE_REVISION, transcribed from the
 # pinned package's manifest; repinning means updating this table together
 # with REFERENCE_REVISION.
@@ -105,8 +109,10 @@ def verify_runtime_files(root: Path, manifest: dict[str, Any]) -> list[str]:
     files this process is about to execute, so unlike the upstream shard
     verification there is no size shortcut. It also refuses importable
     entries the table does not name — the package root is about to go first
-    on ``sys.path``, where an extra ``*.py`` file or ``__init__.py`` package
-    would shadow one of the pinned runtime's dependencies.
+    on ``sys.path``, where an extra source, ``.pyc`` or extension module,
+    or an ``__init__.py`` package would shadow one of the pinned runtime's
+    dependencies — and any ``__pycache__``, whose cached bytecode could
+    execute in place of a verified source file.
     """
 
     table = (manifest.get("runtime") or {}).get("files_sha256")
@@ -125,13 +131,28 @@ def verify_runtime_files(root: Path, manifest: dict[str, Any]) -> list[str]:
     for entry in sorted(Path(root).iterdir()):
         if entry.name in table:
             continue
-        if entry.is_file() and entry.suffix == ".py":
+        if entry.name == "__pycache__":
+            problems.append("unexpected bytecode cache __pycache__/ in the package root")
+        elif entry.is_file() and entry.suffix in IMPORTABLE_FILE_SUFFIXES:
             problems.append(f"unexpected importable file {entry.name} in the package root")
         elif entry.is_dir() and (entry / "__init__.py").is_file():
             problems.append(f"unexpected importable package {entry.name}/ in the package root")
     if problems:
         raise ValueError("runtime verification failed: " + "; ".join(problems[:8]))
     return sorted(table)
+
+
+def put_first_on_sys_path(root: Path) -> str:
+    """Put the resolved package root at the front of ``sys.path``.
+
+    Equivalent entries are dropped, not reused: a ``PYTHONPATH`` copy of
+    the root listed later would leave foreign directories ahead of it.
+    """
+
+    resolved = Path(root).resolve()
+    sys.path[:] = [entry for entry in sys.path if Path(entry or ".").resolve() != resolved]
+    sys.path.insert(0, str(resolved))
+    return str(resolved)
 
 
 class D3Executor:
@@ -163,11 +184,16 @@ class D3Executor:
         # Import the just-verified runtime the way upstream d3_server.py does:
         # the package directory goes first on sys.path so the flat runtime
         # modules (d3_runtime, d3_format, ...) resolve to the checkpoint's own
-        # copies. One worker process serves one package.
-        root_str = str(root)
-        if root_str not in sys.path:
-            sys.path.insert(0, root_str)
-        import d3_runtime
+        # copies. One worker process serves one package. The import runs with
+        # bytecode writing off: a __pycache__ it left next to the verified
+        # source is what the next gate run refuses.
+        put_first_on_sys_path(root)
+        saved_dont_write_bytecode = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True
+        try:
+            import d3_runtime
+        finally:
+            sys.dont_write_bytecode = saved_dont_write_bytecode
 
         self.model = d3_runtime.D3.from_pretrained(
             root,
@@ -187,20 +213,78 @@ class D3Executor:
         self._closed = False
 
     @property
+    def image_unavailable(self) -> str | None:
+        """Why the loaded checkpoint cannot read images; ``None`` when it can.
+
+        Mirrors the runtime's own flag: it is set when the vision tower
+        weights, the patch embedding or the image processor are missing, and
+        the upstream server refuses non-empty ``images`` on it.
+        """
+
+        return self._image_unavailable
+
+    @property
+    def video_unavailable(self) -> str | None:
+        """Why the loaded checkpoint cannot read videos; ``None`` when it can."""
+
+        return self._video_unavailable
+
+    @property
     def modalities(self) -> list[str]:
         """The loaded model's input modalities, in upstream /health order."""
 
         names = ["text", "image"] if self._image_unavailable is None else ["text"]
         return names + ["video"] if self._video_unavailable is None else names
 
-    def prepare(self, state: Any, questions: dict[str, Any]) -> Any:
-        """Validate and tokenize one request; per-question failures land in
-        ``prepared.errors`` instead of raising (envelope problems raise)."""
+    def load_images(self, images: list[Any]) -> list[Any]:
+        """Decode one request's images (RGB PIL) through strict loading.
+
+        The pinned runtime is the per-item validation authority — data URL
+        shape, PNG/JPEG/WEBP format, the 8,000,000-byte and 16,000,000-pixel
+        budgets — and its ``ValueError`` rejections name the item
+        (``images[i]: ...``). The empty short-circuit and the capability gate
+        with the upstream server's message live in the worker's decode stage,
+        mirroring ``d3_server.py``'s ``decode_images``.
+        """
 
         with self._lock:
             if self._closed:
                 raise RuntimeError("D3 executor is closed")
-            return self.model.prepare(state, questions)
+            return self.model.load_images(images, strict=True)
+
+    def load_videos(self, videos: list[Any]) -> list[Any]:
+        """Decode and sample one request's videos through strict loading.
+
+        Per-item validation (MP4/WebM/QuickTime/Matroska data URLs, the
+        32,000,000-byte, 300-second and per-frame budgets, 2 fps sampling of
+        4-32 frames) is the pinned runtime's; rejections name the item
+        (``videos[i]: ...``).
+        """
+
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("D3 executor is closed")
+            return self.model.load_videos(videos, strict=True)
+
+    def prepare(
+        self,
+        state: Any,
+        questions: dict[str, Any],
+        images: Any = None,
+        videos: Any = None,
+    ) -> Any:
+        """Validate and tokenize one request; per-question failures land in
+        ``prepared.errors`` instead of raising (envelope problems raise).
+
+        ``images``/``videos`` are already-decoded media from the worker's
+        decode stage; the runtime picks the video, image or text path by
+        their truthiness, exactly as the upstream server passes them.
+        """
+
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("D3 executor is closed")
+            return self.model.prepare(state, questions, images, videos)
 
     def run(self, prepared: Any) -> tuple[dict[str, list[float]], int]:
         """Probabilities per runnable question and the input token count."""
