@@ -20,7 +20,8 @@ pillow>=10
 # including nvidia-smi name NVIDIA L20X, stays on the FLA chunk and still
 # becomes ready. The device name is not required to be NVIDIA H200.
 # vLLM's separate CuteDSL prefill backend, CUDA graphs, and torch.compile
-# are not selected. No Public231 C1 of this tip has been measured.
+# are not selected. The recorded L20X-labeled C1 is tip 594528a9 on the
+# FLA chunk: p50 164.969 ms, p95 216.755 ms, versus 9030065 run1.
 causal-conv1d>=1.5
 flash-linear-attention==0.5.2
 flashinfer-python==0.6.16.post3
