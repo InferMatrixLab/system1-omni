@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Any
 
 from .attention import install_unpadded_full_attention, sdpa_preference
-from .mlp import install_fused_gate_up, mlp_preference
+from .compile_forward import compile_preference, install_dynamic_compile, warmup_dynamic_compile
+from .mlp import mlp_preference
 from .contract import (
     ATTENTION_MODE,
     BASE_MODEL,
@@ -167,10 +168,10 @@ class PplxExecutor:
         # Import conv and FLA before Qwen3.5 modeling freezes the torch refs.
         # Both measured FlashInfer policies missed the gate, so the default
         # stays on FLA chunk. PPLX_GDN_PREFILL=short opts into the rejected
-        # length dispatch. cuDNN-first SDPA also missed the gate and is not
-        # selectable. CUDA fuses the text MLP gate and up GEMMs unless
-        # PPLX_MLP=default. A lab GPU named NVIDIA L20X is accepted at
-        # capability 8.9 or 9.0.
+        # length dispatch. cuDNN-first SDPA and the fused gate-up GEMM also
+        # missed the gate and are not selectable. CUDA compiles the
+        # language-model forward unless PPLX_COMPILE=default. A lab GPU
+        # named NVIDIA L20X is accepted at capability 8.9 or 9.0.
         cuda = device == "cuda"
         self.causal_conv1d_version = prepare_causal_conv1d(required=cuda)
         self.fla_version = prepare_fla(required=cuda)
@@ -182,6 +183,7 @@ class PplxExecutor:
         self.sdpa = sdpa_preference(device, os.environ.get("PPLX_SDPA"))
         self.mlp = mlp_preference(device, os.environ.get("PPLX_MLP"))
         self.fused_gate_up_layers = 0
+        self.forward_compile = compile_preference(device, os.environ.get("PPLX_COMPILE"))
         if cuda:
             import torch
 
@@ -225,8 +227,9 @@ class PplxExecutor:
         # full-attention modules and the noncausal pre-hook.
         language_model = self.model.backbone.language_model
         self.unpadded_full_attention_layers = install_unpadded_full_attention(language_model)
-        if self.mlp == "fused-gate-up":
-            self.fused_gate_up_layers = install_fused_gate_up(language_model)
+        if self.forward_compile == "dynamic":
+            install_dynamic_compile(language_model)
+            warmup_dynamic_compile(self.model.backbone, device)
 
     def evaluate(self, request: Request) -> dict[str, Any]:
         import torch
