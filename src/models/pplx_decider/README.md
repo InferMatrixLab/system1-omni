@@ -85,9 +85,12 @@ explicit full-attention mask so Transformers 5.17 SDPA can use its
 grouped-query kernel (`head_dim` 256). Any false padding bit keeps
 `padding[:, None, None, :].bool()`. The linear-attention mask is unchanged.
 cuDNN SDPA stays off, which is the checkpoint setting. Flash and math SDPA
-are not bit-exact, so a later Public231 sample has to count decision
-disagreements against head `1ba07d15b11a8c0796657e4a10b7ba3e62354421`.
-That latency delta is not measured in this tree.
+are not bit-exact. CUDA startup also requires `causal-conv1d` 1.7.0, built
+with an sm_89 image, imported before Qwen3.5 modeling so the conv is not
+the `F.conv1d` fallback. That kernel is not bit-exact with the fallback.
+A later Public231 sample has to count decision disagreements against head
+`1ba07d15b11a8c0796657e4a10b7ba3e62354421`. That latency delta is not
+measured in this tree.
 
 The shared Qwen3.5 CUDA language kernels in this repository are causal
 (`src/backends/cuda/qwen3_5/attention.cu`). Their vision-operator tests mention

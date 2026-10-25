@@ -49,6 +49,7 @@ snapshot_download(
 )
 PY
 python3 -m pip install -r weights/pplx-decider-v1.1-27b/requirements.txt
+PYTHONPATH=src python3 recipe/pplx_decider/install_causal_conv1d.py
 PYTHONPATH=src python3 -m frontend.pplx_decider \
   --model weights/pplx-decider-v1.1-27b \
   --device cuda \
@@ -56,12 +57,21 @@ PYTHONPATH=src python3 -m frontend.pplx_decider \
   --port 8000
 ```
 
-`/health` is ready only after the hash gate, the weight load, and the
-unpadded full-attention install. It reports `model`, `max_input_tokens`
-(8192), `modalities`, `attention_mode`, and
-`unpadded_full_attention_layers`. The pinned `config.json` lists 16
-`full_attention` layers, so that field is 16 after a normal load. It does
-not report a filesystem path.
+`/health` is ready only after the hash gate, the weight load, the
+causal-conv check, and the unpadded full-attention install. It reports
+`model`, `max_input_tokens` (8192), `modalities`, `attention_mode`,
+`unpadded_full_attention_layers`, and `causal_conv1d`. The pinned
+`config.json` lists 16 `full_attention` layers, so that field is 16 after
+a normal load. On CUDA, `causal_conv1d` is `1.7.0`. Startup raises if the
+package is missing, the cubin has no image for the visible GPU, or
+Transformers still bound `F.conv1d`. That last case is what logs
+`falling back to its reference PyTorch implementation` on the first
+forward. It does not report a filesystem path.
+
+`install_causal_conv1d.py` builds [causal-conv1d 1.7.0](https://pypi.org/project/causal-conv1d/1.7.0/)
+against the installed torch. That release's gencode list has sm_87 and
+sm_90 and no sm_89, so the script adds `arch=compute_89,code=sm_89` before
+the build. It needs nvcc. This tree did not compile it.
 
 ```sh
 curl -sS http://127.0.0.1:8000/health
@@ -174,11 +184,13 @@ them and do not raise the timeout after seeing the times.
 6. A second arm through `http://127.0.0.1:8080/v1/systemone` is frontend
    time only. Keep it in different output directories. The Rust frontend's
    own 60 second cap still applies. Do not average it into the worker p50.
-7. Remeasure the unpadded full-attention head on the same stripped twin,
-   the same clock, warmup 5, concurrency 1, and three rounds. Compare
-   `responses.jsonl` answers with the `1ba07d1` rounds and report how many
-   decisions differ. A latency table without that count is an unfinished
-   delta. Samples for this head: 0 until that run exists.
+7. Remeasure this head on the same L20X, warmup 5, concurrency 1, three
+   rounds, clock `successful_latency` /
+   `post_to_body_json_and_schema_validation`. Compare with primary run1
+   p50 98.777 ms and p95 341.202 ms. Count decision disagreements against
+   `1ba07d1` `responses.jsonl`. `causal_conv1d` and the unpadded mask are
+   both in this head, so the delta is not the conv alone. Samples: 0 until
+   that paste. No further optimize commits before it.
 
 `benchmarks/smoke.jsonl` checks the client, not this model and not Public231.
 
@@ -189,7 +201,9 @@ them and do not raise the timeout after seeing the times.
 | 2026-10-24 | No kernel change. Asked whether the BF16 resident set fits a 48 GB sm_89 card. | No CUDA device in the implementation environment. Samples: 0. | none |
 | 2026-10-25 | Baseline at `1ba07d15b11a8c0796657e4a10b7ba3e62354421`. The checkpoint supplies an all-ones full-attention mask, so SDPA stays on the masked math kernel. | 1× lab L20X, sm_89, ~140 GiB. BF16 resident ~50333 MiB, no OOM. Warmup 5, concurrency 1, clock `successful_latency` / `post_to_body_json_and_schema_validation`. Stripped no-thinking twin. run1 231/231, p50 98.777 ms, p95 341.202 ms (primary). run2 231/231, p50 97.921 ms, p95 340.804 ms. run3 231/231, p50 98.177 ms, p95 343.953 ms. | baseline |
 | 2026-10-25 | Omit the explicit full-attention mask when every padding bit is true, and set full-attention `is_causal` false, so Transformers 5.17 can take the grouped-query SDPA kernel (`head_dim` 256). Padded batches keep the bool mask. Linear attention is unchanged. Flash and math are not bit-exact. | No CUDA device in this environment. Head `b6fa9d0`. Samples: 0. | not measured |
-| 2026-10-25 | Admit stock Public231 `thinking` only when it is `{"enabled": false}`. No kernel change. Further optimize commits wait for a pasted L20X p50/p95 of the current head. | No CUDA device in this environment. Samples: 0. Baseline primary stays `1ba07d1` run1. | not measured |
+| 2026-10-25 | Admit stock Public231 `thinking` only when it is `{"enabled": false}`. No kernel change. | No CUDA device in this environment. Head `778609f`. Samples: 0. Baseline primary stays `1ba07d1` run1. | not measured |
+| 2026-10-25 | In-process profile of the `1ba07d1` primary. About 136 tokens at p50: total ~89 ms, forward CUDA 87.7 ms (~98%), prepare 1.4 ms, parse/post/answer <0.3 ms. No decode. Short-sequence floor ~88–91 ms. A ~2676-token prompt forwarded in ~327 ms and drives p95. Sinks named by the profile: the 27B HF backbone forward; short-sequence launch and HF SDPA plus GDN with no CUDA graphs; missing `causal_conv1d` (Transformers fallback warning, generic depthwise conv in the trace). | Owner profile of the primary run. Not a new C1 sample. | n/a |
+| 2026-10-25 | Install `causal-conv1d` 1.7.0 and add an sm_89 cubin the upstream gencode omits. CUDA startup refuses a missing package, a cubin without the visible GPU arch, or a Qwen conv still bound to `F.conv1d`. The package path is not bit-exact with that fallback. Hold further optimize commits until an L20X C1 p50/p95 of this head is pasted against primary 98.777 / 341.202. | No CUDA device in this environment. Samples: 0. `778609f` is still unverified. | not measured |
 
 ## Limits
 

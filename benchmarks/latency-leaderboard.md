@@ -87,7 +87,6 @@ records a Public231 concurrency-1 run on 1× lab L20X (sm_89) at head
 `1ba07d1`: stripped no-thinking twin, warmup 5, concurrency 1, clock
 `successful_latency` / `post_to_body_json_and_schema_validation`. Primary
 run1 was 231/231, p50 98.777 ms, p95 341.202 ms. That run stays in its own
-group and does not enter the H800 table above. The unpadded-mask
-change after that head, and the later admission of `{"thinking": {"enabled": false}}`,
-have no measured samples. Image replacement, repeated-image/cache workloads and higher
+group and does not enter the H800 table above. The unpadded-mask change, the admission of `{"thinking": {"enabled": false}}`,
+and the causal-conv1d load gate after that head have no measured samples. Image replacement, repeated-image/cache workloads and higher
 concurrency have not been measured here; add their own frozen inputs before ranking.

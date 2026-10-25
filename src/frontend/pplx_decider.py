@@ -73,6 +73,9 @@ class Handler(BaseHTTPRequestHandler):
         layers = getattr(executor, "unpadded_full_attention_layers", None)
         if layers is not None:
             body["unpadded_full_attention_layers"] = layers
+        conv = getattr(executor, "causal_conv1d_version", None)
+        if conv is not None:
+            body["causal_conv1d"] = conv
         self.send_json(200, body)
 
     def do_POST(self):
@@ -141,11 +144,12 @@ def main(argv=None):
     try:
         server = WorkerServer((args.host, args.port), executor)
         LOG.info(
-            "ready model=%s device=%s attention=%s unpadded_full_attention_layers=%s bind=%s:%s",
+            "ready model=%s device=%s attention=%s unpadded_full_attention_layers=%s causal_conv1d=%s bind=%s:%s",
             executor.model_name,
             args.device,
             executor.attention_mode,
             executor.unpadded_full_attention_layers,
+            executor.causal_conv1d_version,
             args.host,
             args.port,
         )

@@ -31,6 +31,7 @@ from .contract import (
     TOKEN_IDS,
     Request,
 )
+from .conv import assert_qwen_conv_uses_package, prepare_causal_conv1d
 
 # SHA-256 of the files at REVISION, computed in this integration from the
 # public blobs. They match release-manifest.json except the manifest's own
@@ -150,7 +151,11 @@ class PplxExecutor:
             raise ValueError("batch_size must be positive")
         root = Path(checkpoint)
         verify_checkpoint(root)
+        # Import causal_conv1d before Qwen3.5 modeling binds F.conv1d.
+        self.causal_conv1d_version = prepare_causal_conv1d(required=device == "cuda")
         decision_model, reference_answer = _import_decision_model(root)
+        if self.causal_conv1d_version is not None:
+            assert_qwen_conv_uses_package()
         self.reference_answer = reference_answer
         self.batch_size = batch_size
         self.device = device

@@ -207,6 +207,13 @@ def test_http_health_and_decision():
         health = json.loads(conn.getresponse().read())
         conn.close()
         assert health["unpadded_full_attention_layers"] == 16
+        assert "causal_conv1d" not in health
+        server.executor.causal_conv1d_version = "1.7.0"
+        conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        conn.request("GET", "/health")
+        health = json.loads(conn.getresponse().read())
+        conn.close()
+        assert health["causal_conv1d"] == "1.7.0"
         status, body = post(
             server,
             {"model": "jev-latest", "state": "s", "questions": {"q": {"type": "noul"}}},
