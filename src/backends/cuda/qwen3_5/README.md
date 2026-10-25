@@ -16,7 +16,20 @@ The norm, elementwise and q/k preparation kernels round to bfloat16 where Transf
 `cs1_attention_gated` fuses the sigmoid gate into the attention epilogue, preserving
 the BF16 rounding of both attention and sigmoid before multiplication. The native
 workers use this entry point; the separate operations remain available for kernel
-comparisons. Rebuild the library and all native Rust consumers together for
+comparisons. `cs1_attention_gated_bidirectional` is an optional ABI 9 symbol with
+the same argument list. It is the Instant prompt mask: every query reads every
+key in that prompt, and a non-zero `q_base` is rejected. Causal
+`cs1_attention_gated` and prefix continuation stay causal. The second template
+parameter defaults to false, so existing causal launches keep that mask. Causal
+callers do not resolve the new symbol. StartLux Instant fails closed when it is
+missing. Rebuild this library before starting that worker. This tree does not
+claim that the causal specialization's SASS is bit-identical to the previous
+build; GPU revalidation of Cua-S1 and Open-Jev was not run with this change.
+
+HF Qwen3.5 folders store `linear_attn.A_log` and `linear_attn.norm.weight` as
+FP32. The shared loader rounds those two suffixes to BF16 at upload because the
+kernels consume BF16. Other non-BF16 language tensors still fail. That rounding
+is a parity gap versus an FP32 `exp(A_log)` and GDN norm in Transformers. Rebuild the library and all native Rust consumers together for
 **ABI version 9**, even with resident features disabled. ABI 9 retains the vision,
 CUDA Graph, gated attention and prefix-continuation entry points and ABI 8's
 `cs1_get_device` and `cs1_bf16_finite` for device feature validation, and adds the
