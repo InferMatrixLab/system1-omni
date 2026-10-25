@@ -46,6 +46,7 @@ from .gdn import (
     MODELING,
     assert_qwen_chunk_uses_fla,
     gdn_prefill_mode,
+    install_flashinfer_gdn_prefill,
     install_short_flashinfer_prefill,
     prepare_fla,
     prepare_flashinfer,
@@ -172,14 +173,13 @@ class PplxExecutor:
         root = Path(checkpoint)
         verify_checkpoint(root)
         # Import conv and FLA before Qwen3.5 modeling freezes the torch refs.
-        # Both measured FlashInfer policies missed the gate, so the default
-        # stays on FLA chunk. PPLX_GDN_PREFILL=short opts into the rejected
-        # length dispatch. cuDNN-first SDPA and the fused gate-up GEMM also
-        # missed the gate and are not selectable. Always-on dynamic compile
-        # and the plain 512-token split both cut p95 and raised p50, so
-        # CUDA still compiles only sequences longer than 512 tokens, and
-        # the shorter path suspends Dynamo unless PPLX_COMPILE=default.
-        # A lab GPU named NVIDIA L20X is accepted at capability 8.9 or 9.0.
+        # Compile tips raised p50 even after the median route proved eager,
+        # so startup leaves the forward eager. Capability 9.0 uses
+        # all-sequence FlashInfer with one reused cu_seqlens. PPLX_GDN_PREFILL=fla
+        # is the primary. PPLX_GDN_PREFILL=short is the rejected length
+        # dispatch. cuDNN-first SDPA and the fused gate-up GEMM are not
+        # selectable. A lab GPU named NVIDIA L20X is accepted at capability
+        # 8.9 or 9.0.
         cuda = device == "cuda"
         self.causal_conv1d_version = prepare_causal_conv1d(required=cuda)
         self.fla_version = prepare_fla(required=cuda)
@@ -194,6 +194,7 @@ class PplxExecutor:
         self.forward_compile = compile_preference(device, os.environ.get("PPLX_COMPILE"))
         self.compile_min_tokens = compile_min_tokens(self.forward_compile)
         self.compile_median = compile_median(self.forward_compile)
+        self.gdn_prefill = "fla"
         self.language_model = None
         if cuda:
             import torch
@@ -207,12 +208,13 @@ class PplxExecutor:
             self.gpu_name = torch.cuda.get_device_name(index)
             if uses_flashinfer_prefill(capability):
                 self.flashinfer_version, self.flashinfer_status = prepare_flashinfer()
-                # Both FlashInfer policies missed the gate. The default stays
-                # on FLA chunk. PPLX_GDN_PREFILL=short opts back into the
-                # rejected length dispatch.
                 gdn_mode = gdn_prefill_mode(os.environ.get("PPLX_GDN_PREFILL"))
-                if self.flashinfer_status == "bound" and gdn_mode != "short":
-                    self.flashinfer_status = "held"
+                if self.flashinfer_status != "bound" or gdn_mode == "fla":
+                    self.gdn_prefill = "fla"
+                    if self.flashinfer_status == "bound":
+                        self.flashinfer_status = "held"
+                else:
+                    self.gdn_prefill = gdn_mode
             else:
                 self.flashinfer_status = "not-selected"
         decision_model, reference_answer = _import_decision_model(root)
@@ -222,8 +224,10 @@ class PplxExecutor:
             assert_qwen_chunk_uses_fla()
         if cuda:
             modeling = importlib.import_module(MODELING)
-            if self.flashinfer_status == "bound":
+            if self.flashinfer_status == "bound" and self.gdn_prefill == "short":
                 install_short_flashinfer_prefill(modeling)
+            elif self.flashinfer_status == "bound":
+                install_flashinfer_gdn_prefill(modeling)
             self.linear_attention = require_bound_linear_attention(modeling)
         self.reference_answer = reference_answer
         self.batch_size = batch_size

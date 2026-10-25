@@ -31,16 +31,15 @@ are causal. Its readout is a separate 255-row tensor. After that load, the
 worker marks those full-attention modules noncausal and omits the explicit
 SDPA mask when the padding mask is all true. Linear-attention chunk prefill
 on the lab L20X-labeled GPU uses FLA 0.5.2 plus causal_conv1d, including
-when that GPU reports capability 8.9. Capability 9.0 stays on FLA chunk
-by default. An installed flashinfer-python 0.6.16.post3 pin is held
-(`flashinfer_status=held`) unless `PPLX_GDN_PREFILL=short`, which is the
-rejected one-sequence ≤256 dispatch. SDPA stays on the checkpoint order.
+when that GPU reports capability 8.9. Capability 9.0 uses all-sequence FlashInfer when
+`flashinfer-python` 0.6.16.post3 imports, and that wrapper reuses one
+`cu_seqlens` per device and length. `PPLX_GDN_PREFILL=fla` is the primary
+chunk. `PPLX_GDN_PREFILL=short` is the rejected one-sequence ≤256
+dispatch. Capability 8.9, and capability 9.0 without that package, stay
+ready on FLA chunk. SDPA stays on the checkpoint order.
 `PPLX_SDPA=cudnn-first` and `PPLX_MLP=fused-gate-up` are refused.
-Always-on dynamic compile and the plain 512-token split cut p95 and
-raised p50. CUDA compiles the language-model forward only when the
-sequence is longer than 512 tokens unless `PPLX_COMPILE=default`.
-Shorter sequences suspend Dynamo and restore the pre-compile CUDA flags.
-`PPLX_COMPILE=dynamic` is the rejected always-on path. Ready accepts the
+The forward stays eager. `PPLX_COMPILE=dynamic` and
+`PPLX_COMPILE=dynamic-tail` are rejected opt-ins. Ready accepts the
 FLA chunk and either FlashInfer dispatch. CuteDSL and CUDA graphs are
 not selected.
 

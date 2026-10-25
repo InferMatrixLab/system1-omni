@@ -85,23 +85,20 @@ explicit full-attention mask so Transformers 5.17 SDPA can use its
 grouped-query kernel (`head_dim` 256). Any false padding bit keeps
 `padding[:, None, None, :].bool()`. The linear-attention mask is unchanged. SDPA stays on the checkpoint
 order, which leaves cuDNN off. `PPLX_SDPA=cudnn-first` and
-`PPLX_MLP=fused-gate-up` are refused. Always-on dynamic compile and the
-plain 512-token split cut p95 and raised p50. CUDA startup compiles the
-language-model forward only when the sequence is longer than 512 tokens
-unless `PPLX_COMPILE=default`. Shorter sequences call the original
-forward with Dynamo suspended and the pre-compile CUDA flags restored.
-Startup warms lengths 768, 1024, and 2048, then requires a 136-token
-forward to take the eager route. `PPLX_COMPILE=dynamic` is the rejected
-always-on compile.
+`PPLX_MLP=fused-gate-up` are refused. The three measured compile tips
+raised p50, including `34ba5de`, whose 136-token probe was eager and
+added no compiled frames. Startup leaves the forward eager.
+`PPLX_COMPILE=dynamic` and `PPLX_COMPILE=dynamic-tail` are rejected
+opt-ins.
 Inductor is not bit-exact with eager. CUDA startup requires
 `causal-conv1d` 1.7.0, imported before Qwen3.5 modeling, and refuses the
 `F.conv1d` fallback. The build keeps an sm_90 cubin and an sm_89 cubin. It
 also requires `flash-linear-attention` 0.5.2. Lab GPUs labeled NVIDIA L20X
-are the H200 target. Capability 8.9, and capability 9.0 by default, report
-`linear_attention` as `fla-chunk` and are ready. An installed
-`flashinfer-python` 0.6.16.post3 pin is held unless
-`PPLX_GDN_PREFILL=short`, which is the rejected one-sequence ≤256
-dispatch. The all-sequence FlashInfer bind is not the startup path.
+are the H200 target. Capability 8.9 reports `linear_attention` as `fla-chunk` and is ready.
+Capability 9.0 with `flashinfer-python` 0.6.16.post3 uses all-sequence
+FlashInfer and reuses one `cu_seqlens` per device and length.
+`PPLX_GDN_PREFILL=fla` is the primary chunk.
+`PPLX_GDN_PREFILL=short` is the rejected one-sequence ≤256 dispatch.
 CuteDSL and CUDA graphs are not used. These kernels are not bit-exact with
 the torch fallbacks. The kept primary is the remeasure of
 `f968e576aa733a0e6e4b2bc46bb11035e7662c8f` on the lab L20X-labeled GPU:
@@ -125,8 +122,10 @@ Always-on dynamic compile on `e36b32ed` missed the both-percentiles gate
 `score_mae≈0.203`) and is not the primary. The 512-token split on
 `7e3b1be` missed the gate (p50 100.037 ms, p95 257.084 ms,
 `choice_acc=0.906`, `noul_acc=0.878`, `score_mae=0.200`) and is not the
-primary. p95 improved on both. The isolated-median compile candidate
-has no sample.
+primary. Isolated-median compile on `34ba5de` missed the gate (p50
+97.084 ms, p95 256.679 ms, `choice_acc=0.9065` (139), `noul_acc=0.8784`
+(74), `score_mae=0.2003` (18)) and is not the primary. The
+reused-`cu_seqlens` FlashInfer candidate has no sample.
 
 The shared Qwen3.5 CUDA language kernels in this repository are causal
 (`src/backends/cuda/qwen3_5/attention.cu`). Their vision-operator tests mention
@@ -138,8 +137,8 @@ backend. A native executor is not in this change.
 | Path | State |
 | --- | --- |
 | CPU contract and HTTP rejection | Implemented; tests do not need weights |
-| CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, checkpoint SDPA order, separate gate and up GEMMs, dynamic `torch.compile` of language-model forwards longer than 512 tokens unless `PPLX_COMPILE=default`, with shorter forwards run outside Dynamo, `causal-conv1d` 1.7.0 with sm_90 and sm_89 cubins, and FLA 0.5.2 chunk. An installed FlashInfer pin is held unless `PPLX_GDN_PREFILL=short`. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
-| Public231 concurrency 1 | Kept primary is the `f968e576` remeasure on the lab L20X-labeled GPU, capability 9.0, `fla-chunk`, `flashinfer` null: 231/231, p50 94.077 ms, p95 300.200 ms. Versus `1ba07d1` run1 98.777 / 341.202: p50 −4.76%, p95 −12.02%. All-sequence FlashInfer `3c72f02` failed the gate: p50 88.808 ms, p95 300.751 ms. Short-sequence FlashInfer `a50b9aa` failed the gate: p50 95.446 ms, p95 300.871 ms. cuDNN-first SDPA `0dcaa0ac` failed the gate: p50 138.501 ms, p95 332.859 ms. Fused gate-up `8b4ee326` failed the gate: p50 102.437 ms, p95 304.970 ms. Always-on dynamic compile `e36b32ed` failed the both-percentiles gate: p50 97.751 ms, p95 263.124 ms. The 512-token split `7e3b1be` failed the gate: p50 100.037 ms, p95 257.084 ms. None of those is the primary. The isolated-median compile candidate has no sample |
+| CUDA reference worker | Checkpoint `device="cuda"` loader, unpadded full attention, checkpoint SDPA order, separate gate and up GEMMs, an eager language-model forward, `causal-conv1d` 1.7.0 with sm_90 and sm_89 cubins, FLA 0.5.2 chunk, and all-sequence FlashInfer on capability 9.0 with one reused `cu_seqlens`. An installed FlashInfer pin is held unless `PPLX_GDN_PREFILL=short`. Load of head `1ba07d1` was reported on 1× lab L20X (sm_89, ~140 GiB): BF16 resident ~50333 MiB, no OOM |
+| Public231 concurrency 1 | Kept primary is the `f968e576` remeasure on the lab L20X-labeled GPU, capability 9.0, `fla-chunk`, `flashinfer` null: 231/231, p50 94.077 ms, p95 300.200 ms. Versus `1ba07d1` run1 98.777 / 341.202: p50 −4.76%, p95 −12.02%. All-sequence FlashInfer `3c72f02` failed the gate: p50 88.808 ms, p95 300.751 ms. Short-sequence FlashInfer `a50b9aa` failed the gate: p50 95.446 ms, p95 300.871 ms. cuDNN-first SDPA `0dcaa0ac` failed the gate: p50 138.501 ms, p95 332.859 ms. Fused gate-up `8b4ee326` failed the gate: p50 102.437 ms, p95 304.970 ms. Always-on dynamic compile `e36b32ed` failed the both-percentiles gate: p50 97.751 ms, p95 263.124 ms. The 512-token split `7e3b1be` failed the gate: p50 100.037 ms, p95 257.084 ms. Isolated-median compile `34ba5de` failed the gate: p50 97.084 ms, p95 256.679 ms. None of those is the primary. The reused-`cu_seqlens` FlashInfer candidate has no sample |
 | CPU `device="cpu"` | The checkpoint switches the backbone to float32. Not the measured path |
 | Images | Admitted. No image parity run |
 | Apple GPU | Not supported |

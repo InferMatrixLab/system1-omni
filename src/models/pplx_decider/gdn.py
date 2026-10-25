@@ -36,6 +36,9 @@ FI_MODULE = "flashinfer.gdn_prefill"
 GDN_PREFILL = "flashinfer"
 HOPPER = (9, 0)
 FLA_LINEAR_ATTENTION = "fla-chunk"
+# One cu_seqlens per device and length. Building a CUDA tensor from a
+# Python list syncs, and the GDN stack does that once per linear layer.
+_CU_SEQLENS: dict[tuple[int, int], Any] = {}
 FLASHINFER_LINEAR_ATTENTION = "flashinfer+fla+causal_conv1d"
 SHORT_FLASHINFER_LINEAR_ATTENTION = "flashinfer-short+fla-chunk"
 # Profile anchors on this workload: median about 136 tokens, tail example
@@ -62,15 +65,16 @@ def uses_flashinfer_prefill(capability: tuple[int, int]) -> bool:
 
 
 def gdn_prefill_mode(selected: str | None) -> str:
-    """Default GDN prefill is FLA chunk.
+    """Default GDN prefill is all-sequence FlashInfer.
 
-    ``short`` is the rejected length dispatch. Both measured FlashInfer
-    policies missed the gate, so startup does not select them.
+    ``fla`` reproduces the primary. ``short`` is the rejected length
+    dispatch. The all-sequence bind missed p95 by a fraction of a
+    millisecond; startup still selects it, with one reused ``cu_seqlens``.
     """
 
-    chosen = "fla" if selected is None else selected
-    if chosen not in {"fla", "short"}:
-        raise RuntimeError("PPLX_GDN_PREFILL must be fla or short")
+    chosen = "flashinfer" if selected is None else selected
+    if chosen not in {"flashinfer", "fla", "short"}:
+        raise RuntimeError("PPLX_GDN_PREFILL must be flashinfer, fla, or short")
     return chosen
 
 
@@ -154,6 +158,38 @@ def assert_qwen_chunk_uses_fla() -> None:
         )
 
 
+def cu_seqlens_key(device_index: int | None, length: int) -> tuple[int, int]:
+    """Cache identity for a device and a sequence length."""
+
+    return (-1 if device_index is None else int(device_index), int(length))
+
+
+def reuse_cu_seqlens(cache: dict[tuple[int, int], Any], key: tuple[int, int], allocate: Any) -> Any:
+    """Return the cached tensor, allocating at most once per key."""
+
+    found = cache.get(key)
+    if found is not None:
+        return found
+    created = allocate()
+    cache[key] = created
+    return created
+
+
+def cached_cu_seqlens(q: Any) -> Any:
+    """Reuse ``[0, length]`` for this device instead of allocating every layer."""
+
+    import torch
+
+    length = int(q.shape[0])
+    index = q.device.index
+    key = cu_seqlens_key(index, length)
+
+    def allocate() -> Any:
+        return torch.tensor([0, length], dtype=torch.int64, device=q.device)
+
+    return reuse_cu_seqlens(_CU_SEQLENS, key, allocate)
+
+
 def flashinfer_chunk_gated_delta_rule(
     q: Any,
     k: Any,
@@ -199,7 +235,7 @@ def flashinfer_chunk_gated_delta_rule(
     fi_g = None if g is None else torch.exp(g.squeeze(0).contiguous().to(torch.float32))
     fi_beta = None if beta is None else beta.squeeze(0).contiguous().to(torch.float32)
     if cu_seqlens is None:
-        cu_seqlens = torch.tensor([0, q.shape[0]], dtype=torch.int64, device=q.device)
+        cu_seqlens = cached_cu_seqlens(q)
     else:
         cu_seqlens = cu_seqlens.to(device=q.device, dtype=torch.int64)
     result = chunk_gated_delta_rule_fi(

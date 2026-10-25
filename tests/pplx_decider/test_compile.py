@@ -24,8 +24,8 @@ class _Tensor:
         self.ndim = len(shape)
 
 
-def test_cuda_compiles_only_the_tail_unless_asked_otherwise():
-    assert compile_preference("cuda", None) == "dynamic-tail"
+def test_cuda_stays_eager_unless_a_rejected_compile_is_requested():
+    assert compile_preference("cuda", None) == "default"
     assert compile_preference("cuda", "dynamic-tail") == "dynamic-tail"
     assert compile_preference("cuda", "dynamic") == "dynamic"
     assert compile_preference("cuda", "default") == "default"

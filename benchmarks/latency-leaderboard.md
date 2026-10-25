@@ -108,7 +108,10 @@ p95 −12.35%) and failed the same gate because p50 rose. It is not the
 primary. The 512-token compile split `7e3b1be` measured 231/231, p50
 100.037 ms, p95 257.084 ms (p50 +6.34%, p95 −14.36%) and failed the same
 gate. p95 improved further and p50 was worse than always-on. It is not
-the primary. The isolated-median compile candidate has no sample.
+the primary. Isolated-median compile `34ba5de` measured 231/231, p50
+97.084 ms, p95 256.679 ms (p50 +3.20%, p95 −14.50%) and failed the same
+gate. The 136-token probe was eager and added no compiled frames. It is
+not the primary. The reused-`cu_seqlens` FlashInfer candidate has no sample.
 Both kept measurements stay in this L20X group and do not enter the H800
 table above. Ready is not limited to capability 9.0.
 

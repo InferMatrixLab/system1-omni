@@ -20,7 +20,9 @@ from models.pplx_decider.gdn import (
     install_flashinfer_gdn_prefill,
     install_short_flashinfer_prefill,
     require_bound_linear_attention,
+    cu_seqlens_key,
     gdn_prefill_mode,
+    reuse_cu_seqlens,
     resolve_flashinfer,
     use_short_flashinfer,
     uses_flashinfer_prefill,
@@ -100,12 +102,31 @@ def test_capability_9_0_stays_ready_when_flashinfer_is_absent():
         resolve_flashinfer("0.6.15", imported=True)
 
 
-def test_gdn_prefill_defaults_to_fla_and_rejects_another_cutoff():
-    assert gdn_prefill_mode(None) == "fla"
+def test_gdn_prefill_defaults_to_all_sequence_flashinfer():
+    assert gdn_prefill_mode(None) == "flashinfer"
+    assert gdn_prefill_mode("flashinfer") == "flashinfer"
     assert gdn_prefill_mode("fla") == "fla"
     assert gdn_prefill_mode("short") == "short"
-    with pytest.raises(RuntimeError, match="fla or short"):
+    with pytest.raises(RuntimeError, match="flashinfer, fla, or short"):
         gdn_prefill_mode("512")
+
+
+def test_cu_seqlens_is_allocated_once_per_device_and_length():
+    assert cu_seqlens_key(None, 136) == (-1, 136)
+    assert cu_seqlens_key(0, 2676) == (0, 2676)
+    cache: dict[tuple[int, int], object] = {}
+    calls: list[int] = []
+
+    def allocate() -> object:
+        calls.append(1)
+        return object()
+
+    first = reuse_cu_seqlens(cache, (0, 136), allocate)
+    second = reuse_cu_seqlens(cache, (0, 136), allocate)
+    other = reuse_cu_seqlens(cache, (0, 2676), allocate)
+    assert first is second
+    assert first is not other
+    assert calls == [1, 1]
 
 
 def test_short_flashinfer_keeps_the_tail_and_a_batch_on_fla():

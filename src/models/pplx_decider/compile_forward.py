@@ -9,9 +9,12 @@ Dynamo frame hook suspended and the CUDA flags captured before
 512 sits between the profiled median of about 136 tokens and the profiled
 tail example of about 2676 tokens. It is not a fitted cutoff.
 
-``PPLX_COMPILE=default`` leaves every length eager.
-``PPLX_COMPILE=dynamic`` is the rejected always-on compile.
-Inductor is not bit-exact with eager. CUDA graphs are not selected.
+Measured compile tips ``e36b32ed``, ``7e3b1be``, and ``34ba5de`` all
+raised p50, including after the 136-token probe proved the median route
+was eager. Unset ``PPLX_COMPILE`` now stays eager.
+``PPLX_COMPILE=dynamic`` and ``PPLX_COMPILE=dynamic-tail`` are rejected
+opt-ins. Inductor is not bit-exact with eager. CUDA graphs are not
+selected.
 """
 
 from __future__ import annotations
@@ -33,11 +36,11 @@ DYNAMIC_WARMUP_LENGTHS = (32, 256, 1024)
 
 
 def compile_preference(device: str, selected: str | None = None) -> str:
-    """CUDA startup compiles long sequences only. Other devices stay eager.
+    """Startup leaves the language-model forward eager.
 
-    ``selected`` is ``PPLX_COMPILE``. Unset on CUDA selects ``dynamic-tail``.
-    ``default`` reproduces the primary. ``dynamic`` is the rejected
-    always-on compile.
+    ``selected`` is ``PPLX_COMPILE``. Unset and ``default`` reproduce the
+    primary. ``dynamic`` and ``dynamic-tail`` are rejected opt-ins. CPU
+    always stays eager.
     """
 
     if device not in {"cuda", "cpu"}:
@@ -47,7 +50,7 @@ def compile_preference(device: str, selected: str | None = None) -> str:
     if device != "cuda":
         return COMPILE_DEFAULT
     if selected is None:
-        return COMPILE_TAIL
+        return COMPILE_DEFAULT
     return selected
 
 
