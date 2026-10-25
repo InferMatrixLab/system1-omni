@@ -111,11 +111,31 @@ PYTHONPATH=src python recipe/clef/export_prompt_fixture.py \
 
 ## Public231 C1 on lab L20X (sm_89)
 
+Operator-reported, not re-run in the environment that edited this recipe.
+Clef-flash, worker HEAD `903006530fb7772bb668bbf192ee4278e273e583`, NVIDIA
+L20X at compute capability 8.9, warmup 5, concurrency 1. Stock Public231
+includes a `thinking` field. That HEAD rejected it with HTTP 422
+`Unknown request fields`. The measured manifest was
+`public231-no-thinking.jsonl`, with the `thinking` key stripped. The
+stripped file's SHA-256 was not reported. Primary for later deltas is run1.
+Do not average the percentiles.
+
+| Round | p50 (ms) | p95 (ms) | Successful |
+| --- | --- | --- | --- |
+| run1 (primary) | 247.518 | 413.025 | 231/231 |
+| run2 | 247.404 | 426.231 | 231/231 |
+| run3 | 242.421 | 410.369 | 231/231 |
+
+The worker now admits `thinking` when it is an object with `enabled` set to
+the JSON boolean `false`, then drops the field before encoding. A stock
+Public231 request in that shape is the next comparison against run1. That
+admission has no measured latency delta. `enabled: true` stays a 422.
+
 This is the operator checklist for a concurrency-1 latency measurement of
 the flash worker. It uses the existing
 [benchmark runner](../../benchmarks/README.md). The client does not reserve
 a GPU and does not prove that CUDA ran. This repository does not contain
-the Public231 JSONL. No p50 or p95 from that workload is known for Clef.
+the Public231 JSONL.
 
 Record results outside the repository. Do not put hostnames, account names,
 home directories, or the name of a reservation system in the metadata or
@@ -133,7 +153,11 @@ in a commit.
    The canonical task hash
    `dc3995d8ae1e2fc8e81ce38431add509eb8bb39b85aadfd0c7c32079382dde51`
    is a different encoding and must not be substituted. Check the file
-   with `sha256sum` before `validate`.
+   with `sha256sum` before `validate`. The recorded campaign above did not
+   use that byte string: the `thinking` key had been removed, and the
+   resulting file hash was not reported. Record `sha256sum` of whichever
+   file the next run actually sends. Keep `thinking` when its `enabled`
+   value is false; stripping it is no longer required for admission.
 4. Install `benchmarks/requirements.txt` (`httpx==0.28.1`) into the client
    environment. The client and the worker may use different environments.
 5. Write a metadata JSON file. Required keys are `gpu`, `gpu_ids`,
@@ -192,7 +216,10 @@ in a commit.
 
 ## What remains unverified
 
-GPU startup, the first forward, image and video inputs, native CUDA, and
-every latency number. Hypotheses for later serve-path work are listed in
-the model README. H1, one encode per request, is already how this worker
-calls the pinned model. Its effect on p50 and p95 is not measured.
+Image and video inputs, native CUDA, answer parity, and any latency delta
+after HEAD `903006530fb7772bb668bbf192ee4278e273e583`. The operator-reported
+C1 numbers above are the baseline. H1, one encode per request, is already
+how that HEAD calls the pinned model, so run1 includes it and its isolated
+effect is unknown. Further serve-path changes stay out until an L20X run
+can cite a p50 and p95 delta against run1. This environment has no GPU and
+did not repeat the campaign.

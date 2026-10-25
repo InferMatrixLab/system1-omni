@@ -56,8 +56,14 @@ is the untruncated prompt length.
 The encoder's decision suffix is the empty think block
 `<think>\n\n</think>\n\nJOINT SCHEMA DECISIONS:`. That is the non-thinking
 path. The chat templates differ between the two revisions and can open a
-think block; `systemone` does not apply those templates. There is no
-thinking switch on this worker. `/health` reports `prompt_mode: non-thinking`.
+think block; `systemone` does not apply those templates. `/health` reports
+`prompt_mode: non-thinking`.
+
+A request may include `thinking` only as an object whose `enabled` value is
+the JSON boolean `false`. That object is removed before encoding, including
+any other keys on it, so the prompt matches a request that never had the
+field. `enabled: true`, a non-object, and an object without `enabled: false`
+are rejected. This worker does not serve a thinking prompt.
 
 Choice options are sorted by id inside the prompt. Answer `probabilities`
 keep the request's criteria order. Ties use that same request order. The
@@ -81,9 +87,10 @@ of the state. The blog's 64k window and the backbone
 
 HTTP bodies larger than 8 MiB are rejected. That cap is larger than a 16384
 token text request and smaller than an unbounded upload. Unknown request
-fields are rejected. Non-empty `images` or `videos` are rejected with a
-message that those modalities are not served. Empty lists are accepted and
-add no media tokens.
+fields are rejected. `thinking` is a known field and is admitted only by the
+rule above. Non-empty `images` or `videos` are rejected with a message that
+those modalities are not served. Empty lists are accepted and add no media
+tokens.
 
 One request is scored at a time. The executor holds the loaded weights and
 the joint head for the process lifetime. The handler takes a process-wide
@@ -120,26 +127,44 @@ PYTHONPATH=src python recipe/clef/export_prompt_fixture.py \
   --check
 ```
 
-No weight was loaded. No GPU forward was run. Public231 concurrency-1
-latency on the lab L20X (compute capability 8.9) was not measured. The
-measurement steps are in the [recipe](../../../recipe/clef/reference.md).
+No weight was loaded in this environment. The operator-reported Public231
+concurrency-1 campaign below was not re-run here. The measurement steps are
+in the [recipe](../../../recipe/clef/reference.md).
 
-## Latency hypotheses
+## Latency
 
-No p50 or p95 is reported. Do not read the H800 Public231 board as a result
-for this worker, and do not label an L20X run as H200.
+Operator-reported Public231 concurrency 1 on NVIDIA L20X, compute capability
+8.9, Clef-flash, worker HEAD
+`903006530fb7772bb668bbf192ee4278e273e583`, warmup 5. Stock Public231 carries
+a `thinking` field and that HEAD returned HTTP 422 `Unknown request fields`.
+The measured file was `public231-no-thinking.jsonl` (the `thinking` key
+stripped). Its SHA-256 was not reported. Do not cite the leaderboard export
+hash `00d1f10ca1142499a598b5f1c6602d329cce1cef04c961c46fc0318daa2c67d3` as
+the hash of that file. Driver, CUDA version and hostname were not reported.
+Do not read the H800 Public231 board as a result for this worker, and do not
+label this run as H200. Percentiles are not averaged across rounds.
 
-| Id | Change | Expected effect | Delta |
+| Round | p50 (ms) | p95 (ms) | Successful |
 | --- | --- | --- | --- |
-| H1 | One `encode_record` per request, then the pinned forward. The handler does not tokenize the schema again before that encode. | Removes a second BPE pass from the critical path. Prefill and the joint head still dominate. | Not measured |
-| H2 | Fuse the joint head's per-question Python loop. | Fewer small launches after prefill. Needs a forked head and numerical parity against the pinned module. | Not implemented |
-| H3 | `torch.compile` or CUDA graphs on the Qwen3.5 backbone. | Uncertain on the linear-attention layers. | Not implemented |
+| run1, primary for later deltas | 247.518 | 413.025 | 231/231 |
+| run2 | 247.404 | 426.231 | 231/231 |
+| run3 | 242.421 | 410.369 | 231/231 |
+
+The `thinking.enabled: false` admission in the current tree strips that
+field before encoding. It has no measured p50 or p95 delta against run1.
+Answer parity against another implementation was not part of this report.
+
+| Id | Change | Expected effect | Delta vs run1 |
+| --- | --- | --- | --- |
+| H1 | One `encode_record` per request, then the pinned forward. The handler does not tokenize the schema again before that encode. | Removes a second BPE pass from the critical path. Prefill and the joint head still dominate. | Included in HEAD `9030065`. Isolated delta unknown |
+| H2 | Fuse the joint head's per-question Python loop. | Fewer small launches after prefill. Needs a forked head and numerical parity against the pinned module. | Not implemented. Held until an L20X measurement can cite a delta |
+| H3 | `torch.compile` or CUDA graphs on the Qwen3.5 backbone. | Uncertain on the linear-attention layers. | Not implemented. Held until an L20X measurement can cite a delta |
 
 ## Status
 
 | Path | Clef-flash | Clef |
 | --- | --- | --- |
-| Text `choice` / `noul` / `score`, non-thinking prompt | Contract tested; GPU inference unverified | Same loader pin; GPU inference unverified |
+| Text `choice` / `noul` / `score`, non-thinking prompt | Contract tested. Operator-reported Public231 C1 latency on L20X sm_89 at HEAD `9030065`; answer parity not checked | Same loader pin; that latency campaign was flash only |
 | Image and video | Rejected | Rejected |
 | Native CUDA | Not implemented | Not implemented |
 | Workers AI proxy | Out of scope | Out of scope |

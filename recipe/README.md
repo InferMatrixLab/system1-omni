@@ -40,8 +40,8 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   (text serving and parity validated on A100; media budgets and caps in the recipe).
 - [Clef reference worker](clef/reference.md): load pinned Clef-flash (9B) or
   Clef (27B) and serve text `choice`/`noul`/`score`. Image, video and native
-  CUDA are not served. Public231 concurrency-1 timing on L20X is an operator
-  checklist; no latency number is recorded here.
+  CUDA are not served. Operator-reported flash Public231 concurrency-1
+  timing on L20X sm_89 is in the recipe (run1 p50 247.518 ms, p95 413.025 ms).
 
 - [LFM2.5-350M choice worker](lfm2/README.md): score text decisions with independent
   questions, hybrid cache branching and configurable candidate batches.

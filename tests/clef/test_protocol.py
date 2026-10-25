@@ -35,6 +35,22 @@ def test_parse_body_rejects_ambiguous_json_and_the_body_cap():
     assert excinfo.value.status == 413
 
 
+def test_thinking_enabled_false_is_admitted_and_omitted_from_the_prompt():
+    from models.clef.prompt import prompt_pieces
+
+    plain = body()
+    marked = body(thinking={"enabled": False, "ignored": 1})
+    parsed = parse_request(marked)
+    assert "thinking" not in parsed.payload
+    assert prompt_pieces(parsed.payload) == prompt_pieces(plain)
+    with pytest.raises(RequestError, match="thinking.enabled must be false"):
+        parse_request(body(thinking={"enabled": True}))
+    with pytest.raises(RequestError, match="thinking.enabled must be false"):
+        parse_request(body(thinking="off"))
+    with pytest.raises(RequestError, match="thinking.enabled must be false"):
+        parse_request(body(thinking={"budget": 0}))
+
+
 def test_parse_requires_model_and_state_and_rejects_unknown_fields():
     with pytest.raises(RequestError, match="Unknown request fields"):
         parse_request(body(media_kwargs={"fps": 1}))

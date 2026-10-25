@@ -106,6 +106,15 @@ def test_decide_rejects_overflow_before_a_second_serve_step():
     assert executor.served == 1
 
 
+def test_decide_accepts_thinking_enabled_false():
+    payload = three_kinds()
+    payload["thinking"] = {"enabled": False}
+    response = decide(json.dumps(payload).encode("utf-8"), FakeClef())
+    assert response["answers"]["urgent"]["noul"] == 0.25
+    bare = decide(json.dumps(three_kinds()).encode("utf-8"), FakeClef())
+    assert response["usage"]["input_tokens"] == bare["usage"]["input_tokens"]
+
+
 def test_decide_rejects_images():
     payload = three_kinds()
     payload["images"] = ["data:image/png;base64,AAAA"]

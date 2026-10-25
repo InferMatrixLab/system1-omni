@@ -16,7 +16,7 @@ from typing import Any
 # body limit; 8 MiB is enough for a request that still has to be refused at
 # the 16384-token admission limit, and it refuses larger bodies explicitly.
 MAX_BODY = 8 * 1024 * 1024
-REQUEST_FIELDS = {"model", "state", "questions", "images", "videos"}
+REQUEST_FIELDS = {"model", "state", "questions", "images", "videos", "thinking"}
 MEDIA_UNSUPPORTED = (
     "{field} are not served by this integration; image and video inputs remain unsupported"
 )
@@ -91,6 +91,24 @@ def _reject_media(value: dict[str, Any], field: str) -> None:
     raise RequestError(MEDIA_UNSUPPORTED.format(field=field))
 
 
+def _accept_thinking(value: dict[str, Any]) -> None:
+    """Allow the stock Public231 ``thinking`` object only when it is off.
+
+    The pinned encoder always writes the empty think block. ``enabled: true``
+    is rejected so a thinking request is not scored on that prompt. Other keys
+    on the object are not interpreted. The key is removed before encoding, so
+    the text matches a request that never had the field.
+    """
+
+    if "thinking" not in value:
+        return
+    thinking = value["thinking"]
+    if not isinstance(thinking, dict) or thinking.get("enabled") is not False:
+        raise RequestError(
+            "thinking.enabled must be false; this worker only serves the non-thinking prompt"
+        )
+
+
 def parse_request(value: dict[str, Any]) -> Request:
     """Validate the systemone envelope and refuse media inputs."""
 
@@ -99,6 +117,7 @@ def parse_request(value: dict[str, Any]) -> Request:
         raise RequestError(f"Unknown request fields: {unknown}")
     _reject_media(value, "images")
     _reject_media(value, "videos")
+    _accept_thinking(value)
     if not isinstance(value.get("model"), str) or "state" not in value:
         raise RequestError("model and state are required")
     questions = value.get("questions")
@@ -106,4 +125,5 @@ def parse_request(value: dict[str, Any]) -> Request:
         raise RequestError("at least one question is required")
     if any(not isinstance(name, str) or not name for name in questions):
         raise RequestError("question IDs must be nonempty strings")
-    return Request(value)
+    payload = {key: item for key, item in value.items() if key != "thinking"}
+    return Request(payload)
