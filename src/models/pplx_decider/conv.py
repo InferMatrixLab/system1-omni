@@ -8,11 +8,12 @@ condition that skips the warning.
 
 ``causal-conv1d`` 1.7.0 is the release that satisfies
 ``flash-linear-attention==0.5.2``'s ``conv1d`` extra (``causal-conv1d>=1.4.0``).
-Upstream 1.7.0 emits ``arch=compute_90,code=sm_90`` when nvcc is 11.8 or
-newer, which is the Hopper cubin H200 runs. The recipe installer inserts
-that cubin if a sdist dropped the line. CUDA startup reads the compiled
-extension and refuses a binary that lacks the visible device's
-architecture.
+Upstream 1.7.0 has no ``sm_89`` cubin. The L20X classification path needs
+``arch=compute_89,code=sm_89``, so the installer inserts it. The same
+pass keeps ``sm_90`` when a sdist already emits it, and inserts that line
+when it does not. CUDA startup reads the compiled extension and refuses a
+binary that lacks the visible device's architecture. It also refuses to
+become ready when Qwen's conv is still the ``F.conv1d`` fallback.
 """
 
 from __future__ import annotations
@@ -22,6 +23,10 @@ from typing import Any
 
 CAUSAL_CONV1D_VERSION = "1.7.0"
 _SM87_LINE = 'cc_flag.append("arch=compute_87,code=sm_87")\n'
+_SM89_BLOCK = (
+    '        cc_flag.append("-gencode")\n'
+    '        cc_flag.append("arch=compute_89,code=sm_89")\n'
+)
 _SM90_BLOCK = (
     '        cc_flag.append("-gencode")\n'
     '        cc_flag.append("arch=compute_90,code=sm_90")\n'
@@ -32,14 +37,30 @@ def version_matches(installed: str, required: str = CAUSAL_CONV1D_VERSION) -> bo
     return installed.split("+", 1)[0] == required
 
 
-def ensure_sm90_gencode(setup_text: str) -> str:
-    """Leave upstream's sm_90 cubin in place, or insert one after sm_87."""
-
-    if "compute_90" in setup_text:
+def _insert_after_sm87(setup_text: str, marker: str, block: str) -> str:
+    if marker in setup_text:
         return setup_text
     if _SM87_LINE not in setup_text:
         raise RuntimeError("causal-conv1d setup.py has no sm_87 gencode line")
-    return setup_text.replace(_SM87_LINE, _SM87_LINE + _SM90_BLOCK, 1)
+    return setup_text.replace(_SM87_LINE, _SM87_LINE + block, 1)
+
+
+def ensure_sm89_gencode(setup_text: str) -> str:
+    """Insert an sm_89 cubin after sm_87. Leave an existing line in place."""
+
+    return _insert_after_sm87(setup_text, "compute_89", _SM89_BLOCK)
+
+
+def ensure_sm90_gencode(setup_text: str) -> str:
+    """Leave upstream's sm_90 cubin in place, or insert one after sm_87."""
+
+    return _insert_after_sm87(setup_text, "compute_90", _SM90_BLOCK)
+
+
+def ensure_prefill_gencode(setup_text: str) -> str:
+    """sm_89 for the L20X path, plus sm_90 when the sdist omitted it."""
+
+    return ensure_sm89_gencode(ensure_sm90_gencode(setup_text))
 
 
 def extension_supports_arch(blob: bytes, major: int, minor: int) -> bool:

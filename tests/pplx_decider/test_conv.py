@@ -7,6 +7,8 @@ import pytest
 from models.pplx_decider.conv import (
     CAUSAL_CONV1D_VERSION,
     binds_package,
+    ensure_prefill_gencode,
+    ensure_sm89_gencode,
     ensure_sm90_gencode,
     extension_supports_arch,
     version_matches,
@@ -58,10 +60,25 @@ def test_sm90_gencode_refuses_an_unknown_setup():
         ensure_sm90_gencode("cc_flag = []\n")
 
 
+def test_sm89_is_inserted_beside_an_existing_sm90_line():
+    upstream = UPSTREAM + '        cc_flag.append("arch=compute_90,code=sm_90")\n'
+    patched = ensure_prefill_gencode(upstream)
+    assert "compute_89" in patched
+    assert "compute_90" in patched
+    assert patched.index("compute_87") < patched.index("compute_89")
+    assert ensure_sm89_gencode(patched) == patched
+    assert ensure_prefill_gencode(patched) == patched
+
+
+def test_sm89_gencode_refuses_an_unknown_setup():
+    with pytest.raises(RuntimeError, match="sm_87"):
+        ensure_sm89_gencode("cc_flag = []\n")
+
+
 def test_extension_arch_bytes():
-    assert extension_supports_arch(b"fatbin sm_90 cubin", 9, 0)
+    assert extension_supports_arch(b"fatbin sm_89 cubin", 8, 9)
     assert extension_supports_arch(b"compute_90", 9, 0)
-    assert not extension_supports_arch(b"sm_80 sm_87", 9, 0)
+    assert not extension_supports_arch(b"sm_80 sm_90", 8, 9)
 
 
 def test_binds_package_through_a_closure_and_forward():

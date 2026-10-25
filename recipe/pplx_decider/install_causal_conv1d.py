@@ -1,10 +1,10 @@
-"""Build causal-conv1d 1.7.0 with an sm_90 cubin and install it here.
+"""Build causal-conv1d 1.7.0 with an sm_89 cubin and install it here.
 
 The checkpoint requirements pin flash-linear-attention 0.5.2 and do not
-install this package. Upstream 1.7.0 already emits
-``arch=compute_90,code=sm_90`` when nvcc is 11.8 or newer. This script
-inserts that Hopper cubin if the sdist omitted it, then installs with the
-torch already in the environment. The target GPU is H200 (sm_90).
+install this package. Upstream 1.7.0 emits sm_90 when nvcc is 11.8 or
+newer and skips sm_89, so a plain pip install has no L20X image. This
+script inserts ``arch=compute_89,code=sm_89`` and keeps or inserts sm_90,
+then installs with the torch already in the environment.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-from models.pplx_decider.conv import CAUSAL_CONV1D_VERSION, ensure_sm90_gencode
+from models.pplx_decider.conv import CAUSAL_CONV1D_VERSION, ensure_prefill_gencode
 
 PIN = f"causal-conv1d=={CAUSAL_CONV1D_VERSION}"
 
@@ -36,7 +36,10 @@ def main() -> None:
         with tarfile.open(archives[0]) as archive:
             archive.extractall(root)
         setup = next(root.glob("causal_conv1d-*/setup.py"))
-        setup.write_text(ensure_sm90_gencode(setup.read_text(encoding="utf-8")), encoding="utf-8")
+        patched = ensure_prefill_gencode(setup.read_text(encoding="utf-8"))
+        if "compute_89" not in patched:
+            raise SystemExit("refusing to build causal_conv1d without an sm_89 cubin")
+        setup.write_text(patched, encoding="utf-8")
         subprocess.check_call(
             [
                 sys.executable,
