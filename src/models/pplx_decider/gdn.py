@@ -31,6 +31,7 @@ FLA_VERSION = "0.5.2"
 FLA_MODULE = "fla.ops.gated_delta_rule"
 FI_DISTRIBUTION = "flashinfer-python"
 FI_VERSION = "0.6.16.post3"
+FI_PIN = f"{FI_DISTRIBUTION}=={FI_VERSION}"
 FI_MODULE = "flashinfer.gdn_prefill"
 GDN_PREFILL = "flashinfer"
 HOPPER = (9, 0)
@@ -85,24 +86,38 @@ def prepare_fla(*, required: bool) -> str | None:
     return version_base(installed)
 
 
-def prepare_flashinfer() -> str | None:
-    """Import the pinned FlashInfer GDN prefill, or return None if it is absent.
+def resolve_flashinfer(installed: str | None, *, imported: bool) -> tuple[str | None, str]:
+    """Choose the FlashInfer pin without refusing capability 9.0.
 
-    A different installed version is a startup error. Absence leaves the
-    FLA chunk bind in place, including on capability 9.0.
+    ``absent`` and ``import-failed`` leave the FLA chunk bind in place.
+    A different installed version is a startup error.
     """
+
+    if installed is None:
+        return None, "absent"
+    if version_base(installed) != FI_VERSION:
+        raise RuntimeError(f"{FI_DISTRIBUTION} {installed!r} is loaded; expected {FI_VERSION}")
+    if not imported:
+        return None, "import-failed"
+    return version_base(installed), "bound"
+
+
+def prepare_flashinfer() -> tuple[str | None, str]:
+    """Import the pinned FlashInfer GDN prefill when this environment has it."""
 
     try:
         installed = importlib.metadata.version(FI_DISTRIBUTION)
     except importlib.metadata.PackageNotFoundError:
-        return None
-    if version_base(installed) != FI_VERSION:
-        raise RuntimeError(f"{FI_DISTRIBUTION} {installed!r} is loaded; expected {FI_VERSION}")
-    try:
-        importlib.import_module(FI_MODULE)
-    except (ImportError, OSError):
-        return None
-    return version_base(installed)
+        installed = None
+    imported = False
+    if installed is not None and version_base(installed) == FI_VERSION:
+        try:
+            importlib.import_module(FI_MODULE)
+        except (ImportError, OSError):
+            imported = False
+        else:
+            imported = True
+    return resolve_flashinfer(installed, imported=imported)
 
 
 def assert_qwen_chunk_uses_fla() -> None:

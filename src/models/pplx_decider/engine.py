@@ -170,6 +170,7 @@ class PplxExecutor:
         self.causal_conv1d_version = prepare_causal_conv1d(required=cuda)
         self.fla_version = prepare_fla(required=cuda)
         self.flashinfer_version = None
+        self.flashinfer_status = None
         self.compute_capability = None
         self.gpu_name = None
         self.linear_attention = None
@@ -184,7 +185,9 @@ class PplxExecutor:
             self.compute_capability = f"{capability[0]}.{capability[1]}"
             self.gpu_name = torch.cuda.get_device_name(index)
             if uses_flashinfer_prefill(capability):
-                self.flashinfer_version = prepare_flashinfer()
+                self.flashinfer_version, self.flashinfer_status = prepare_flashinfer()
+            else:
+                self.flashinfer_status = "not-selected"
         decision_model, reference_answer = _import_decision_model(root)
         if self.causal_conv1d_version is not None:
             assert_qwen_conv_uses_package()

@@ -210,6 +210,7 @@ def test_http_health_and_decision():
         assert health["causal_conv1d"] is None
         assert health["fla"] is None
         assert health["flashinfer"] is None
+        assert health["flashinfer_status"] is None
         assert health["linear_attention"] is None
         assert health["compute_capability"] is None
         assert health["gpu_name"] is None
@@ -226,10 +227,12 @@ def test_http_health_and_decision():
         assert health["causal_conv1d"] == "1.7.0"
         assert health["fla"] == "0.5.2"
         assert health["flashinfer"] is None
+        assert health["flashinfer_status"] is None
         assert health["linear_attention"] == "fla-chunk"
         assert health["compute_capability"] == "8.9"
         assert health["gpu_name"] == "NVIDIA L20X"
         server.executor.flashinfer_version = "0.6.16.post3"
+        server.executor.flashinfer_status = "bound"
         server.executor.linear_attention = "flashinfer+fla+causal_conv1d"
         server.executor.compute_capability = "9.0"
         conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
@@ -238,6 +241,7 @@ def test_http_health_and_decision():
         conn.close()
         assert health["status"] == "ready"
         assert health["flashinfer"] == "0.6.16.post3"
+        assert health["flashinfer_status"] == "bound"
         assert health["linear_attention"] == "flashinfer+fla+causal_conv1d"
         assert health["compute_capability"] == "9.0"
         assert health["gpu_name"] == "NVIDIA L20X"

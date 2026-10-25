@@ -10,12 +10,14 @@ from models.pplx_decider.gdn import (
     FLA_LINEAR_ATTENTION,
     FLA_VERSION,
     FLASHINFER_LINEAR_ATTENTION,
+    FI_PIN,
     FI_VERSION,
     READY_LINEAR_ATTENTION,
     bound_linear_attention,
     flashinfer_chunk_gated_delta_rule,
     install_flashinfer_gdn_prefill,
     require_bound_linear_attention,
+    resolve_flashinfer,
     uses_flashinfer_prefill,
     version_base,
 )
@@ -24,6 +26,7 @@ from models.pplx_decider.gdn import (
 def test_versions_and_ready_names():
     assert FLA_VERSION == "0.5.2"
     assert FI_VERSION == "0.6.16.post3"
+    assert FI_PIN == "flashinfer-python==0.6.16.post3"
     assert version_base("0.5.2+cu128") == "0.5.2"
     assert FLA_LINEAR_ATTENTION == "fla-chunk"
     assert FLASHINFER_LINEAR_ATTENTION == "flashinfer+fla+causal_conv1d"
@@ -72,6 +75,20 @@ def test_torch_chunk_is_not_ready():
     modeling = SimpleNamespace(torch_chunk_gated_delta_rule=object(), causal_conv1d_fn=object())
     with pytest.raises(RuntimeError, match="not ready"):
         require_bound_linear_attention(modeling, fla_chunk=_other_chunk)
+
+
+def test_capability_9_0_stays_ready_when_flashinfer_is_absent():
+    version, status = resolve_flashinfer(None, imported=False)
+    assert version is None
+    assert status == "absent"
+    version, status = resolve_flashinfer(FI_VERSION, imported=False)
+    assert version is None
+    assert status == "import-failed"
+    version, status = resolve_flashinfer(FI_VERSION, imported=True)
+    assert version == FI_VERSION
+    assert status == "bound"
+    with pytest.raises(RuntimeError, match="0.6.16.post3"):
+        resolve_flashinfer("0.6.15", imported=True)
 
 
 def test_flashinfer_wrapper_rejects_a_batch_and_a_state():
