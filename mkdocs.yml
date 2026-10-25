@@ -70,6 +70,8 @@ nav:
       - Cua-S1 native screenshots: recipe/cua_s1/native_screenshot.md
       - Cua-S1 vision CUDA Graph: recipe/cua_s1/native_vision_graph.md
       - Open-Jev native text worker: recipe/open_jev/native.md
+      - StartLux Instant 4B native worker: recipe/startlux/README.md
+      - StartLux Instant 4B L20X latency: recipe/startlux/latency.md
       - Open-Jev-27B H200 validation: recipe/open_jev/validation.md
       - Open-Jev-9B validation: recipe/open_jev/validation-9b.md
       - Decider native text worker: recipe/decider/README.md
@@ -83,4 +85,6 @@ nav:
       - LFM2.5-350M choice worker: recipe/lfm2/README.md
       - D3 reference worker: recipe/d3/reference.md
       - Vela 2.0 reference workers: recipe/vela/reference.md
+      - Clef reference worker: recipe/clef/reference.md
+      - pplx-decider reference worker: recipe/pplx_decider/README.md
   - Contributing: CONTRIBUTING.md

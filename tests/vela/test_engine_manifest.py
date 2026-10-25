@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import py_compile
 import re
 import sys
@@ -210,6 +211,37 @@ def test_a_namespace_directory_with_nested_modules_is_refused(tmp_path):
     (fla / "ops.py").write_text("unverified module\n")
     with pytest.raises(ValueError, match="unexpected importable package fla/"):
         verify_files(tmp_path, table)
+
+
+def test_a_directory_symlink_hiding_importable_code_is_refused(tmp_path):
+    # rglob does not descend into a symlinked subdirectory, but import does:
+    # a real directory whose only entry is a symlink to a directory with a
+    # module would pass the depth walk, and the module would execute after
+    # the package root goes first on sys.path.
+    package = tmp_path / "pkg"
+    package.mkdir()
+    table = build_package(package, small_files())
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "ops.py").write_text("unverified module\n")
+    fla = package / "fla"
+    fla.mkdir()
+    os.symlink(target, fla / "evil")
+    with pytest.raises(ValueError, match="unexpected importable package fla/"):
+        verify_files(package, table)
+
+
+def test_a_directory_symlink_in_the_package_root_is_refused(tmp_path):
+    # A symlinked directory at the root is refused outright: walking its
+    # target cannot see the target's own nested symlinks either.
+    package = tmp_path / "pkg"
+    package.mkdir()
+    table = build_package(package, small_files())
+    target = tmp_path / "target"
+    target.mkdir()
+    os.symlink(target, package / "torch")
+    with pytest.raises(ValueError, match="directory symlink torch"):
+        verify_files(package, table)
 
 
 def test_unimportable_package_root_entries_still_pass(tmp_path):
