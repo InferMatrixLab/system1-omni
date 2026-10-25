@@ -331,14 +331,18 @@ pub fn load(path: &Path) -> Result<&'static Api> {
             path.display()
         )
     })?;
-    let api = Api::resolve(lib)?;
-    // SAFETY: takes no arguments.
-    let abi = unsafe { (api.cs1_abi_version)() };
+    // Check the version before resolving the complete interface, so older libraries
+    // report the rebuild requirement even when they lack newly required symbols.
+    // SAFETY: the version entry point has the same no-argument signature in every ABI.
+    let version = unsafe { lib.get::<unsafe extern "C" fn() -> u32>(b"cs1_abi_version\0") }
+        .context("CUDA library has no ABI version; rebuild it")?;
+    let abi = unsafe { version() };
     ensure!(
         abi == ABI_VERSION,
         "{} has ABI version {abi}, this build needs {ABI_VERSION}; rebuild it",
         path.display()
     );
+    let api = Api::resolve(lib)?;
     Ok(API.get_or_init(|| api))
 }
 
@@ -400,7 +404,7 @@ impl DeviceBuffer {
 
     /// The device address `offset` bytes into the buffer.
     pub fn at(&self, offset: usize) -> *mut c_void {
-        debug_assert!(offset <= self.bytes);
+        assert!(offset <= self.bytes);
         self.ptr.wrapping_byte_add(offset)
     }
 }

@@ -1,13 +1,22 @@
-//! Bounded PNG/JPEG decoding to the interleaved RGB8 that Pillow's
-//! `Image.open(...).convert("RGB")` gives, for the native vision workers.
+//! Bounded single-frame PNG/JPEG decoding to the interleaved RGB8 that Pillow's
+//! `Image.open(...).convert("RGB")` gives, shared by native workers.
 //!
-//! Single-frame PNG and JPEG only: APNG and MPO containers are refused rather than
-//! decoded to their first picture. Sixteen-bit samples follow Pillow's conversions.
-
+//! APNG and MPO containers are refused rather than decoded to their first picture.
+//! Sixteen-bit samples follow Pillow's conversions.
+use anyhow::{Context, Result, ensure};
+use base64::Engine;
+use image::{DynamicImage, ImageFormat};
 use std::io::Cursor;
 
-use anyhow::{Context, Result, ensure};
-use image::{DynamicImage, ImageFormat};
+pub const MAX_IMAGE_BYTES: usize = 4 * 1024 * 1024;
+
+/// The source limits of `decode_data_url`.
+const DATA_URL_LIMITS: DecodeLimits = DecodeLimits {
+    max_side: 2048,
+    max_pixels: 1_048_576,
+    max_aspect: 200,
+    max_alloc: 32 * 1024 * 1024,
+};
 
 /// Source limits checked from the header before decoding.
 #[derive(Clone, Copy, Debug)]
@@ -25,6 +34,24 @@ pub struct DecodedImage {
     pub width: usize,
     pub height: usize,
     pub rgb: Vec<u8>,
+}
+
+pub fn decode_data_url(url: &str) -> Result<DecodedImage> {
+    let (prefix, encoded) = url.split_once(',').context("invalid image data URL")?;
+    let format = match prefix {
+        "data:image/png;base64" => ImageFormat::Png,
+        "data:image/jpeg;base64" => ImageFormat::Jpeg,
+        _ => anyhow::bail!("only inline PNG/JPEG images are supported"),
+    };
+    ensure!(
+        encoded.len() <= 4 * MAX_IMAGE_BYTES.div_ceil(3),
+        "encoded image exceeds 4 MiB"
+    );
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .context("invalid base64 image")?;
+    ensure!(raw.len() <= MAX_IMAGE_BYTES, "image exceeds 4 MiB");
+    decode_rgb8(&raw, format, &DATA_URL_LIMITS)
 }
 
 /// Decode `raw`, whose bytes must be a `format` image, within `limits`.

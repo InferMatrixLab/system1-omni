@@ -7,6 +7,7 @@ description = "Shared Qwen3.5/3.8 prefill implementation for native decision wor
 
 [dependencies]
 anyhow = "1.0.100"
+base64 = "0.22.1"
 half = "2.7.1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 libloading = "0.8"
@@ -24,8 +25,12 @@ name = "kernels"
 path = "../../../../tests/qwen3_5/kernels.rs"
 
 [[test]]
-name = "device_features"
-path = "../../../../tests/qwen3_5/device_features.rs"
+name = "graph"
+path = "../../../../tests/qwen3_5/graph.rs"
+
+[[test]]
+name = "image_decode"
+path = "../../../../tests/qwen3_5/image_decode.rs"
 
 [[test]]
 name = "prefix"
@@ -34,3 +39,11 @@ path = "../../../../tests/qwen3_5/prefix.rs"
 [[test]]
 name = "readout"
 path = "../../../../tests/qwen3_5/readout.rs"
+
+[[test]]
+name = "graph_loading"
+path = "../../../../tests/qwen3_5/graph_loading.rs"
+
+[[test]]
+name = "device_features"
+path = "../../../../tests/qwen3_5/device_features.rs"
