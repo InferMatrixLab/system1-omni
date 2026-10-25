@@ -202,6 +202,8 @@ def test_http_health_and_decision():
         assert "text" in health["modalities"]
         assert "unpadded_full_attention_layers" not in health
         assert health["sdpa"] is None
+        assert health["mlp"] is None
+        assert health["fused_gate_up_layers"] is None
         server.executor.unpadded_full_attention_layers = 16
         conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
         conn.request("GET", "/health")
@@ -253,6 +255,14 @@ def test_http_health_and_decision():
         health = json.loads(conn.getresponse().read())
         conn.close()
         assert health["sdpa"] == "cudnn-first"
+        server.executor.mlp = "fused-gate-up"
+        server.executor.fused_gate_up_layers = 64
+        conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        conn.request("GET", "/health")
+        health = json.loads(conn.getresponse().read())
+        conn.close()
+        assert health["mlp"] == "fused-gate-up"
+        assert health["fused_gate_up_layers"] == 64
         assert "gdn" not in health
         status, body = post(
             server,

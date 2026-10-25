@@ -21,12 +21,10 @@ unfinished until decision disagreements against head ``1ba07d1`` are counted.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Sequence
 from typing import Any
 
 _CHECKPOINT_HOOK = "mask_inputs"
-SDPA_CANDIDATE = "cudnn-first"
 SDPA_DEFAULT = "default"
 
 
@@ -146,50 +144,19 @@ def mask_inputs_unpadded(module: Any, args: tuple, kwargs: dict) -> tuple[tuple,
 
 
 def sdpa_preference(device: str, selected: str | None = None) -> str:
-    """CUDA candidate prefers cuDNN attention. Any other device stays on the default order.
+    """Keep the checkpoint SDPA order on every device.
 
-    ``selected`` is ``PPLX_SDPA``. Unset on CUDA selects ``cudnn-first``.
-    ``default`` reproduces the primary order. A value outside those two
-    names is a startup error on every device.
+    The checkpoint turns cuDNN SDPA off. ``PPLX_SDPA=cudnn-first`` missed
+    the gate and is not selectable. Unset and ``default`` are the primary.
     """
 
-    if selected is not None and selected not in {SDPA_CANDIDATE, SDPA_DEFAULT}:
-        raise RuntimeError("PPLX_SDPA must be cudnn-first or default")
-    if device != "cuda":
+    if device not in {"cuda", "cpu"}:
+        raise ValueError("device must be cuda or cpu")
+    if selected in {None, SDPA_DEFAULT}:
         return SDPA_DEFAULT
-    return SDPA_CANDIDATE if selected is None else selected
-
-
-@contextmanager
-def sdpa_context(preference: str) -> Iterator[None]:
-    """Prefer cuDNN SDPA, then flash, mem-efficient, and math.
-
-    The checkpoint leaves cuDNN SDPA off. This context turns it on for the
-    forward and restores the previous flag. ``default`` does not change it.
-    """
-
-    if preference == SDPA_DEFAULT:
-        yield
-        return
-    if preference != SDPA_CANDIDATE:
-        raise RuntimeError("PPLX_SDPA must be cudnn-first or default")
-    import torch
-    from torch.nn.attention import SDPBackend, sdpa_kernel
-
-    previous = torch.backends.cuda.cudnn_sdp_enabled()
-    torch.backends.cuda.enable_cudnn_sdp(True)
-    try:
-        with sdpa_kernel(
-            [
-                SDPBackend.CUDNN_ATTENTION,
-                SDPBackend.FLASH_ATTENTION,
-                SDPBackend.EFFICIENT_ATTENTION,
-                SDPBackend.MATH,
-            ]
-        ):
-            yield
-    finally:
-        torch.backends.cuda.enable_cudnn_sdp(previous)
+    if selected == "cudnn-first":
+        raise RuntimeError("PPLX_SDPA=cudnn-first missed the gate and is not selectable")
+    raise RuntimeError("PPLX_SDPA must be unset or default")
 
 
 def install_unpadded_full_attention(language_model: Any) -> int:

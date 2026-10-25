@@ -18,7 +18,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .attention import install_unpadded_full_attention, sdpa_context, sdpa_preference
+from .attention import install_unpadded_full_attention, sdpa_preference
+from .mlp import install_fused_gate_up, mlp_preference
 from .contract import (
     ATTENTION_MODE,
     BASE_MODEL,
@@ -166,7 +167,9 @@ class PplxExecutor:
         # Import conv and FLA before Qwen3.5 modeling freezes the torch refs.
         # Both measured FlashInfer policies missed the gate, so the default
         # stays on FLA chunk. PPLX_GDN_PREFILL=short opts into the rejected
-        # length dispatch. A lab GPU named NVIDIA L20X is accepted at
+        # length dispatch. cuDNN-first SDPA also missed the gate and is not
+        # selectable. CUDA fuses the text MLP gate and up GEMMs unless
+        # PPLX_MLP=default. A lab GPU named NVIDIA L20X is accepted at
         # capability 8.9 or 9.0.
         cuda = device == "cuda"
         self.causal_conv1d_version = prepare_causal_conv1d(required=cuda)
@@ -177,6 +180,8 @@ class PplxExecutor:
         self.gpu_name = None
         self.linear_attention = None
         self.sdpa = sdpa_preference(device, os.environ.get("PPLX_SDPA"))
+        self.mlp = mlp_preference(device, os.environ.get("PPLX_MLP"))
+        self.fused_gate_up_layers = 0
         if cuda:
             import torch
 
@@ -218,9 +223,10 @@ class PplxExecutor:
         )
         # Hashed files stay byte-identical. This only retargets the loaded
         # full-attention modules and the noncausal pre-hook.
-        self.unpadded_full_attention_layers = install_unpadded_full_attention(
-            self.model.backbone.language_model
-        )
+        language_model = self.model.backbone.language_model
+        self.unpadded_full_attention_layers = install_unpadded_full_attention(language_model)
+        if self.mlp == "fused-gate-up":
+            self.fused_gate_up_layers = install_fused_gate_up(language_model)
 
     def evaluate(self, request: Request) -> dict[str, Any]:
         import torch
@@ -233,7 +239,7 @@ class PplxExecutor:
         ]
         answers: dict[str, Any] = {}
         input_tokens = 0
-        with torch.inference_mode(), sdpa_context(self.sdpa):
+        with torch.inference_mode():
             step = self.forward_batch_size
             for start in range(0, len(rows), step):
                 batch = self.model.prepare(rows[start : start + step])

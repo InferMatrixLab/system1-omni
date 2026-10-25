@@ -133,15 +133,13 @@ def test_install_rejects_non_sdpa_before_changing_modules():
     assert model._forward_pre_hooks[7] is mask_inputs
 
 
-def test_sdpa_preference_is_cudnn_first_only_on_cuda():
-    assert sdpa_preference("cuda", None) == "cudnn-first"
-    assert sdpa_preference("cuda", "cudnn-first") == "cudnn-first"
+def test_sdpa_preference_stays_on_the_primary_order():
+    assert sdpa_preference("cuda", None) == "default"
     assert sdpa_preference("cuda", "default") == "default"
     assert sdpa_preference("cpu", None) == "default"
-    assert sdpa_preference("cpu", "cudnn-first") == "default"
-    with pytest.raises(RuntimeError, match="cudnn-first or default"):
-        sdpa_preference("cuda", "flash")
-    with pytest.raises(RuntimeError, match="cudnn-first or default"):
+    with pytest.raises(RuntimeError, match="not selectable"):
+        sdpa_preference("cuda", "cudnn-first")
+    with pytest.raises(RuntimeError, match="unset or default"):
         sdpa_preference("cpu", "flash")
 
 
