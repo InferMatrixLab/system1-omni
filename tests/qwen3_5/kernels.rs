@@ -473,6 +473,240 @@ fn flash_attention_matches_float64_reference() {
     }
 }
 
+#[test]
+#[ignore = "needs a GPU and CUA_S1_CUDA_LIB with vision v2 symbols"]
+fn vision_v2_head_dim72_position_and_rope_match_rounded_reference() {
+    let st = setup();
+    let v2 = api().vision_v2().unwrap();
+    let (hidden, dh) = (1152usize, 72usize);
+    let table = random(32 * hidden, 11, 0.5);
+    let table_device = to_device(&table, st);
+    for n in [1usize, 3, 65] {
+        let input = random(n * hidden, 12, 1.0);
+        let indices: Vec<i32> = (0..n * 4).map(|i| ((i * 7 + 3) % 32) as i32).collect();
+        let weights: Vec<f32> = [0.125, 0.375, 0.25, 0.25].repeat(n);
+        let index_bytes: Vec<u8> = indices.iter().flat_map(|v| v.to_le_bytes()).collect();
+        let index_device = DeviceBuffer::new(index_bytes.len()).unwrap();
+        let weight_device = f32_to_device(&weights, st);
+        let positioned = to_device(&input, st);
+        // SAFETY: n complete hidden-width rows, four in-range table indices and
+        // weights per token, and immutable table/index buffers on this stream.
+        unsafe {
+            cuda::upload(index_device.at(0), &index_bytes, st).unwrap();
+            check(
+                (v2.position)(
+                    positioned.at(0),
+                    table_device.at(0),
+                    index_device.at(0).cast(),
+                    weight_device.at(0).cast(),
+                    n as i32,
+                    hidden as i32,
+                    st,
+                ),
+                "vision v2 positions",
+            )
+            .unwrap();
+        }
+        let actual = from_device(&positioned, n * hidden, st);
+        for token in 0..n {
+            for channel in 0..hidden {
+                let mut position = 0f32;
+                for corner in 0..4 {
+                    let index = token * 4 + corner;
+                    position +=
+                        table[indices[index] as usize * hidden + channel].to_f32() * weights[index];
+                }
+                let expected = bf16::from_f32(
+                    input[token * hidden + channel].to_f32() + bf16::from_f32(position).to_f32(),
+                );
+                assert_eq!(
+                    actual[token * hidden + channel].to_bits(),
+                    expected.to_f32().to_bits(),
+                    "position n={n}, token={token}, channel={channel}"
+                );
+            }
+        }
+
+        let qkv = random(n * hidden * 3, 13, 2.0);
+        let angles: Vec<f32> = (0..n * dh / 2).map(|i| i as f32 * 0.03125).collect();
+        let cos: Vec<f32> = angles.iter().map(|v| v.cos()).collect();
+        let sin: Vec<f32> = angles.iter().map(|v| v.sin()).collect();
+        let qkv_device = to_device(&qkv, st);
+        let cos_device = f32_to_device(&cos, st);
+        let sin_device = f32_to_device(&sin, st);
+        let q = DeviceBuffer::new(n * hidden * 2).unwrap();
+        let k = DeviceBuffer::new(n * hidden * 2).unwrap();
+        // SAFETY: QKV has n interleaved 3*hidden rows, the FP32 tables have
+        // n*(dh/2) entries, and Q/K have n*hidden disjoint BF16 entries.
+        unsafe {
+            check(
+                (v2.rope)(
+                    qkv_device.at(0),
+                    cos_device.at(0).cast(),
+                    sin_device.at(0).cast(),
+                    q.at(0),
+                    k.at(0),
+                    n as i32,
+                    hidden as i32,
+                    dh as i32,
+                    st,
+                ),
+                "vision v2 rotary",
+            )
+            .unwrap();
+        }
+        for (part, buffer) in [(0, &q), (1, &k)] {
+            let actual = from_device(buffer, n * hidden, st);
+            for token in 0..n {
+                for channel in 0..hidden {
+                    let d = channel % dh;
+                    let half = dh / 2;
+                    let partner = if d < half {
+                        channel + half
+                    } else {
+                        channel - half
+                    };
+                    let sign = if d < half { -1.0 } else { 1.0 };
+                    let offset = token * hidden * 3 + part * hidden;
+                    let angle = token * half + d % half;
+                    let expected = bf16::from_f32(
+                        qkv[offset + channel].to_f32() * cos[angle]
+                            + sign * qkv[offset + partner].to_f32() * sin[angle],
+                    );
+                    assert_eq!(
+                        actual[token * hidden + channel].to_bits(),
+                        expected.to_f32().to_bits(),
+                        "rope n={n}, part={part}, token={token}, channel={channel}"
+                    );
+                }
+            }
+        }
+    }
+    // SAFETY: every operation/download above completed before stream retirement.
+    check(
+        unsafe { (api().cs1_stream_destroy)(st) },
+        "destroy vision test stream",
+    )
+    .unwrap();
+}
+
+#[test]
+#[ignore = "needs a GPU and CUA_S1_CUDA_LIB with vision v2 symbols"]
+fn vision_v2_head_dim72_padding_attention_and_unpack() {
+    let st = setup();
+    let v2 = api().vision_v2().unwrap();
+    let (heads, dh, padded_dh) = (16usize, 72usize, 80usize);
+    let hidden = heads * dh;
+    for (n, amplitude) in [(1usize, 8.0), (63, 2.0), (64, 0.5), (65, 0.5), (139, 2.0)] {
+        let q = random(n * hidden, 21, amplitude);
+        let k = random(n * hidden, 22, amplitude);
+        let qkv = random(n * hidden * 3, 23, 1.0);
+        let q_device = to_device(&q, st);
+        let k_device = to_device(&k, st);
+        let qkv_device = to_device(&qkv, st);
+        let output = DeviceBuffer::new(n * hidden * 2).unwrap();
+        let count = n * heads * padded_dh;
+        // Nonzero initial contents expose missing zero writes to padded columns.
+        let workspace = to_device(&vec![bf16::from_f32(9.0); count * 4], st);
+        // SAFETY: Q/K are compact, V starts at the third slice of each 3*hidden
+        // QKV row, and workspace contains four n*heads*80 BF16 buffers.
+        unsafe {
+            check(
+                (v2.attention)(
+                    q_device.at(0),
+                    k_device.at(0),
+                    qkv_device.at(hidden * 2 * 2),
+                    output.at(0),
+                    n as i32,
+                    heads as i32,
+                    dh as i32,
+                    workspace.at(0),
+                    st,
+                ),
+                "vision v2 attention",
+            )
+            .unwrap();
+        }
+        let actual = from_device(&output, n * hidden, st);
+        let padded = from_device(&workspace, count * 4, st);
+        assert!(actual.iter().all(|v| v.is_finite()));
+        for token in 0..n {
+            for head in 0..heads {
+                for d in 0..padded_dh {
+                    let offset = (token * heads + head) * padded_dh + d;
+                    for (part, source) in [(0, &q), (1, &k), (2, &qkv)] {
+                        let expected = if d < dh {
+                            let index = if part == 2 {
+                                token * hidden * 3 + hidden * 2 + head * dh + d
+                            } else {
+                                (token * heads + head) * dh + d
+                            };
+                            source[index].to_f32()
+                        } else {
+                            0.0
+                        };
+                        assert_eq!(padded[part * count + offset].to_bits(), expected.to_bits());
+                    }
+                    if d < dh {
+                        assert_eq!(
+                            actual[(token * heads + head) * dh + d].to_bits(),
+                            padded[3 * count + offset].to_bits(),
+                            "unpack n={n}, token={token}, head={head}, d={d}"
+                        );
+                    }
+                }
+            }
+        }
+        let mut worst = 0f64;
+        // Vision attention is noncausal. Keep the existing FlashAttention test's
+        // per-row relative error metric and 1.6e-2 budget, including tail rows.
+        for row in (0..n).step_by(n.div_ceil(64)).chain([n - 1]) {
+            for head in 0..heads {
+                let query = &q[(row * heads + head) * dh..][..dh];
+                let scores: Vec<f64> = (0..n)
+                    .map(|token| {
+                        query
+                            .iter()
+                            .zip(&k[(token * heads + head) * dh..][..dh])
+                            .map(|(q, k)| q.to_f64() * k.to_f64())
+                            .sum::<f64>()
+                            / (dh as f64).sqrt()
+                    })
+                    .collect();
+                let max = scores.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                let weights: Vec<f64> = scores.iter().map(|v| (v - max).exp()).collect();
+                let sum: f64 = weights.iter().sum();
+                let reference: Vec<f64> = (0..dh)
+                    .map(|d| {
+                        (0..n)
+                            .map(|token| {
+                                weights[token]
+                                    * qkv[token * hidden * 3 + hidden * 2 + head * dh + d].to_f64()
+                            })
+                            .sum::<f64>()
+                            / sum
+                    })
+                    .collect();
+                let difference = actual[(row * heads + head) * dh..][..dh]
+                    .iter()
+                    .zip(&reference)
+                    .map(|(got, want)| (*got as f64 - want).abs())
+                    .fold(0f64, f64::max);
+                let scale = reference.iter().map(|v| v.abs()).fold(1e-3, f64::max);
+                worst = worst.max(difference / scale);
+            }
+        }
+        eprintln!("vision v2 dh=72 n={n}: largest relative difference {worst:.2e}");
+        assert!(worst < 1.6e-2, "n={n}: {worst}");
+    }
+    // SAFETY: every operation/download above completed before stream retirement.
+    check(
+        unsafe { (api().cs1_stream_destroy)(st) },
+        "destroy vision test stream",
+    )
+    .unwrap();
+}
+
 /// Transformers' torch_recurrent_gated_delta_rule in float64, one token at a time,
 /// with the L2 norms of q and k and q scaled by K^-1/2.
 #[allow(clippy::too_many_arguments)]
@@ -773,78 +1007,81 @@ fn device_copy_helpers_roundtrip() {
 fn gdn_conv_continuation_uses_cached_history() {
     let st = setup();
     let prefix = 64usize;
-    let (key_dim, value_dim, heads) = (16 * 128usize, 48 * 128usize, 48usize);
-    let channels = 2 * key_dim + value_dim;
-    let ld = channels + value_dim + 2 * heads;
-    let weights = to_device(&vec![bf16::from_f32(0.25); channels * 4], st);
-    let conv = |source: &DeviceBuffer, start: usize, rows: usize| {
-        let q = DeviceBuffer::new(rows * key_dim * 2).unwrap();
-        let k = DeviceBuffer::new(rows * key_dim * 2).unwrap();
-        let v = DeviceBuffer::new(rows * value_dim * 2).unwrap();
-        // SAFETY: source contains start + rows complete pitched rows; outputs
-        // contain rows of the corresponding Q/K/V widths.
-        unsafe {
-            check(
-                (api().cs1_gdn_conv)(
-                    source.at(start * ld * 2),
-                    ld as i32,
-                    weights.at(0),
-                    q.at(0),
-                    k.at(0),
-                    v.at(0),
-                    rows as i32,
-                    key_dim as i32,
-                    value_dim as i32,
+    // Decider2B uses sixteen key/value heads; preserve the 27B control too.
+    for (key_dim, value_dim, heads) in [(2048usize, 2048usize, 16usize), (2048, 6144, 48)] {
+        let channels = 2 * key_dim + value_dim;
+        let ld = channels + value_dim + 2 * heads;
+        let weights = to_device(&vec![bf16::from_f32(0.25); channels * 4], st);
+        let conv = |source: &DeviceBuffer, start: usize, rows: usize| {
+            let q = DeviceBuffer::new(rows * key_dim * 2).unwrap();
+            let k = DeviceBuffer::new(rows * key_dim * 2).unwrap();
+            let v = DeviceBuffer::new(rows * value_dim * 2).unwrap();
+            // SAFETY: source contains start + rows complete pitched rows; outputs
+            // contain rows of the corresponding Q/K/V widths.
+            unsafe {
+                check(
+                    (api().cs1_gdn_conv)(
+                        source.at(start * ld * 2),
+                        ld as i32,
+                        weights.at(0),
+                        q.at(0),
+                        k.at(0),
+                        v.at(0),
+                        rows as i32,
+                        key_dim as i32,
+                        value_dim as i32,
+                        st,
+                    ),
+                    "gdn conv continuation",
+                )
+                .unwrap();
+            }
+            [
+                from_device(&q, rows * key_dim, st),
+                from_device(&k, rows * key_dim, st),
+                from_device(&v, rows * value_dim, st),
+            ]
+        };
+        for rows in [1usize, 2, 3, 4, 65] {
+            let total = prefix + rows;
+            // Positive inputs and taps make omission of any history row observable.
+            let projection: Vec<bf16> = random(total * ld, 37, 0.5)
+                .iter()
+                .map(|x| bf16::from_f32(x.to_f32().abs() + 0.25))
+                .collect();
+            let source = to_device(&projection, st);
+            let full = conv(&source, 0, total);
+            let tail = DeviceBuffer::new(3 * ld * 2).unwrap();
+            let window = DeviceBuffer::new((rows + 3) * ld * 2).unwrap();
+            // SAFETY: capture three prefix rows, restore them ahead of the suffix,
+            // and copy the suffix into the remaining non-overlapping window rows.
+            unsafe {
+                cuda::copy_dd(tail.at(0), source.at((prefix - 3) * ld * 2), 3 * ld * 2, st)
+                    .unwrap();
+                cuda::copy_dd(window.at(0), tail.at(0), 3 * ld * 2, st).unwrap();
+                cuda::copy_dd(
+                    window.at(3 * ld * 2),
+                    source.at(prefix * ld * 2),
+                    rows * ld * 2,
                     st,
-                ),
-                "gdn conv continuation",
-            )
-            .unwrap();
-        }
-        [
-            from_device(&q, rows * key_dim, st),
-            from_device(&k, rows * key_dim, st),
-            from_device(&v, rows * value_dim, st),
-        ]
-    };
-    for rows in [1usize, 2, 3, 4, 65] {
-        let total = prefix + rows;
-        // Positive inputs and taps make omission of any history row observable.
-        let projection: Vec<bf16> = random(total * ld, 37, 0.5)
-            .iter()
-            .map(|x| bf16::from_f32(x.to_f32().abs() + 0.25))
-            .collect();
-        let source = to_device(&projection, st);
-        let full = conv(&source, 0, total);
-        let tail = DeviceBuffer::new(3 * ld * 2).unwrap();
-        let window = DeviceBuffer::new((rows + 3) * ld * 2).unwrap();
-        // SAFETY: capture three prefix rows, restore them ahead of the suffix,
-        // and copy the suffix into the remaining non-overlapping window rows.
-        unsafe {
-            cuda::copy_dd(tail.at(0), source.at((prefix - 3) * ld * 2), 3 * ld * 2, st).unwrap();
-            cuda::copy_dd(window.at(0), tail.at(0), 3 * ld * 2, st).unwrap();
-            cuda::copy_dd(
-                window.at(3 * ld * 2),
-                source.at(prefix * ld * 2),
-                rows * ld * 2,
-                st,
-            )
-            .unwrap();
-        }
-        let restored = conv(&window, 0, rows + 3);
-        let missing_history = conv(&window, 3, rows);
-        for (i, width) in [key_dim, key_dim, value_dim].into_iter().enumerate() {
-            let expected = &full[i][prefix * width..];
-            assert_eq!(
-                &restored[i][3 * width..],
-                expected,
-                "cached conv history diverges for output {i}, suffix rows={rows}"
-            );
-            assert_ne!(
-                &missing_history[i][..rows.min(3) * width],
-                &expected[..rows.min(3) * width],
-                "fixture must detect the old suffix-only conv call"
-            );
+                )
+                .unwrap();
+            }
+            let restored = conv(&window, 0, rows + 3);
+            let missing_history = conv(&window, 3, rows);
+            for (i, width) in [key_dim, key_dim, value_dim].into_iter().enumerate() {
+                let expected = &full[i][prefix * width..];
+                assert_eq!(
+                    &restored[i][3 * width..],
+                    expected,
+                    "cached conv history diverges for output {i}, suffix rows={rows}"
+                );
+                assert_ne!(
+                    &missing_history[i][..rows.min(3) * width],
+                    &expected[..rows.min(3) * width],
+                    "fixture must detect the old suffix-only conv call"
+                );
+            }
         }
     }
 }
@@ -853,77 +1090,81 @@ fn gdn_conv_continuation_uses_cached_history() {
 #[ignore = "needs a GPU and CUA_S1_CUDA_LIB"]
 fn windowed_attention_matches_full_pass_bit_for_bit() {
     let st = setup();
-    let (hq, hk, dh) = (24usize, 4usize, 256usize);
-    for (t, bases) in [
-        (139usize, vec![64usize]),
-        (712, vec![64, 128]),
-        (972, vec![64, 896]),
-        (2048, vec![64, 1024]),
-    ] {
-        // gated path with a strided V buffer, exactly the model's shape
-        let ldv = hk * dh + 16;
-        let q = to_device(&random(t * hq * dh, 1, 2.0), st);
-        let k = to_device(&random(t * hk * dh, 2, 2.0), st);
-        let v = to_device(&random(t * ldv, 3, 1.0), st);
-        let gate = to_device(&random(t * hq * dh, 4, 3.0), st);
-        let full = DeviceBuffer::new(t * hq * dh * 2).unwrap();
-        // SAFETY: every buffer has complete rows of the shapes above.
-        unsafe {
-            check(
-                (api().cs1_attention_gated)(
-                    q.at(0),
-                    k.at(0),
-                    v.at(0),
-                    ldv as i32,
-                    gate.at(0),
-                    full.at(0),
-                    t as i32,
-                    hq as i32,
-                    hk as i32,
-                    dh as i32,
-                    0.0625,
-                    st,
-                ),
-                "full pass",
-            )
-            .unwrap();
-        }
-        let full_rows = from_device(&full, t * hq * dh, st);
-        for qb in &bases {
-            let win = DeviceBuffer::new(t * hq * dh * 2).unwrap();
-            // SAFETY: the window reads the same buffers; rows < q_base stay unwritten.
+    // Canonical window indexing covers Decider2B and the existing 27B shape.
+    for (hq, hk, dh) in [(8usize, 2usize, 256usize), (24, 4, 256)] {
+        for (t, bases) in [
+            (139usize, vec![64usize]),
+            (712, vec![64, 128]),
+            (972, vec![64, 896]),
+            (2048, vec![64, 1024]),
+        ] {
+            // gated path with a strided V buffer, exactly the model's shape
+            let ldv = hk * dh + 16;
+            let q = to_device(&random(t * hq * dh, 1, 2.0), st);
+            let k = to_device(&random(t * hk * dh, 2, 2.0), st);
+            let v = to_device(&random(t * ldv, 3, 1.0), st);
+            let gate = to_device(&random(t * hq * dh, 4, 3.0), st);
+            let full = DeviceBuffer::new(t * hq * dh * 2).unwrap();
+            // SAFETY: every buffer has complete rows of the shapes above.
             unsafe {
                 check(
-                    (api().cs1_attention_gated_prefix)(
+                    (api().cs1_attention_gated)(
                         q.at(0),
                         k.at(0),
                         v.at(0),
                         ldv as i32,
                         gate.at(0),
-                        win.at(0),
+                        full.at(0),
                         t as i32,
                         hq as i32,
                         hk as i32,
                         dh as i32,
                         0.0625,
-                        *qb as i32,
                         st,
                     ),
-                    "windowed pass",
+                    "full pass",
                 )
                 .unwrap();
             }
-            let win_rows = from_device(&win, t * hq * dh, st);
-            let mut bad = 0usize;
-            for row in *qb..t {
-                for e in 0..hq * dh {
-                    if full_rows[row * hq * dh + e] != win_rows[row * hq * dh + e] {
-                        bad += 1;
+            let full_rows = from_device(&full, t * hq * dh, st);
+            for qb in &bases {
+                let win = DeviceBuffer::new(t * hq * dh * 2).unwrap();
+                // SAFETY: the window reads the same buffers; rows < q_base stay unwritten.
+                unsafe {
+                    check(
+                        (api().cs1_attention_gated_prefix)(
+                            q.at(0),
+                            k.at(0),
+                            v.at(0),
+                            ldv as i32,
+                            gate.at(0),
+                            win.at(0),
+                            t as i32,
+                            hq as i32,
+                            hk as i32,
+                            dh as i32,
+                            0.0625,
+                            *qb as i32,
+                            st,
+                        ),
+                        "windowed pass",
+                    )
+                    .unwrap();
+                }
+                let win_rows = from_device(&win, t * hq * dh, st);
+                let mut bad = 0usize;
+                for row in *qb..t {
+                    for e in 0..hq * dh {
+                        if full_rows[row * hq * dh + e] != win_rows[row * hq * dh + e] {
+                            bad += 1;
+                        }
                     }
                 }
+                assert_eq!(bad, 0, "t = {t}, q_base = {qb}: {bad} values differ");
+                eprintln!(
+                    "windowed attention t = {t}, q_base = {qb}: rows >= q_base bitwise equal"
+                );
             }
-            assert_eq!(bad, 0, "t = {t}, q_base = {qb}: {bad} values differ");
-            eprintln!("windowed attention t = {t}, q_base = {qb}: rows >= q_base bitwise equal");
         }
     }
 }
@@ -935,6 +1176,8 @@ fn gdn_prefill_two_phase_matches_one_shot_bit_for_bit() {
     let d = 128usize;
     for (t, h, hk, qk_amp, decay_scale) in [
         (107usize, 4usize, 2usize, 1.0f32, 1.0f32),
+        (129, 16, 16, 0.01, 1.0),
+        (936, 16, 16, 0.01, 1.0),
         (936, 4, 2, 0.01, 1.0),
         (3399, 3, 1, 0.01, 1.0),
         (65, 4, 2, 0.01, 1e-9),
@@ -1086,3 +1329,127 @@ fn gdn_prefill_two_phase_matches_one_shot_bit_for_bit() {
         );
     }
 }
+
+#[test]
+#[ignore = "needs a GPU and CUA_S1_CUDA_LIB"]
+fn fixed_gemm_rows_do_not_depend_on_m() {
+    let st = setup();
+    // Every projection of the 2B, 4B, 9B and 27B backbones as (N, K): the GDN input and
+    // output, the attention input and output, and the MLP's gate|up and down.
+    let shapes = [
+        (8224usize, 2048usize),
+        (2048, 2048),
+        (5120, 2048),
+        (12288, 2048),
+        (2048, 6144),
+        (12352, 2560),
+        (2560, 4096),
+        (10240, 2560),
+        (18432, 2560),
+        (2560, 9216),
+        (12352, 4096),
+        (4096, 4096),
+        (10240, 4096),
+        (24576, 4096),
+        (4096, 12288),
+        (16480, 5120),
+        (5120, 6144),
+        (14336, 5120),
+        (34816, 5120),
+        (5120, 17408),
+    ];
+    let max_m = 4096usize;
+    // SAFETY: plain handle creation; checked for null below.
+    let fixed = unsafe { (api().cs1_gemm_create_fixed)(32 << 20, 64) };
+    assert!(!fixed.is_null());
+    // SAFETY: a non-positive reference M is refused before anything is allocated.
+    assert!(unsafe { (api().cs1_gemm_create_fixed)(32 << 20, 0) }.is_null());
+    let nan = vec![0xffu8; max_m * 34816 * 2];
+    for (i, (n, k)) in shapes.into_iter().enumerate() {
+        let x = random(max_m * k, 70 + i as u64, 2.0);
+        let w = random(n * k, 90 + i as u64, 0.05);
+        let (xd, wd) = (to_device(&x, st), to_device(&w, st));
+        let y = DeviceBuffer::new(max_m * n * 2).unwrap();
+        // the bfloat16 output of m rows starting at input row `at`, over a NaN-filled buffer
+        let rows = |at: usize, m: usize| {
+            let mut out = vec![0u8; m * n * 2];
+            // SAFETY: x holds max_m rows of k, w is [n, k], y has room for max_m rows of n,
+            // and at + m <= max_m.
+            unsafe {
+                cuda::upload(y.at(0), &nan[..max_m * n * 2], st).unwrap();
+                check(
+                    (api().cs1_gemm)(
+                        fixed,
+                        xd.at(at * k * 2),
+                        wd.at(0),
+                        y.at(0),
+                        m as i32,
+                        n as i32,
+                        k as i32,
+                        n as i32,
+                        st,
+                    ),
+                    "fixed gemm",
+                )
+                .unwrap();
+                cuda::download(&mut out, y.at(0), st).unwrap();
+            }
+            out
+        };
+        let all = rows(0, max_m);
+        // every output was written (the comparisons below are byte for byte against this)
+        let (values, _) = all.as_chunks::<2>();
+        assert!(values.iter().all(|b| !bf16::from_le_bytes(*b).is_nan()));
+        let row = |r: usize| &all[r * n * 2..(r + 1) * n * 2];
+        // fewer rows, and rows that sit lower in the full call, as a branch's tokens do
+        for (at, m) in [
+            (0usize, 1usize),
+            (0, 2),
+            (0, 3),
+            (0, 8),
+            (0, 63),
+            (0, 64),
+            (0, 65),
+            (0, 256),
+            (0, 1000),
+            (0, 1024),
+            (0, 3109),
+            (1, 2),
+            (37, 64),
+            (64, 65),
+            (1000, 200),
+            (3000, 1096),
+        ] {
+            assert!(
+                rows(at, m) == all[at * n * 2..(at + m) * n * 2],
+                "rows {at}..{} changed at {n} x {k}",
+                at + m
+            );
+        }
+        // the first and last rows against float64, so the product itself is right
+        for r in [0, max_m - 1] {
+            let want: Vec<f64> = (0..n)
+                .map(|j| {
+                    (0..k)
+                        .map(|c| x[r * k + c].to_f64() * w[j * k + c].to_f64())
+                        .sum()
+                })
+                .collect();
+            let (got, _) = row(r).as_chunks::<2>();
+            let scale = want.iter().fold(0f64, |m, v| m.max(v.abs()));
+            let worst = got
+                .iter()
+                .zip(&want)
+                .map(|(b, v)| (bf16::from_le_bytes(*b).to_f64() - v).abs())
+                .fold(0f64, f64::max);
+            assert!(
+                worst <= 1e-2 * scale,
+                "{n} x {k}, row {r}: {worst} vs {scale}"
+            );
+        }
+    }
+    // SAFETY: created above and not destroyed before.
+    unsafe { (api().cs1_gemm_destroy)(fixed) };
+}
+#[path = "vision_v2_kernels.rs"]
+mod vision_v2;
