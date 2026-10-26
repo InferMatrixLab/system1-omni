@@ -56,7 +56,7 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
     // unparseable value is an error, and a wider one clamps back down.
     let logit_gate = std::env::var("VELA_GPU_LOGIT_GATE")
         .map(|v| {
-            v.parse::<f32>()
+            v.parse::<f64>()
                 .expect("VELA_GPU_LOGIT_GATE must be a number")
         })
         .unwrap_or(0.35)
@@ -189,7 +189,7 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
         );
         println!("{case}: worst logit drift {worst_logit:.4}");
         assert!(
-            worst_logit <= logit_gate,
+            worst_logit as f64 <= logit_gate,
             "{case}: drift {worst_logit} > {logit_gate}"
         );
     }

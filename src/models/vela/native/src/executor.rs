@@ -116,11 +116,20 @@ impl Executor {
         // Each block's query position is its last token: the full
         // sequence's final hidden.
         for (block_index, block) in row.blocks.iter().enumerate() {
-            let ids = match block {
-                Block::Question { ids, .. } | Block::Span { ids, .. } => ids,
+            let (ids, query) = match block {
+                Block::Question { ids, query, .. } | Block::Span { ids, query, .. } => {
+                    (ids, *query)
+                }
             };
-            // The query is each block's last token by construction.
-            debug_assert!(ids.last().is_some());
+            // The renderer places every query at its block's last
+            // token; run_all reads the final position, so a future
+            // render change that moves it must fail here, not decode
+            // the wrong position.
+            assert_eq!(
+                query,
+                ids.len() - 1,
+                "a block's query must be its last token"
+            );
             readouts.push(Readout {
                 ids: [row.p_ids.as_slice(), ids].concat(),
                 tag: (block_index, None),
