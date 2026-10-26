@@ -79,22 +79,27 @@ fn bundle_dir() -> PathBuf {
     )
 }
 
-/// Largest absolute difference between two nested JSON numbers.
+/// Largest absolute difference between two nested JSON numbers; a
+/// structural mismatch — an object key missing on either side, arrays
+/// of unequal length, or a differing non-numeric value — scores the
+/// full 1.0.
 fn max_drift(a: &Value, b: &Value) -> f64 {
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => {
             (x.as_f64().unwrap_or(0.0) - y.as_f64().unwrap_or(0.0)).abs()
         }
-        (Value::Array(x), Value::Array(y)) => x
+        (Value::Array(x), Value::Array(y)) if x.len() == y.len() => x
             .iter()
             .zip(y)
             .map(|(x, y)| max_drift(x, y))
             .fold(0.0, f64::max),
         (Value::Object(x), Value::Object(y)) => x
             .iter()
-            .map(|(k, v)| y.get(k).map(|w| max_drift(v, w)).unwrap_or(0.0))
+            .map(|(k, v)| y.get(k).map(|w| max_drift(v, w)).unwrap_or(1.0))
+            .chain(y.keys().filter(|k| !x.contains_key(*k)).map(|_| 1.0))
             .fold(0.0, f64::max),
-        _ => 0.0,
+        (_, _) if a == b => 0.0,
+        _ => 1.0,
     }
 }
 
