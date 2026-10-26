@@ -74,29 +74,32 @@ fn f32_stack(raw: &[u8], name: &str) -> Vec<Vec<Vec<f32>>> {
 }
 
 fn bundle_dir() -> PathBuf {
-    let path = PathBuf::from(
+    PathBuf::from(
         std::env::var("VELA_NATIVE_BUNDLE").expect("set VELA_NATIVE_BUNDLE to an exported bundle"),
-    );
-    assert!(path.is_dir(), "{} is not a directory", path.display());
-    path
+    )
 }
 
-/// Largest absolute difference between two nested JSON numbers.
+/// Largest absolute difference between two nested JSON numbers; a
+/// structural mismatch — an object key missing on either side, arrays
+/// of unequal length, or a differing non-numeric value — scores the
+/// full 1.0.
 fn max_drift(a: &Value, b: &Value) -> f64 {
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => {
             (x.as_f64().unwrap_or(0.0) - y.as_f64().unwrap_or(0.0)).abs()
         }
-        (Value::Array(x), Value::Array(y)) => x
+        (Value::Array(x), Value::Array(y)) if x.len() == y.len() => x
             .iter()
             .zip(y)
             .map(|(x, y)| max_drift(x, y))
             .fold(0.0, f64::max),
         (Value::Object(x), Value::Object(y)) => x
             .iter()
-            .map(|(k, v)| y.get(k).map(|w| max_drift(v, w)).unwrap_or(0.0))
+            .map(|(k, v)| y.get(k).map(|w| max_drift(v, w)).unwrap_or(1.0))
+            .chain(y.keys().filter(|k| !x.contains_key(*k)).map(|_| 1.0))
             .fold(0.0, f64::max),
-        _ => 0.0,
+        (_, _) if a == b => 0.0,
+        _ => 1.0,
     }
 }
 
@@ -106,14 +109,23 @@ fn the_heads_reproduce_the_reference_logits_and_the_scoring_the_answers() {
     let bundle = bundle_dir();
     let heads = Heads::load(&bundle).expect("heads load");
     let cal = Calibration::load(&bundle).expect("calibration loads");
+    // The env gates may only tighten the documented ceilings: an
+    // unparseable value is an error, and a wider one clamps back down.
     let logits_gate = std::env::var("VELA_HEADS_LOGIT_GATE")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(4e-5);
+        .map(|v| {
+            v.parse::<f64>()
+                .expect("VELA_HEADS_LOGIT_GATE must be a number")
+        })
+        .unwrap_or(4e-5)
+        .min(4e-5);
     let answers_gate = std::env::var("VELA_HEADS_ANSWER_GATE")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1e-6);
+        .map(|v| {
+            v.parse::<f64>()
+                .expect("VELA_HEADS_ANSWER_GATE must be a number")
+        })
+        .unwrap_or(1e-6)
+        .min(1e-6);
+    println!("gates: logit {logits_gate:.3e} answer {answers_gate:.3e}");
 
     for case in CASES {
         let fixture = load_json(&format!("head-input-{case}.json"));

@@ -71,7 +71,7 @@ VELA_CUDA_LIB=/path/to/libqwen3_5_cuda.so \
   cargo test -p omni-vela-native --test vela_native_executor -- --ignored --nocapture
 ~~~
 
-25 tests run everywhere with no weights and no GPU: the wire contract
+27 tests run everywhere with no weights and no GPU: the wire contract
 against the pinned runtime's 422/400 bodies, the bundle manifest gate,
 and the predict-mapping/plan parity on every frozen fixture. The four
 opt-in checks (behind `-- --ignored`) replay the fixtures through the

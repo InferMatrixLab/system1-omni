@@ -51,7 +51,8 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
 - [Vela 2.0 reference workers (0.3B and the 0.8B hybrid)](vela/reference.md): download the pinned
   vllm-sr/Vela-2.0-0.3B package, pass its full-hash package gate, and serve all
   five SystemOne question kinds (`choice`/`noul`/`score` plus the `span`/`set`
-  extensions) through the Python worker and the Rust frontend on CPU FP32.
+  extensions) through the Python worker and the Rust frontend on CPU FP32;
+  or vllm-sr/Vela-2.0-0.8B at revision `326b01d8` behind its own 10-file gate.
 - [Vela 2.0 0.8B native library](vela/native.md): export the pinned-bundle
   manifest gate, wire contract and token-level processing for the 0.8B hybrid,
   checked against frozen fixtures; serving stays with the reference Python worker.
