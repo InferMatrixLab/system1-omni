@@ -123,17 +123,19 @@ manifest three times still represents 231 independent tasks, not 693 tasks.
 
 A Public231 tip that already has a full-C1 primary can be dropped before those
 three traversals. Validate `benchmarks/smoke.jsonl` first. `--fast-screen` then
-samples 60 requests from a manifest whose cases include integer `prompt_tokens`
-(not sent on the wire): quotas 10, 10, 8, 8, 8, and 16 for buckets 0–127,
-128–255, 256–511, 512–1023, 1024–2047, and 2048+. Seed 231, one measured round,
-concurrency 1, warmup 5. The screen baseline is an earlier `--fast-screen` of
-the primary SHA on those same 60 IDs (`--baseline-screen`). Do not pass
-`--baseline-p50-ms` or `--baseline-p95-ms`; full-C1 pooled numbers, including
-StartLux Instant 7.338/51.816, are refused. The StartLux Instant screen
-primary is `TBD — measure on primary SHA same 60 IDs`. An Instant
-`usage.input_tokens` index was refused: bucket 1024–2047 has 6 prompts and
-the quota is 8. Do not fill the slot until that bucket has at least 8, or
-InferRSI approves a quota change.
+samples a manifest whose cases include integer `prompt_tokens` (not sent on
+the wire): quotas 10, 10, 8, 8, 6, and 16 for buckets 0–127, 128–255,
+256–511, 512–1023, 1024–2047, and 2048+ (58 requests when every bucket is
+full). A shorter bucket keeps every available prompt and records
+`quota_shortfall`; nothing is borrowed from another bucket. If 2048+ has
+fewer than 16, the decision is `inconclusive` and cannot early-DROP. Seed
+231, one measured round, concurrency 1, warmup 5. The screen baseline is an
+earlier `--fast-screen` of the primary SHA on those same request IDs
+(`--baseline-screen`). Do not pass `--baseline-p50-ms` or
+`--baseline-p95-ms`; full-C1 pooled numbers, including StartLux Instant
+7.338/51.816, are refused. The StartLux Instant screen primary is
+`TBD — measure on primary SHA same request IDs` until measured with these
+quotas.
 `fast_screen_decision` is `screen_primary`, `drop` (only when both p50 and p95
 are worse by ≥ +2% or ≥ +0.5 ms), `full_c1`, or `inconclusive`. A `drop` writes
 `dropped_at` in `fast_screen_drop.json`. The field is never a KEEP. The gate is

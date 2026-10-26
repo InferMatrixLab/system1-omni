@@ -58,10 +58,14 @@ method, or the named hardware.
 ## Fast-screen before full C1
 
 Follow [public231-c1](../public231-c1/SKILL.md). Smoke must pass before the
-screen. Run one fast-screen: 60 requests, seed 231, concurrency 1, warmup 5,
-bucket quotas 0–127:10, 128–255:10, 256–511:8, 512–1023:8, 1024–2047:8,
-2048+:16. Compare the tip's screen p50 and p95 to the primary SHA's own
-screen of those same 60 IDs on the same device, compute capability, and
+screen. Run one fast-screen: seed 231, concurrency 1, warmup 5, bucket
+quotas 0–127:10, 128–255:10, 256–511:8, 512–1023:8, 1024–2047:6, 2048+:16
+(58 requests when every bucket is full). If a bucket has fewer prompts than
+its quota, take every prompt in that bucket and record `quota_shortfall`.
+Do not fill from another bucket and do not substitute another model's
+lengths. If 2048+ has fewer than 16, the screen is `inconclusive` and cannot
+early-DROP. Compare the tip's screen p50 and p95 to the primary SHA's own
+screen of those same request IDs on the same device, compute capability, and
 clock. Pass that directory with `--baseline-screen`. Do not pass full-C1
 pooled percentiles. `--baseline-p50-ms` and `--baseline-p95-ms` are refused.
 
@@ -72,21 +76,20 @@ the full-C1 primaries in their recipes and the latency leaderboard. For
 every model the screen-primary slot is:
 
 ```text
-screen_primary_p50_ms: TBD — measure on primary SHA same 60 IDs
-screen_primary_p95_ms: TBD — measure on primary SHA same 60 IDs
+screen_primary_p50_ms: TBD — measure on primary SHA same request IDs
+screen_primary_p95_ms: TBD — measure on primary SHA same request IDs
 ```
 
 Fill it only from a completed `--fast-screen` whose decision is
-`screen_primary` on the primary SHA, same machine, same 60 IDs. A full-C1
+`screen_primary` on the primary SHA, same machine, same request IDs. A full-C1
 KEEP moves the full-C1 primary; it does not by itself fill this slot.
-StartLux Instant is still TBD. hk2 refused the Instant
-`usage.input_tokens` index before any screened request: bucket 1024–2047
-has 6 prompts, quota 8 (`fast-screen bucket 1024-2047 needs 8 requests;
-found 6`). Do not write 7.338/51.816 as that screen primary. Unblock only
-with an Instant-valid length index of at least 8 prompts in 1024–2047, or
-an InferRSI-approved quota change. This gate does not choose between those.
+StartLux Instant is still TBD until measured with quotas 10/10/8/8/6/16.
+An earlier hk2 screen of the Instant `usage.input_tokens` index was refused
+under the previous 1024–2047 quota of 8 (that bucket has 6 prompts). InferRSI
+set the quota to 6 on 2026-10-26. Do not write 7.338/51.816 as that screen
+primary. Remeasure with the new quotas before filling the slot.
 
-Early DROP only when both screen Δp50 and Δp95 are worse than that same-60
+Early DROP only when both screen Δp50 and Δp95 are worse than that same-ID
 baseline. A metric is worse when its delta (tip minus baseline) is ≥ +2%
 of that baseline or ≥ +0.5 ms. Otherwise, including a mixed result, run
 full C1. The summary records `screen_primary`, `drop`, `full_c1`, or
@@ -102,12 +105,14 @@ KEEP, merge, and ready-for-review require the full C1 dual gate: pooled p50
 and pooled p95 both strictly lower, pooled 2048+ p95 strictly lower, and no
 quality collapse under the rules in the next section. The +2% / +0.5 ms
 band does not make a full-C1 tie a KEEP. hk2 contract smoke of client
-`d2fab1e08f231fe2e23540f3b25b2650cd416d09` against Instant at `51f80ad`
-passed 4/4 with `evidence_complete` true; that client has no StartLux or
-CUDA diff versus `51f80ad`, and offline `tests/benchmarks` there were 109
-OK. That smoke is not the screen primary. Offline MockTransport tests are
-not a review PASS. The Instant screen primary is still blocked on the short
-1024–2047 bucket.
+`d2fab1e08f231fe2e23540f3b25b2650cd416d09` against Instant served at
+`51f80ad681c8f7b1be9b22b5e700bef34e33534c` passed 4/4 with
+`evidence_complete` true. Artifacts are under
+`~/experiments/2026-10-26-pr181-screen-primary/primary/smoke/` on hk2.
+That client has no StartLux or CUDA diff versus `51f80ad`, and offline
+`tests/benchmarks` there were 109 OK. That smoke is not the screen primary.
+Offline MockTransport tests are not a review PASS. The Instant screen
+primary stays TBD until measured with quotas 10/10/8/8/6/16.
 
 ## INCONCLUSIVE stops the loop
 
@@ -117,15 +122,17 @@ these are true:
 - the baseline p50/p95 were not recorded before the edit
 - smoke did not pass before the latency screen
 - the fast-screen was skipped on a tip that already has a full-C1 primary
-- the screen baseline is a full-C1 pooled p50/p95, a typed percentile, or a
-  different 60 IDs than `--fast-screen` just sampled
+- the screen baseline is a full-C1 pooled p50/p95, a typed percentile, or
+  different request IDs than `--fast-screen` just sampled
+- a short bucket was filled from another bucket, or 2048+ has fewer than 16
+  and the screen was treated as a DROP or as a screen primary
 - the fast-screen decision is `inconclusive`
 - a DROP has no `dropped_at`
 - a KEEP, a gain, or a new primary is claimed from fast-screen numbers
 - ready or review PASS is claimed from offline MockTransport output without
   the hk2 contract smoke, or a screen-primary p50/p95 is filled from the
-  full-C1 pooled pair or from the refused Instant index (1024–2047 found 6,
-  needs 8)
+  full-C1 pooled pair, or from a screen that has not been measured with
+  quotas 10/10/8/8/6/16
 - the fast-screen decision was `full_c1` but fewer than three measured
   rounds finished
 - a completed `drop` is treated as a KEEP or as the next baseline
@@ -173,7 +180,7 @@ Before the agent proposes the next change, give it this record:
 - clock basis, `device`, and `compute capability` for both sides
 - RSI phase, alternatives considered, and which change is primary
 - fast-screen decision (`screen_primary`, `drop`, `full_c1`, or
-  `inconclusive`), the same 60 IDs, `dropped_at` when the decision is
+  `inconclusive`), the request IDs and any `quota_shortfall`, `dropped_at` when the decision is
   `drop`, and the screen p50/p95 deltas labeled as screen-only
 - verdict: improved, regressed, or INCONCLUSIVE
 - quality/contract result when the path reached full C1 or a KEEP decision

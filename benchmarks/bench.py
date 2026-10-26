@@ -45,19 +45,22 @@ FAST_SCREEN_SEED = 231
 FAST_SCREEN_RELATIVE = 0.02
 FAST_SCREEN_ABSOLUTE_MS = 0.5
 FAST_SCREEN_DROP_NAME = "fast_screen_drop.json"
-# Placeholder until the primary SHA is screened on these same 60 IDs.
-SCREEN_PRIMARY_TBD = "screen primary TBD — measure on primary SHA same 60 IDs"
+# Placeholder until the primary SHA is screened on these same request IDs.
+SCREEN_PRIMARY_TBD = "screen primary TBD — measure on primary SHA same request IDs"
 # Full-C1 pooled pairs. These are not screen baselines. StartLux Instant's
 # pooled primary is the first entry; do not copy it onto a fast-screen.
 FULL_C1_POOLED_NOT_SCREEN = ((7.338, 51.816),)
+# Quotas sum to 58 when every bucket is full. 1024-2047 is 6 (InferRSI
+# 2026-10-26). A shorter bucket is capped, not filled from another bucket.
 FAST_SCREEN_BUCKETS = (
     ("0-127", 0, 128, 10),
     ("128-255", 128, 256, 10),
     ("256-511", 256, 512, 8),
     ("512-1023", 512, 1024, 8),
-    ("1024-2047", 1024, 2048, 8),
+    ("1024-2047", 1024, 2048, 6),
     ("2048+", 2048, None, 16),
 )
+FAST_SCREEN_TAIL = "2048+"
 
 
 def saved_response_format(config):
@@ -299,27 +302,37 @@ def _fast_screen_rank(seed, bucket, case_id):
     return hashlib.sha256(f"{seed}\n{bucket}\n{case_id}".encode()).hexdigest()
 
 
+def fast_screen_quotas():
+    return {name: quota for name, _lo, _hi, quota in FAST_SCREEN_BUCKETS}
+
+
 def fast_screen_sample(cases, seed=FAST_SCREEN_SEED):
-    """Pick the fixed 60-request screen. Returns cases in manifest order."""
+    """Cap each bucket to its quota. A short bucket keeps every case.
+
+    Nothing is borrowed from another bucket. `quota_shortfall` lists each
+    bucket whose pool was smaller than its quota. 2048+ below 16 does not
+    raise here; the saved decision is inconclusive and cannot early-DROP.
+    """
     grouped = {name: [] for name, *_rest in FAST_SCREEN_BUCKETS}
     for case in cases:
         grouped[fast_screen_bucket(prompt_token_count(case))].append(case)
     chosen = set()
     counts = {}
+    shortfall = []
     for name, _lo, _hi, quota in FAST_SCREEN_BUCKETS:
         pool = grouped[name]
-        if len(pool) < quota:
-            raise ValueError(
-                f"fast-screen bucket {name} needs {quota} requests; found {len(pool)}"
-            )
         ranked = sorted(
             pool,
             key=lambda case: (_fast_screen_rank(seed, name, case["id"]), case["id"]),
         )
         picked = ranked[:quota]
         counts[name] = len(picked)
+        if len(pool) < quota:
+            shortfall.append({"name": name, "quota": quota, "found": len(pool)})
         chosen.update(case["id"] for case in picked)
-    return [case for case in cases if case["id"] in chosen], counts
+    if not chosen:
+        raise ValueError("fast-screen selected no requests")
+    return [case for case in cases if case["id"] in chosen], counts, shortfall
 
 
 def latency_clearly_worse(baseline_ms, tip_ms):
@@ -426,7 +439,7 @@ def _valid_dropped_at(value):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", parsed) == value
 
 
-def load_same_60_screen_baseline(path, selected_ids, parent_manifest_sha256, tip_gpu):
+def load_same_request_screen_baseline(path, selected_ids, parent_manifest_sha256, tip_gpu):
     """Baseline is the primary SHA's own screen of these exact request IDs."""
     if not isinstance(path, Path) or not path.is_dir():
         raise ValueError("baseline screen directory is missing")
@@ -441,7 +454,7 @@ def load_same_60_screen_baseline(path, selected_ids, parent_manifest_sha256, tip
     if screen.get("role") != "screen_primary":
         raise ValueError(
             "baseline screen must be the primary SHA's own fast-screen "
-            "(role screen_primary) of these same 60 IDs, not a tip comparison "
+            "(role screen_primary) of these same request IDs, not a tip comparison "
             "and not full-C1 pooled percentiles. " + SCREEN_PRIMARY_TBD
         )
     if screen.get("selected_ids") != list(selected_ids):
@@ -452,8 +465,7 @@ def load_same_60_screen_baseline(path, selected_ids, parent_manifest_sha256, tip
         raise ValueError("baseline screen seed does not match")
     if screen.get("parent_manifest_sha256") != parent_manifest_sha256:
         raise ValueError("baseline screen manifest does not match")
-    expected = {name: quota for name, _lo, _hi, quota in FAST_SCREEN_BUCKETS}
-    if screen.get("bucket_counts") != expected:
+    if screen.get("quotas") != fast_screen_quotas():
         raise ValueError("baseline screen quotas do not match")
     metadata = config.get("metadata") or {}
     gpu = metadata.get("gpu")
@@ -472,7 +484,7 @@ def load_same_60_screen_baseline(path, selected_ids, parent_manifest_sha256, tip
     p95 = summary["successful_latency_p95_ms"]
     refuse_full_c1_pooled_baseline(p50, p95)
     return {
-        "baseline_kind": "same_60_id_screen",
+        "baseline_kind": "same_request_id_screen",
         "baseline_runtime_revision": revision,
         "baseline_gpu": gpu,
         "baseline_p50_ms": p50,
@@ -501,13 +513,9 @@ def _check_saved_fast_screen(screen, cases, config):
         or screen.get("absolute_worse_ms") != FAST_SCREEN_ABSOLUTE_MS
     ):
         raise ValueError("fast-screen thresholds do not match this runner")
-    expected = {name: quota for name, _lo, _hi, quota in FAST_SCREEN_BUCKETS}
-    if screen.get("bucket_counts") != expected:
-        raise ValueError("fast-screen bucket counts do not match the protocol")
+    _validate_screen_counts(screen, cases)
     if screen.get("selected_ids") != [case["id"] for case in cases]:
         raise ValueError("fast-screen selection does not match the saved manifest")
-    if len(cases) != sum(expected.values()):
-        raise ValueError("fast-screen manifest is not 60 requests")
     role = screen.get("role")
     if role == "screen_primary":
         if "baseline_p50_ms" in screen or "baseline_p95_ms" in screen:
@@ -518,19 +526,83 @@ def _check_saved_fast_screen(screen, cases, config):
         return
     if role != "tip":
         raise ValueError("unsupported fast-screen role")
-    if screen.get("baseline_kind") != "same_60_id_screen":
+    if screen.get("baseline_kind") != "same_request_id_screen":
         raise ValueError(
-            "tip fast-screen baseline must be the same 60 IDs. " + SCREEN_PRIMARY_TBD
+            "tip fast-screen baseline must be the same request IDs. "
+            + SCREEN_PRIMARY_TBD
         )
     if "baseline_p50_ms" not in screen or "baseline_p95_ms" not in screen:
-        raise ValueError("saved tip fast-screen is missing its same-60 baseline")
+        raise ValueError("saved tip fast-screen is missing its same-ID baseline")
     refuse_full_c1_pooled_baseline(screen["baseline_p50_ms"], screen["baseline_p95_ms"])
     if screen.get("baseline_selected_ids") != screen["selected_ids"]:
-        raise ValueError("saved screen baseline is not the same 60 request IDs")
+        raise ValueError("saved screen baseline is not the same request IDs")
     if screen.get("baseline_gpu") != config.get("metadata", {}).get("gpu"):
         raise ValueError("saved screen baseline gpu does not match this run")
     if not screen.get("baseline_runtime_revision"):
         raise ValueError("saved screen baseline is missing the primary SHA")
+
+
+def _validate_screen_counts(screen, cases):
+    """Taken counts stay inside each quota. A gap is a recorded shortfall."""
+    quotas = fast_screen_quotas()
+    if screen.get("quotas") != quotas:
+        raise ValueError("fast-screen quotas do not match this runner")
+    counts = screen.get("bucket_counts")
+    if not isinstance(counts, dict) or set(counts) != set(quotas):
+        raise ValueError("fast-screen bucket counts do not match the protocol")
+    shortfall = screen.get("quota_shortfall")
+    if not isinstance(shortfall, list):
+        raise ValueError("fast-screen quota_shortfall is missing")
+    short_by_name = {}
+    for item in shortfall:
+        if not isinstance(item, dict):
+            raise ValueError("fast-screen quota_shortfall has a bad bucket")
+        name = item.get("name")
+        if name not in quotas or name in short_by_name:
+            raise ValueError("fast-screen quota_shortfall has a bad bucket")
+        if item.get("quota") != quotas[name]:
+            raise ValueError("fast-screen quota_shortfall quota does not match")
+        found = item.get("found")
+        if type(found) is not int or found < 0 or found >= quotas[name]:
+            raise ValueError("fast-screen quota_shortfall found is not below quota")
+        short_by_name[name] = found
+    order = [name for name, *_rest in FAST_SCREEN_BUCKETS if name in short_by_name]
+    if [item["name"] for item in shortfall] != order:
+        raise ValueError("fast-screen quota_shortfall is out of bucket order")
+    for name, quota in quotas.items():
+        taken = counts[name]
+        if type(taken) is not int or taken < 0 or taken > quota:
+            raise ValueError("fast-screen bucket count is outside the quota")
+        if name in short_by_name:
+            if taken != short_by_name[name]:
+                raise ValueError(
+                    "fast-screen shortfall does not match the taken count"
+                )
+        elif taken != quota:
+            raise ValueError(
+                "fast-screen bucket is below quota without quota_shortfall"
+            )
+    if sum(counts.values()) != len(cases):
+        raise ValueError("fast-screen manifest does not match the taken bucket counts")
+    actual = {name: 0 for name in quotas}
+    for case in cases:
+        actual[fast_screen_bucket(prompt_token_count(case))] += 1
+    if actual != counts:
+        raise ValueError("fast-screen cases do not match bucket_counts")
+
+
+def _tail_short(screen):
+    """2048+ below 16 makes the whole screen inconclusive. No early DROP."""
+    counts = screen.get("bucket_counts") or {}
+    taken = counts.get(FAST_SCREEN_TAIL)
+    if type(taken) is int and taken < fast_screen_quotas()[FAST_SCREEN_TAIL]:
+        return True
+    for item in screen.get("quota_shortfall") or []:
+        if isinstance(item, dict) and item.get("name") == FAST_SCREEN_TAIL:
+            found = item.get("found")
+            if type(found) is not int or found < fast_screen_quotas()[FAST_SCREEN_TAIL]:
+                return True
+    return False
 
 
 def _saved_fast_screen_decision(screen, summary):
@@ -544,6 +616,8 @@ def _saved_fast_screen_decision(screen, summary):
         and summary["successful_latency_p95_ms"] is not None
     )
     if not complete:
+        return "inconclusive"
+    if _tail_short(screen):
         return "inconclusive"
     if screen.get("role") == "screen_primary":
         return "screen_primary"
@@ -567,7 +641,7 @@ def _attach_dropped_at(path, screen, summary):
     if record.get("decision") != "drop" or not _valid_dropped_at(record.get("dropped_at")):
         raise ValueError("fast-screen DROP record is missing dropped_at")
     if record.get("selected_ids") != screen["selected_ids"]:
-        raise ValueError("fast-screen DROP record does not match the 60 IDs")
+        raise ValueError("fast-screen DROP record does not match the screen request IDs")
     summary["dropped_at"] = record["dropped_at"]
 
 
@@ -926,7 +1000,7 @@ async def run(args, cases):
     screen_record = None
     if fast_screen:
         _require_fast_screen_shape(args)
-        cases, bucket_counts = fast_screen_sample(cases)
+        cases, bucket_counts, quota_shortfall = fast_screen_sample(cases)
         selected_ids = [case["id"] for case in cases]
         parent_sha = digest(args.manifest)
         screen_record = {
@@ -942,14 +1016,16 @@ async def run(args, cases):
                 }
                 for name, lo, hi, quota in FAST_SCREEN_BUCKETS
             ],
+            "quotas": fast_screen_quotas(),
             "selected_ids": selected_ids,
             "bucket_counts": bucket_counts,
+            "quota_shortfall": quota_shortfall,
             "parent_manifest_sha256": parent_sha,
         }
         if baseline_screen is not None:
             screen_record["role"] = "tip"
             screen_record.update(
-                load_same_60_screen_baseline(
+                load_same_request_screen_baseline(
                     baseline_screen,
                     selected_ids,
                     parent_sha,
@@ -1234,6 +1310,7 @@ def summarize_saved(path):
     )
     if screen is not None:
         summary["fast_screen_decision"] = _saved_fast_screen_decision(screen, summary)
+        summary["quota_shortfall"] = screen.get("quota_shortfall") or []
         if screen.get("role") == "tip":
             p50 = summary["successful_latency_p50_ms"]
             p95 = summary["successful_latency_p95_ms"]
@@ -1350,16 +1427,17 @@ def main():
         "--fast-screen",
         action="store_true",
         help=(
-            "sample 60 Public231 requests (seed 231, length buckets) for one "
-            "measured round. Without --baseline-screen this records the "
-            "screen primary. A tip passes that directory, not pooled C1 numbers."
+            "sample Public231 requests (seed 231, quotas 10/10/8/8/6/16) for "
+            "one measured round. A short bucket is capped and recorded. "
+            "Without --baseline-screen this records the screen primary. "
+            "A tip passes that directory, not pooled C1 numbers."
         ),
     )
     runner.add_argument(
         "--baseline-screen",
         type=Path,
         help=(
-            "primary SHA's own fast-screen directory of these same 60 IDs. "
+            "primary SHA's own fast-screen directory of these same request IDs. "
             "Not a full-C1 pooled p50/p95."
         ),
     )

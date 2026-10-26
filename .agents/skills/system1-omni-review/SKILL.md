@@ -1,6 +1,6 @@
 ---
 name: system1-omni-review
-description: Review ThinkFlowLab/system1-omni pull requests for Rust serving, model-contract, CUDA/Metal compatibility and numerical or performance evidence, with pinned review provenance. For a Public231 fast-screen, check the same-60-ID screen baseline, hk2 --fast-screen evidence, dropped_at on DROP, and that KEEP is still full C1 only.
+description: Review ThinkFlowLab/system1-omni pull requests for Rust serving, model-contract, CUDA/Metal compatibility and numerical or performance evidence, with pinned review provenance. For a Public231 fast-screen, check the same-request-ID screen baseline (quotas 10/10/8/8/6/16, cap-to-available, 2048+ below 16 is inconclusive), hk2 smoke evidence, dropped_at on DROP, and that KEEP is still full C1 only.
 ---
 
 # System1-Omni PR review
@@ -35,23 +35,28 @@ When the change touches `benchmarks/bench.py`, the Public231 skills, or a
 claim that a tip was screened or dropped, check all four of these. A miss
 is a blocking review finding, not a note.
 
-1. **Same-60 screen baseline.** The tip screen p50/p95 are compared to the
+1. **Same-ID screen baseline.** The tip screen p50/p95 are compared to the
    primary SHA's own `--fast-screen` of those exact request IDs (same seed,
-   buckets, quotas, and device). Full-C1 pooled numbers are not that
-   baseline. StartLux Instant 7.338/51.816 from `51f80ad` is a pooled C1
-   pair. Typed `--baseline-p50-ms` / `--baseline-p95-ms` and a full-C1
-   output directory fail closed. The screen-primary slot stays
-   `TBD — measure on primary SHA same 60 IDs` until that screen exists.
-   Do not accept a paste that fills the slot from the pooled pair.
+   buckets, quotas 10/10/8/8/6/16, and device). Full-C1 pooled numbers are
+   not that baseline. StartLux Instant 7.338/51.816 from `51f80ad` is a
+   pooled C1 pair. Typed `--baseline-p50-ms` / `--baseline-p95-ms` and a
+   full-C1 output directory fail closed. A bucket shorter than its quota
+   records `quota_shortfall` and is not filled from another bucket. If
+   2048+ has fewer than 16, the screen is `inconclusive` and cannot
+   early-DROP or stand as a screen primary. The screen-primary slot stays
+   `TBD — measure on primary SHA same request IDs` until that screen exists
+   under these quotas. Do not accept a paste that fills the slot from the
+   pooled pair.
 2. **hk2 smoke.** Contract smoke on hk2 is required before ready.
    Recorded PASS: client `d2fab1e08f231fe2e23540f3b25b2650cd416d09` against
    StartLux Instant served at `51f80ad681c8f7b1be9b22b5e700bef34e33534c`,
    4/4, `evidence_complete` true, no StartLux or CUDA diff versus
-   `51f80ad`, offline `tests/benchmarks` 109 OK. MockTransport output is
-   not that smoke and is not a PASS. The 4/4 smoke is not a screen primary.
-   The Instant `--fast-screen` attempt was refused: bucket 1024–2047 has 6
-   prompts, quota 8. Do not PASS a review that writes 7.338/51.816, or any
-   other fabricated pair, into the screen-primary slot.
+   `51f80ad`, offline `tests/benchmarks` 109 OK. Artifacts are under
+   `~/experiments/2026-10-26-pr181-screen-primary/primary/smoke/` on hk2.
+   MockTransport output is not that smoke and is not a PASS. The 4/4 smoke
+   is not a screen primary. The Instant screen primary stays TBD until
+   measured with quotas 10/10/8/8/6/16. Do not PASS a review that writes
+   7.338/51.816, or any other fabricated pair, into the screen-primary slot.
 3. **`dropped_at`.** A screen DROP writes `fast_screen_drop.json` and puts
    `dropped_at` (`YYYY-MM-DDTHH:MM:SSZ`) on the summary. A DROP missing that
    field is not auditable and is not a valid DROP.

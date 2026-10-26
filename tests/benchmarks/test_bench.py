@@ -951,11 +951,12 @@ class FastScreenTests(unittest.IsolatedAsyncioTestCase):
                 ("128-255", 10),
                 ("256-511", 8),
                 ("512-1023", 8),
-                ("1024-2047", 8),
+                ("1024-2047", 6),
                 ("2048+", 16),
             ],
         )
-        self.assertEqual(sum(quota for *_rest, quota in bench.FAST_SCREEN_BUCKETS), 60)
+        self.assertEqual(sum(quota for *_rest, quota in bench.FAST_SCREEN_BUCKETS), 58)
+        self.assertEqual(bench.FAST_SCREEN_BUCKETS[4][3], 6)
         self.assertEqual(bench.FAST_SCREEN_SEED, 231)
         self.assertEqual(bench.FAST_SCREEN_RELATIVE, 0.02)
         self.assertEqual(bench.FAST_SCREEN_ABSOLUTE_MS, 0.5)
@@ -978,10 +979,11 @@ class FastScreenTests(unittest.IsolatedAsyncioTestCase):
 
     def test_sample_is_stable_quota_and_manifest_order(self):
         cases = screen_population()
-        selected, counts = bench.fast_screen_sample(cases)
-        again, _counts = bench.fast_screen_sample(cases)
+        selected, counts, shortfall = bench.fast_screen_sample(cases)
+        again, _counts, _short = bench.fast_screen_sample(cases)
         self.assertEqual([case["id"] for case in selected], [case["id"] for case in again])
-        self.assertEqual(sum(counts.values()), 60)
+        self.assertEqual(sum(counts.values()), 58)
+        self.assertEqual(shortfall, [])
         self.assertEqual(
             counts,
             {
@@ -989,7 +991,7 @@ class FastScreenTests(unittest.IsolatedAsyncioTestCase):
                 "128-255": 10,
                 "256-511": 8,
                 "512-1023": 8,
-                "1024-2047": 8,
+                "1024-2047": 6,
                 "2048+": 16,
             },
         )
@@ -999,12 +1001,15 @@ class FastScreenTests(unittest.IsolatedAsyncioTestCase):
         for case in selected:
             self.assertNotIn("prompt_tokens", case["request"])
 
-    def test_short_bucket_and_bad_lengths_fail_closed(self):
+    def test_short_bucket_caps_without_borrowing(self):
         cases = screen_population()
         long = [case for case in cases if case["prompt_tokens"] >= 2048][:15]
-        short = [case for case in cases if case["prompt_tokens"] < 2048] + long
-        with self.assertRaisesRegex(ValueError, "2048\\+"):
-            bench.fast_screen_sample(short)
+        short_tail = [case for case in cases if case["prompt_tokens"] < 2048] + long
+        _selected, counts, shortfall = bench.fast_screen_sample(short_tail)
+        self.assertEqual(counts["2048+"], 15)
+        self.assertEqual(counts["1024-2047"], 6)
+        self.assertEqual(shortfall, [{"name": "2048+", "quota": 16, "found": 15}])
+        self.assertEqual(sum(counts.values()), 57)
         missing = dict(cases[0])
         missing.pop("prompt_tokens")
         with self.assertRaisesRegex(ValueError, "prompt_tokens"):
@@ -1014,16 +1019,65 @@ class FastScreenTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "nonnegative integer"):
             bench.fast_screen_sample([bad, *cases[1:]])
         mid = [case for case in cases if 1024 <= case["prompt_tokens"] < 2048]
-        self.assertGreaterEqual(len(mid), 8)
+        self.assertGreaterEqual(len(mid), 6)
         under = [
             case for case in cases if not (1024 <= case["prompt_tokens"] < 2048)
         ]
-        under.extend(mid[:6])
-        with self.assertRaisesRegex(
-            ValueError,
-            r"fast-screen bucket 1024-2047 needs 8 requests; found 6",
-        ):
-            bench.fast_screen_sample(under)
+        under.extend(mid[:5])
+        selected, counts, shortfall = bench.fast_screen_sample(under)
+        self.assertEqual(counts["1024-2047"], 5)
+        self.assertEqual(counts["2048+"], 16)
+        self.assertEqual(counts["512-1023"], 8)
+        self.assertEqual(shortfall, [{"name": "1024-2047", "quota": 6, "found": 5}])
+        self.assertEqual(
+            sum(1 for case in selected if 1024 <= case["prompt_tokens"] < 2048),
+            5,
+        )
+        exact = [
+            case for case in cases if not (1024 <= case["prompt_tokens"] < 2048)
+        ]
+        exact.extend(mid[:6])
+        _selected, counts, shortfall = bench.fast_screen_sample(exact)
+        self.assertEqual(counts["1024-2047"], 6)
+        self.assertEqual(shortfall, [])
+        with self.assertRaisesRegex(ValueError, "selected no requests"):
+            bench.fast_screen_sample([])
+
+    def test_short_tail_cannot_early_drop(self):
+        summary = {
+            "evidence_complete": True,
+            "failed_requests": 0,
+            "incomplete_requests": 0,
+            "unattempted_requests": 0,
+            "successful_requests": 57,
+            "planned_requests": 57,
+            "successful_latency_p50_ms": 100.0,
+            "successful_latency_p95_ms": 100.0,
+        }
+        screen = {
+            "role": "tip",
+            "bucket_counts": {"2048+": 15},
+            "quota_shortfall": [{"name": "2048+", "quota": 16, "found": 15}],
+            "baseline_p50_ms": 1.0,
+            "baseline_p95_ms": 1.0,
+        }
+        self.assertEqual(
+            bench._saved_fast_screen_decision(screen, summary), "inconclusive"
+        )
+        screen["role"] = "screen_primary"
+        self.assertEqual(
+            bench._saved_fast_screen_decision(screen, summary), "inconclusive"
+        )
+        shorter_mid = {
+            "role": "tip",
+            "bucket_counts": {"2048+": 16, "1024-2047": 5},
+            "quota_shortfall": [{"name": "1024-2047", "quota": 6, "found": 5}],
+            "baseline_p50_ms": 1.0,
+            "baseline_p95_ms": 1.0,
+        }
+        self.assertEqual(
+            bench._saved_fast_screen_decision(shorter_mid, summary), "drop"
+        )
 
     def test_drop_only_when_both_percentiles_are_clearly_worse(self):
         relative_tip = 10 * (1 + bench.FAST_SCREEN_RELATIVE)
@@ -1092,8 +1146,9 @@ class FastScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(code, 0)
             saved = json.loads((args.output / "summary.json").read_text())
             self.assertEqual(saved, bench.summarize_saved(args.output))
-            self.assertEqual(saved["planned_requests"], 60)
-            self.assertEqual(saved["successful_requests"], 60)
+            self.assertEqual(saved["planned_requests"], 58)
+            self.assertEqual(saved["successful_requests"], 58)
+            self.assertEqual(saved["quota_shortfall"], [])
             self.assertEqual(saved["fast_screen_decision"], "screen_primary")
             self.assertNotIn("dropped_at", saved)
             self.assertFalse((args.output / bench.FAST_SCREEN_DROP_NAME).exists())
@@ -1102,7 +1157,9 @@ class FastScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(screen["role"], "screen_primary")
             self.assertNotIn("baseline_p50_ms", screen)
             self.assertEqual(screen["seed"], 231)
-            self.assertEqual(len(screen["selected_ids"]), 60)
+            self.assertEqual(len(screen["selected_ids"]), 58)
+            self.assertEqual(screen["quotas"]["1024-2047"], 6)
+            self.assertEqual(screen["quota_shortfall"], [])
             self.assertEqual(saved["latency_by_prompt_bucket"]["2048+"]["samples"], 16)
 
     async def test_tip_compares_same_60_ids_and_drop_records_dropped_at(self):
@@ -1224,14 +1281,16 @@ class FastScreenTests(unittest.IsolatedAsyncioTestCase):
             short_manifest.write_text(
                 "".join(json.dumps(case) + "\n" for case in short_cases)
             )
-            short = run_args(root)
-            short.output = root / "short-out"
-            short.manifest = short_manifest
-            short.fast_screen = True
-            short.warmup = 5
-            with self.assertRaisesRegex(ValueError, "2048\\+"):
-                await bench.run(short, bench.load_cases(short_manifest))
-            self.assertFalse(short.output.exists())
+            short_args, code = await self._run_screen(root, short_manifest, "short-out")
+            self.assertEqual(code, 0)
+            saved = bench.summarize_saved(short_args.output)
+            self.assertEqual(saved["fast_screen_decision"], "inconclusive")
+            self.assertEqual(
+                saved["quota_shortfall"],
+                [{"name": "2048+", "quota": 16, "found": 15}],
+            )
+            self.assertNotIn("dropped_at", saved)
+            self.assertFalse((short_args.output / "fast_screen_drop.json").exists())
 
 
 def _stepping_clock(step):

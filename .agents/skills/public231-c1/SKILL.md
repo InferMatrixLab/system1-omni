@@ -1,6 +1,6 @@
 ---
 name: public231-c1
-description: Measure Public231 C1 request latency for a model or pull request. Use when a campaign needs the contract smoke, a 60-request fast-screen that can drop a clear regression, then warmup 5, concurrency 1, three measured rounds, SHA, pass rate, and p50/p95 on the bench.py clock. A fast-screen is not a KEEP and is not a gain. Every paste records measured device and compute capability. The documented production target is H200 / SM90; a different measured identity stays a valid run and pairs only with that same recorded identity. Includes how to treat a thinking field and what a room post may contain.
+description: Measure Public231 C1 request latency for a model or pull request. Use when a campaign needs the contract smoke, a fast-screen (quotas 10/10/8/8/6/16, 58 requests when every bucket is full) that can drop a clear regression, then warmup 5, concurrency 1, three measured rounds, SHA, pass rate, and p50/p95 on the bench.py clock. A fast-screen is not a KEEP and is not a gain. A short 2048+ bucket is inconclusive and cannot early-DROP. Every paste records measured device and compute capability. The documented production target is H200 / SM90; a different measured identity stays a valid run and pairs only with that same recorded identity. Includes how to treat a thinking field and what a room post may contain.
 ---
 
 # Public231 C1
@@ -20,11 +20,13 @@ relabel, or a room post that contains operator metadata.
    must succeed before any latency screen. A model recipe that already runs a
    server contract smoke still runs that smoke. A failed smoke is not a
    latency result and is not a DROP.
-2. **Fast-screen.** One 60-request round after smoke. The screen baseline is
-   the primary SHA served on the same machine and measured on these exact 60
-   request IDs. It is not the full-C1 pooled p50/p95. DROP the tip when both
-   screen percentiles are clearly worse than that same-60 baseline. Otherwise
-   run full C1. The screen never KEEPs a tip.
+2. **Fast-screen.** One round after smoke. Quotas are 10/10/8/8/6/16 (58
+   requests when every bucket is full). The screen baseline is the primary
+   SHA served on the same machine and measured on these exact request IDs.
+   It is not the full-C1 pooled p50/p95. DROP the tip when both screen
+   percentiles are clearly worse than that same-ID baseline. Otherwise run
+   full C1. The screen never KEEPs a tip. If 2048+ has fewer than 16
+   prompts, the screen is inconclusive and cannot early-DROP.
 3. **Full Public231 C1.** Unchanged measurement: warmup 5, concurrency 1,
    three measured rounds. KEEP only on the full dual gate below.
 
@@ -56,16 +58,21 @@ Bucket quotas (inclusive lower bound, exclusive upper bound):
 | 128–255 | 10 |
 | 256–511 | 8 |
 | 512–1023 | 8 |
-| 1024–2047 | 8 |
+| 1024–2047 | 6 |
 | 2048+ | 16 |
 
-That is 60 requests. 2048+ is the overweight. A bucket with fewer cases than
-its quota is not a screen; fix the length index or stop. Do not fill the
-quota from another bucket. Do not run a second screen round and pool it.
+That is 58 requests when every bucket is full. 2048+ is the overweight.
+
+Cap-to-available: if a bucket has fewer prompts than its quota, take every
+prompt in that bucket and record `quota_shortfall` as `{name, quota, found}`.
+Do not fill the gap from another bucket. Do not substitute another model's
+lengths. Do not run a second screen round and pool it. If **2048+ has fewer
+than 16**, the whole screen is `inconclusive`. It cannot early-DROP, and it
+cannot be a screen primary.
 
 Compare the tip screen's successful p50 and p95 only to a screen primary:
 the same primary SHA, same `device` / `gpu`, same manifest, same seed 231,
-same bucket quotas, and the same 60 request IDs. Pass that saved run as
+same bucket quotas, and the same request IDs. Pass that saved run as
 `--baseline-screen`. Do not pass `--baseline-p50-ms` or `--baseline-p95-ms`.
 The runner rejects those flags. A full-C1 output directory is also rejected.
 
@@ -77,23 +84,22 @@ Clef and pplx-decider keep their full-C1 primaries in their recipes and in
 [the latency leaderboard](../../../benchmarks/latency-leaderboard.md). Do not
 paste any model's pooled C1 pair into the screen.
 
-Screen primary, same 60 IDs. Fill this only from a completed
+Screen primary, same request IDs. Fill this only from a completed
 `--fast-screen` whose decision is `screen_primary`. Do not invent the pair,
 and do not copy the full-C1 pooled pair into it:
 
 ```text
-screen_primary_p50_ms: TBD — measure on primary SHA same 60 IDs
-screen_primary_p95_ms: TBD — measure on primary SHA same 60 IDs
+screen_primary_p50_ms: TBD — measure on primary SHA same request IDs
+screen_primary_p95_ms: TBD — measure on primary SHA same request IDs
 ```
 
-StartLux Instant is still that TBD. An hk2 `--fast-screen` of Instant,
-indexed by `usage.input_tokens`, was refused before any screened request:
-bucket 1024–2047 has 6 prompts and the quota is 8
-(`fast-screen bucket 1024-2047 needs 8 requests; found 6`). Fail-closed is
-correct. Unblock only with an Instant-valid length index that has at least
-8 prompts in 1024–2047, or with an InferRSI-approved quota change. This
-protocol does not choose between those. Do not write 7.338/51.816, or any
-other stand-in, as the screen primary.
+StartLux Instant is still that TBD until a screen is measured with these
+quotas (10/10/8/8/6/16). An earlier hk2 `--fast-screen` of Instant, indexed
+by `usage.input_tokens`, was refused under the previous quota of 8 for
+1024–2047 because that bucket has 6 prompts. InferRSI set the quota to 6
+on 2026-10-26. That refusal is not a screen-primary pair. Do not write
+7.338/51.816, or any other stand-in, as the screen primary. Remeasure the
+primary SHA with the new quotas before filling the slot.
 
 Record a screen primary with `--fast-screen` and no `--baseline-screen`.
 That run's decision is `screen_primary`. It is not a tip verdict and not a
@@ -127,12 +133,13 @@ The saved summary field `fast_screen_decision` is `screen_primary`, `drop`,
 copies `dropped_at` onto the summary. `dropped_at` is UTC
 `YYYY-MM-DDTHH:MM:SSZ`, written once. A DROP without `dropped_at` is not an
 auditable DROP. `inconclusive` means any measured request failed, was
-incomplete, or was unattempted, warmup failed, or `evidence_complete` is
-not true. An inconclusive screen is not a DROP and not permission to
+incomplete, or was unattempted, warmup failed, `evidence_complete` is not
+true, or bucket 2048+ has fewer than 16 prompts. A short 2048+ tail cannot
+early-DROP. An inconclusive screen is not a DROP and not permission to
 continue. A negative screen delta is not a gain, not a new primary, and
 not a KEEP. Do not claim a speedup from fast-screen numbers. Percentiles
-use the same median and nearest-rank p95 as full C1, on this one round of
-60, not an average of rounds.
+use the same median and nearest-rank p95 as full C1, on this one capped
+round (58 requests when every bucket is full), not an average of rounds.
 
 hk2 contract smoke of client
 `d2fab1e08f231fe2e23540f3b25b2650cd416d09` against StartLux Instant served
@@ -140,9 +147,11 @@ at `51f80ad681c8f7b1be9b22b5e700bef34e33534c` passed: 4/4,
 `evidence_complete` true. That client has no StartLux or CUDA diff versus
 `51f80ad`. Offline `tests/benchmarks` on that client: 109 OK. An offline
 `httpx.MockTransport` unit test is not a substitute for that smoke and is
-not a review PASS. The 4/4 smoke is not a screen primary, not a 60-request
+not a review PASS. Smoke artifacts are under
+`~/experiments/2026-10-26-pr181-screen-primary/primary/smoke/` on hk2.
+The 4/4 smoke is not a screen primary, not a fast-screen
 latency pair, and not a KEEP. The Instant screen primary remains the TBD
-above because the 1024–2047 bucket was short. Room posts still omit
+above until it is measured with quotas 10/10/8/8/6/16. Room posts still omit
 hostnames; the hk2 note is PR evidence.
 
 ## Full C1 KEEP
@@ -309,7 +318,7 @@ Publish:
 
 A fast-screen paste is a separate record. Label it fast-screen, and include
 the decision (`screen_primary`, `drop`, `full_c1`, or `inconclusive`), seed
-231, the same 60 IDs, the primary SHA of the screen baseline when the run
+231, the request IDs, any `quota_shortfall`, the primary SHA of the screen baseline when the run
 is a tip, both deltas when they exist, `dropped_at` when the decision is
 `drop`, and the same `device` and `compute capability`. Do not publish that
 paste as a C1 baseline or as a speedup. Do not fill screen-primary p50/p95

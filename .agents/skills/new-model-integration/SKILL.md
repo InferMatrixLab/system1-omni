@@ -89,9 +89,11 @@ Further latency work stays on this model's draft branch. Run it under
 [optimize-remeasure-gate](../optimize-remeasure-gate/SKILL.md): paste the C1
 p50/p95, `device`, and `compute capability` first. After that primary
 exists, smoke and the fast-screen run before another full C1. The screen
-compares the same 60 request IDs against the primary SHA's own screen, not
-against the full-C1 pooled pair. That screen-primary pair stays
-`TBD — measure on primary SHA same 60 IDs` until it is measured. A clear
+compares the same request IDs against the primary SHA's own screen, not
+against the full-C1 pooled pair. Quotas are 10/10/8/8/6/16. A short bucket
+records `quota_shortfall` and is not filled from another bucket. 2048+ below
+16 is inconclusive and cannot early-DROP. That screen-primary pair stays
+`TBD — measure on primary SHA same request IDs` until it is measured. A clear
 regression is dropped there, with `dropped_at`, and is not a KEEP. Do not
 stack the next tip commit until that tip has been dropped by the screen or
 remeasured with full C1 on the same named hardware. Incomplete evidence is
