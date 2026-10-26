@@ -138,6 +138,129 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
         // created before this deliberate dispatch error and must retire safely.
         assert!(model.forward_fixed(&[0]).is_err());
         assert_eq!(metric(b"loading_gemms\0"), 2);
+        // Execute the real model's bounded selection/scope logic through a
+        // host-only CUDA boundary. These assertions do not test GEMM arithmetic.
+        let set_compatible = unsafe {
+            metrics
+                .get::<unsafe extern "C" fn(i32)>(b"loading_compatible\0")
+                .unwrap()
+        };
+        let submit = unsafe {
+            metrics
+                .get::<unsafe extern "C" fn()>(b"loading_submit\0")
+                .unwrap()
+        };
+        assert_eq!(
+            model
+                .with_matched_prefix(&[64, 64], &[64], |_| Ok(17))
+                .unwrap(),
+            Some(17)
+        );
+        assert!(
+            model
+                .with_matched_prefix::<()>(&[64, 64], &[64], |_| {
+                    unsafe { submit() };
+                    anyhow::bail!("suffix failure")
+                })
+                .is_err()
+        );
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = model.with_matched_prefix::<()>(&[64, 64], &[64], |_| {
+                unsafe { submit() };
+                panic!("suffix panic");
+            });
+        }));
+        assert!(panic.is_err());
+        assert_eq!(metric(b"loading_pending\0"), 0);
+        assert_eq!(
+            model
+                .with_matched_prefix(&[64, 64], &[64], |_| Ok(23))
+                .unwrap(),
+            Some(23)
+        );
+        assert!(
+            model
+                .with_matched_prefix(&[64, 64], &[64], |m| {
+                    m.with_matched_prefix(&[64, 64], &[64], |_| Ok(()))
+                        .map(|_| ())
+                })
+                .unwrap_err()
+                .to_string()
+                .contains("nested matched execution")
+        );
+        // Returning to M64 must select its original handle after a failed scope.
+        assert!(model.forward_fixed(&[0]).is_err());
+        unsafe { set_compatible(0) };
+        assert_eq!(
+            model
+                .with_matched_prefix(&[64, 64], &[64], |_| -> anyhow::Result<()> {
+                    panic!("incompatible plan executed")
+                })
+                .unwrap(),
+            None
+        );
+        unsafe { set_compatible(1) };
+        let set_window = unsafe {
+            metrics
+                .get::<unsafe extern "C" fn(i32)>(b"loading_window_supported\0")
+                .unwrap()
+        };
+        unsafe { set_window(0) };
+        assert_eq!(
+            model
+                .with_matched_prefix(&[64, 64], &[1, 63], |_| -> anyhow::Result<()> {
+                    panic!("unsupported window executed")
+                })
+                .unwrap(),
+            None
+        );
+        unsafe { set_window(1) };
+        let reject = unsafe {
+            metrics
+                .get::<unsafe extern "C" fn(i32, i32, i32, i32)>(b"loading_reject\0")
+                .unwrap()
+        };
+        // Earlier full shapes and suffixes pass; later failures must still
+        // prevent any window execution, including in a later weight projection.
+        for (ordinary, rows, n, k) in [(1, 62, 0, 0), (0, 7, 0, 0), (1, 64, 8, 256)] {
+            unsafe { reject(ordinary, rows, n, k) };
+            assert_eq!(
+                model
+                    .with_matched_prefix(&[64, 62], &[1, 63, 7], |_| -> anyhow::Result<()> {
+                        panic!("later incompatible shape executed");
+                    })
+                    .unwrap(),
+                None
+            );
+        }
+        unsafe { reject(-1, 0, 0, 0) };
+        assert_eq!(
+            model.with_matched_prefix(&[64], &[64], |_| Ok(1)).unwrap(),
+            None
+        );
+        assert!(
+            model
+                .with_matched_prefix(&[0, 64], &[64], |_| Ok(1))
+                .is_err()
+        );
+        assert!(
+            model
+                .with_matched_prefix(&[64, 65], &[64], |_| Ok(1))
+                .is_err()
+        );
+        // Seventeen distinct reference lengths must retire the first bounded
+        // generation before reusing its cuBLAS workspace slots.
+        for m in 1..=17 {
+            // Represent queued device work just before workspace retirement.
+            unsafe { submit() };
+            assert_eq!(
+                model.with_matched_prefix(&[m, m], &[m], |_| Ok(m)).unwrap(),
+                Some(m)
+            );
+            assert!(metric(b"loading_gemms\0") <= 18);
+            assert_eq!(metric(b"loading_pending\0"), 0);
+            assert_eq!(metric(b"loading_unsynced_destroy\0"), 0);
+        }
         drop(model);
         assert_eq!(metric(b"loading_streams\0"), metric(b"loading_destroyed\0"));
         assert_eq!(metric(b"loading_live\0"), 0);
@@ -154,6 +277,13 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
         std::env::var("CUA_S1_GRAPH").as_deref() == Ok("1")
     );
     let allocations = metric(b"loading_live\0");
+    assert!(
+        model
+            .with_matched_prefix(&[64, 64], &[64], |_| Ok(()))
+            .unwrap_err()
+            .to_string()
+            .contains("only merged weights")
+    );
     let error = model.forward_fixed(&[0]).unwrap_err();
     assert!(error.to_string().contains("only merged weights"));
     let error = model

@@ -16,6 +16,7 @@
 // runs on.
 #include <cublasLt.h>
 
+#include <cstring>
 #include <map>
 #include <tuple>
 
@@ -36,6 +37,7 @@ struct Gemm {
     void* workspace = nullptr;
     size_t workspace_bytes = 0;
     bool reference = false;
+    bool matched = false;
     int reference_m = 0;  // > 0: one algorithm per weight shape, chosen at this M
     std::map<Key, Plan> plans;
     std::map<std::tuple<int, int, int, bool, bool>, cublasLtMatmulAlgo_t> fixed;  // N, K, ldy, FP32, bias
@@ -95,9 +97,12 @@ int fixed_choice(Gemm& g, int N, int K, int ldy, bool fp32, bool bias, Plan& p) 
     if (it == g.fixed.end()) {
         Plan r;
         int rc = describe(g.reference_m, N, K, ldy, r, fp32, bias);
-        if (rc == 0) rc = first_choice(g, r, CUBLASLT_REDUCTION_SCHEME_NONE);
+        const uint32_t schemes = g.matched
+            ? CUBLASLT_REDUCTION_SCHEME_MASK & ~CUBLASLT_REDUCTION_SCHEME_INPLACE
+            : CUBLASLT_REDUCTION_SCHEME_NONE;
+        if (rc == 0) rc = first_choice(g, r, schemes);
         if (rc == 0) {
-            // Check that the choice really has no split-K reduction.
+            // Legacy fixed excludes split-K; matched retains ordinary deterministic reductions.
             int32_t splits = 0;
             uint32_t scheme = 0;
             size_t written = 0;
@@ -106,7 +111,8 @@ int fixed_choice(Gemm& g, int N, int K, int ldy, bool fp32, bool bias, Plan& p) 
                                                      sizeof(splits), &written) == CUBLAS_STATUS_SUCCESS &&
                 cublasLtMatmulAlgoConfigGetAttribute(&r.algo, CUBLASLT_ALGO_CONFIG_REDUCTION_SCHEME, &scheme,
                                                      sizeof(scheme), &written) == CUBLAS_STATUS_SUCCESS;
-            if (!read || splits != 1 || scheme != CUBLASLT_REDUCTION_SCHEME_NONE)
+            if (!read || (!g.matched && (splits != 1 || scheme != CUBLASLT_REDUCTION_SCHEME_NONE)) ||
+                scheme == CUBLASLT_REDUCTION_SCHEME_INPLACE)
                 rc = status(CUBLAS_STATUS_NOT_SUPPORTED);
         }
         if (rc == 0) it = g.fixed.emplace(key, r.algo).first;
@@ -117,6 +123,7 @@ int fixed_choice(Gemm& g, int N, int K, int ldy, bool fp32, bool bias, Plan& p) 
     cublasLtMatmulHeuristicResult_t check{};
     const cublasStatus_t s = cublasLtMatmulAlgoCheck(g.handle, p.op, p.a, p.b, p.c, p.c, &p.algo, &check);
     if (s != CUBLAS_STATUS_SUCCESS) return status(s);
+    if (g.matched && check.state != CUBLAS_STATUS_SUCCESS) return status(check.state);
     if (check.workspaceSize > g.workspace_bytes) return status(CUBLAS_STATUS_NOT_SUPPORTED);
     return 0;
 }
@@ -226,4 +233,21 @@ extern "C" void* cs1_reference_gemm_create(size_t workspace_bytes) {
     auto* g=static_cast<Gemm*>(cs1_gemm_create(workspace_bytes));
     if(g) g->reference=true;
     return g;
+}
+
+// Additive ABI 9 entry points. Ordinary and fixed-M64 handles keep their policy.
+extern "C" void* cs1_gemm_create_matched(size_t bytes, int reference_m) {
+    auto* g = static_cast<Gemm*>(cs1_gemm_create_fixed(bytes, reference_m));
+    if (g) g->matched = true;
+    return g;
+}
+
+// ordinary == nullptr checks that the selected algorithm supports a subwindow.
+extern "C" int cs1_gemm_compatible(void* ordinary, void* matched, int M, int N, int K) {
+    if (!matched || M <= 0 || N <= 0 || K <= 0) return 0;
+    Plan *a = nullptr, *b = nullptr;
+    if (plan_for(*static_cast<Gemm*>(matched), M, N, K, N, b)) return 0;
+    if (!ordinary) return 1;
+    if (plan_for(*static_cast<Gemm*>(ordinary), M, N, K, N, a)) return 0;
+    return std::memcmp(&a->algo, &b->algo, sizeof(a->algo)) == 0;
 }

@@ -1453,3 +1453,94 @@ fn fixed_gemm_rows_do_not_depend_on_m() {
 }
 #[path = "vision_v2_kernels.rs"]
 mod vision_v2;
+
+#[test]
+#[ignore = "needs sm89 CUDA, rebuilt matched symbols; requalify on other libraries/devices"]
+fn matched_gemm_rows_equal_complete_ordinary_projection() {
+    let st = setup();
+    let create = api().matched_create().unwrap();
+    let compatible = api().matched_compatible().unwrap();
+    // Actual 4B weight shapes and complete-prompt lengths from qualification.
+    for (n, k) in [
+        (12352usize, 2560usize),
+        (2560, 4096),
+        (10240, 2560),
+        (18432, 2560),
+        (2560, 9216),
+    ] {
+        for reference in [214usize, 219, 245, 309, 437, 867, 1179, 2293] {
+            // SAFETY: plain positive-size cuBLAS context creation, destroyed below.
+            let ordinary = unsafe { (api().cs1_gemm_create)(32 << 20) };
+            let matched = unsafe { create(32 << 20, reference as i32) };
+            assert!(!ordinary.is_null() && !matched.is_null());
+            let x = random(reference * k, reference as u64, 2.0);
+            let w = random(n * k, n as u64, 0.05);
+            let (xd, wd) = (to_device(&x, st), to_device(&w, st));
+            let y = DeviceBuffer::new(reference * n * 2).unwrap();
+            let project = |handle, at: usize, rows: usize| {
+                let mut output = vec![0; rows * n * 2];
+                // SAFETY: each checked window is inside x; y has reference rows.
+                unsafe {
+                    check(
+                        (api().cs1_gemm)(
+                            handle,
+                            xd.at(at * k * 2),
+                            wd.at(0),
+                            y.at(0),
+                            rows as i32,
+                            n as i32,
+                            k as i32,
+                            n as i32,
+                            st,
+                        ),
+                        "matched row probe",
+                    )
+                    .unwrap();
+                    cuda::download(&mut output, y.at(0), st).unwrap();
+                }
+                output
+            };
+            // SAFETY: valid handles/dimensions; comparison does not run kernels.
+            assert_eq!(
+                unsafe { compatible(ordinary, matched, reference as i32, n as i32, k as i32) },
+                1
+            );
+            let full = project(ordinary, 0, reference);
+            for (at, rows) in [
+                (0, 1),
+                (0, 63),
+                (0, 64),
+                (1, 64),
+                (17, 64),
+                (reference - 1, 1),
+                (reference / 2, reference - reference / 2),
+                (0, reference),
+            ] {
+                // Probe only legal windows of this admitted full matrix.
+                assert!(at + rows <= reference);
+                assert_eq!(
+                    unsafe {
+                        compatible(
+                            std::ptr::null_mut(),
+                            matched,
+                            rows as i32,
+                            n as i32,
+                            k as i32,
+                        )
+                    },
+                    1
+                );
+                assert_eq!(
+                    project(matched, at, rows),
+                    full[at * n * 2..(at + rows) * n * 2],
+                    "N={n} K={k} reference={reference} at={at} rows={rows}"
+                );
+            }
+            // SAFETY: downloads drained all uses, both contexts owned here.
+            unsafe {
+                (api().cs1_gemm_destroy)(matched);
+                (api().cs1_gemm_destroy)(ordinary);
+            }
+        }
+    }
+}

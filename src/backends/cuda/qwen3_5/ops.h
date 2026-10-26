@@ -142,6 +142,11 @@ void* cs1_gemm_create(size_t workspace_bytes);
 // runs on). Null if reference_m <= 0 or setup fails. cs1_gemm with this handle returns a
 // cuBLAS status for an M the algorithm cannot serve, rather than switching algorithms.
 void* cs1_gemm_create_fixed(size_t workspace_bytes, int reference_m);
+// Optional additive ABI 9: choose the ordinary reduction mask at reference_m.
+// Compatibility returns 1 for equal complete descriptors, else 0. A null ordinary
+// handle tests support only (used for prefix/suffix windows); no GEMM executes.
+void* cs1_gemm_create_matched(size_t workspace_bytes, int reference_m);
+int cs1_gemm_compatible(void* ordinary, void* matched, int M, int N, int K);
 void cs1_gemm_destroy(void* gemm);
 int cs1_gemm(void* gemm, const void* x, const void* w, void* y, int M, int N, int K, int ldy,
              void* stream);
