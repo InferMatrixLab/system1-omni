@@ -100,7 +100,8 @@ or native equivalence to every reference precision and environment.
 `CUA_S1_MM_PREFIX=shared` opts into sharing the aligned language prefix of all
 questions in one screenshot request. Unset or `off` keeps the existing independent
 forwards. `fixed` runs complete prompts independently with the same fixed GEMM
-algorithms as `shared`, providing the numerical control. Other values fail before
+algorithms as `shared`, providing the numerical control. The `matched` mode
+below instead checks ordinary full-prompt algorithms. Other values fail before
 checkpoint or CUDA loading.
 
 ```sh
@@ -120,7 +121,7 @@ or less than 64 shared tokens, uses complete fixed passes and never reads a
 previous snapshot. Retained capacity is additional device memory, separate from
 the vision-cache budget.
 
-Both opt-in modes require host features and language Graph off; vision Graph
+All active prefix modes require host features and language Graph off; vision Graph
 remains independently selectable. They keep the existing prompt, CPU letter head,
 answer order and usage accounting. Fixed GEMMs can round differently from default
 execution: compare `shared` with `fixed` for continuation parity, and separately
@@ -138,8 +139,9 @@ HTTP response parsing and schema validation. The ordinary off control was
 118.804/275.748 ms, so this result does not justify enabling shared mode by default.
 Source pins, raw samples, exclusions and reproduction inputs are in the
 [follow-up qualification](https://github.com/Levius-Fubuki/system1-omni/releases/download/cua-mm-qualification-20261025/cua-mm-followup-qualification-20261025.tar.gz).
-These measurements precede the documentation update; the tested runtime sources
-are byte-identical. Other GPUs and general GUI task success remain unverified.
+These historical measurements apply to the fixed/shared implementation at
+`d4908d95c`, before the matched mode below. Other GPUs and general GUI task
+success remain unverified.
 
 CPU control/planner tests run in the ordinary Cua suite. On a reserved GPU with
 the four artifact variables above, run the exact model and recovery checks:
@@ -151,3 +153,84 @@ cargo test --release --locked -p omni-cua-s1-native --lib prefix_tests \
 
 The screenshot corpus is a numerical and execution regression; it does not
 establish general GUI task accuracy or a speedup for every request.
+
+### Full-prompt-matched algorithms
+
+`CUA_S1_MM_PREFIX=matched` shares the same request-local aligned prefix using
+algorithms selected at the first question's complete prompt length, with the
+ordinary BF16 reduction policy. Before any prefix execution, every layer's
+projection must have identical algorithm descriptors for every complete question;
+the selected algorithms must also support every prefix and suffix window within
+the workspace limit. A mismatch or unsupported window falls back to ordinary
+independent full passes. A single question or no aligned prefix takes that path
+directly. Allocation/setup and execution errors remain errors.
+
+```sh
+export CUA_S1_MM_PREFIX=matched
+export CUA_S1_GRAPH=0 CUA_S1_DEVICE_FEATURES=0
+# Rebuild the CUDA library with src/backends/cuda/qwen3_5/build.sh.
+```
+
+This mode requires the optional additive ABI 9 symbols `cs1_gemm_create_matched`
+and `cs1_gemm_compatible`; older libraries still serve the existing modes.
+The engine retains at most 16 matched GEMM workspaces, 32 MiB each. On a new
+reference length beyond that cap, it drains the language stream and releases the
+previous generation before allocating another. This is separate from retained
+prefix-state capacity and vision-cache limits. No screenshot contents survive
+as reusable results between requests. Errors and panics drain submitted work
+and restore the ordinary/fixed-M64 handle selection before returning/unwinding.
+
+Descriptor equality and algorithm support do not establish arithmetic invariance
+across row counts on every GPU. Qualify the exact GPU/cuBLAS/model combination
+before relying on ordinary-output parity. Keep `off` as the ordinary numerical
+control and `fixed`/`shared` as the separate M64 controls. No automatic policy,
+language Graph integration, changed prompt or new precision profile is enabled.
+
+```sh
+cargo test --release --locked -p omni-qwen3-5-native --test kernels \
+  matched_gemm_rows_equal_complete_ordinary_projection \
+  -- --ignored --test-threads=1 --nocapture
+# Also run the prefix_tests command above with vision Graph 0 and 1.
+```
+
+On RTX 4090/SM8.9, driver 595.71.05, CUDA 13.0/cuBLASLt 13.1.1.3, a fresh
+comparison against `d4908d95c` used concurrency 1 and a direct native-worker HTTP
+POST through full JSON/schema validation. Each configuration ran in forward and
+reverse order, four timed traversals per visit, after excluding growth,
+all-shape stabilization and five warmups. The frozen real suite uses 12 screenshots
+(desktop/mobile/web, four each), four correlated click-choice permutations each.
+
+| Workload / mode | timed requests | mean ms | p50 ms | p95 ms | sampled max MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| synthetic / off | 64 | 133.30 | 119.31 | 277.13 | 10138 |
+| synthetic / shared M64 | 64 | 134.73 | 139.35 | 215.54 | 10288 |
+| synthetic / matched | 64 | 107.17 | 103.24 | 173.69 | 10448 |
+| real / off | 96 | 256.36 | 265.33 | 271.98 | 10210 |
+| real / shared M64 | 96 | 205.53 | 209.87 | 215.85 | 10318 |
+| real / matched | 96 | 152.83 | 152.94 | 160.08 | 10606 |
+
+On this real suite, matched reduces mean latency 25.6% versus shared M64 and
+40.4% versus off; p95 reductions are 25.8% and 41.1%. The paired-workload-round
+bootstrap 95% intervals for mean reduction are 25.1–26.1% and 39.9–40.7%; these
+describe repeated timings, not general task performance. Synthetic mean
+reductions are 20.5% and 19.6%. One small two-question synthetic case regresses
+4.8% versus off. There is no claim of a speedup for every shape. Real-suite sampled
+maximum increases 288 MiB versus M64 and 396 MiB versus off. Memory is sampled
+at about 100 ms, not an exact allocator peak. Vision-cache controls are 8 entries/
+1024 MiB for synthetic and 16 entries/2048 MiB for real, not new defaults.
+
+Five profiles each completed 80 real/stress layouts twice and 32 single-question
+extractions (960 calls total), plus malformed-input/recovery probes. Matched and
+candidate off have exactly the ordinary-control FP32 logit bits, complete
+responses, token IDs and all three position axes; candidate shared retains the
+original M64 results. All single-question extractions match their parent answers.
+The 320 projection-window comparisons and prefix model regressions with vision
+Graph 0/1 passed on this GPU. Existing default-versus-reference limits remain:
+the adapted 48-screenshot/192-correlated-choice set scores 119 for off/matched
+and 120 for M64. This is not official ScreenSpot accuracy or evidence of improved
+reference quality. Defaults remain off; other GPUs, libraries and concurrency
+need qualification.
+
+Raw timings, exclusions, logits, model/source/binary hashes, reproduction inputs
+and acquisition scripts, failures and final-source mapping are in the
+[2026-10-26 qualification](https://github.com/Levius-Fubuki/system1-omni/releases/download/cua-mm-qualification-20261026/cua-mm-matched-qualification-20261026.tar.gz). Original real screenshot pixels are omitted.

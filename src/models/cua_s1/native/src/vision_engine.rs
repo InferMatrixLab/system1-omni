@@ -215,7 +215,32 @@ impl VisionEngine {
                 prepared.prompts.len() == counts.len() && !counts.is_empty(),
                 "question/prompt count mismatch"
             );
-            if self.prefix_mode != prefix::Mode::Off {
+            if self.prefix_mode == prefix::Mode::Matched {
+                let (lengths, windows) = prefix::matched_windows(&prepared.prompts)?;
+                let features = self.vision.forward(&prepared.image)?;
+                let result = self
+                    .language
+                    .with_matched_prefix(&lengths, &windows, |model| {
+                        prefix::execute(
+                            model,
+                            &self.letters,
+                            prepared,
+                            &features,
+                            prefix::Mode::Shared,
+                            &mut self.prefix_storage,
+                        )
+                    })?;
+                if let Some(logits) = result {
+                    Ok(logits)
+                } else {
+                    prepared
+                        .prompts
+                        .iter()
+                        .zip(counts)
+                        .map(|(p, n)| self.raw_score(p, &features, n).map(|(_, logits)| logits))
+                        .collect()
+                }
+            } else if self.prefix_mode != prefix::Mode::Off {
                 let features = self.vision.forward(&prepared.image)?;
                 prefix::execute(
                     &mut self.language,

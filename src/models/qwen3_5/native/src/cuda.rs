@@ -295,6 +295,15 @@ pub type GatedAttention = unsafe extern "C" fn(
 ) -> c_int;
 
 impl Api {
+    pub fn matched_create(&self) -> Result<unsafe extern "C" fn(usize, i32) -> *mut c_void> {
+        unsafe { Ok(*self._lib.get(b"cs1_gemm_create_matched\0")?) }
+    }
+    pub fn matched_compatible(
+        &self,
+    ) -> Result<unsafe extern "C" fn(*mut c_void, *mut c_void, i32, i32, i32) -> i32> {
+        unsafe { Ok(*self._lib.get(b"cs1_gemm_compatible\0")?) }
+    }
+
     /// Prompt-bidirectional full attention. Absent on CUDA libraries built before
     /// this additive ABI 9 symbol; causal workers never resolve it.
     pub fn attention_gated_bidirectional(&self) -> Result<GatedAttention> {

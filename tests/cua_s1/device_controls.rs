@@ -52,18 +52,30 @@ fn multimodal_prefix_controls_reject_invalid_and_incompatible_modes_before_loadi
             "",
             "0",
             "0",
-            "CUA_S1_MM_PREFIX must be off, fixed, or shared",
+            "CUA_S1_MM_PREFIX must be off, fixed, shared, or matched",
         ),
         (
             "true",
             "0",
             "0",
-            "CUA_S1_MM_PREFIX must be off, fixed, or shared",
+            "CUA_S1_MM_PREFIX must be off, fixed, shared, or matched",
         ),
         (
             "shared",
             "1",
             "0",
+            "multimodal prefix modes require Graph and device features off",
+        ),
+        (
+            "matched",
+            "1",
+            "0",
+            "multimodal prefix modes require Graph and device features off",
+        ),
+        (
+            "matched",
+            "0",
+            "1",
             "multimodal prefix modes require Graph and device features off",
         ),
         (
@@ -90,4 +102,54 @@ fn multimodal_prefix_controls_reject_invalid_and_incompatible_modes_before_loadi
         let error = String::from_utf8(output.stderr).unwrap();
         assert!(error.contains(expected), "{error}");
     }
+}
+
+#[test]
+fn matched_prefix_is_opt_in_and_recognized_before_checkpoint_loading() {
+    for value in [
+        None,
+        Some("off"),
+        Some("fixed"),
+        Some("shared"),
+        Some("matched"),
+    ] {
+        let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_omni-cua-s1-vision"));
+        cmd.env_remove("CUA_S1_MM_PREFIX")
+            .env("CUA_S1_GRAPH", "0")
+            .env("CUA_S1_DEVICE_FEATURES", "0")
+            .env("CUA_S1_MODEL", "/nonexistent-cua-prefix-model")
+            .env("CUA_S1_BASE", "/nonexistent-cua-prefix-model")
+            .env("CUA_S1_VISION_ADAPTER", "/nonexistent-cua-prefix-model")
+            .env("CUA_S1_CUDA_LIB", "/nonexistent-cua-prefix-model");
+        if let Some(value) = value {
+            cmd.env("CUA_S1_MM_PREFIX", value);
+        }
+        let output = cmd.output().unwrap();
+        let error = String::from_utf8(output.stderr).unwrap();
+        assert!(!output.status.success());
+        assert!(
+            error.contains("export the multimodal language checkpoint"),
+            "{value:?}: {error}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn non_unicode_prefix_is_rejected_before_loading() {
+    use std::os::unix::ffi::OsStrExt;
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_omni-cua-s1-vision"))
+        .env("CUA_S1_MM_PREFIX", std::ffi::OsStr::from_bytes(&[0xff]))
+        .env("CUA_S1_DEVICE_FEATURES", "0")
+        .env("CUA_S1_MODEL", "/nonexistent-cua-prefix-model")
+        .env("CUA_S1_BASE", "/nonexistent-cua-prefix-model")
+        .env("CUA_S1_VISION_ADAPTER", "/nonexistent-cua-prefix-model")
+        .env("CUA_S1_CUDA_LIB", "/nonexistent-cua-prefix-model")
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("CUA_S1_MM_PREFIX must be off, fixed, shared, or matched")
+    );
 }

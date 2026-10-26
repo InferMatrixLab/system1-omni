@@ -7,6 +7,7 @@ pub(super) enum Mode {
     Off,
     Fixed,
     Shared,
+    Matched,
 }
 
 impl Mode {
@@ -15,7 +16,8 @@ impl Mode {
             Err(std::env::VarError::NotPresent) | Ok("off") => Self::Off,
             Ok("fixed") => Self::Fixed,
             Ok("shared") => Self::Shared,
-            _ => anyhow::bail!("CUA_S1_MM_PREFIX must be off, fixed, or shared"),
+            Ok("matched") => Self::Matched,
+            _ => anyhow::bail!("CUA_S1_MM_PREFIX must be off, fixed, shared, or matched"),
         };
         ensure!(
             mode == Self::Off
@@ -166,4 +168,25 @@ pub(super) fn execute(
             VisionEngine::letter_logits(letters, &hidden, count)
         })
         .collect()
+}
+
+/// Validate before prefix discovery; PreparedRequest is a public boundary.
+pub(super) fn matched_windows(prompts: &[ImagePrompt]) -> Result<(Vec<usize>, Vec<usize>)> {
+    for prompt in prompts {
+        ensure!(
+            !prompt.token_ids.is_empty()
+                && prompt
+                    .position_ids
+                    .iter()
+                    .all(|axis| axis.len() == prompt.token_ids.len()),
+            "invalid prepared position shape"
+        );
+    }
+    let lengths: Vec<_> = prompts.iter().map(|p| p.token_ids.len()).collect();
+    let shared = common_prefix(prompts);
+    let mut windows = if shared > 0 { vec![shared] } else { vec![] };
+    if shared > 0 {
+        windows.extend(lengths.iter().map(|n| n - shared));
+    }
+    Ok((lengths, windows))
 }
