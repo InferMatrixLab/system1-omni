@@ -155,6 +155,18 @@ many short candidates, is drift between runs.
   `fixed_gemm_rows_do_not_depend_on_m` pass at `01c84c6` and again at `2a19ed2`, which
   adds the startup check of fixed GEMM rows. On this export the check takes 0.37 s
   at startup.
+- After `main` with #186 was merged in (`5235e50`), the `prefix` test and
+  `fixed_gemm_rows_do_not_depend_on_m` pass again, and the 253 requests keep the
+  same answers with no switch, shared and `auto`. #186's own `prefill_batch` test
+  needs a checkpoint that packs candidates and fails on this export, as it does on
+  `main` `28f4957`.
+- `002f510` adds `packing_options_leave_fixed_rows_unchanged` to
+  `tests/qwen3_5/prefix.rs`. It selects batched GDN and packed projections, as
+  Open-Jev does at load for checkpoints that pack candidates (27B), and checks that
+  shared prefixes and `forward_fixed` still equal `forward_fixed` without them bit
+  for bit, also after a packed batch. It passes on this export at `002f510`, with
+  the other `tests/qwen3_5/prefix.rs` tests and
+  `fixed_gemm_rows_do_not_depend_on_m`. No run on 27B itself.
 - Device memory after warmup, and after the 22 M1 to M3 requests and the five
   longest JevBench tasks: 15,874 and 16,674 MiB with no switch, 15,906 and
   16,884 MiB with `OPEN_JEV_PREFIX=1`. The difference is the fixed-algorithm GEMM
