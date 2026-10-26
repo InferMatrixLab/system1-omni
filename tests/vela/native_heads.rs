@@ -73,11 +73,10 @@ fn f32_stack(raw: &[u8], name: &str) -> Vec<Vec<Vec<f32>>> {
         .collect()
 }
 
-fn bundle_dir() -> Option<PathBuf> {
-    std::env::var("VELA_NATIVE_BUNDLE")
-        .ok()
-        .map(PathBuf::from)
-        .filter(|p| p.is_dir())
+fn bundle_dir() -> PathBuf {
+    PathBuf::from(
+        std::env::var("VELA_NATIVE_BUNDLE").expect("set VELA_NATIVE_BUNDLE to an exported bundle"),
+    )
 }
 
 /// Largest absolute difference between two nested JSON numbers.
@@ -100,21 +99,28 @@ fn max_drift(a: &Value, b: &Value) -> f64 {
 }
 
 #[test]
+#[ignore = "requires VELA_NATIVE_BUNDLE at an exported bundle; CPU only"]
 fn the_heads_reproduce_the_reference_logits_and_the_scoring_the_answers() {
-    let Some(bundle) = bundle_dir() else {
-        eprintln!("skipping: set VELA_NATIVE_BUNDLE to an exported bundle");
-        return;
-    };
+    let bundle = bundle_dir();
     let heads = Heads::load(&bundle).expect("heads load");
     let cal = Calibration::load(&bundle).expect("calibration loads");
+    // The env gates may only tighten the documented ceilings: an
+    // unparseable value is an error, and a wider one clamps back down.
     let logits_gate = std::env::var("VELA_HEADS_LOGIT_GATE")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(4e-5);
+        .map(|v| {
+            v.parse::<f64>()
+                .expect("VELA_HEADS_LOGIT_GATE must be a number")
+        })
+        .unwrap_or(4e-5)
+        .min(4e-5);
     let answers_gate = std::env::var("VELA_HEADS_ANSWER_GATE")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1e-6);
+        .map(|v| {
+            v.parse::<f64>()
+                .expect("VELA_HEADS_ANSWER_GATE must be a number")
+        })
+        .unwrap_or(1e-6)
+        .min(1e-6);
+    println!("gates: logit {logits_gate:.3e} answer {answers_gate:.3e}");
 
     for case in CASES {
         let fixture = load_json(&format!("head-input-{case}.json"));
