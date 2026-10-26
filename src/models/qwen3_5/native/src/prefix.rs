@@ -33,6 +33,11 @@ impl<'a> PrefixPlan<'a> {
         self.saved_tokens >= 4096 && self.saved_tokens >= total.div_ceil(3)
     }
 
+    /// Whether more than one group shares the request prefix's whole 64-token chunks.
+    pub fn shares_across_groups(&self) -> bool {
+        self.prompts.groups.len() > 1 && self.prompts.prefix.len() >= 64
+    }
+
     pub fn new<R: PrefixRow>(rows: &'a [R]) -> Option<Self> {
         if rows.len() < 2 || rows.iter().any(|row| row.ids().is_empty()) {
             return None;

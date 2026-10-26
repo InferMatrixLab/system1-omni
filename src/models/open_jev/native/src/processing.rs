@@ -91,18 +91,26 @@ impl ResponseContext {
         self.finish_with_prefix(rows, None)
     }
 
-    /// `finish`, reporting in `metadata.prefix_cache` how the candidates ran.
+    /// `finish`, reporting in `metadata.prefix_cache` the configured policy, whether the
+    /// candidates ran on shared prefixes, within one question or across questions, and
+    /// the prefix tokens that were not recomputed.
     pub fn finish_with_prefix(
         self,
         rows: Vec<Vec<f32>>,
         prefix: Option<&PrefixUse>,
     ) -> Result<Value> {
-        let prefix_cache = match prefix {
-            Some(used) if used.mode != PrefixMode::Off => json!({
-                "enabled": used.shared, "mode": used.mode.name(), "saved_tokens": used.saved_tokens
-            }),
-            _ => json!({"enabled": false, "mode": "independent_candidates"}),
+        let used = prefix.copied().unwrap_or_default();
+        let policy = match used.mode {
+            PrefixMode::Off => "default",
+            mode => mode.name(),
         };
+        let scope = match (used.shared, used.across_questions) {
+            (false, _) => "none",
+            (true, false) => "within_question",
+            (true, true) => "across_questions",
+        };
+        let prefix_cache = json!({"policy": policy, "enabled": used.shared, "scope": scope,
+            "saved_tokens": used.saved_tokens});
         ensure!(rows.len() == self.questions.len(), "invalid logit rows");
         let mut answers = Map::new();
         for (q, mut logits) in self.questions.iter().zip(rows) {

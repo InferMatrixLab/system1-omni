@@ -85,4 +85,8 @@ fn candidates_plan_as_question_groups_and_rebuild_in_order() {
     // The 200-token state is floored to 192; the first question's 100 extra tokens
     // reach 256 for its other two candidates.
     assert_eq!(plan.saved_tokens, 3 * 192 + 2 * (256 - 192));
+    assert!(plan.shares_across_groups());
+    // One question's candidates share only within it.
+    let one = super::rows(&ids[..1]);
+    assert!(!PrefixPlan::new(&one).unwrap().shares_across_groups());
 }

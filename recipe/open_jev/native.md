@@ -220,10 +220,12 @@ OPEN_JEV_PREFIX=auto OPEN_JEV_MODEL=weights/open-jev-9b-merged \
   target/release/omni-open-jev-native
 ```
 
-With either switch set, the response's `metadata.prefix_cache` gives the mode,
-whether the request ran on shared prefixes (`enabled`) and the prefix tokens that
-were not recomputed (`saved_tokens`); with both off it is unchanged. Usage still
-counts every candidate's tokens. The [Open-Jev-9B validation](validation-9b.md#shared-prefixes-2026-10-25)
+The response's `metadata.prefix_cache` gives the configured `policy` (`default` with
+both switches off, otherwise `fixed`, `shared` or `auto`), whether the request ran on
+shared prefixes (`enabled`), their `scope` (`none`, `within_question`, or
+`across_questions` when more than one question shares the request prefix) and the
+prefix tokens that were not recomputed (`saved_tokens`). Usage still counts every
+candidate's tokens. The [Open-Jev-9B validation](validation-9b.md#shared-prefixes-2026-10-25)
 has the measurements; shared prefixes have not been run on Open-Jev-27B-v1.1. The
 GPU test compares shared and fixed scores on a two-question request:
 

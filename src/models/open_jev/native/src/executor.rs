@@ -94,11 +94,13 @@ fn rows(ids: &[Vec<Vec<u32>>]) -> Vec<Row<'_>> {
 }
 
 /// How a request's candidates ran: the configured mode, whether they ran on shared
-/// prefixes, and the prefix tokens that were not recomputed.
-#[derive(Clone, Copy, Debug)]
+/// prefixes and whether more than one question shared one, and the prefix tokens that
+/// were not recomputed.
+#[derive(Clone, Copy, Debug, Default)]
 pub struct PrefixUse {
     pub mode: PrefixMode,
     pub shared: bool,
+    pub across_questions: bool,
     pub saved_tokens: usize,
 }
 
@@ -178,8 +180,7 @@ impl Executor {
                 };
                 let mut used = PrefixUse {
                     mode,
-                    shared: false,
-                    saved_tokens: 0,
+                    ..PrefixUse::default()
                 };
                 let mut scores = Vec::with_capacity(inputs.len());
                 if let Some(plan) = plan {
@@ -187,6 +188,7 @@ impl Executor {
                         scores.push(head.score(last)?);
                     }
                     used.shared = true;
+                    used.across_questions = plan.shares_across_groups();
                     used.saved_tokens = plan.saved_tokens;
                 } else if mode == PrefixMode::Fixed || mode == PrefixMode::Shared {
                     for ids in &inputs {
