@@ -24,6 +24,131 @@ pub struct Stream(*mut c_void);
 // from one thread at a time.
 unsafe impl Send for Stream {}
 
+/// Optional GDN prefill with more threads and unchanged arithmetic.
+pub type GdnPrefill = unsafe extern "C" fn(
+    *const c_void,
+    *const c_void,
+    *const c_void,
+    *const f32,
+    *const c_void,
+    *mut c_void,
+    *mut f32,
+    c_int,
+    c_int,
+    c_int,
+    f32,
+    Stream,
+) -> c_int;
+
+/// Optional vectorized convolution with the original layout and rounding.
+pub type GdnConv = unsafe extern "C" fn(
+    *const c_void,
+    c_int,
+    *const c_void,
+    *mut c_void,
+    *mut c_void,
+    *mut c_void,
+    c_int,
+    c_int,
+    c_int,
+    Stream,
+) -> c_int;
+
+/// Optional compact suffix operators reading immutable per-layer prefix state.
+#[derive(Clone, Copy)]
+pub struct SharedSuffix {
+    pub conv: unsafe extern "C" fn(
+        *const c_void,
+        *const c_void,
+        c_int,
+        *const c_void,
+        *mut c_void,
+        *mut c_void,
+        *mut c_void,
+        c_int,
+        c_int,
+        c_int,
+        Stream,
+    ) -> c_int,
+    pub attention: unsafe extern "C" fn(
+        *const c_void,
+        *const c_void,
+        *const c_void,
+        c_int,
+        *const c_void,
+        *mut c_void,
+        *const c_void,
+        *const c_void,
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+        f32,
+        Stream,
+    ) -> c_int,
+}
+
+/// Optional shape changes using a validated original-shape GEMM algorithm.
+#[derive(Clone, Copy)]
+pub struct ReuseGemm {
+    pub check: unsafe extern "C" fn(
+        *mut c_void,
+        *const usize,
+        usize,
+        *const usize,
+        usize,
+        c_int,
+        c_int,
+    ) -> c_int,
+    pub run: unsafe extern "C" fn(
+        *mut c_void,
+        *const c_void,
+        *const c_void,
+        *mut c_void,
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+        Stream,
+    ) -> c_int,
+}
+
+/// Optional packed BF16 projections retaining the original per-sequence algorithms.
+pub type PackedGemm = unsafe extern "C" fn(
+    *mut c_void,
+    *const c_void,
+    *const c_void,
+    *mut c_void,
+    *const usize,
+    usize,
+    c_int,
+    c_int,
+    Stream,
+) -> c_int;
+
+/// Optional GDN prefill over up to sixteen independent token sequences.
+#[derive(Clone, Copy)]
+pub struct BatchedGdn {
+    pub workspace_floats: unsafe extern "C" fn(c_int, c_int, c_int) -> usize,
+    pub run: unsafe extern "C" fn(
+        *const c_void,
+        *const c_void,
+        *const c_void,
+        *const f32,
+        *const c_void,
+        *mut c_void,
+        *mut f32,
+        usize,
+        *const usize,
+        usize,
+        c_int,
+        c_int,
+        f32,
+        Stream,
+    ) -> c_int,
+}
+
 /// Additive dimension-aware vision entry points. Libraries at the required ABI may omit these optional symbols.
 pub struct VisionV2 {
     pub position: unsafe extern "C" fn(
@@ -315,6 +440,67 @@ impl Api {
                 .context(
                     "libqwen3_5_cuda.so has no cs1_attention_gated_bidirectional; rebuild src/backends/cuda/qwen3_5 (ABI 9 additive symbol required by StartLux Instant)",
                 )
+        }
+    }
+
+    pub fn wide_gdn(&self) -> Option<GdnPrefill> {
+        // SAFETY: the additive signature matches ops.h; API retains the library.
+        unsafe {
+            self._lib
+                .get::<GdnPrefill>(b"cs1_gdn_prefill_wide\0")
+                .ok()
+                .map(|f| *f)
+        }
+    }
+
+    pub fn vector_conv(&self) -> Option<GdnConv> {
+        // SAFETY: the additive signature matches ops.h; API retains the library.
+        unsafe {
+            self._lib
+                .get::<GdnConv>(b"cs1_gdn_conv_vector\0")
+                .ok()
+                .map(|f| *f)
+        }
+    }
+
+    pub fn shared_suffix(&self) -> Option<SharedSuffix> {
+        // SAFETY: additive signatures match ops.h; the API retains the library.
+        unsafe {
+            Some(SharedSuffix {
+                conv: *self._lib.get(b"cs1_gdn_conv_prefix\0").ok()?,
+                attention: *self._lib.get(b"cs1_attention_gated_shared\0").ok()?,
+            })
+        }
+    }
+
+    pub fn reuse_gemm(&self) -> Option<ReuseGemm> {
+        // SAFETY: signatures match optional ops.h declarations; API owns the library.
+        unsafe {
+            Some(ReuseGemm {
+                check: *self._lib.get(b"cs1_gemm_reuse_check\0").ok()?,
+                run: *self._lib.get(b"cs1_gemm_reuse\0").ok()?,
+            })
+        }
+    }
+
+    pub fn packed_gemm(&self) -> Result<PackedGemm> {
+        // SAFETY: the additive signature matches cs1_gemm_packed in ops.h;
+        // this API retains the library for the process lifetime.
+        unsafe {
+            self._lib
+                .get::<PackedGemm>(b"cs1_gemm_packed\0")
+                .map(|f| *f)
+        }
+        .context("packed projections require the optional cs1_gemm_packed CUDA symbol")
+    }
+
+    pub fn batched_gdn(&self) -> Result<BatchedGdn> {
+        // SAFETY: optional signatures match ops.h; the static API owns the library.
+        unsafe {
+            Ok(BatchedGdn {
+                workspace_floats: *self._lib.get(b"cs1_gdn_batch_workspace_floats\0")?,
+                run: *self._lib.get(b"cs1_gdn_prefill_batch\0")?,
+            })
         }
     }
 

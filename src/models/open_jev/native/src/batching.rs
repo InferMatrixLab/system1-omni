@@ -24,6 +24,22 @@ pub(crate) fn ranges(inputs: &[&[u32]]) -> Vec<Range<usize>> {
     batches
 }
 
+/// Only long candidates that the original packing policy executes separately.
+/// Sharing is restricted to one question by the caller, with a nonempty suffix.
+pub(crate) fn shared_prefix(inputs: &[&[u32]]) -> usize {
+    if !(2..=MAX_SEQUENCES).contains(&inputs.len())
+        || inputs.iter().any(|ids| ids.len() <= MAX_TOKENS / 2)
+    {
+        return 0;
+    }
+    let shortest = inputs.iter().map(|ids| ids.len()).min().unwrap();
+    let common = (0..shortest - 1)
+        .take_while(|&i| inputs.iter().all(|ids| ids[i] == inputs[0][i]))
+        .count();
+    let aligned = common / 64 * 64;
+    if aligned >= 512 { aligned } else { 0 }
+}
+
 #[cfg(test)]
 #[path = "../../../../../tests/open_jev/batching.rs"]
 mod tests;

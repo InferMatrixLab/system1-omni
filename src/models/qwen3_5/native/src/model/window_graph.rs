@@ -19,7 +19,7 @@ impl Model {
     ) -> Result<()> {
         let s = self.scratch.as_ref().unwrap();
         if !self.graph_enabled {
-            return self.run_window(s, begin, end, true, capture, prefix, gemm);
+            return self.run_window(s, begin, end, true, capture, prefix, gemm, None);
         }
         let states = [
             prefix.map(|p| Arc::clone(&p.buffers)),
@@ -38,10 +38,19 @@ impl Model {
             return Ok(());
         }
         // Preserve the eager miss result; capture records without executing.
-        self.run_window(s, begin, end, true, capture.as_deref_mut(), prefix, gemm)?;
+        self.run_window(
+            s,
+            begin,
+            end,
+            true,
+            capture.as_deref_mut(),
+            prefix,
+            gemm,
+            None,
+        )?;
         cuda::synchronize(self.stream)?;
         let recorded = cuda::Graph::capture(self.stream, || {
-            self.run_window(s, begin, end, true, capture, prefix, gemm)
+            self.run_window(s, begin, end, true, capture, prefix, gemm, None)
         });
         self.cache_window_graph(key, states, recorded)
     }

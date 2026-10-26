@@ -14,8 +14,14 @@ single prompts and bounded packed prefill. StartLux Instant uses a
 bidirectional full-attention call on each prompt; its GDN stays causal, and
 it does not pack prompts or cache prefixes. Cua-S1 and Open-Jev-9B use
 single-prompt calls; Open-Jev-27B-v1.1 packs candidates within one request for
-input and gate/up GEMMs while preserving per-sequence mixers and output/down GEMM
-shapes. Decider optionally packs up to four complete rows and 4096 tokens within
+input and gate/up GEMMs. Its opt-in output/down packing retains each original
+matrix algorithm and checks the combined shape; incompatible groups keep separate
+calls. Its batched linear-attention kernels preserve independent sequence state.
+Long candidates from one question can share an exact prefix when every retained
+projection algorithm supports the prefix and suffix shapes. This Open-Jev path
+preserves the original complete-prompt arithmetic choices; it is separate from
+the fixed-algorithm `forward_shared` interface described below.
+Decider optionally packs up to four complete rows and 4096 tokens within
 one request, or selects request-local shared prefixes through the same canonical
 continuation path used by JEV-VL (below). Both optimizations default off.
 [Laya's native worker](../src/models/laya/README.md)

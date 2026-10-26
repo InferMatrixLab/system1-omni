@@ -18,7 +18,12 @@
 
 #include <cstring>
 #include <map>
+#include <list>
+#include <iterator>
 #include <tuple>
+#include <cstring>
+#include <limits>
+#include <vector>
 
 #include "ops.h"
 
@@ -31,6 +36,28 @@ struct Plan {
 };
 
 using Key = std::tuple<int, int, int, int, bool, bool>;  // M, N, K, ldy, FP32, bias
+using PackedKey = std::tuple<std::vector<size_t>, int, int>;
+
+struct PackedSegment {
+    Plan plan;
+    size_t offset = 0;
+    int rows = 0;
+    bool enabled = false;
+};
+
+using PackedSegments = std::vector<PackedSegment>;
+constexpr size_t MAX_PACKED_PLANS = 512;
+struct PackedPlan {
+    PackedSegments segments;
+    std::list<PackedKey>::iterator age;
+};
+
+using ReuseKey = std::tuple<int, int, int, int>;
+constexpr size_t MAX_REUSED_PLANS = 512;
+struct ReusedPlan {
+    Plan plan;
+    std::list<ReuseKey>::iterator age;
+};
 
 struct Gemm {
     cublasLtHandle_t handle = nullptr;
@@ -41,6 +68,10 @@ struct Gemm {
     int reference_m = 0;  // > 0: one algorithm per weight shape, chosen at this M
     std::map<Key, Plan> plans;
     std::map<std::tuple<int, int, int, bool, bool>, cublasLtMatmulAlgo_t> fixed;  // N, K, ldy, FP32, bias
+    std::map<ReuseKey, ReusedPlan> reused_plans;
+    std::list<ReuseKey> reused_order;
+    std::map<PackedKey, PackedPlan> packed_plans;
+    std::list<PackedKey> packed_order;
 };
 
 int status(cublasStatus_t s) { return s == CUBLAS_STATUS_SUCCESS ? 0 : 1000 + (int)s; }
@@ -157,6 +188,42 @@ int plan_for(Gemm& g, int M, int N, int K, int ldy, Plan*& out, bool fp32 = fals
     return 0;
 }
 
+// Optional shape changes retain the exact original cuBLASLt algorithm. A return
+// of -1 means unsupported (the caller must use its unchanged complete forward).
+int reused_plan(Gemm& g, int M, int N, int K, int original_M, Plan*& out) {
+    const auto key = std::make_tuple(M, N, K, original_M);
+    auto it = g.reused_plans.find(key);
+    if (it != g.reused_plans.end()) {
+        if (std::next(it->second.age) != g.reused_order.end())
+            g.reused_order.splice(g.reused_order.end(), g.reused_order, it->second.age);
+        out = &it->second.plan;
+        return 0;
+    }
+    Plan* original = nullptr;
+    int rc = plan_for(g, original_M, N, K, N, original);
+    if (rc) return rc;
+    Plan p;
+    rc = describe(M, N, K, N, p, false, false);
+    if (rc) { destroy(p); return rc; }
+    p.algo = original->algo;
+    cublasLtMatmulHeuristicResult_t checked{};
+    const auto result = cublasLtMatmulAlgoCheck(g.handle, p.op, p.a, p.b, p.c, p.c, &p.algo, &checked);
+    if (result != CUBLAS_STATUS_SUCCESS || checked.state != CUBLAS_STATUS_SUCCESS ||
+        checked.workspaceSize > g.workspace_bytes) {
+        destroy(p);
+        return -1;
+    }
+    if (g.reused_plans.size() == MAX_REUSED_PLANS) {
+        const auto oldest = g.reused_plans.find(g.reused_order.front());
+        destroy(oldest->second.plan);
+        g.reused_plans.erase(oldest);
+        g.reused_order.pop_front();
+    }
+    g.reused_order.push_back(key);
+    out = &g.reused_plans.emplace(key, ReusedPlan{p, std::prev(g.reused_order.end())}).first->second.plan;
+    return 0;
+}
+
 }  // namespace
 
 extern "C" void* cs1_gemm_create_fixed(size_t workspace_bytes, int reference_m) {
@@ -182,6 +249,9 @@ extern "C" void cs1_gemm_destroy(void* gemm) {
     Gemm* g = static_cast<Gemm*>(gemm);
     if (!g) return;
     for (auto& kv : g->plans) destroy(kv.second);
+    for (auto& kv : g->reused_plans) destroy(kv.second.plan);
+    for (auto& kv : g->packed_plans)
+        for (auto& segment : kv.second.segments) destroy(segment.plan);
     if (g->workspace) cudaFree(g->workspace);
     cublasLtDestroy(g->handle);
     delete g;
@@ -198,6 +268,141 @@ extern "C" int cs1_gemm(void* gemm, const void* x, const void* w, void* y, int M
     const float alpha = 1.f, beta = 0.f;
     return status(cublasLtMatmul(g->handle, p->op, &alpha, w, p->a, x, p->b, &beta, y, p->c, y, p->c, &p->algo,
                                  g->workspace, g->workspace_bytes, static_cast<cudaStream_t>(stream)));
+}
+
+// Additive opt-in for merged language models. Keep each original shape's
+// algorithm, including split-K and its reduction scheme. Pack only consecutive
+// shapes with identical algorithms, and split groups to fit the existing workspace.
+extern "C" int cs1_gemm_packed(void* gemm, const void* x, const void* w, void* y,
+                                const size_t* lengths, size_t count, int N, int K,
+                                void* stream) {
+    auto* g = static_cast<Gemm*>(gemm);
+    if (!g || !lengths || count == 0 || N <= 0 || K <= 0) return cudaErrorInvalidValue;
+    size_t total = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (lengths[i] == 0 || lengths[i] > static_cast<size_t>(std::numeric_limits<int>::max()) - total)
+            return cudaErrorInvalidValue;
+        total += lengths[i];
+    }
+    if (count == 1) return cs1_gemm(g, x, w, y, static_cast<int>(total), N, K, N, stream);
+    const PackedKey key{std::vector<size_t>(lengths, lengths + count), N, K};
+    auto it = g->packed_plans.find(key);
+    if (it == g->packed_plans.end()) {
+        std::vector<Plan*> originals(count);
+        for (size_t i = 0; i < count; ++i) {
+            const int rc = plan_for(*g, static_cast<int>(lengths[i]), N, K, N, originals[i]);
+            if (rc) return rc;
+        }
+        PackedSegments packed;
+        size_t offset = 0;
+        for (size_t begin = 0; begin < count;) {
+            size_t end = begin + 1;
+            size_t rows = lengths[begin];
+            // Equality of the opaque value is conservative: differences in
+            // reserved bytes only decline packing. Original map pointers are stable.
+            while (!g->reference && end < count &&
+                   std::memcmp(&originals[begin]->algo, &originals[end]->algo,
+                               sizeof(cublasLtMatmulAlgo_t)) == 0) {
+                rows += lengths[end++];
+            }
+            PackedSegment segment;
+            segment.offset = offset;
+            // Try the largest compatible group first. A smaller group may fit
+            // when split-K workspace or an algorithm shape limit rejects it.
+            while (end > begin + 1) {
+                const int rc = describe(static_cast<int>(rows), N, K, N, segment.plan, false, false);
+                if (rc) {
+                    destroy(segment.plan);
+                    for (auto& previous : packed) destroy(previous.plan);
+                    return rc;
+                }
+                auto& p = segment.plan;
+                p.algo = originals[begin]->algo;
+                cublasLtMatmulHeuristicResult_t checked{};
+                const auto result = cublasLtMatmulAlgoCheck(g->handle, p.op, p.a, p.b, p.c, p.c,
+                                                            &p.algo, &checked);
+                segment.enabled = result == CUBLAS_STATUS_SUCCESS && checked.state == CUBLAS_STATUS_SUCCESS
+                                  && checked.workspaceSize <= g->workspace_bytes;
+                if (segment.enabled) break;
+                destroy(segment.plan);
+                rows -= lengths[--end];
+            }
+            segment.rows = static_cast<int>(rows);
+            packed.push_back(segment);
+            offset += rows;
+            begin = end;
+        }
+        if (g->packed_plans.size() == MAX_PACKED_PLANS) {
+            const auto oldest = g->packed_plans.find(g->packed_order.front());
+            // Descriptors are host-side cuBLAS inputs; captured graphs own their
+            // launch arguments. The eviction/replay regression covers this lifetime.
+            for (auto& segment : oldest->second.segments) destroy(segment.plan);
+            g->packed_plans.erase(oldest);
+            g->packed_order.pop_front();
+        }
+        g->packed_order.push_back(key);
+        it = g->packed_plans.emplace(key, PackedPlan{std::move(packed), std::prev(g->packed_order.end())}).first;
+    }
+    if (std::next(it->second.age) != g->packed_order.end())
+        g->packed_order.splice(g->packed_order.end(), g->packed_order, it->second.age);
+    const float alpha = 1.f, beta = 0.f;
+    for (auto& segment : it->second.segments) {
+        const auto* input = static_cast<const char*>(x) + segment.offset * K * 2;
+        auto* output = static_cast<char*>(y) + segment.offset * N * 2;
+        int rc;
+        if (segment.enabled) {
+            auto& p = segment.plan;
+            rc = status(cublasLtMatmul(g->handle, p.op, &alpha, w, p.a, input, p.b, &beta, output, p.c,
+                                       output, p.c, &p.algo, g->workspace, g->workspace_bytes,
+                                       static_cast<cudaStream_t>(stream)));
+        } else {
+            rc = cs1_gemm(g, input, w, output, segment.rows, N, K, N, stream);
+        }
+        if (rc) return rc;
+    }
+    return 0;
+}
+
+extern "C" int cs1_gemm_reuse_check(void* gemm, const size_t* original_rows, size_t originals,
+                                     const size_t* target_rows, size_t targets, int N, int K) {
+    auto* g = static_cast<Gemm*>(gemm);
+    if (!g || !original_rows || !target_rows || originals == 0 || targets == 0 || N <= 0 || K <= 0)
+        return cudaErrorInvalidValue;
+    if (g->reference) return -1;
+    for (size_t i = 0; i < originals; ++i)
+        if (!original_rows[i] || original_rows[i] > static_cast<size_t>(std::numeric_limits<int>::max()))
+            return cudaErrorInvalidValue;
+    for (size_t i = 0; i < targets; ++i)
+        if (!target_rows[i] || target_rows[i] > static_cast<size_t>(std::numeric_limits<int>::max()))
+            return cudaErrorInvalidValue;
+    Plan* original = nullptr;
+    int rc = plan_for(*g, static_cast<int>(original_rows[0]), N, K, N, original);
+    if (rc) return rc;
+    for (size_t i = 1; i < originals; ++i) {
+        Plan* other = nullptr;
+        rc = plan_for(*g, static_cast<int>(original_rows[i]), N, K, N, other);
+        if (rc) return rc;
+        if (std::memcmp(&original->algo, &other->algo, sizeof(original->algo))) return -1;
+    }
+    for (size_t i = 0; i < targets; ++i) {
+        Plan* target = nullptr;
+        rc = reused_plan(*g, static_cast<int>(target_rows[i]), N, K, static_cast<int>(original_rows[0]), target);
+        if (rc) return rc;
+    }
+    return 0;
+}
+
+extern "C" int cs1_gemm_reuse(void* gemm, const void* x, const void* w, void* y,
+                              int M, int N, int K, int original_M, void* stream) {
+    auto* g = static_cast<Gemm*>(gemm);
+    if (!g || M <= 0 || N <= 0 || K <= 0 || original_M <= 0) return cudaErrorInvalidValue;
+    if (g->reference) return -1;
+    Plan* p = nullptr;
+    const int rc = reused_plan(*g, M, N, K, original_M, p);
+    if (rc) return rc;
+    const float alpha = 1.f, beta = 0.f;
+    return status(cublasLtMatmul(g->handle, p->op, &alpha, w, p->a, x, p->b, &beta, y, p->c, y, p->c,
+                               &p->algo, g->workspace, g->workspace_bytes, static_cast<cudaStream_t>(stream)));
 }
 
 // Vision's biased BF16 linears round only after adding bias. The patch
