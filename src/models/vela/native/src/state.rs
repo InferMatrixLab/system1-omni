@@ -6,7 +6,7 @@
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-use crate::contract::RequestError;
+use crate::contract::{RequestError, py_is_blank, py_trim};
 
 /// `json.dumps(ensure_ascii=False, sort_keys=True, separators=(",", ":"))`
 /// — key-sorted compact JSON, non-ASCII literal.
@@ -30,6 +30,19 @@ pub fn canonical(value: &Value) -> String {
         Value::Array(items) => {
             let parts: Vec<String> = items.iter().map(canonical).collect();
             format!("[{}]", parts.join(","))
+        }
+        other => scalar(other),
+    }
+}
+
+/// Scalars as Python `json.dumps` renders them: integers in range
+/// verbatim, floats through the shared Python-parity formatter
+/// (`1e+20`, `1.5e-07` — `serde_json` prints `1e20`, `1.5e-7`).
+fn scalar(value: &Value) -> String {
+    match value {
+        Value::Number(number) if number.is_i64() || number.is_u64() => number.to_string(),
+        Value::Number(number) => {
+            omni_qwen3_5_native::json::float_repr(number.as_f64().expect("a JSON number"))
         }
         other => serde_json::to_string(other).unwrap(),
     }
@@ -91,7 +104,9 @@ pub fn system_one_state(state: &Value) -> Result<StateParts, RequestError> {
     // A string holding a JSON object is read as that object.
     let state = match state {
         Value::String(text) => {
-            let stripped = text.trim_start();
+            // The reference strips (Python blank set) before sniffing
+            // the JSON-object form and before parsing it.
+            let stripped = py_trim(text);
             if stripped.starts_with('{') {
                 if let Value::Object(object) =
                     serde_json::from_str::<Value>(stripped).unwrap_or(Value::Null)
@@ -108,7 +123,7 @@ pub fn system_one_state(state: &Value) -> Result<StateParts, RequestError> {
     };
     match &state {
         Value::String(text) => {
-            if text.trim().is_empty() {
+            if py_is_blank(text) {
                 return Err(state_error("state must not be empty or whitespace"));
             }
             let mut fields = BTreeMap::new();
@@ -216,7 +231,7 @@ pub fn system_one_state(state: &Value) -> Result<StateParts, RequestError> {
                         text.push_str(&rendered);
                     }
                 }
-                if text.trim().is_empty() {
+                if py_is_blank(&text) {
                     return Err(state_error(&format!(
                         "the {role} part of the state is empty"
                     )));
