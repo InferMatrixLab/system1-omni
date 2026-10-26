@@ -113,6 +113,10 @@ fn invalid_json_is_a_generic_400() {
 fn a_non_object_body_is_rejected() {
     let error = contract::parse_body(b"[1, 2]").unwrap_err();
     assert_eq!(error.status, 400);
+    assert_eq!(
+        error.body,
+        json!({"detail": "request must be a JSON object"})
+    );
 }
 
 #[test]

@@ -54,8 +54,9 @@ pub fn parse_body(raw: &[u8]) -> Result<Map<String, Value>, RequestError> {
     Ok(message)
 }
 
-/// Mirror the reference worker's 400 messages: duplicate keys verbatim,
-/// everything else the shared generic message.
+/// Mirror the reference worker's 400 messages: duplicate keys and
+/// non-object bodies verbatim, everything else the shared generic
+/// message.
 pub(crate) fn normalize_parse_error(error: &str) -> RequestError {
     if let Some(rest) = error.split("duplicate key ").nth(1) {
         // serde appends its position suffix after the quoted key.
@@ -65,6 +66,11 @@ pub(crate) fn normalize_parse_error(error: &str) -> RequestError {
         {
             return RequestError::detail(400, &format!("duplicate JSON key '{key}'"));
         }
+    }
+    // The shared parser's exact non-object error, answered with the
+    // reference worker's wording.
+    if error == "request body must be a JSON object" {
+        return RequestError::detail(400, "request must be a JSON object");
     }
     RequestError::detail(400, "request body must contain valid JSON and UTF-8 text")
 }
