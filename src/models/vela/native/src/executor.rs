@@ -11,9 +11,10 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use omni_qwen3_5_native::model::Model;
 
+use crate::bundle::Bundle;
 use crate::heads::Heads;
 use crate::render::{Block, RenderedRow};
 
@@ -38,8 +39,15 @@ pub struct Executor {
 
 impl Executor {
     pub fn load(bundle: &Path, library: &Path) -> Result<Self> {
+        Bundle::load(bundle).context("the exported bundle did not pass the manifest gate")?;
         let model = Model::load(&bundle.join("bf16"), library)
             .context("the shared qwen3_5 model did not load the uniform-BF16 backbone")?;
+        // heads.rs builds every projection at its private HIDDEN = 1024.
+        ensure!(
+            model.cfg.hidden == 1024,
+            "the backbone hidden size {} cannot feed the heads' 1024",
+            model.cfg.hidden
+        );
         let heads = Heads::load(bundle)?;
         Ok(Self {
             model,
