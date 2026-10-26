@@ -1037,59 +1037,143 @@ class FastScreenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bench.fast_screen_decision(10, 1000, 9, 900), "full_c1")
         with self.assertRaisesRegex(ValueError, "positive"):
             bench.latency_clearly_worse(0, 1)
+        self.assertTrue(bench.is_full_c1_pooled_baseline(7.338, 51.816))
+        self.assertFalse(bench.is_full_c1_pooled_baseline(7.338, 40.0))
+        with self.assertRaisesRegex(ValueError, "screen primary TBD"):
+            bench.refuse_full_c1_pooled_baseline(7.338, 51.816)
 
-    async def test_run_fast_screen_keeps_sixty_and_does_not_keep(self):
+    async def _run_screen(self, root, manifest, name, *, baseline=None, step=None, handler=None):
+        args = run_args(root)
+        args.output = root / name
+        args.manifest = manifest
+        args.fast_screen = True
+        args.warmup = 5
+        args.baseline_screen = baseline
+
+        def default_handler(request):
+            body = json.loads(request.content)
+            self.assertNotIn("prompt_tokens", body)
+            self.assertEqual(body["model"], "english")
+            return httpx.Response(200, json=noul_ok())
+
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler or default_handler)
+        )
+        with patch.object(bench.httpx, "AsyncClient", return_value=client):
+            if step is None:
+                with redirect_stdout(io.StringIO()):
+                    code = await bench.run(args, bench.load_cases(manifest))
+            else:
+                with (
+                    patch.object(bench.time, "perf_counter", _stepping_clock(step)),
+                    redirect_stdout(io.StringIO()),
+                ):
+                    code = await bench.run(args, bench.load_cases(manifest))
+        return args, code
+
+    async def test_screen_primary_is_sixty_ids_and_not_a_keep(self):
         cases = screen_population()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             manifest = root / "public231.jsonl"
             manifest.write_text("".join(json.dumps(case) + "\n" for case in cases))
-            args = run_args(root)
-            args.manifest = manifest
-            args.fast_screen = True
-            args.warmup = 5
-            args.baseline_p50_ms = 1_000_000.0
-            args.baseline_p95_ms = 1_000_000.0
-            seen = []
-
-            def handler(request):
-                body = json.loads(request.content)
-                seen.append(body)
-                self.assertNotIn("prompt_tokens", body)
-                self.assertEqual(body["model"], "english")
-                return httpx.Response(200, json=noul_ok())
-
-            client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-            with (
-                patch.object(bench.httpx, "AsyncClient", return_value=client),
-                redirect_stdout(io.StringIO()),
-            ):
-                self.assertEqual(await bench.run(args, bench.load_cases(manifest)), 0)
+            args, code = await self._run_screen(root, manifest, "primary", step=0.002)
+            self.assertEqual(code, 0)
             saved = json.loads((args.output / "summary.json").read_text())
             self.assertEqual(saved, bench.summarize_saved(args.output))
             self.assertEqual(saved["planned_requests"], 60)
             self.assertEqual(saved["successful_requests"], 60)
-            self.assertEqual(saved["fast_screen_decision"], "full_c1")
-            self.assertNotIn("keep", saved["fast_screen_decision"])
-            self.assertLess(saved["fast_screen_delta_p50_ms"], 0)
+            self.assertEqual(saved["fast_screen_decision"], "screen_primary")
+            self.assertNotIn("dropped_at", saved)
+            self.assertFalse((args.output / bench.FAST_SCREEN_DROP_NAME).exists())
             config = json.loads((args.output / "config.json").read_text())
             screen = config["fast_screen"]
+            self.assertEqual(screen["role"], "screen_primary")
+            self.assertNotIn("baseline_p50_ms", screen)
             self.assertEqual(screen["seed"], 231)
-            self.assertEqual(screen["parent_manifest_sha256"], bench.digest(manifest))
             self.assertEqual(len(screen["selected_ids"]), 60)
-            self.assertEqual(
-                screen["bucket_counts"]["2048+"],
-                16,
+            self.assertEqual(saved["latency_by_prompt_bucket"]["2048+"]["samples"], 16)
+
+    async def test_tip_compares_same_60_ids_and_drop_records_dropped_at(self):
+        cases = screen_population()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "public231.jsonl"
+            manifest.write_text("".join(json.dumps(case) + "\n" for case in cases))
+            primary, _code = await self._run_screen(
+                root, manifest, "primary", step=0.002
             )
-            recorded = [
-                json.loads(line)
-                for line in (args.output / "requests.jsonl").read_text().splitlines()
-            ]
-            self.assertEqual([case["id"] for case in recorded], screen["selected_ids"])
-            buckets = saved["latency_by_prompt_bucket"]
-            self.assertEqual(buckets["2048+"]["samples"], 16)
-            self.assertEqual(buckets["0-127"]["samples"], 10)
-            self.assertEqual(len(seen), 65)
+            tip, code = await self._run_screen(
+                root, manifest, "tip", baseline=primary.output, step=0.020
+            )
+            self.assertEqual(code, 0)
+            saved = json.loads((tip.output / "summary.json").read_text())
+            self.assertEqual(saved, bench.summarize_saved(tip.output))
+            self.assertEqual(saved["fast_screen_decision"], "drop")
+            self.assertRegex(saved["dropped_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+            record = json.loads((tip.output / bench.FAST_SCREEN_DROP_NAME).read_text())
+            self.assertEqual(record["dropped_at"], saved["dropped_at"])
+            self.assertEqual(record["decision"], "drop")
+            tip_ids = json.loads((tip.output / "config.json").read_text())["fast_screen"]["selected_ids"]
+            primary_ids = json.loads((primary.output / "config.json").read_text())["fast_screen"]["selected_ids"]
+            self.assertEqual(record["selected_ids"], tip_ids)
+            self.assertEqual(tip_ids, primary_ids)
+            again = bench.summarize_saved(tip.output)
+            self.assertEqual(again["dropped_at"], saved["dropped_at"])
+            pooled = run_args(root)
+            pooled.output = root / "pooled"
+            pooled.manifest = manifest
+            pooled.fast_screen = True
+            pooled.warmup = 5
+            pooled.baseline_screen = primary.output
+            pooled.baseline_p50_ms = 7.338
+            pooled.baseline_p95_ms = 51.816
+            with self.assertRaisesRegex(ValueError, "screen primary TBD"):
+                await bench.run(pooled, bench.load_cases(manifest))
+            self.assertFalse(pooled.output.exists())
+
+            kept, kept_code = await self._run_screen(
+                root, manifest, "faster", baseline=primary.output, step=0.001
+            )
+            self.assertEqual(kept_code, 0)
+            kept_summary = bench.summarize_saved(kept.output)
+            self.assertEqual(kept_summary["fast_screen_decision"], "full_c1")
+            self.assertNotIn("dropped_at", kept_summary)
+            self.assertFalse((kept.output / bench.FAST_SCREEN_DROP_NAME).exists())
+
+    async def test_full_c1_directory_and_other_ids_are_refused(self):
+        cases = screen_population()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "public231.jsonl"
+            manifest.write_text("".join(json.dumps(case) + "\n" for case in cases))
+            primary, _code = await self._run_screen(root, manifest, "primary", step=0.002)
+            full_c1 = root / "full-c1"
+            full_c1.mkdir()
+            bench.write_json(full_c1 / "config.json", {"metadata": {"gpu": "mock-only"}})
+            refused = run_args(root)
+            refused.output = root / "tip"
+            refused.manifest = manifest
+            refused.fast_screen = True
+            refused.warmup = 5
+            refused.baseline_screen = full_c1
+            with self.assertRaisesRegex(ValueError, "full-C1"):
+                await bench.run(refused, bench.load_cases(manifest))
+            self.assertFalse(refused.output.exists())
+
+            config_path = primary.output / "config.json"
+            config = json.loads(config_path.read_text())
+            config["metadata"]["gpu"] = "other-gpu"
+            bench.write_json(config_path, config)
+            mismatched = run_args(root)
+            mismatched.output = root / "mismatch"
+            mismatched.manifest = manifest
+            mismatched.fast_screen = True
+            mismatched.warmup = 5
+            mismatched.baseline_screen = primary.output
+            with self.assertRaisesRegex(ValueError, "gpu does not match"):
+                await bench.run(mismatched, bench.load_cases(manifest))
+            self.assertFalse(mismatched.output.exists())
 
     async def test_failed_fast_screen_is_inconclusive_and_short_bucket_writes_nothing(self):
         cases = screen_population()
@@ -1097,12 +1181,6 @@ class FastScreenTests(unittest.IsolatedAsyncioTestCase):
             root = Path(directory)
             manifest = root / "public231.jsonl"
             manifest.write_text("".join(json.dumps(case) + "\n" for case in cases))
-            args = run_args(root)
-            args.manifest = manifest
-            args.fast_screen = True
-            args.warmup = 5
-            args.baseline_p50_ms = 1_000_000.0
-            args.baseline_p95_ms = 1_000_000.0
             calls = {"n": 0}
 
             def handler(_request):
@@ -1111,23 +1189,20 @@ class FastScreenTests(unittest.IsolatedAsyncioTestCase):
                     return httpx.Response(503, text="busy")
                 return httpx.Response(200, json=noul_ok())
 
-            client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-            with (
-                patch.object(bench.httpx, "AsyncClient", return_value=client),
-                redirect_stdout(io.StringIO()),
-            ):
-                self.assertEqual(await bench.run(args, bench.load_cases(manifest)), 1)
+            args, code = await self._run_screen(
+                root, manifest, "broken", handler=handler
+            )
+            self.assertEqual(code, 1)
             saved = bench.summarize_saved(args.output)
             self.assertEqual(saved["fast_screen_decision"], "inconclusive")
             self.assertGreater(saved["failed_requests"], 0)
+            self.assertNotIn("dropped_at", saved)
 
             refused = run_args(root)
             refused.output = root / "unused"
             refused.manifest = manifest
             refused.fast_screen = True
             refused.warmup = 3
-            refused.baseline_p50_ms = 7.338
-            refused.baseline_p95_ms = 51.816
             with self.assertRaisesRegex(ValueError, "warmup 5"):
                 await bench.run(refused, bench.load_cases(manifest))
             self.assertFalse(refused.output.exists())
@@ -1143,8 +1218,16 @@ class FastScreenTests(unittest.IsolatedAsyncioTestCase):
             short.manifest = short_manifest
             short.fast_screen = True
             short.warmup = 5
-            short.baseline_p50_ms = 7.338
-            short.baseline_p95_ms = 51.816
             with self.assertRaisesRegex(ValueError, "2048\\+"):
                 await bench.run(short, bench.load_cases(short_manifest))
             self.assertFalse(short.output.exists())
+
+
+def _stepping_clock(step):
+    state = {"t": 0.0}
+
+    def tick():
+        state["t"] += step
+        return state["t"]
+
+    return tick

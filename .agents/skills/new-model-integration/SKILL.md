@@ -88,10 +88,14 @@ that: do not invent a C1 result. CPU contract tests are not a latency baseline.
 Further latency work stays on this model's draft branch. Run it under
 [optimize-remeasure-gate](../optimize-remeasure-gate/SKILL.md): paste the C1
 p50/p95, `device`, and `compute capability` first. After that primary
-exists, smoke and the fast-screen run before another full C1; a clear
-regression is dropped there and is not a KEEP. Do not stack the next tip
-commit until that tip has been dropped by the screen or remeasured with
-full C1 on the same named hardware. Incomplete evidence is INCONCLUSIVE.
+exists, smoke and the fast-screen run before another full C1. The screen
+compares the same 60 request IDs against the primary SHA's own screen, not
+against the full-C1 pooled pair. That screen-primary pair stays
+`TBD — measure on primary SHA same 60 IDs` until it is measured. A clear
+regression is dropped there, with `dropped_at`, and is not a KEEP. Do not
+stack the next tip commit until that tip has been dropped by the screen or
+remeasured with full C1 on the same named hardware. Incomplete evidence is
+INCONCLUSIVE.
 Quality and contract checks stay green. Each tip states its RSI phase
 (bring-up/scheduling,
 parallelism/comms, kernel, or launch/post) and which alternatives were

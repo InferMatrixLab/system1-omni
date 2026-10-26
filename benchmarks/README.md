@@ -126,19 +126,22 @@ three traversals. Validate `benchmarks/smoke.jsonl` first. `--fast-screen` then
 samples 60 requests from a manifest whose cases include integer `prompt_tokens`
 (not sent on the wire): quotas 10, 10, 8, 8, 8, and 16 for buckets 0–127,
 128–255, 256–511, 512–1023, 1024–2047, and 2048+. Seed 231, one measured round,
-concurrency 1, warmup 5. Pass the current primary with `--baseline-p50-ms` and
-`--baseline-p95-ms`. The summary field `fast_screen_decision` is `drop` only
-when both p50 and p95 are worse by ≥ +2% or ≥ +0.5 ms, `full_c1` when they are
-not, and `inconclusive` when the round is incomplete. The field is never a
-KEEP. The gate, including the StartLux Instant primary and the Clef and
-pplx-decider pairing rules, is `.agents/skills/public231-c1/SKILL.md`.
+concurrency 1, warmup 5. The screen baseline is an earlier `--fast-screen` of
+the primary SHA on those same 60 IDs (`--baseline-screen`). Do not pass
+`--baseline-p50-ms` or `--baseline-p95-ms`; full-C1 pooled numbers, including
+StartLux Instant 7.338/51.816, are refused. Until that same-60 screen exists,
+the screen primary is `TBD — measure on primary SHA same 60 IDs`.
+`fast_screen_decision` is `screen_primary`, `drop` (only when both p50 and p95
+are worse by ≥ +2% or ≥ +0.5 ms), `full_c1`, or `inconclusive`. A `drop` writes
+`dropped_at` in `fast_screen_drop.json`. The field is never a KEEP. The gate is
+`.agents/skills/public231-c1/SKILL.md`.
 
 ```sh
 python benchmarks/bench.py run requests.jsonl \
   --endpoint http://127.0.0.1:8000/v1/systemone --model english \
   --metadata run-metadata.json --phase measured \
   --concurrency 1 --warmup 5 \
-  --fast-screen --baseline-p50-ms <primary-p50> --baseline-p95-ms <primary-p95> \
+  --fast-screen --baseline-screen /tmp/public231-screen-primary \
   --output /tmp/public231-fast-screen
 ```
 

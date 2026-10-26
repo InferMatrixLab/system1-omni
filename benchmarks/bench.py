@@ -44,6 +44,12 @@ LEGACY_RESPONSE_FORMAT = "httpx-text-v1"
 FAST_SCREEN_SEED = 231
 FAST_SCREEN_RELATIVE = 0.02
 FAST_SCREEN_ABSOLUTE_MS = 0.5
+FAST_SCREEN_DROP_NAME = "fast_screen_drop.json"
+# Placeholder until the primary SHA is screened on these same 60 IDs.
+SCREEN_PRIMARY_TBD = "screen primary TBD — measure on primary SHA same 60 IDs"
+# Full-C1 pooled pairs. These are not screen baselines. StartLux Instant's
+# pooled primary is the first entry; do not copy it onto a fast-screen.
+FULL_C1_POOLED_NOT_SCREEN = ((7.338, 51.816),)
 FAST_SCREEN_BUCKETS = (
     ("0-127", 0, 128, 10),
     ("128-255", 128, 256, 10),
@@ -346,6 +352,27 @@ def fast_screen_decision(baseline_p50, baseline_p95, tip_p50, tip_p95):
     return "full_c1"
 
 
+def is_full_c1_pooled_baseline(p50_ms, p95_ms):
+    """True for published full-C1 pooled pairs that must not be a screen baseline."""
+    if type(p50_ms) is bool or type(p95_ms) is bool:
+        return False
+    if not isinstance(p50_ms, (int, float)) or not isinstance(p95_ms, (int, float)):
+        return False
+    return any(
+        math.isclose(p50_ms, pooled_p50, rel_tol=0, abs_tol=5e-4)
+        and math.isclose(p95_ms, pooled_p95, rel_tol=0, abs_tol=5e-4)
+        for pooled_p50, pooled_p95 in FULL_C1_POOLED_NOT_SCREEN
+    )
+
+
+def refuse_full_c1_pooled_baseline(p50_ms, p95_ms):
+    if is_full_c1_pooled_baseline(p50_ms, p95_ms):
+        raise ValueError(
+            "refusing full-C1 pooled numbers as a fast-screen baseline "
+            f"({p50_ms} / {p95_ms} ms). {SCREEN_PRIMARY_TBD}"
+        )
+
+
 def latency_by_prompt_bucket(cases, records):
     """Per-bucket p50/p95 when every case carries prompt_tokens. Else None."""
     if any("prompt_tokens" not in case for case in cases):
@@ -367,21 +394,91 @@ def latency_by_prompt_bucket(cases, records):
     return report
 
 
-def _require_fast_screen_run(args):
+def _refuse_numeric_screen_baseline(args):
+    """Typed percentiles are how a full-C1 pooled pair gets reused. Refuse them."""
+    if (
+        getattr(args, "baseline_p50_ms", None) is not None
+        or getattr(args, "baseline_p95_ms", None) is not None
+    ):
+        raise ValueError(
+            "refusing --baseline-p50-ms and --baseline-p95-ms. "
+            "Full-C1 pooled percentiles, including StartLux Instant "
+            "7.338/51.816, are not a screen baseline. " + SCREEN_PRIMARY_TBD
+        )
+
+
+def _require_fast_screen_shape(args):
     if args.phase != "measured":
         raise ValueError("fast-screen requires --phase measured")
     if args.concurrency != 1:
         raise ValueError("fast-screen requires --concurrency 1")
     if args.warmup != 5:
         raise ValueError("fast-screen requires --warmup 5")
-    baseline_p50 = getattr(args, "baseline_p50_ms", None)
-    baseline_p95 = getattr(args, "baseline_p95_ms", None)
-    if baseline_p50 is None or baseline_p95 is None:
+
+
+def _valid_dropped_at(value):
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = time.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return False
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", parsed) == value
+
+
+def load_same_60_screen_baseline(path, selected_ids, parent_manifest_sha256, tip_gpu):
+    """Baseline is the primary SHA's own screen of these exact request IDs."""
+    if not isinstance(path, Path) or not path.is_dir():
+        raise ValueError("baseline screen directory is missing")
+    if not (path / "config.json").is_file():
+        raise ValueError("baseline screen is missing config.json")
+    config = json.loads((path / "config.json").read_text())
+    screen = config.get("fast_screen")
+    if not screen:
         raise ValueError(
-            "fast-screen requires --baseline-p50-ms and --baseline-p95-ms"
+            "a full-C1 directory is not a fast-screen baseline. " + SCREEN_PRIMARY_TBD
         )
-    latency_clearly_worse(baseline_p50, baseline_p50)
-    latency_clearly_worse(baseline_p95, baseline_p95)
+    if screen.get("role") != "screen_primary":
+        raise ValueError(
+            "baseline screen must be the primary SHA's own fast-screen "
+            "(role screen_primary) of these same 60 IDs, not a tip comparison "
+            "and not full-C1 pooled percentiles. " + SCREEN_PRIMARY_TBD
+        )
+    if screen.get("selected_ids") != list(selected_ids):
+        raise ValueError(
+            "baseline screen request IDs do not match this fast-screen"
+        )
+    if screen.get("seed") != FAST_SCREEN_SEED:
+        raise ValueError("baseline screen seed does not match")
+    if screen.get("parent_manifest_sha256") != parent_manifest_sha256:
+        raise ValueError("baseline screen manifest does not match")
+    expected = {name: quota for name, _lo, _hi, quota in FAST_SCREEN_BUCKETS}
+    if screen.get("bucket_counts") != expected:
+        raise ValueError("baseline screen quotas do not match")
+    metadata = config.get("metadata") or {}
+    gpu = metadata.get("gpu")
+    if gpu != tip_gpu:
+        raise ValueError("baseline screen gpu does not match this run")
+    revision = metadata.get("runtime_revision")
+    if not revision:
+        raise ValueError("baseline screen is missing runtime_revision")
+    summary = summarize_saved(path)
+    if summary.get("fast_screen_decision") != "screen_primary":
+        raise ValueError(
+            "baseline screen is not a completed screen-primary measurement. "
+            + SCREEN_PRIMARY_TBD
+        )
+    p50 = summary["successful_latency_p50_ms"]
+    p95 = summary["successful_latency_p95_ms"]
+    refuse_full_c1_pooled_baseline(p50, p95)
+    return {
+        "baseline_kind": "same_60_id_screen",
+        "baseline_runtime_revision": revision,
+        "baseline_gpu": gpu,
+        "baseline_p50_ms": p50,
+        "baseline_p95_ms": p95,
+        "baseline_selected_ids": list(selected_ids),
+    }
 
 
 def manifest_subset_bytes(path, selected_ids):
@@ -396,7 +493,7 @@ def manifest_subset_bytes(path, selected_ids):
     return "".join(by_id[case_id] + "\n" for case_id in selected_ids).encode()
 
 
-def _check_saved_fast_screen(screen, cases):
+def _check_saved_fast_screen(screen, cases, config):
     if screen.get("seed") != FAST_SCREEN_SEED:
         raise ValueError("unsupported fast-screen seed")
     if (
@@ -407,12 +504,33 @@ def _check_saved_fast_screen(screen, cases):
     expected = {name: quota for name, _lo, _hi, quota in FAST_SCREEN_BUCKETS}
     if screen.get("bucket_counts") != expected:
         raise ValueError("fast-screen bucket counts do not match the protocol")
-    if "baseline_p50_ms" not in screen or "baseline_p95_ms" not in screen:
-        raise ValueError("saved fast-screen is missing its baseline")
     if screen.get("selected_ids") != [case["id"] for case in cases]:
         raise ValueError("fast-screen selection does not match the saved manifest")
     if len(cases) != sum(expected.values()):
         raise ValueError("fast-screen manifest is not 60 requests")
+    role = screen.get("role")
+    if role == "screen_primary":
+        if "baseline_p50_ms" in screen or "baseline_p95_ms" in screen:
+            raise ValueError(
+                "a screen-primary measurement must not carry typed baseline percentiles. "
+                + SCREEN_PRIMARY_TBD
+            )
+        return
+    if role != "tip":
+        raise ValueError("unsupported fast-screen role")
+    if screen.get("baseline_kind") != "same_60_id_screen":
+        raise ValueError(
+            "tip fast-screen baseline must be the same 60 IDs. " + SCREEN_PRIMARY_TBD
+        )
+    if "baseline_p50_ms" not in screen or "baseline_p95_ms" not in screen:
+        raise ValueError("saved tip fast-screen is missing its same-60 baseline")
+    refuse_full_c1_pooled_baseline(screen["baseline_p50_ms"], screen["baseline_p95_ms"])
+    if screen.get("baseline_selected_ids") != screen["selected_ids"]:
+        raise ValueError("saved screen baseline is not the same 60 request IDs")
+    if screen.get("baseline_gpu") != config.get("metadata", {}).get("gpu"):
+        raise ValueError("saved screen baseline gpu does not match this run")
+    if not screen.get("baseline_runtime_revision"):
+        raise ValueError("saved screen baseline is missing the primary SHA")
 
 
 def _saved_fast_screen_decision(screen, summary):
@@ -427,12 +545,30 @@ def _saved_fast_screen_decision(screen, summary):
     )
     if not complete:
         return "inconclusive"
+    if screen.get("role") == "screen_primary":
+        return "screen_primary"
     return fast_screen_decision(
         screen["baseline_p50_ms"],
         screen["baseline_p95_ms"],
         summary["successful_latency_p50_ms"],
         summary["successful_latency_p95_ms"],
     )
+
+
+def _attach_dropped_at(path, screen, summary):
+    drop_path = path / FAST_SCREEN_DROP_NAME
+    if summary.get("fast_screen_decision") != "drop":
+        if drop_path.exists():
+            raise ValueError("fast_screen_drop.json is only written for a DROP")
+        return
+    if not drop_path.is_file():
+        return
+    record = json.loads(drop_path.read_text())
+    if record.get("decision") != "drop" or not _valid_dropped_at(record.get("dropped_at")):
+        raise ValueError("fast-screen DROP record is missing dropped_at")
+    if record.get("selected_ids") != screen["selected_ids"]:
+        raise ValueError("fast-screen DROP record does not match the 60 IDs")
+    summary["dropped_at"] = record["dropped_at"]
 
 
 def quality(cases, records):
@@ -784,14 +920,15 @@ async def run(args, cases):
     ):
         if not metadata.get(name):
             raise ValueError(f"metadata requires {name}")
+    _refuse_numeric_screen_baseline(args)
     fast_screen = getattr(args, "fast_screen", False)
-    baseline_p50 = getattr(args, "baseline_p50_ms", None)
-    baseline_p95 = getattr(args, "baseline_p95_ms", None)
+    baseline_screen = getattr(args, "baseline_screen", None)
     screen_record = None
     if fast_screen:
-        _require_fast_screen_run(args)
+        _require_fast_screen_shape(args)
         cases, bucket_counts = fast_screen_sample(cases)
         selected_ids = [case["id"] for case in cases]
+        parent_sha = digest(args.manifest)
         screen_record = {
             "seed": FAST_SCREEN_SEED,
             "relative_worse": FAST_SCREEN_RELATIVE,
@@ -807,12 +944,22 @@ async def run(args, cases):
             ],
             "selected_ids": selected_ids,
             "bucket_counts": bucket_counts,
-            "parent_manifest_sha256": digest(args.manifest),
-            "baseline_p50_ms": args.baseline_p50_ms,
-            "baseline_p95_ms": args.baseline_p95_ms,
+            "parent_manifest_sha256": parent_sha,
         }
-    elif baseline_p50 is not None or baseline_p95 is not None:
-        raise ValueError("baseline percentiles require --fast-screen")
+        if baseline_screen is not None:
+            screen_record["role"] = "tip"
+            screen_record.update(
+                load_same_60_screen_baseline(
+                    baseline_screen,
+                    selected_ids,
+                    parent_sha,
+                    metadata.get("gpu"),
+                )
+            )
+        else:
+            screen_record["role"] = "screen_primary"
+    elif baseline_screen is not None:
+        raise ValueError("--baseline-screen requires --fast-screen")
     warmup_manifest = getattr(args, "warmup_manifest", None)
     warmup_cases = load_cases(warmup_manifest) if warmup_manifest else cases
     # A case the adapter cannot wire fails before any HTTP exchange; reject it
@@ -912,6 +1059,24 @@ async def run(args, cases):
             # Replay has saved the completed samples and the measured stop boundary.
             pass
     summary = summarize_saved(args.output)
+    if summary.get("fast_screen_decision") == "drop" and "dropped_at" not in summary:
+        saved_screen = json.loads((args.output / "config.json").read_text())["fast_screen"]
+        write_json(
+            args.output / FAST_SCREEN_DROP_NAME,
+            {
+                "decision": "drop",
+                "dropped_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "selected_ids": saved_screen["selected_ids"],
+                "baseline_runtime_revision": saved_screen["baseline_runtime_revision"],
+                "baseline_p50_ms": saved_screen["baseline_p50_ms"],
+                "baseline_p95_ms": saved_screen["baseline_p95_ms"],
+                "tip_p50_ms": summary["successful_latency_p50_ms"],
+                "tip_p95_ms": summary["successful_latency_p95_ms"],
+            },
+        )
+        summary = summarize_saved(args.output)
+        if "dropped_at" not in summary:
+            raise ValueError("fast-screen DROP did not record dropped_at")
     write_json(args.output / "summary.json", summary)
     print(json.dumps(summary, indent=2))
     return int(summary["failed_requests"] > 0 or not summary["evidence_complete"])
@@ -957,7 +1122,7 @@ def summarize_saved(path):
     cases = load_cases(path / "requests.jsonl")
     screen = config.get("fast_screen")
     if screen is not None:
-        _check_saved_fast_screen(screen, cases)
+        _check_saved_fast_screen(screen, cases, config)
     by_id = {c["id"]: c for c in cases}
     ids = {}
     for name in ("attempted_ids", "completed_ids", "active_ids"):
@@ -1069,14 +1234,18 @@ def summarize_saved(path):
     )
     if screen is not None:
         summary["fast_screen_decision"] = _saved_fast_screen_decision(screen, summary)
-        p50 = summary["successful_latency_p50_ms"]
-        p95 = summary["successful_latency_p95_ms"]
-        summary["fast_screen_delta_p50_ms"] = (
-            None if p50 is None else p50 - screen["baseline_p50_ms"]
-        )
-        summary["fast_screen_delta_p95_ms"] = (
-            None if p95 is None else p95 - screen["baseline_p95_ms"]
-        )
+        if screen.get("role") == "tip":
+            p50 = summary["successful_latency_p50_ms"]
+            p95 = summary["successful_latency_p95_ms"]
+            summary["fast_screen_delta_p50_ms"] = (
+                None if p50 is None else p50 - screen["baseline_p50_ms"]
+            )
+            summary["fast_screen_delta_p95_ms"] = (
+                None if p95 is None else p95 - screen["baseline_p95_ms"]
+            )
+        _attach_dropped_at(path, screen, summary)
+    elif (path / FAST_SCREEN_DROP_NAME).exists():
+        raise ValueError("fast_screen_drop.json is only written for a DROP")
     return summary
 
 
@@ -1182,18 +1351,27 @@ def main():
         action="store_true",
         help=(
             "sample 60 Public231 requests (seed 231, length buckets) for one "
-            "measured round; requires --baseline-p50-ms and --baseline-p95-ms"
+            "measured round. Without --baseline-screen this records the "
+            "screen primary. A tip passes that directory, not pooled C1 numbers."
+        ),
+    )
+    runner.add_argument(
+        "--baseline-screen",
+        type=Path,
+        help=(
+            "primary SHA's own fast-screen directory of these same 60 IDs. "
+            "Not a full-C1 pooled p50/p95."
         ),
     )
     runner.add_argument(
         "--baseline-p50-ms",
         type=float,
-        help="current full-C1 primary p50, milliseconds; fast-screen only",
+        help=argparse.SUPPRESS,
     )
     runner.add_argument(
         "--baseline-p95-ms",
         type=float,
-        help="current full-C1 primary p95, milliseconds; fast-screen only",
+        help=argparse.SUPPRESS,
     )
     runner.add_argument(
         "--warmup-manifest", type=Path, help="independent labelled warmup requests"

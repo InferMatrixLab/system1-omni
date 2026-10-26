@@ -60,32 +60,46 @@ method, or the named hardware.
 Follow [public231-c1](../public231-c1/SKILL.md). Smoke must pass before the
 screen. Run one fast-screen: 60 requests, seed 231, concurrency 1, warmup 5,
 bucket quotas 0–127:10, 128–255:10, 256–511:8, 512–1023:8, 1024–2047:8,
-2048+:16. Compare its p50 and p95 to this model's current full-C1 primary,
-on the same device, compute capability, and clock.
+2048+:16. Compare the tip's screen p50 and p95 to the primary SHA's own
+screen of those same 60 IDs on the same device, compute capability, and
+clock. Pass that directory with `--baseline-screen`. Do not pass full-C1
+pooled percentiles. `--baseline-p50-ms` and `--baseline-p95-ms` are refused.
 
-The StartLux Instant primary named for this gate, until a full-C1 KEEP
-replaces it, is runtime revision
-`51f80ad681c8f7b1be9b22b5e700bef34e33534c` (`51f80ad`), pooled p50 7.338 ms,
-pooled p95 51.816 ms. Clef and pplx-decider keep the primaries recorded in
-their recipes and in the latency leaderboard. Do not reuse the StartLux
-Instant pair for those models. A primary moves only when a later full C1
-KEEPs.
+StartLux Instant's full-C1 pooled primary remains
+`51f80ad681c8f7b1be9b22b5e700bef34e33534c` (`51f80ad`), p50 7.338 ms, p95
+51.816 ms. That pair is not the screen baseline. Clef and pplx-decider keep
+the full-C1 primaries in their recipes and the latency leaderboard. For
+every model the screen-primary slot is:
 
-Early DROP only when both Δp50 and Δp95 are worse. A metric is worse when
-its delta (tip minus baseline) is ≥ +2% of that baseline or ≥ +0.5 ms.
-Otherwise, including a mixed result, run full C1.
-`python benchmarks/bench.py run --fast-screen` records `drop`, `full_c1`,
-or `inconclusive`. It does not record a KEEP.
+```text
+screen_primary_p50_ms: TBD — measure on primary SHA same 60 IDs
+screen_primary_p95_ms: TBD — measure on primary SHA same 60 IDs
+```
 
-A `drop` is a regression. Do not run full C1. Do not stack the next commit
-on that tip. Do not adopt the screen p50/p95 as the next baseline. A
-negative screen delta is not a gain and is not a KEEP. An `inconclusive`
-screen stops the loop.
+Fill it only from an hk2 `--fast-screen` run whose decision is
+`screen_primary`. A full-C1 KEEP moves the full-C1 primary; it does not by
+itself fill this slot. Measure the new primary on the same 60 IDs before
+the next tip screen.
+
+Early DROP only when both screen Δp50 and Δp95 are worse than that same-60
+baseline. A metric is worse when its delta (tip minus baseline) is ≥ +2%
+of that baseline or ≥ +0.5 ms. Otherwise, including a mixed result, run
+full C1. The summary records `screen_primary`, `drop`, `full_c1`, or
+`inconclusive`. It does not record a KEEP.
+
+A `drop` is a regression. The artifact includes `dropped_at` in
+`fast_screen_drop.json` and on the summary. Do not run full C1. Do not
+stack the next commit on that tip. Do not adopt the screen p50/p95 as the
+next baseline. A negative screen delta is not a gain and is not a KEEP. An
+`inconclusive` screen stops the loop.
 
 KEEP, merge, and ready-for-review require the full C1 dual gate: pooled p50
 and pooled p95 both strictly lower, pooled 2048+ p95 strictly lower, and no
 quality collapse under the rules in the next section. The +2% / +0.5 ms
-band does not make a full-C1 tie a KEEP.
+band does not make a full-C1 tie a KEEP. Ready-for-review also requires hk2
+evidence of `--fast-screen` (screen primary, and the tip screen when a tip
+is claimed). Offline MockTransport tests are not that evidence and are not
+a review PASS.
 
 ## INCONCLUSIVE stops the loop
 
@@ -95,8 +109,13 @@ these are true:
 - the baseline p50/p95 were not recorded before the edit
 - smoke did not pass before the latency screen
 - the fast-screen was skipped on a tip that already has a full-C1 primary
+- the screen baseline is a full-C1 pooled p50/p95, a typed percentile, or a
+  different 60 IDs than `--fast-screen` just sampled
 - the fast-screen decision is `inconclusive`
+- a DROP has no `dropped_at`
 - a KEEP, a gain, or a new primary is claimed from fast-screen numbers
+- ready or review PASS is claimed from offline MockTransport output without
+  hk2 `--fast-screen` evidence
 - the fast-screen decision was `full_c1` but fewer than three measured
   rounds finished
 - a completed `drop` is treated as a KEEP or as the next baseline
@@ -143,8 +162,9 @@ Before the agent proposes the next change, give it this record:
   full C1 ran
 - clock basis, `device`, and `compute capability` for both sides
 - RSI phase, alternatives considered, and which change is primary
-- fast-screen decision (`drop`, `full_c1`, or `inconclusive`) and, when the
-  screen ran, its p50/p95 deltas labeled as screen-only
+- fast-screen decision (`screen_primary`, `drop`, `full_c1`, or
+  `inconclusive`), the same 60 IDs, `dropped_at` when the decision is
+  `drop`, and the screen p50/p95 deltas labeled as screen-only
 - verdict: improved, regressed, or INCONCLUSIVE
 - quality/contract result when the path reached full C1 or a KEEP decision
 

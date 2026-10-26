@@ -20,9 +20,11 @@ relabel, or a room post that contains operator metadata.
    must succeed before any latency screen. A model recipe that already runs a
    server contract smoke still runs that smoke. A failed smoke is not a
    latency result and is not a DROP.
-2. **Fast-screen.** One 60-request round after smoke. DROP the tip when both
-   p50 and p95 are clearly worse than that model's current full-C1 primary.
-   Otherwise run full C1. The screen never KEEPs a tip.
+2. **Fast-screen.** One 60-request round after smoke. The screen baseline is
+   the primary SHA served on the same machine and measured on these exact 60
+   request IDs. It is not the full-C1 pooled p50/p95. DROP the tip when both
+   screen percentiles are clearly worse than that same-60 baseline. Otherwise
+   run full C1. The screen never KEEPs a tip.
 3. **Full Public231 C1.** Unchanged measurement: warmup 5, concurrency 1,
    three measured rounds. KEEP only on the full dual gate below.
 
@@ -61,22 +63,46 @@ That is 60 requests. 2048+ is the overweight. A bucket with fewer cases than
 its quota is not a screen; fix the length index or stop. Do not fill the
 quota from another bucket. Do not run a second screen round and pool it.
 
-Compare the screen's successful p50 and p95 to the current full-C1 primary
-for **this** model. Pass that primary with `--baseline-p50-ms` and
-`--baseline-p95-ms`. The StartLux Instant primary named for this gate, until
-a full-C1 KEEP replaces it, is runtime revision
+Compare the tip screen's successful p50 and p95 only to a screen primary:
+the same primary SHA, same `device` / `gpu`, same manifest, same seed 231,
+same bucket quotas, and the same 60 request IDs. Pass that saved run as
+`--baseline-screen`. Do not pass `--baseline-p50-ms` or `--baseline-p95-ms`.
+The runner rejects those flags. A full-C1 output directory is also rejected.
+
+Full-C1 pooled numbers are not this baseline. StartLux Instant's full-C1
+pooled primary remains runtime revision
 `51f80ad681c8f7b1be9b22b5e700bef34e33534c` (`51f80ad`), pooled p50 7.338 ms,
-pooled p95 51.816 ms. Clef and pplx-decider keep the primaries recorded in
-their recipes and in [the latency leaderboard](../../../benchmarks/latency-leaderboard.md).
-Do not paste the StartLux Instant pair onto Clef or pplx-decider.
+pooled p95 51.816 ms, and the runner refuses that pair as a screen baseline.
+Clef and pplx-decider keep their full-C1 primaries in their recipes and in
+[the latency leaderboard](../../../benchmarks/latency-leaderboard.md). Do not
+paste any model's pooled C1 pair into the screen.
+
+Screen primary, same 60 IDs (fill only after that screen is measured; do not
+invent the pair):
+
+```text
+screen_primary_p50_ms: TBD — measure on primary SHA same 60 IDs
+screen_primary_p95_ms: TBD — measure on primary SHA same 60 IDs
+```
+
+Record the screen primary with `--fast-screen` and no `--baseline-screen`.
+That run's decision is `screen_primary`. It is not a tip verdict and not a
+KEEP. Later tips pass that directory.
 
 ```sh
 python benchmarks/bench.py run <public231.jsonl> \
   --endpoint <ready /v1/systemone URL> --model <served-alias> \
   --metadata <run-metadata.json> --phase measured \
   --concurrency 1 --warmup 5 \
-  --fast-screen --baseline-p50-ms <primary-p50> --baseline-p95-ms <primary-p95> \
-  --output <fresh-directory>
+  --fast-screen \
+  --output <primary-screen-directory>
+
+python benchmarks/bench.py run <public231.jsonl> \
+  --endpoint <ready /v1/systemone URL> --model <served-alias> \
+  --metadata <run-metadata.json> --phase measured \
+  --concurrency 1 --warmup 5 \
+  --fast-screen --baseline-screen <primary-screen-directory> \
+  --output <tip-screen-directory>
 ```
 
 Delta is tip minus baseline, in milliseconds. A percentile is **worse** when
@@ -84,16 +110,27 @@ its delta is ≥ +2% of that baseline value or ≥ +0.5 ms. The runner evaluates
 that boundary as `tip >= baseline * 1.02` or `tip >= baseline + 0.5`, so an
 exact threshold stays worse. Early **DROP** only when **both** p50 and p95
 are worse. Mixed results and results inside that band proceed to full C1.
-The saved summary field `fast_screen_decision` is `drop`, `full_c1`, or
-`inconclusive`. It is never `keep`.
+The saved summary field `fast_screen_decision` is `screen_primary`, `drop`,
+`full_c1`, or `inconclusive`. It is never `keep`.
 
-`drop` means do not run full C1. `inconclusive` means any measured request
-failed, was incomplete, or was unattempted, warmup failed, or
-`evidence_complete` is not true. An inconclusive screen is not a DROP and
-not permission to continue. A negative screen delta is not a gain, not a
-new primary, and not a KEEP. Do not claim a speedup from fast-screen
-numbers. Percentiles use the same median and nearest-rank p95 as full C1,
-on this one round of 60, not an average of rounds.
+`drop` means do not run full C1. The run writes `fast_screen_drop.json` and
+copies `dropped_at` onto the summary. `dropped_at` is UTC
+`YYYY-MM-DDTHH:MM:SSZ`, written once. A DROP without `dropped_at` is not an
+auditable DROP. `inconclusive` means any measured request failed, was
+incomplete, or was unattempted, warmup failed, or `evidence_complete` is
+not true. An inconclusive screen is not a DROP and not permission to
+continue. A negative screen delta is not a gain, not a new primary, and
+not a KEEP. Do not claim a speedup from fast-screen numbers. Percentiles
+use the same median and nearest-rank p95 as full C1, on this one round of
+60, not an average of rounds.
+
+Before this protocol change is marked ready for review, the PR must include
+hk2 evidence of `python benchmarks/bench.py run --fast-screen` for the
+screen primary (and the tip comparison, when a tip is claimed). That
+evidence records the SHA, `device`, `compute capability`, the 60 IDs, and
+`summary.json`. An offline `httpx.MockTransport` unit test is not that
+evidence and is not a review PASS. Room posts still omit hostnames; the
+hk2 requirement is the ready/review evidence, not a room post.
 
 ## Full C1 KEEP
 
@@ -258,10 +295,12 @@ Publish:
 - `evidence_complete` from each `summary.json`
 
 A fast-screen paste is a separate record. Label it fast-screen, and include
-the decision (`drop`, `full_c1`, or `inconclusive`), seed 231, both deltas,
-the primary SHA those deltas use, and the same `device` and
-`compute capability`. Do not publish that paste as a C1 baseline or as a
-speedup.
+the decision (`screen_primary`, `drop`, `full_c1`, or `inconclusive`), seed
+231, the same 60 IDs, the primary SHA of the screen baseline when the run
+is a tip, both deltas when they exist, `dropped_at` when the decision is
+`drop`, and the same `device` and `compute capability`. Do not publish that
+paste as a C1 baseline or as a speedup. Do not fill screen-primary p50/p95
+from the full-C1 pooled pair.
 
 Labelled choice/noul accuracy and score MAE in
 `quality_on_successful_requests` are conditional on successes. Report them
