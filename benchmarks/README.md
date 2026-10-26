@@ -133,9 +133,14 @@ fewer than 16, the decision is `inconclusive` and cannot early-DROP. Seed
 earlier `--fast-screen` of the primary SHA on those same request IDs
 (`--baseline-screen`). Do not pass `--baseline-p50-ms` or
 `--baseline-p95-ms`; full-C1 pooled numbers, including StartLux Instant
-7.338/51.816, are refused. The StartLux Instant screen primary is
-`TBD — measure on primary SHA same request IDs` until measured with these
-quotas.
+7.338/51.816, are refused. The StartLux Instant screen primary, measured
+on hk2 (L20X / sm_89) with these quotas, is SHA
+`51f80ad681c8f7b1be9b22b5e700bef34e33534c`, p50 19.112976267933846 ms, p95
+73.46072793006897 ms, n=58, 58/58, `evidence_complete` true, decision
+`screen_primary`, `quota_shortfall` `{}`, buckets 10/10/8/8/6/16. The
+measuring client was `923c8c739bcaf3cc2b098f3cf373c2b547d2666c` plus a
+local-only 1024–2047 quota patch from 8 to 6. Pass that saved run as
+`--baseline-screen`; do not type the screen percentiles.
 `fast_screen_decision` is `screen_primary`, `drop` (only when both p50 and p95
 are worse by ≥ +2% or ≥ +0.5 ms), `full_c1`, or `inconclusive`. A `drop` writes
 `dropped_at` in `fast_screen_drop.json`. The field is never a KEEP. The gate is

@@ -1104,7 +1104,7 @@ class FastScreenTests(unittest.IsolatedAsyncioTestCase):
             bench.latency_clearly_worse(0, 1)
         self.assertTrue(bench.is_full_c1_pooled_baseline(7.338, 51.816))
         self.assertFalse(bench.is_full_c1_pooled_baseline(7.338, 40.0))
-        with self.assertRaisesRegex(ValueError, "screen primary TBD"):
+        with self.assertRaisesRegex(ValueError, "Do not type percentiles"):
             bench.refuse_full_c1_pooled_baseline(7.338, 51.816)
 
     async def _run_screen(self, root, manifest, name, *, baseline=None, step=None, handler=None):
@@ -1196,7 +1196,7 @@ class FastScreenTests(unittest.IsolatedAsyncioTestCase):
             pooled.baseline_screen = primary.output
             pooled.baseline_p50_ms = 7.338
             pooled.baseline_p95_ms = 51.816
-            with self.assertRaisesRegex(ValueError, "screen primary TBD"):
+            with self.assertRaisesRegex(ValueError, "Do not type percentiles"):
                 await bench.run(pooled, bench.load_cases(manifest))
             self.assertFalse(pooled.output.exists())
 

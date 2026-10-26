@@ -43,10 +43,20 @@ is a blocking review finding, not a note.
    full-C1 output directory fail closed. A bucket shorter than its quota
    records `quota_shortfall` and is not filled from another bucket. If
    2048+ has fewer than 16, the screen is `inconclusive` and cannot
-   early-DROP or stand as a screen primary. The screen-primary slot stays
-   `TBD — measure on primary SHA same request IDs` until that screen exists
-   under these quotas. Do not accept a paste that fills the slot from the
-   pooled pair.
+   early-DROP or stand as a screen primary. StartLux Instant's measured
+   screen primary is SHA `51f80ad681c8f7b1be9b22b5e700bef34e33534c`, p50
+   19.112976267933846 ms, p95 73.46072793006897 ms, n=58, 58/58,
+   `evidence_complete` true, decision `screen_primary`, `quota_shortfall`
+   `{}`, buckets 10/10/8/8/6/16, device L20X, compute capability sm_89.
+   The measuring client was `923c8c739bcaf3cc2b098f3cf373c2b547d2666c` with
+   a local-only 1024–2047 quota patch from 8 to 6; the remote tip may still
+   have been on quota 8. Later screens use the committed n=58 quotas.
+   Artifacts:
+   `~/experiments/2026-10-26-pr181-screen-primary/screen-primary-n58/`
+   (`SCREEN_PRIMARY.json`, `fast-screen/`, `screen_ids.json`,
+   `local-quota-patch.diff`).
+   Do not accept a paste that fills the slot from the pooled pair, from
+   typed screen percentiles, or from another model's lengths.
 2. **hk2 smoke.** Contract smoke on hk2 is required before ready.
    Recorded PASS: client `d2fab1e08f231fe2e23540f3b25b2650cd416d09` against
    StartLux Instant served at `51f80ad681c8f7b1be9b22b5e700bef34e33534c`,
@@ -54,9 +64,9 @@ is a blocking review finding, not a note.
    `51f80ad`, offline `tests/benchmarks` 109 OK. Artifacts are under
    `~/experiments/2026-10-26-pr181-screen-primary/primary/smoke/` on hk2.
    MockTransport output is not that smoke and is not a PASS. The 4/4 smoke
-   is not a screen primary. The Instant screen primary stays TBD until
-   measured with quotas 10/10/8/8/6/16. Do not PASS a review that writes
-   7.338/51.816, or any other fabricated pair, into the screen-primary slot.
+   is not a screen primary. The Instant screen primary is the n=58 pair in
+   check 1, not 7.338/51.816. Do not PASS a review that writes 7.338/51.816,
+   or any other fabricated pair, into the screen-primary slot.
 3. **`dropped_at`.** A screen DROP writes `fast_screen_drop.json` and puts
    `dropped_at` (`YYYY-MM-DDTHH:MM:SSZ`) on the summary. A DROP missing that
    field is not auditable and is not a valid DROP.

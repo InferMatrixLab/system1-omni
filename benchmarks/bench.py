@@ -45,8 +45,12 @@ FAST_SCREEN_SEED = 231
 FAST_SCREEN_RELATIVE = 0.02
 FAST_SCREEN_ABSOLUTE_MS = 0.5
 FAST_SCREEN_DROP_NAME = "fast_screen_drop.json"
-# Placeholder until the primary SHA is screened on these same request IDs.
-SCREEN_PRIMARY_TBD = "screen primary TBD — measure on primary SHA same request IDs"
+# Typed percentiles are not a screen baseline. StartLux Instant's recorded
+# screen primary is 51f80ad, n=58; pass that saved run, do not type it.
+SCREEN_PRIMARY_TBD = (
+    "pass the primary SHA's saved --fast-screen of the same request IDs "
+    "(StartLux Instant 51f80ad, n=58). Do not type percentiles"
+)
 # Full-C1 pooled pairs. These are not screen baselines. StartLux Instant's
 # pooled primary is the first entry; do not copy it onto a fast-screen.
 FULL_C1_POOLED_NOT_SCREEN = ((7.338, 51.816),)

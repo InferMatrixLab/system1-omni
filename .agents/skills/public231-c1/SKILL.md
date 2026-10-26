@@ -86,20 +86,36 @@ paste any model's pooled C1 pair into the screen.
 
 Screen primary, same request IDs. Fill this only from a completed
 `--fast-screen` whose decision is `screen_primary`. Do not invent the pair,
-and do not copy the full-C1 pooled pair into it:
+and do not copy the full-C1 pooled pair into it.
+
+StartLux Instant screen primary, measured on hk2 with quotas 10/10/8/8/6/16.
+58/58 success, `evidence_complete` true, decision `screen_primary`,
+`quota_shortfall` `{}`:
 
 ```text
-screen_primary_p50_ms: TBD — measure on primary SHA same request IDs
-screen_primary_p95_ms: TBD — measure on primary SHA same request IDs
+screen_primary_sha: 51f80ad681c8f7b1be9b22b5e700bef34e33534c
+screen_primary_p50_ms: 19.112976267933846
+screen_primary_p95_ms: 73.46072793006897
+n: 58
+bucket_counts: 0-127:10, 128-255:10, 256-511:8, 512-1023:8, 1024-2047:6, 2048+:16
+device: L20X
+compute capability: sm_89
 ```
 
-StartLux Instant is still that TBD until a screen is measured with these
-quotas (10/10/8/8/6/16). An earlier hk2 `--fast-screen` of Instant, indexed
-by `usage.input_tokens`, was refused under the previous quota of 8 for
-1024–2047 because that bucket has 6 prompts. InferRSI set the quota to 6
-on 2026-10-26. That refusal is not a screen-primary pair. Do not write
-7.338/51.816, or any other stand-in, as the screen primary. Remeasure the
-primary SHA with the new quotas before filling the slot.
+The measuring client was `923c8c739bcaf3cc2b098f3cf373c2b547d2666c` plus a
+local-only patch that changed the 1024–2047 quota from 8 to 6. The remote
+tip may still have been on quota 8 when this was measured. The committed
+runner samples these quotas (n=58), so the next screen does not need that
+local patch. Artifacts on hk2:
+`~/experiments/2026-10-26-pr181-screen-primary/screen-primary-n58/`
+(`SCREEN_PRIMARY.json`, `fast-screen/`, `screen_ids.json`,
+`local-quota-patch.diff`).
+
+Pass that saved run as `--baseline-screen`. Do not type
+19.112976267933846 / 73.46072793006897, and do not type the full-C1 pooled
+7.338/51.816. Other models do not inherit this pair. An earlier hk2 screen
+of Instant was refused under the previous 1024–2047 quota of 8; that
+refusal is not this screen primary.
 
 Record a screen primary with `--fast-screen` and no `--baseline-screen`.
 That run's decision is `screen_primary`. It is not a tip verdict and not a
@@ -150,9 +166,8 @@ at `51f80ad681c8f7b1be9b22b5e700bef34e33534c` passed: 4/4,
 not a review PASS. Smoke artifacts are under
 `~/experiments/2026-10-26-pr181-screen-primary/primary/smoke/` on hk2.
 The 4/4 smoke is not a screen primary, not a fast-screen
-latency pair, and not a KEEP. The Instant screen primary remains the TBD
-above until it is measured with quotas 10/10/8/8/6/16. Room posts still omit
-hostnames; the hk2 note is PR evidence.
+latency pair, and not a KEEP. The Instant screen primary is the n=58 block
+above. Room posts still omit hostnames; the hk2 note is PR evidence.
 
 ## Full C1 KEEP
 

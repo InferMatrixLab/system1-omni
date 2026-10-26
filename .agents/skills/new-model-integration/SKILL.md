@@ -92,8 +92,11 @@ exists, smoke and the fast-screen run before another full C1. The screen
 compares the same request IDs against the primary SHA's own screen, not
 against the full-C1 pooled pair. Quotas are 10/10/8/8/6/16. A short bucket
 records `quota_shortfall` and is not filled from another bucket. 2048+ below
-16 is inconclusive and cannot early-DROP. That screen-primary pair stays
-`TBD — measure on primary SHA same request IDs` until it is measured. A clear
+16 is inconclusive and cannot early-DROP. StartLux Instant's measured
+screen primary is SHA `51f80ad681c8f7b1be9b22b5e700bef34e33534c`, p50
+19.112976267933846 ms, p95 73.46072793006897 ms, n=58 on L20X / sm_89.
+A model that has not been screened has no screen-primary pair. Do not copy
+Instant's screen pair or a full-C1 pooled pair into it. A clear
 regression is dropped there, with `dropped_at`, and is not a KEEP. Do not
 stack the next tip commit until that tip has been dropped by the screen or
 remeasured with full C1 on the same named hardware. Incomplete evidence is

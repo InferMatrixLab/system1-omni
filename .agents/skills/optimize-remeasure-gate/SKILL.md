@@ -72,22 +72,34 @@ pooled percentiles. `--baseline-p50-ms` and `--baseline-p95-ms` are refused.
 StartLux Instant's full-C1 pooled primary remains
 `51f80ad681c8f7b1be9b22b5e700bef34e33534c` (`51f80ad`), p50 7.338 ms, p95
 51.816 ms. That pair is not the screen baseline. Clef and pplx-decider keep
-the full-C1 primaries in their recipes and the latency leaderboard. For
-every model the screen-primary slot is:
-
-```text
-screen_primary_p50_ms: TBD — measure on primary SHA same request IDs
-screen_primary_p95_ms: TBD — measure on primary SHA same request IDs
-```
-
-Fill it only from a completed `--fast-screen` whose decision is
+the full-C1 primaries in their recipes and the latency leaderboard. Fill a
+screen-primary slot only from a completed `--fast-screen` whose decision is
 `screen_primary` on the primary SHA, same machine, same request IDs. A full-C1
 KEEP moves the full-C1 primary; it does not by itself fill this slot.
-StartLux Instant is still TBD until measured with quotas 10/10/8/8/6/16.
-An earlier hk2 screen of the Instant `usage.input_tokens` index was refused
-under the previous 1024–2047 quota of 8 (that bucket has 6 prompts). InferRSI
-set the quota to 6 on 2026-10-26. Do not write 7.338/51.816 as that screen
-primary. Remeasure with the new quotas before filling the slot.
+
+StartLux Instant screen primary, hk2, quotas 10/10/8/8/6/16, 58/58 success,
+`evidence_complete` true, decision `screen_primary`, `quota_shortfall` `{}`:
+
+```text
+screen_primary_sha: 51f80ad681c8f7b1be9b22b5e700bef34e33534c
+screen_primary_p50_ms: 19.112976267933846
+screen_primary_p95_ms: 73.46072793006897
+n: 58
+bucket_counts: 0-127:10, 128-255:10, 256-511:8, 512-1023:8, 1024-2047:6, 2048+:16
+device: L20X
+compute capability: sm_89
+```
+
+The measuring client was `923c8c739bcaf3cc2b098f3cf373c2b547d2666c` plus a
+local-only 1024–2047 quota patch from 8 to 6. The remote tip may still have
+been on quota 8. Later screens use the committed n=58 quotas and do not
+need that patch. Artifacts:
+`~/experiments/2026-10-26-pr181-screen-primary/screen-primary-n58/`
+(`SCREEN_PRIMARY.json`, `fast-screen/`, `screen_ids.json`,
+`local-quota-patch.diff`). Do not write 7.338/51.816 as this screen
+primary. Do not type the screen percentiles; pass `--baseline-screen`.
+Clef and pplx-decider have no screen primary yet. Do not copy Instant's
+screen pair onto them.
 
 Early DROP only when both screen Δp50 and Δp95 are worse than that same-ID
 baseline. A metric is worse when its delta (tip minus baseline) is ≥ +2%
@@ -112,7 +124,7 @@ band does not make a full-C1 tie a KEEP. hk2 contract smoke of client
 That client has no StartLux or CUDA diff versus `51f80ad`, and offline
 `tests/benchmarks` there were 109 OK. That smoke is not the screen primary.
 Offline MockTransport tests are not a review PASS. The Instant screen
-primary stays TBD until measured with quotas 10/10/8/8/6/16.
+primary is the n=58 block above.
 
 ## INCONCLUSIVE stops the loop
 
