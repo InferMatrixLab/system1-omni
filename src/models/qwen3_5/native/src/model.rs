@@ -1952,6 +1952,119 @@ impl Model {
         Ok(self.fixed_gemm)
     }
 
+    /// Check on this GPU what `forward_shared` relies on: that the fixed GEMM algorithms
+    /// give a row the same result whatever the number of rows in the call and wherever
+    /// the row sits. For each decoder-layer projection shape of the loaded weights (the
+    /// GEMMs `forward_shared` runs with that handle), 4096 random rows run in one call,
+    /// then subsets of them run alone, as in `fixed_gemm_rows_do_not_depend_on_m`; each
+    /// must equal the same rows of the full call byte for byte. Holds about 0.35 GiB of
+    /// device memory on a 9B backbone (0.5 GiB on 27B) while it runs. A guard for this
+    /// model's shapes, not a substitute for the kernel test.
+    pub fn check_fixed_rows(&mut self) -> Result<()> {
+        const ROWS: usize = 4096;
+        // (first row, rows) of each subset
+        const PARTS: [(usize, usize); 11] = [
+            (0, 1),
+            (0, 2),
+            (0, 63),
+            (0, 64),
+            (0, 65),
+            (0, 1024),
+            (37, 64),
+            (64, 65),
+            (1000, 200),
+            (3000, 1096),
+            (4095, 1),
+        ];
+        self.ensure_fixed_profile()?;
+        cuda::set_device(0)?;
+        let gemm = self.fixed_gemm()?;
+        let mut weights: Vec<&Tensor> = Vec::new();
+        for layer in &self.layers {
+            let (input, output) = match &layer.mixer {
+                Mixer::Linear(la) => (&la.in_proj, &la.out),
+                Mixer::Full(fa) => (&fa.qkv, &fa.o),
+            };
+            for w in [input, output, &layer.gate_up, &layer.down] {
+                if weights.iter().all(|seen| seen.shape != w.shape) {
+                    weights.push(w);
+                }
+            }
+        }
+        let (n_max, k_max) = weights
+            .iter()
+            .fold((0, 0), |(n, k), w| (n.max(w.shape[0]), k.max(w.shape[1])));
+        let part_max = PARTS.iter().map(|&(_, m)| m).max().unwrap();
+        let x = DeviceBuffer::new(ROWS * k_max * BF16)?;
+        let full = DeviceBuffer::new(ROWS * n_max * BF16)?;
+        let part = DeviceBuffer::new(part_max * n_max * BF16)?;
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let input: Vec<u8> = (0..ROWS * k_max)
+            .flat_map(|_| {
+                seed = seed
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                let value = (seed >> 40) as f32 / (1u64 << 24) as f32 * 4.0 - 2.0;
+                half::bf16::from_f32(value).to_le_bytes()
+            })
+            .collect();
+        let nan = vec![0xffu8; part_max * n_max * BF16];
+        let result = (|| {
+            // SAFETY: x has room for ROWS rows of k_max.
+            unsafe { cuda::upload(x.at(0), &input, self.stream)? };
+            let (mut want, mut got) = (nan.clone(), nan.clone());
+            for w in &weights {
+                let (n, k) = (w.shape[0], w.shape[1]);
+                let run = |at: usize, m: usize, y: &DeviceBuffer| {
+                    // SAFETY: x holds ROWS rows of k and at + m <= ROWS, w is [n, k], and y
+                    // has room for m rows of n.
+                    check(
+                        unsafe {
+                            (cuda::api().cs1_gemm)(
+                                gemm,
+                                x.at(at * k * BF16),
+                                w.ptr,
+                                y.at(0),
+                                m as i32,
+                                n as i32,
+                                k as i32,
+                                n as i32,
+                                self.stream,
+                            )
+                        },
+                        "fixed gemm",
+                    )
+                };
+                run(0, ROWS, &full)?;
+                for (at, m) in PARTS {
+                    let (want, got) = (&mut want[..m * n * BF16], &mut got[..m * n * BF16]);
+                    // SAFETY: full holds ROWS rows of n, and part has room for m rows of n;
+                    // NaN marks outputs the subset leaves unwritten.
+                    unsafe {
+                        cuda::download(want, full.at(at * n * BF16), self.stream)?;
+                        cuda::upload(part.at(0), &nan[..got.len()], self.stream)?;
+                    }
+                    run(at, m, &part)?;
+                    // SAFETY: as above.
+                    unsafe { cuda::download(got, part.at(0), self.stream)? };
+                    ensure!(
+                        got == want,
+                        "fixed GEMM rows depend on the row count on this GPU: with weight shape \
+                         {n}x{k}, rows {at}..{} run alone differ from the same rows of a \
+                         {ROWS}-row call",
+                        at + m
+                    );
+                }
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            // Work already queued may still use the buffers.
+            let _ = cuda::synchronize(self.stream);
+        }
+        result
+    }
+
     fn embed_tokens(&self, s: &Scratch, ids: &[u32]) -> Result<()> {
         self.embed_tokens_at(s, ids, 0)
     }

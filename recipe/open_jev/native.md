@@ -199,11 +199,17 @@ one request; there is no cross-request cache. A request with less than one reusa
 Shared execution keeps one GEMM algorithm per weight shape. On GPUs where that keeps
 rows independent of the row count, each candidate's score is bit-identical to
 `OPEN_JEV_FIXED=1`, which runs every candidate as its own full pass with those
-algorithms; both round differently from the default path. Before enabling either
-switch on a new GPU, run Decider's
-[fixed-algorithm check](../decider/validation.md#deploying-fixed-and-shared-modes)
-there. If the backend rejects the fixed algorithm for a shape, the request fails with
-HTTP 500 like any other inference error; it does not fall back to another algorithm.
+algorithms; both round differently from the default path. With `OPEN_JEV_PREFIX`
+set to `1` or `auto`, the worker checks this at startup for the model's own
+projection shapes, with row counts like those of Decider's
+[fixed-algorithm check](../decider/validation.md#deploying-fixed-and-shared-modes):
+each subset of 4,096 random rows, run alone, must equal the same rows of the full
+call byte for byte, or the worker refuses to start. The check briefly takes about
+0.35 GiB of device memory on 9B. It covers only the loaded model's shapes, so
+Decider's check is still the one to run when qualifying a new GPU. If the backend
+rejects the fixed algorithm for a shape, the startup check fails; at row counts the
+check did not try, and with `OPEN_JEV_FIXED=1`, the request fails with HTTP 500 like
+any other inference error. It never falls back to another algorithm.
 `OPEN_JEV_PREFIX=auto` shares only when the plan saves at least 4096 tokens and at
 least a third of the request's tokens, as `DECIDER_PREFIX=auto` does; other requests
 take the default path. Shared candidates run one at a time and are not packed. The

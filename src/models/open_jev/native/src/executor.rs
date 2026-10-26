@@ -119,8 +119,18 @@ impl Executor {
         graph: bool,
     ) -> Result<Self> {
         let (d, lib) = (dir.to_path_buf(), library.to_path_buf());
-        let model =
-            tokio::task::spawn_blocking(move || Model::load_with_graph(&d, &lib, graph)).await??;
+        let sharing = matches!(prefix, PrefixMode::Shared | PrefixMode::Auto);
+        let model = tokio::task::spawn_blocking(move || {
+            let mut model = Model::load_with_graph(&d, &lib, graph)?;
+            // Shared prefixes reproduce the fixed rows only where rows do not depend on M.
+            if sharing {
+                model
+                    .check_fixed_rows()
+                    .context("OPEN_JEV_PREFIX startup check failed")?;
+            }
+            Ok::<_, anyhow::Error>(model)
+        })
+        .await??;
         Ok(Self {
             model: Arc::new(Mutex::new(model)),
             head,

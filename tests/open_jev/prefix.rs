@@ -6,7 +6,7 @@ use omni_open_jev_native::{
     engine::{Engine, check_graph, prefix_values},
     executor::PrefixUse,
 };
-use omni_qwen3_5_native::prefix::PrefixMode;
+use omni_qwen3_5_native::{model::Model, prefix::PrefixMode};
 use serde_json::json;
 
 #[test]
@@ -74,6 +74,18 @@ async fn run(engine: &Engine, raw: &[u8]) -> (Vec<Vec<f32>>, PrefixUse) {
 async fn shared_prefixes_match_fixed_rows_and_auto_keeps_small_requests_on_the_default_path() {
     let model = PathBuf::from(std::env::var_os("OPEN_JEV_MODEL").unwrap());
     let library = PathBuf::from(std::env::var_os("OPEN_JEV_CUDA_LIB").unwrap());
+    // The check the worker runs at startup when sharing is selected.
+    {
+        let mut model = Model::load_with_graph(&model, &library, false).unwrap();
+        for _ in 0..2 {
+            let start = std::time::Instant::now();
+            model.check_fixed_rows().unwrap();
+            eprintln!(
+                "fixed-row check: {:.1} ms",
+                start.elapsed().as_secs_f64() * 1e3
+            );
+        }
+    }
     let small = br#"{"state":"Dialog: Update installed.","questions":{"q":{"type":"choice","instructions":"Close it.","criteria":{"ok":"OK","wait":"Wait"}}}}"#;
     let (fixed, off_small) = {
         let engine = Engine::load_with_prefix(&model, &library, PrefixMode::Fixed)
