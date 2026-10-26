@@ -207,6 +207,10 @@ impl Executor {
     fn run_all(&mut self, readouts: &[Readout]) -> Result<Vec<Vec<f32>>> {
         let mut hiddens = Vec::with_capacity(readouts.len());
         const CHUNK: usize = 16;
+        // A readout's rounding depends on which readouts share its
+        // packed chunk (the input-projection GEMM runs over the packed
+        // token count), so the recorded GPU evidence and CHUNK must
+        // move together.
         for chunk in readouts.chunks(CHUNK) {
             let inputs: Vec<&[u32]> = chunk.iter().map(|r| r.ids.as_slice()).collect();
             hiddens.extend(self.model.forward_batch(&inputs)?);
