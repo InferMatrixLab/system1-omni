@@ -13,10 +13,7 @@ onig = { package = "onig", version = "6", default-features = false }
 omni-qwen3-5-native = { path = "../../qwen3_5/native" }
 serde = { version = "1", features = ["derive"] }
 tokenizers = { version = "=0.22.2", default-features = false, features = ["onig"] }
-serde_json = { version = "1.0.149", features = ["preserve_order"] }
-sha2 = "0.11"
-
-[dev-dependencies]
+serde_json = { version = "1.0.149", features = ["float_roundtrip", "preserve_order"] }
 sha2 = "0.11"
 
 [lib]
