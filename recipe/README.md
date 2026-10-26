@@ -52,6 +52,13 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   vllm-sr/Vela-2.0-0.3B package, pass its full-hash package gate, and serve all
   five SystemOne question kinds (`choice`/`noul`/`score` plus the `span`/`set`
   extensions) through the Python worker and the Rust frontend on CPU FP32.
+- [Clef reference worker](clef/reference.md): load pinned Clef-flash (9B) or
+  Clef (27B) and serve text `choice`/`noul`/`score`. Image, video and native
+  CUDA are not served. Operator-reported flash Public231 concurrency-1
+  timing on the L20X-labeled lab host is in the recipe. The primary is
+  tip `594528a9`: p50 164.969 ms, p95 216.755 ms, `/health`
+  `fla+causal_conv1d`, versus `9030065` run1 p50 247.518 ms, p95 413.025 ms
+  (Δp50 −82.549 ms, Δp95 −196.270 ms).
 
 - [LFM2.5-350M choice worker](lfm2/README.md): score text decisions with independent
   questions, hybrid cache branching and configurable candidate batches.

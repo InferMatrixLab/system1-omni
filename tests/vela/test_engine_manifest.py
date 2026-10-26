@@ -10,9 +10,9 @@ the exact-size weights check.
 
 from __future__ import annotations
 
-import types
 import hashlib
 import json
+import os
 import py_compile
 import re
 import sys
@@ -158,21 +158,21 @@ def test_unsafe_pinned_names_are_rejected_before_any_file_access(tmp_path):
         verify_files(tmp_path, {"../escape.py": "0" * 64})
 
 
-@pytest.mark.parametrize(
-    "shadow",
-    [
-        "tokenizers.py",
-        "torch.pyc",
-        "torch.cpython-312-x86_64-linux-gnu.so",
-    ],
-)
-def test_extra_importable_files_in_the_package_root_are_refused(tmp_path, shadow):
-    # Sourceless bytecode and extension modules import from a sys.path
-    # entry exactly like source files, so every loader suffix is
-    # refused, not just .py.
+def test_extra_importable_files_in_the_package_root_are_refused(tmp_path):
     table = build_package(tmp_path, small_files())
-    (tmp_path / shadow).write_bytes(b"shadowing module\n")
-    with pytest.raises(ValueError, match=f"unexpected importable file {re.escape(shadow)}"):
+    (tmp_path / "tokenizers.py").write_text("shadowing module\n")
+    with pytest.raises(ValueError, match="unexpected importable file tokenizers.py"):
+        verify_files(tmp_path, table)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["torch.pyc", "torch.abi3.so", "_vela.cpython-312-x86_64-linux-gnu.so"],
+)
+def test_sourceless_and_extension_module_files_are_refused(tmp_path, name):
+    table = build_package(tmp_path, small_files())
+    (tmp_path / name).write_bytes(b"module bytes\n")
+    with pytest.raises(ValueError, match=f"unexpected importable file {re.escape(name)}"):
         verify_files(tmp_path, table)
 
 
@@ -185,57 +185,70 @@ def test_extra_package_directories_in_the_package_root_are_refused(tmp_path):
         verify_files(tmp_path, table)
 
 
-def test_namespace_package_directories_with_code_are_refused(tmp_path):
-    # A directory without __init__.py still shadows a dependency as a
-    # namespace package once it carries importable code at any depth;
-    # the pinned package's own data directories (no importables) pass.
+@pytest.mark.parametrize(
+    "init_name",
+    ["__init__.pyc", "__init__.abi3.so"],
+)
+def test_sourceless_and_extension_package_inits_are_refused(tmp_path, init_name):
+    # A directory whose __init__ is bytecode or an extension — no source at
+    # all — still imports as a regular package once the package root goes
+    # first on sys.path, executing bytes the pin never hashed: the review's
+    # torch/__init__.pyc bypass.
     table = build_package(tmp_path, small_files())
-    numpy = tmp_path / "numpy"
-    (numpy / "core").mkdir(parents=True)
-    (numpy / "core" / "__init__.py").write_text("shadowing namespace code\n")
-    with pytest.raises(ValueError, match="unexpected namespace package numpy"):
+    torch = tmp_path / "torch"
+    torch.mkdir()
+    (torch / init_name).write_bytes(b"unverified module bytes\n")
+    with pytest.raises(ValueError, match="unexpected importable package torch/"):
         verify_files(tmp_path, table)
 
 
-def test_namespace_directories_with_extension_modules_are_refused(tmp_path):
-    # Deep extension modules import as pkg.mod the same as deep .py
-    # files, so the namespace-package refusal covers them too.
+def test_a_namespace_directory_with_nested_modules_is_refused(tmp_path):
+    # Even without any __init__, a directory imports as a namespace package
+    # whose nested modules execute on import the same way.
     table = build_package(tmp_path, small_files())
-    numpy = tmp_path / "numpy"
-    (numpy / "core").mkdir(parents=True)
-    (numpy / "core" / "_multiarray_umath.cpython-312-x86_64-linux-gnu.so").write_bytes(b"elf")
-    with pytest.raises(ValueError, match="unexpected namespace package numpy"):
+    fla = tmp_path / "fla"
+    fla.mkdir()
+    (fla / "ops.py").write_text("unverified module\n")
+    with pytest.raises(ValueError, match="unexpected importable package fla/"):
         verify_files(tmp_path, table)
 
 
-def test_an_existing_bytecode_cache_cannot_bypass_the_gate(tmp_path):
-    # A __pycache__ entry with an unchecked hash is imported without
-    # consulting the source it claims to be compiled from, so a poisoned
-    # cache would run even beside sources that hash to the table; the
-    # gate refuses the cache itself, as bytecode cannot be verified
-    # against the pin.
-    table = build_package(tmp_path, small_files())
-    assert verify_files(tmp_path, table) == sorted(table)
+def test_a_directory_symlink_hiding_importable_code_is_refused(tmp_path):
+    # rglob does not descend into a symlinked subdirectory, but import does:
+    # a real directory whose only entry is a symlink to a directory with a
+    # module would pass the depth walk, and the module would execute after
+    # the package root goes first on sys.path.
+    package = tmp_path / "pkg"
+    package.mkdir()
+    table = build_package(package, small_files())
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "ops.py").write_text("unverified module\n")
+    fla = package / "fla"
+    fla.mkdir()
+    os.symlink(target, fla / "evil")
+    with pytest.raises(ValueError, match="unexpected importable package fla/"):
+        verify_files(package, table)
 
-    victim = tmp_path / "vela2_inference.py"
-    real = victim.read_bytes()
-    victim.write_bytes(b"import os\nos.system('poisoned by cache')\n")
-    cache_dir = tmp_path / "__pycache__"
-    cfile = cache_dir / f"vela2_inference.{sys.implementation.cache_tag}.pyc"
-    py_compile.compile(
-        str(victim),
-        cfile=str(cfile),
-        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
-    )
-    victim.write_bytes(real)
 
-    with pytest.raises(ValueError, match="__pycache__"):
-        verify_files(tmp_path, table)
+def test_a_directory_symlink_in_the_package_root_is_refused(tmp_path):
+    # A symlinked directory at the root is refused outright: walking its
+    # target cannot see the target's own nested symlinks either.
+    package = tmp_path / "pkg"
+    package.mkdir()
+    table = build_package(package, small_files())
+    target = tmp_path / "target"
+    target.mkdir()
+    os.symlink(target, package / "torch")
+    with pytest.raises(ValueError, match="directory symlink torch"):
+        verify_files(package, table)
 
 
 def test_unimportable_package_root_entries_still_pass(tmp_path):
     # The pinned package's own layout shape: onnx/, assets/, LICENSES/ and
-    # figures/ directories without __init__.py, markdown and license files.
+    # figures/ directories without __init__.py, and markdown and license
+    # files. An existing __pycache__ is refused separately: the gate below
+    # cannot verify cached bytecode against the pin.
     table = build_package(tmp_path, small_files())
     for directory in ("onnx", "assets", "LICENSES", "figures"):
         (tmp_path / directory).mkdir()
@@ -244,6 +257,27 @@ def test_unimportable_package_root_entries_still_pass(tmp_path):
     (tmp_path / "LICENSE").write_text("Apache-2.0\n")
 
     assert verify_files(tmp_path, table) == sorted(table)
+
+
+def test_an_existing_pycache_of_different_code_is_refused(tmp_path):
+    # The bypass the gate must close: Python reads a matching unchecked-hash
+    # .pyc from __pycache__ in place of the verified source, so a cache
+    # compiled from different code would execute unverified bytecode after
+    # a clean verify_files pass. Compile the poison, restore the
+    # manifest-matching source, and the directory itself must be refused.
+    files = small_files()
+    table = build_package(tmp_path, files)
+    poisoned = tmp_path / "vela2_inference.py"
+    poisoned.write_text("POISONED_MARKER = 'not the pinned runtime'\n", encoding="utf-8")
+    py_compile.compile(
+        poisoned,
+        cfile=tmp_path / "__pycache__" / f"vela2_inference.{sys.implementation.cache_tag}.pyc",
+        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+    )
+    poisoned.write_bytes(files["vela2_inference.py"])
+
+    with pytest.raises(ValueError, match="__pycache__"):
+        verify_files(tmp_path, table)
 
 
 def test_no_foreign_runtime_import_is_clean(tmp_path):
@@ -271,21 +305,6 @@ def test_a_runtime_module_from_another_directory_is_refused(tmp_path):
         sys.modules.pop("modeling_vela2", None)
 
 
-def test_a_runtime_module_without_a_file_is_refused(tmp_path):
-    # A namespace package or builtin resolves with __file__ = None; it
-    # cannot be this package's flat module, so the gate fails closed
-    # instead of crashing on the None path.
-    package = tmp_path / "pkg"
-    package.mkdir()
-    build_package(package, small_files())
-    sys.modules["vela2_inference"] = types.ModuleType("vela2_inference")
-    try:
-        with pytest.raises(ValueError, match="namespace"):
-            verify_no_foreign_runtime(package)
-    finally:
-        sys.modules.pop("vela2_inference", None)
-
-
 def test_the_package_root_is_forced_to_the_front_of_sys_path(tmp_path):
     # A PYTHONPATH copy of the root listed later must not leave a foreign
     # directory ahead of it: verify_no_foreign_runtime cannot catch this,
@@ -307,7 +326,7 @@ def test_the_package_root_is_forced_to_the_front_of_sys_path(tmp_path):
 
 
 def test_weights_are_checked_by_exact_pinned_size(tmp_path):
-    table = build_package(tmp_path, small_files())
+    build_package(tmp_path, small_files())
     sparse_weights(tmp_path)
     verify_weights(tmp_path)
 

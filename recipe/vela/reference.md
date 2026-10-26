@@ -65,7 +65,7 @@ The ownership boundary follows
 | --- | --- |
 | Package | [vllm-sr/Vela-2.0-0.3B](https://huggingface.co/vllm-sr/Vela-2.0-0.3B) |
 | Pinned revision | `d6f03aa9baca4f9017fa8f8e9c2764d3bed3f409` |
-| Package gate | config structural identity + a 7-file SHA-256 table pinned per revision in `engine.py`, full hash before import, no unlisted importables in the package root, no existing `__pycache__` bytecode cache, exact 1,236,473,252-byte weights check |
+| Package gate | config structural identity + a 7-file SHA-256 table pinned per revision in `engine.py`, full hash before import, no unlisted importables, `__pycache__` or directory symlinks in the package root, exact 1,236,473,252-byte weights check |
 | License | Apache-2.0; tokenizer material under Gemma Terms of Use |
 
 The gate's file table is checked in (not read from the package, which
@@ -97,8 +97,9 @@ tokenizer, the ONNX exports and doc assets); serving needs roughly
 2 GB of RAM for the FP32 model plus working memory for the batch rows.
 The worker refuses to start when the config is not the pinned member's,
 when any of the 7 gated files fails its hash, when the package root
-holds an importable entry the table does not name or a `__pycache__`
-bytecode cache, or when the weights file is not the pinned size — that
+holds an importable entry the table does not name, an existing
+`__pycache__` or a directory symlink, or when the weights file is not
+the pinned size — that
 gate runs before any package code is imported.
 
 ## Start the worker
@@ -257,8 +258,8 @@ GPU bf16-autocast numbers for the baseline.
 
 - The package directory must be the pinned revision's download; the
   worker refuses foreign configs, hash mismatches, unlisted importables,
-  bytecode caches and wrong weights sizes at startup, before importing
-  anything.
+  `__pycache__` bytecode caches, directory symlinks and wrong weights
+  sizes at startup, before importing anything.
 - The 8 MiB body cap is slice-scoped (upstream sets no total-body
   limit); a valid request bounded by the 8,192-token window is far
   below it.

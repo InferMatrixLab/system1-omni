@@ -84,6 +84,7 @@ nav:
       - CLM stub-encoder contract: recipe/clm/README.md
       - LFM2.5-350M choice worker: recipe/lfm2/README.md
       - D3 reference worker: recipe/d3/reference.md
-      - pplx-decider reference worker: recipe/pplx_decider/README.md
       - Vela 2.0 0.3B reference worker: recipe/vela/reference.md
+      - Clef reference worker: recipe/clef/reference.md
+      - pplx-decider reference worker: recipe/pplx_decider/README.md
   - Contributing: CONTRIBUTING.md
