@@ -78,6 +78,10 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
         .trim()
         .trim_end_matches(';');
     let mut fake = include_str!("graph_loading_fake.c").to_owned();
+    let missing = std::env::var("OMNI_TEST_MATCHED_MISSING_SYMBOL").ok();
+    if let Some(symbol) = &missing {
+        fake = fake.replace(symbol, &format!("omitted_{symbol}"));
+    }
     let implemented = [
         "cs1_abi_version",
         "cs1_error_string",
@@ -130,6 +134,30 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
     let metrics = unsafe { libloading::Library::new(&library).unwrap() };
     let metric =
         |name: &[u8]| unsafe { metrics.get::<unsafe extern "C" fn() -> i32>(name).unwrap()() };
+    if let Some(symbol) = missing {
+        let mut model = Model::load_with_graph(&directory, &library, false).unwrap();
+        // Matched warmup must reject either missing capability even though one
+        // question does not share a prefix. No matched workspace is allocated.
+        let error = model
+            .with_matched_prefix(&[64], &[], |_| Ok(()))
+            .expect_err("matched warmup accepted an incomplete CUDA library");
+        let detail = format!("{error:#}");
+        assert!(detail.contains("rebuild libqwen3_5_cuda"), "{detail}");
+        assert!(detail.contains(&symbol), "{detail}");
+        assert_eq!(metric(b"loading_gemms\0"), 1);
+        // Ordinary and legacy fixed execution still reach their kernel calls;
+        // those fake kernels fail deliberately, without needing matched symbols.
+        for result in [model.forward(&[0]), model.forward_fixed(&[0])] {
+            let error = result.unwrap_err().to_string();
+            assert!(error.contains("unexpected host-test CUDA call"), "{error}");
+        }
+        drop(model);
+        assert_eq!(metric(b"loading_live\0"), 0);
+        assert_eq!(metric(b"loading_gemms\0"), 0);
+        assert_eq!(metric(b"loading_early\0"), 0);
+        std::fs::remove_dir_all(directory).unwrap();
+        return;
+    }
     for graph in [false, true] {
         let mut model = Model::load_with_graph(&directory, &library, graph).unwrap();
         assert_eq!(model.graph_stats().requested, graph);
@@ -331,4 +359,22 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
         "failed construction retires its stream"
     );
     std::fs::remove_dir_all(directory).unwrap();
+    // CUDA API loading is process-global, so isolate each incomplete library.
+    for symbol in ["cs1_gemm_create_matched", "cs1_gemm_compatible"] {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocations",
+                "--nocapture",
+            ])
+            .env("OMNI_TEST_MATCHED_MISSING_SYMBOL", symbol)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{symbol}: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
