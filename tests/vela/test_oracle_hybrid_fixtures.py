@@ -1,12 +1,11 @@
 """Ties the frozen hybrid oracle fixtures to the recipe examples they came from.
 
-Mirrors test_oracle_fixtures (the 0.3B tie) for the 0.8B hybrid fixtures
-recorded by ``recipe/vela/compare_reference.py`` under the
-``oracle-hybrid-`` prefix. Each fixture's ``request`` is the recipe's
-example request with the ``model`` field rewritten to the hybrid's
-served name (the comparison tool does exactly this rewrite for file
-cases), and its recorded ``system_one`` response passes the worker's
-own response gate on the hybrid setting. No weights, no torch.
+The 0.8B hybrid fixtures recorded by ``recipe/vela/compare_reference.py``
+under the ``oracle-hybrid-`` prefix keep the recipe's example requests
+(with the ``model`` field rewritten to the hybrid's served name) and their
+recorded ``system_one`` responses, which must pass the production
+``finish_response`` gate on the hybrid setting; the 0.3B oracles have no
+equivalent consumer yet. No weights, no torch.
 """
 
 from __future__ import annotations
