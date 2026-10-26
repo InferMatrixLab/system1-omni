@@ -96,3 +96,48 @@ async fn packed_candidates_preserve_isolation_order_and_graph_shapes() {
         assert!((row[0] - expected).abs() <= 0.01);
     }
 }
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "needs the pinned Open-Jev export, CUDA library and a GPU reservation"]
+async fn text_prefix_buffers_grow_and_shrink_without_reusing_prior_contents() {
+    let model = PathBuf::from(std::env::var_os("OPEN_JEV_MODEL").unwrap());
+    let library = PathBuf::from(std::env::var_os("OPEN_JEV_CUDA_LIB").unwrap());
+    let engine = Engine::load(&model, &library).await.unwrap();
+    let mut first = None;
+    for (prefix, token) in [(2048, 42), (3072, 43), (2048, 44), (2048, 42)] {
+        let inputs: Vec<Vec<u32>> = (0..3)
+            .map(|index| {
+                let mut ids = vec![token; prefix];
+                ids.extend(vec![7 + index; 256]);
+                ids
+            })
+            .collect();
+        let mut expected = Vec::new();
+        for ids in &inputs {
+            expected.push(
+                engine
+                    .executor
+                    .execute(&engine.scheduler, vec![vec![ids.clone()]])
+                    .await
+                    .unwrap()[0][0],
+            );
+        }
+        let actual = engine
+            .executor
+            .execute_detailed(&engine.scheduler, vec![inputs])
+            .await
+            .unwrap();
+        assert_eq!(
+            actual.shared_prefix_tokens, prefix,
+            "exercise actual prefix reuse"
+        );
+        assert_eq!(actual.scores, vec![expected.clone()]);
+        if token == 42 {
+            if let Some(first) = &first {
+                assert_eq!(&actual.scores, first, "returning input after changed state");
+            } else {
+                first = Some(actual.scores);
+            }
+        }
+    }
+}

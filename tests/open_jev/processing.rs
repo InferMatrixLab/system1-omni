@@ -244,3 +244,79 @@ fn finishing_rejects_missing_candidates_and_nonfinite_scores() {
         );
     }
 }
+
+fn question(id: &str, prompts: &[&str]) -> Question {
+    Question {
+        id: id.into(),
+        kind: Kind::Choice,
+        keys: (0..prompts.len()).map(|i| i.to_string()).collect(),
+        prompts: prompts.iter().map(|s| s.to_string()).collect(),
+        legend: None,
+    }
+}
+
+#[test]
+fn parallel_tokenization_keeps_candidate_order_across_chunks_and_questions() {
+    let p = processor(4096);
+    let prompts: Vec<_> = (1..=33).map(|i| "x ".repeat(i)).collect();
+    let refs: Vec<_> = prompts.iter().map(String::as_str).collect();
+    let questions = [
+        question("many", &refs),
+        question("last", &["billing", "security"]),
+    ];
+    let actual =
+        encode_questions(&p.tokenizer, "technical ", " Route", 4096, &questions, true).unwrap();
+    for (row, q) in actual.iter().zip(&questions) {
+        for (ids, prompt) in row.iter().zip(&q.prompts) {
+            let reference = p
+                .tokenizer
+                .encode(format!("technical {} Route", prompt.trim()), true)
+                .unwrap();
+            assert_eq!(ids, reference.get_ids());
+        }
+    }
+    assert_eq!(actual[0].len(), 33);
+    assert_eq!(actual[1][0], [1, 10, 8, 5]);
+    assert_eq!(actual[1][1], [1, 10, 9, 5]);
+}
+
+#[test]
+fn batch_longest_padding_retains_independent_candidate_lengths() {
+    let mut p = processor(4096);
+    p.tokenizer
+        .with_padding(Some(tokenizers::PaddingParams::default()));
+    let questions = [question("padding", &["x", "x x x"])];
+    let actual = encode_questions(&p.tokenizer, "", "", 4096, &questions, true).unwrap();
+    assert_eq!(actual, vec![vec![vec![1, 3], vec![1, 3, 3, 3]]]);
+}
+
+#[test]
+fn batch_failure_retains_the_first_candidate_error() {
+    let mut p = processor(4096);
+    // Known words still encode; unknown words fail because the unknown token is absent.
+    p.tokenizer.with_model(
+        WordLevel::builder()
+            .vocab([("x".to_owned(), 3)].into_iter().collect())
+            .unk_token("[missing]".into())
+            .build()
+            .unwrap(),
+    );
+    for prompts in [["x x", "unknown"], ["unknown", "x x"]] {
+        let questions = [question("error-order", &prompts)];
+        let reference = encode_questions(&p.tokenizer, "", "", 2, &questions, false)
+            .unwrap_err()
+            .to_string();
+        let actual = encode_questions(&p.tokenizer, "", "", 2, &questions, true)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(actual, reference);
+        if prompts[0] == "x x" {
+            assert_eq!(
+                actual,
+                "question error-order: 3 tokens exceeds max_length=2; no silent truncation"
+            );
+        } else {
+            assert!(actual.contains("Missing [UNK] token"), "{actual}");
+        }
+    }
+}

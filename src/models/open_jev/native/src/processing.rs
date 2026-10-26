@@ -65,6 +65,7 @@ impl Processor {
             &self.suffix,
             self.max_length,
             &questions,
+            self.checkpoint.parallel_tokenization,
         )?;
         let input_tokens = inputs.iter().flatten().map(Vec::len).sum();
         let candidates = inputs.iter().map(Vec::len).sum();
@@ -86,6 +87,15 @@ impl Processor {
 impl ResponseContext {
     /// Restore the Noul baseline and normalize across each complete question.
     pub fn finish(self, rows: Vec<Vec<f32>>) -> Result<Value> {
+        self.finish_with_prefix(rows, 0)
+    }
+
+    /// Report executed prefix reuse, rather than inferring it from token lengths.
+    pub fn finish_with_prefix(
+        self,
+        rows: Vec<Vec<f32>>,
+        shared_prefix_tokens: usize,
+    ) -> Result<Value> {
         ensure!(rows.len() == self.questions.len(), "invalid logit rows");
         let mut answers = Map::new();
         for (q, mut logits) in self.questions.iter().zip(rows) {
@@ -98,13 +108,18 @@ impl ResponseContext {
                 contract::answer(q, &logits, self.temperature)?,
             );
         }
+        let prefix_cache = if shared_prefix_tokens > 0 {
+            json!({"enabled": true, "mode": "within_question", "shared_tokens": shared_prefix_tokens})
+        } else {
+            json!({"enabled": false, "mode": "independent_candidates"})
+        };
         Ok(
             json!({"model": self.checkpoint.model_id, "answers": answers,
             "usage": {"input_tokens": self.input_tokens, "output_tokens": 0},
             "metadata": {"method": "native_merged_lora_decision_head", "temperature": self.temperature,
                 "candidate_sequences": self.candidates, "inference_seconds": self.start.elapsed().as_secs_f64(),
                 "base_revision": self.checkpoint.base_revision, "max_length": self.max_length,
-                "prefix_cache": {"enabled": false, "mode": "independent_candidates"}}}),
+                "prefix_cache": prefix_cache}}),
         )
     }
 }
@@ -115,15 +130,25 @@ fn encode_questions(
     suffix: &str,
     max_length: usize,
     questions: &[Question],
+    parallel: bool,
 ) -> Result<Vec<Vec<Vec<u32>>>> {
     questions
         .iter()
         .map(|q| {
-            q.prompts
-                .iter()
-                .map(|prompt| {
-                    let chat = format!("{prefix}{}{suffix}", prompt.trim());
-                    let enc = tokenizer.encode(chat, true).map_err(anyhow::Error::msg)?;
+            // BatchLongest padding would change each candidate's IDs and length.
+            // Keep the existing per-candidate semantics for all padded tokenizers.
+            let chunk_size = if parallel && tokenizer.get_padding().is_none() {
+                16
+            } else {
+                1
+            };
+            let mut inputs = Vec::with_capacity(q.prompts.len());
+            for chunk in q.prompts.chunks(chunk_size) {
+                let chats: Vec<_> = chunk
+                    .iter()
+                    .map(|prompt| format!("{prefix}{}{suffix}", prompt.trim()))
+                    .collect();
+                let validate = |enc: tokenizers::Encoding| -> Result<Vec<u32>> {
                     ensure!(
                         enc.len() <= max_length,
                         "question {}: {} tokens exceeds max_length={max_length}; no silent truncation",
@@ -131,8 +156,26 @@ fn encode_questions(
                         enc.len()
                     );
                     Ok(enc.get_ids().to_vec())
-                })
-                .collect()
+                };
+                if chats.len() > 1
+                    && let Ok(encodings) = tokenizer.encode_batch_fast(chats.iter().map(String::as_str).collect(), true)
+                {
+                    // Only token IDs are consumed; skip unused character offsets.
+                    // Batch encoding preserves input order; validate in that order too.
+                    for enc in encodings {
+                        inputs.push(validate(enc)?);
+                    }
+                } else {
+                    // A later tokenizer failure must not hide an earlier length error.
+                    // Retrying serially also preserves the original first-error message.
+                    for chat in chats {
+                        inputs.push(validate(
+                            tokenizer.encode(chat, true).map_err(anyhow::Error::msg)?,
+                        )?);
+                    }
+                }
+            }
+            Ok(inputs)
         })
         .collect()
 }

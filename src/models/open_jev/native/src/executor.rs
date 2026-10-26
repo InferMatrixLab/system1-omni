@@ -68,6 +68,12 @@ impl DecisionHead {
     }
 }
 
+/// Model results and execution facts for response metadata.
+pub struct ExecutedRequest {
+    pub scores: Vec<Vec<f32>>,
+    pub shared_prefix_tokens: usize,
+}
+
 pub struct Executor {
     model: Arc<Mutex<Model>>,
     head: DecisionHead,
@@ -82,7 +88,16 @@ impl Executor {
         checkpoint: &Checkpoint,
     ) -> Result<Self> {
         let (d, lib) = (dir.to_path_buf(), library.to_path_buf());
-        let model = tokio::task::spawn_blocking(move || Model::load(&d, &lib)).await??;
+        let batch_gdn = checkpoint.pack_candidates;
+        let model = tokio::task::spawn_blocking(move || {
+            let mut model = Model::load(&d, &lib)?;
+            if batch_gdn {
+                model.enable_batched_gdn()?;
+                model.enable_packed_projections()?;
+            }
+            Ok::<_, anyhow::Error>(model)
+        })
+        .await??;
         Ok(Self {
             model: Arc::new(Mutex::new(model)),
             head,
@@ -98,6 +113,15 @@ impl Executor {
         scheduler: &SerialScheduler,
         ids: Vec<Vec<Vec<u32>>>,
     ) -> Result<Vec<Vec<f32>>> {
+        Ok(self.execute_detailed(scheduler, ids).await?.scores)
+    }
+
+    /// Include whether a prefix was actually reused after device compatibility checks.
+    pub async fn execute_detailed(
+        &self,
+        scheduler: &SerialScheduler,
+        ids: Vec<Vec<Vec<u32>>>,
+    ) -> Result<ExecutedRequest> {
         let model = self.model.clone();
         let head = self.head.clone();
         let pack = self.pack;
@@ -108,7 +132,22 @@ impl Executor {
                     .map_err(|_| anyhow::anyhow!("poisoned model"))?;
                 let inputs: Vec<&[u32]> = ids.iter().flatten().map(Vec::as_slice).collect();
                 let mut scores = Vec::with_capacity(inputs.len());
-                if pack {
+                let prefix_len = if pack && ids.len() == 1 {
+                    batching::shared_prefix(&inputs)
+                } else {
+                    0
+                };
+                let shared = if prefix_len > 0 {
+                    model.try_forward_shared_prefix(&inputs, prefix_len)?
+                } else {
+                    None
+                };
+                let shared_prefix_tokens = if shared.is_some() { prefix_len } else { 0 };
+                if let Some(hidden) = shared {
+                    for last in hidden {
+                        scores.push(head.score(last)?);
+                    }
+                } else if pack {
                     for range in batching::ranges(&inputs) {
                         for last in model.forward_batch(&inputs[range])? {
                             scores.push(head.score(last)?);
@@ -120,10 +159,13 @@ impl Executor {
                     }
                 }
                 let mut scores = scores.into_iter();
-                Ok(ids
-                    .iter()
-                    .map(|candidates| scores.by_ref().take(candidates.len()).collect())
-                    .collect())
+                Ok(ExecutedRequest {
+                    scores: ids
+                        .iter()
+                        .map(|candidates| scores.by_ref().take(candidates.len()).collect())
+                        .collect(),
+                    shared_prefix_tokens,
+                })
             })
             .await
     }

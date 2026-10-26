@@ -25,7 +25,8 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   multimodal language checkpoint and serve one-image decisions with Rust/CUDA.
 - [Open-Jev native text worker](open_jev/native.md): export the merged text
   backbone and trained decision head of Open-Jev-27B-v1.1 or Open-Jev-9B, then
-  serve with Rust and CUDA. [Open-Jev-9B validation](open_jev/validation-9b.md)
+  serve with Rust and CUDA; the 27B path supports compatible candidate batching
+  and within-question prefix sharing. [Open-Jev-9B validation](open_jev/validation-9b.md)
   compares the 9B worker with the reference.
 - [StartLux Instant 4B native worker](startlux/README.md): build the Ada sm_89
   CUDA library, serve the pinned CC BY-NC Instant checkpoint, and run the
