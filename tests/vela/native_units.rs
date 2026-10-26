@@ -4,7 +4,7 @@
 //! loaded by the `#[path]` wiring in contract.rs).
 
 use omni_vela_native::state::system_one_state;
-use omni_vela_native::words::{split_words, word_first_tokens};
+use omni_vela_native::words::{split_words, unit_ids, word_first_tokens};
 use serde_json::json;
 
 // ------------------------------------------------------------- state
@@ -85,6 +85,10 @@ fn cjk_characters_are_one_unit_each() {
         .map(|(a, b)| text.chars().skip(*a).take(b - a).collect())
         .collect();
     assert_eq!(words, vec!["追", "踪", "parcel", "仓", "库"]);
+    // Mixed content: each CJK char its own unit, the ASCII word one
+    // unit, the space outside every unit.
+    let chars: Vec<char> = "追踪 parcel".chars().collect();
+    assert_eq!(unit_ids(&chars), vec![0, 1, -1, 2, 2, 2, 2, 2, 2]);
 }
 
 #[test]

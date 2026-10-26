@@ -29,15 +29,21 @@ fn word_pattern() -> Regex {
     .expect("the reference word pattern must compile")
 }
 
+/// Start-of-char byte offsets plus the end sentinel; index it with
+/// `partition_point(|&start| start < byte)` to map a byte offset to its
+/// code-point offset.
+fn char_starts(text: &str) -> Vec<usize> {
+    text.char_indices()
+        .map(|(byte, _)| byte)
+        .chain(std::iter::once(text.len()))
+        .collect()
+}
+
 /// The (start, end) word ranges of `text`, in code points.
 pub fn split_words(text: &str) -> Vec<(usize, usize)> {
     let regex = word_pattern();
     // Byte offsets → code-point offsets.
-    let char_of_byte: Vec<usize> = text
-        .char_indices()
-        .map(|(byte, _)| byte)
-        .chain(std::iter::once(text.len()))
-        .collect();
+    let char_of_byte = char_starts(text);
     let to_char = |byte: usize| -> usize { char_of_byte.partition_point(|&start| start < byte) };
     regex
         .find_iter(text)
@@ -110,7 +116,11 @@ pub fn unit_ids(chars: &[char]) -> Vec<i64> {
         onig::Syntax::ruby(),
     )
     .expect("the reference unit pattern must compile");
+    // find_iter yields byte offsets; ids indexes characters.
+    let char_of_byte = char_starts(&text);
+    let to_char = |byte: usize| -> usize { char_of_byte.partition_point(|&start| start < byte) };
     for (unit, (start, end)) in regex.find_iter(&text).enumerate() {
+        let (start, end) = (to_char(start), to_char(end));
         for id in ids.iter_mut().take(end).skip(start) {
             *id = unit as i64;
         }
