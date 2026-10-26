@@ -6,7 +6,7 @@ use anyhow::{Result, ensure};
 use serde_json::{Value, json};
 use tokenizers::Tokenizer;
 
-use crate::contract::{self, Question, RequestError, chat_text};
+use crate::contract::{self, Question, RequestError, chat_head, chat_text};
 use crate::executor::Input;
 use crate::json::quote;
 
@@ -14,6 +14,8 @@ const MAX_PROMPT_TOKENS: usize = 16384;
 
 pub struct Processor {
     pub(crate) tokenizer: Tokenizer,
+    /// Mark where each prompt's leading block ends, for the prefix cache.
+    pub(crate) checkpoints: bool,
 }
 
 pub struct PreparedRequest {
@@ -31,7 +33,10 @@ impl Processor {
     pub fn load(dir: &Path) -> Result<Self> {
         let tokenizer =
             Tokenizer::from_file(dir.join("tokenizer.json")).map_err(anyhow::Error::msg)?;
-        Ok(Self { tokenizer })
+        Ok(Self {
+            tokenizer,
+            checkpoints: false,
+        })
     }
 
     /// Validate and tokenize the entire request before submitting any model work.
@@ -61,9 +66,15 @@ impl Processor {
                     ),
                 });
             }
+            let checkpoint = if self.checkpoints {
+                self.checkpoint(&ids, q)?
+            } else {
+                0
+            };
             inputs.push(Input {
                 ids,
                 n_options: q.keys.len(),
+                checkpoint,
             });
         }
         let input_tokens = inputs.iter().map(|input| input.ids.len()).sum();
@@ -74,6 +85,25 @@ impl Processor {
                 input_tokens,
             },
         })
+    }
+}
+
+impl Processor {
+    /// The last multiple of 64 tokens of `ids` inside the question's leading block
+    /// (`chat_head`). The block's last token is left out: it may merge with the state's
+    /// first characters.
+    fn checkpoint(&self, ids: &[u32], q: &Question) -> Result<usize, RequestError> {
+        let head = self.tokenizer.encode(chat_head(q), false).map_err(|e| {
+            eprintln!("inference failed: {e}");
+            RequestError {
+                status: 500,
+                message: "inference failed".into(),
+            }
+        })?;
+        let head = head.get_ids();
+        let same = ids.iter().zip(head).take_while(|(a, b)| a == b).count();
+        let end = same.min(head.len().saturating_sub(1));
+        Ok(end - end % 64)
     }
 }
 

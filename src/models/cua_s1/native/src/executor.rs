@@ -8,6 +8,7 @@ use omni_runtime::SerialScheduler;
 use serde_json::Value as Json;
 
 use crate::model::Model;
+use crate::prefix_cache::{PrefixCache, PrefixCacheStats};
 use crate::provenance::TextExport;
 
 /// Tied with the output projection in Qwen3.5-4B.
@@ -17,12 +18,44 @@ const EMBEDDING: &str = "model.language_model.embed_tokens.weight";
 pub struct Input {
     pub ids: Vec<u32>,
     pub n_options: usize,
+    /// Where the prompt's leading block ends, for the prefix cache; 0 for none.
+    pub checkpoint: usize,
 }
 
 pub struct Executor {
+    // Declared first so that cached states are freed before the model's stream.
+    cache: Option<Arc<Mutex<PrefixCache>>>,
     model: Arc<Mutex<Model>>,
     letters: Vec<f32>,
     export: TextExport,
+    /// The cache's counters after the last question, readable while one runs.
+    stats: Arc<Mutex<Option<PrefixCacheStats>>>,
+}
+
+/// `CUA_S1_PREFIX_CACHE_BYTES`: unset, empty or 0 leaves the cache off.
+pub fn prefix_cache_bytes(value: Option<&str>) -> Result<Option<usize>> {
+    match value.map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(v) => v
+            .parse::<usize>()
+            .map(|n| (n > 0).then_some(n))
+            .context("CUA_S1_PREFIX_CACHE_BYTES must be a byte count"),
+    }
+}
+
+/// The cache continues prompts from saved states with the fixed GEMM algorithms, which
+/// need merged-adapter weights and run eagerly.
+pub(crate) fn check_prefix_cache(export: TextExport, graph: bool) -> Result<()> {
+    ensure!(
+        export == TextExport::Merged,
+        "CUA_S1_PREFIX_CACHE_BYTES needs a merged-adapter export (cua-s1-text-merged/1); \
+         the unmerged profile rejects prefix continuation"
+    );
+    ensure!(
+        !graph,
+        "CUA_S1_PREFIX_CACHE_BYTES requires CUA_S1_GRAPH off"
+    );
+    Ok(())
 }
 
 impl Executor {
@@ -31,6 +64,7 @@ impl Executor {
         library: &Path,
         letter_ids: &[u32],
         export: TextExport,
+        cache_bytes: Option<usize>,
     ) -> Result<Self> {
         let (d, lib) = (dir.to_path_buf(), library.to_path_buf());
         let model = tokio::task::spawn_blocking(move || match export {
@@ -44,11 +78,19 @@ impl Executor {
         })
         .await??;
         let letters = letter_rows(dir, letter_ids, model.cfg.hidden)?;
+        let cache = cache_bytes.map(PrefixCache::new);
         Ok(Self {
             model: Arc::new(Mutex::new(model)),
             letters,
             export,
+            stats: Arc::new(Mutex::new(cache.as_ref().map(PrefixCache::stats))),
+            cache: cache.map(|c| Arc::new(Mutex::new(c))),
         })
+    }
+
+    /// The prefix cache's counters, or None when it is off.
+    pub fn prefix_cache_stats(&self) -> Option<PrefixCacheStats> {
+        *self.stats.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Admit each question through the worker's shared runtime scheduler.
@@ -61,12 +103,18 @@ impl Executor {
         let mut rows = Vec::with_capacity(inputs.len());
         for input in inputs {
             let model = self.model.clone();
+            let cache = self.cache.clone();
+            let stats = self.stats.clone();
             let last = scheduler
                 .run(move || {
-                    model
-                        .lock()
-                        .map_err(|_| anyhow::anyhow!("poisoned"))?
-                        .forward(&input.ids)
+                    let mut model = model.lock().map_err(|_| anyhow::anyhow!("poisoned"))?;
+                    let Some(cache) = cache else {
+                        return model.forward(&input.ids);
+                    };
+                    let mut cache = cache.lock().map_err(|_| anyhow::anyhow!("poisoned"))?;
+                    let last = cache.forward(&mut model, &input.ids, input.checkpoint);
+                    *stats.lock().unwrap_or_else(|e| e.into_inner()) = Some(cache.stats());
+                    last
                 })
                 .await?;
             rows.push(letter_logits(
