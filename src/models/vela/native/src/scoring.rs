@@ -154,16 +154,19 @@ impl Calibration {
     ) -> (f64, String) {
         let gate = &self.data["pii_sparse_gate"];
         let k = gate["K"].as_i64().unwrap_or(-1);
-        if k < 0 || thr >= gate["t_sparse"].as_f64().unwrap_or(f64::INFINITY) || offs.is_empty() {
+        // A gate without `t_sparse` is not configured (the pinned
+        // calibration always carries it): disable it rather than apply
+        // an undefined threshold under a renamed rule.
+        let Some(t_sparse) = gate["t_sparse"].as_f64() else {
+            return (thr, rule.into());
+        };
+        if k < 0 || thr >= t_sparse || offs.is_empty() {
             return (thr, rule.into());
         }
         let probe = gate["probe_threshold"].as_f64().unwrap_or(0.5);
         let decoded = decode_spans(probs, offs, names, text, probe);
         if decoded.len() as i64 <= k {
-            (
-                gate["t_sparse"].as_f64().unwrap_or(thr),
-                format!("{rule}+sparse"),
-            )
+            (t_sparse, format!("{rule}+sparse"))
         } else {
             (thr, rule.into())
         }
@@ -755,8 +758,8 @@ pub fn system_one_response(
                     );
                 }
             }
-            _ => {
-                // span: clip to the plan's field range and re-trim.
+            "span" => {
+                // clip to the plan's field range and re-trim.
                 let part = entry["part"].as_str().unwrap_or("user");
                 let text = part_texts.get(part).cloned().unwrap_or_default();
                 let chars: Vec<char> = text.chars().collect();
@@ -798,6 +801,7 @@ pub fn system_one_response(
                     serde_json::json!({"type": "noul", "noul": json_f64(max as f64)}),
                 );
             }
+            _ => unreachable!("validated plans carry a known question type"),
         }
     }
     let mut response = serde_json::Map::new();
