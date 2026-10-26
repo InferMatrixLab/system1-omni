@@ -112,8 +112,11 @@ The response envelope is the pinned runtime's, passed through verbatim
   value. Tie-breaking inside a question is insertion order (argmax over
   raw logits).
 - Thresholds come from the package's own `calibration.json` by question
-  id (`set:*` 0.3, PII length rule + sparse gate, `span:halu` 0.55,
-  `span:toxic` 0.1, …) unless the question's own `threshold` overrides
+  id, which ships different digits per member — the 0.3B's are
+  `set:*` 0.3, `span:halu` 0.55, `span:toxic` 0.1 plus the PII length
+  rule and sparse gate; the 0.8B hybrid's are `set:*` 0.2,
+  `span:halu` 0.35, `span:toxic` 0.05 — unless the question's own
+  `threshold` overrides
   them, in which case the applied value is echoed (`rule "given"` is
   the pinned predict-level marker on overridden span answers; set
   answers echo the value without a rule field). Serving-time
@@ -166,11 +169,15 @@ from the "no silent truncation" convention this repository's other
 text workers use. The pinned truncation order (quoted from the runtime's
 `assemble`): if the assembled sequence exceeds `max_length`, the part no
 question is `over` is cut first (never below 64 tokens, then never below
-1), then the protected (targeted) parts are cut the same way, and only
+1), then the protected (targeted) parts are cut straight toward the
+1-token floor (no 64 stop), and only
 when the questions plus schema alone still do not fit does the request
-413. Windowing then re-covers a cut labelled part (windows of the part's
-kept length, overlap up to 512 tokens, per-type aggregation: choice/score
-mean, set max, span word-logit mean; uncovered words score −30).
+413. Windowing then re-covers a labelled target longer than 2,048
+tokens in windows of the part's full token list (the runtime windows
+the un-truncated part; each window row renders within its own budget):
+windows of ≤1,800 tokens at stride 1,536 (overlap 264), with per-type
+aggregation — choice/score
+mean, set max, span word-logit mean; uncovered words score −30.
 **Known risk, kept deliberately**: a guardrail consumer can silently
 miss text beyond the truncation point — an injection payload hidden
 past the cut still evaluates against the truncated state. Tightening to
@@ -243,10 +250,14 @@ The native implementation lives in [`native/`](native/) as the
   SHA-256. `--bf16-out` additionally writes the uniform-BF16 backbone
   the shared qwen3_5 loader consumes.
 - `native/src/bundle.rs` re-verifies that manifest (revision,
-  inventory counts, per-file hashes) before anything loads it.
+  inventory counts, per-file hashes, the three verbatim runtime files
+  additionally against the repository's own pin table) before anything
+  loads it.
 - `native/src/contract.rs` is the wire admission, mirroring
   `protocol.py` and the pinned runtime's preamble with byte-equal
-  422/400 bodies.
+  422/400 bodies (one known residual: a non-finite JSON number answers
+  the generic 400 message here, where the Python worker names the
+  value).
 - `native/src/{state,questions,words,render,processing}.rs` are the
   token-level processing: the state → parts mapping, the SystemOne →
   predict mapping with the pinned runtime's validation triples (Noul
@@ -270,7 +281,11 @@ The native implementation lives in [`native/`](native/) as the
   usage). Replaying the recorded head-input fixtures
   (`tests/vela/fixtures/head-input-*`): head-logit drift ≤ 3.8e-5,
   predict-answer drift ≤ 7.3e-7, and the finished responses match the
-  frozen oracles within 1.5e-6 on four cases.
+  frozen oracles within 1.5e-6 on four cases. The windowed long-span
+  fixture's reference answer carries no spans, so its drift comparison
+  covers the per-window head logits and the empty result, not the
+  window-aggregation arithmetic itself; a windowed fixture whose
+  reference answer has spans would close that gap.
 - `native/src/executor.rs` runs the backbone on CUDA through the
   shared qwen3_5 crate: the family `Model` exposes only last-position
   hidden states, so every readout position runs as its own full
@@ -285,6 +300,6 @@ The native implementation lives in [`native/`](native/) as the
 The crate is a library; the HTTP worker around `Processor` +
 `Executor` is not part of it. Long-span GPU parity and measured
 latency are not recorded. Checks: `cargo test -p omni-vela-native`
-(28 tests, no weights, no GPU; render, head and response parity are
+(50 tests, no weights, no GPU; render, head and response parity are
 opt-in with `VELA_NATIVE_BUNDLE`, executor parity additionally with
 `VELA_CUDA_LIB`; see [recipe/vela/native.md](../../recipe/vela/native.md)).

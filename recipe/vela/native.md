@@ -92,22 +92,29 @@ VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
   cargo test -p omni-vela-native --test vela_native_executor -- --ignored --nocapture
 ~~~
 
-40 tests run everywhere with no weights and no GPU: the wire contract
-against the pinned runtime's 422/400 bodies, the bundle manifest gate,
-and the predict-mapping/plan parity on every frozen fixture. The four
+50 tests run everywhere with no weights and no GPU: the wire contract
+against the pinned runtime's 422/400 bodies (one known residual: a
+non-finite JSON number answers the generic 400 message, where the
+Python worker names the value), the bundle manifest gate (including
+the repository pin for the three verbatim runtime files), the
+truncation budget, and the predict-mapping/plan parity on every
+frozen fixture. The four
 opt-in checks (behind `-- --ignored`) replay the fixtures through the
 Rust implementation:
 
 - render parity — the token plans match field-for-field (5/5);
 - head parity — head-logit drift ≤ 3.8e-5, predict-answer drift
-  ≤ 7.3e-7, discrete picks and span structures equal (5/5);
+  ≤ 7.3e-7, discrete picks and span structures equal (5/5; the
+  windowed long-span case's reference answer has no spans, so its
+  window-aggregation arithmetic is pinned only through the per-window
+  head logits, not the aggregated answer);
 - response parity — the finished SystemOne envelopes match the frozen
   oracles within 1.5e-6 (4/4);
 - executor parity — the backbone on CUDA replays the recorded
   reference logits with a worst drift of 0.285 (the uniform-BF16
-  backbone against the CPU-FP32 reference; gate 0.35, tighten-only via
-  `VELA_GPU_LOGIT_GATE`: a wider value clamps back down), 4/4 small
-  cases.
+  backbone against the CPU-FP32 reference; gate 0.35, tighten-only
+  via `VELA_GPU_LOGIT_GATE` — an unparseable value is an error and a
+  wider one clamps back down), 4/4 small cases.
 
 For a field-level diff of one token-plan case:
 

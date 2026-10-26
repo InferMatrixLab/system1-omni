@@ -40,7 +40,6 @@ Models that are being added are also tracked in issues labeled [new model](https
 - **Planned:** not implemented yet; the linked issue tracks it.
 
 The Cua-S1 workers answer `choice` questions only.
-LAYA's English worker, Open-Jev and CLM support `choice`, `score`, and `noul` text questions.
 LAYA's English worker, Open-Jev, CLM, and StartLux Instant 4B support `choice`, `score`, and `noul` text questions.
 StartLux serves Instant only; AutoThink is not implemented, and the weights are CC BY-NC 4.0.
 D3's reference worker serves the same three kinds for text, image and video
