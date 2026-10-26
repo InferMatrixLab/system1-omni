@@ -4,7 +4,7 @@
 //!
 //!     VELA_NATIVE_BUNDLE=.../vela-2.0-0.8b-native \
 //!     VELA_CUDA_LIB=.../libqwen3_5_cuda.so \
-//!     cargo test -p omni-vela-native --test vela_native_executor -- --nocapture
+//!     cargo test -p omni-vela-native --test vela_native_executor -- --ignored --nocapture
 //!
 //! The recorded reference ran CPU FP32; this path runs the uniform-BF16
 //! backbone, so the gates are backbone-level numerical tolerances, not
@@ -27,25 +27,20 @@ fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../tests/vela/fixtures")
 }
 
-fn env_dir(name: &str) -> Option<PathBuf> {
-    std::env::var(name)
-        .ok()
-        .map(PathBuf::from)
-        .filter(|p| p.is_dir())
+fn env_dir(name: &str) -> PathBuf {
+    let path = PathBuf::from(std::env::var(name).unwrap_or_else(|_| panic!("set {name}")));
+    assert!(path.is_dir(), "{} is not a directory", path.display());
+    path
 }
 
 #[test]
+#[ignore = "requires VELA_NATIVE_BUNDLE at an exported bundle and VELA_CUDA_LIB at the built CUDA library; GPU"]
 fn the_gpu_backbone_replays_the_reference_readouts() {
-    let (Some(bundle), Some(library)) = (
-        env_dir("VELA_NATIVE_BUNDLE"),
-        std::env::var("VELA_CUDA_LIB")
-            .ok()
-            .map(PathBuf::from)
-            .filter(|p| p.exists()),
-    ) else {
-        eprintln!("skipping: set VELA_NATIVE_BUNDLE and VELA_CUDA_LIB");
-        return;
-    };
+    let bundle = env_dir("VELA_NATIVE_BUNDLE");
+    let library = PathBuf::from(
+        std::env::var("VELA_CUDA_LIB").expect("set VELA_CUDA_LIB to the built CUDA library"),
+    );
+    assert!(library.exists(), "{} does not exist", library.display());
     let mut executor = Executor::load(&bundle, &library).expect("executor loads");
     let logit_gate = std::env::var("VELA_GPU_LOGIT_GATE")
         .ok()

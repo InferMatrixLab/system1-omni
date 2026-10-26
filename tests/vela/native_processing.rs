@@ -6,7 +6,7 @@
 //! the exported bundle's tokenizer and is opt-in:
 //!
 //!     VELA_NATIVE_BUNDLE=weights/vela-2.0-0.8b-native \
-//!       cargo test -p omni-vela-native --test vela_native_processing -- --nocapture
+//!       cargo test -p omni-vela-native --test vela_native_processing -- --ignored --nocapture
 
 use std::path::PathBuf;
 
@@ -100,18 +100,18 @@ fn a_set_label_collision_is_rejected_after_the_walk() {
 
 // ------------------------------------------------- full render (opt-in)
 
-fn bundle_dir() -> Option<PathBuf> {
-    let value = std::env::var("VELA_NATIVE_BUNDLE").ok()?;
-    let path = PathBuf::from(value);
-    path.is_dir().then_some(path)
+fn bundle_dir() -> PathBuf {
+    let path = PathBuf::from(
+        std::env::var("VELA_NATIVE_BUNDLE").expect("set VELA_NATIVE_BUNDLE to an exported bundle"),
+    );
+    assert!(path.is_dir(), "{} is not a directory", path.display());
+    path
 }
 
 #[test]
+#[ignore = "requires VELA_NATIVE_BUNDLE at an exported bundle; CPU only"]
 fn the_rendered_rows_match_every_fixture() {
-    let Some(bundle) = bundle_dir() else {
-        eprintln!("skipping: set VELA_NATIVE_BUNDLE to an exported bundle for render parity");
-        return;
-    };
+    let bundle = bundle_dir();
     let processor = omni_vela_native::processing::Processor::load(&bundle)
         .expect("processor loads the exported bundle");
     for case in CASES {

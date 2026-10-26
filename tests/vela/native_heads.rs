@@ -73,11 +73,12 @@ fn f32_stack(raw: &[u8], name: &str) -> Vec<Vec<Vec<f32>>> {
         .collect()
 }
 
-fn bundle_dir() -> Option<PathBuf> {
-    std::env::var("VELA_NATIVE_BUNDLE")
-        .ok()
-        .map(PathBuf::from)
-        .filter(|p| p.is_dir())
+fn bundle_dir() -> PathBuf {
+    let path = PathBuf::from(
+        std::env::var("VELA_NATIVE_BUNDLE").expect("set VELA_NATIVE_BUNDLE to an exported bundle"),
+    );
+    assert!(path.is_dir(), "{} is not a directory", path.display());
+    path
 }
 
 /// Largest absolute difference between two nested JSON numbers.
@@ -100,11 +101,9 @@ fn max_drift(a: &Value, b: &Value) -> f64 {
 }
 
 #[test]
+#[ignore = "requires VELA_NATIVE_BUNDLE at an exported bundle; CPU only"]
 fn the_heads_reproduce_the_reference_logits_and_the_scoring_the_answers() {
-    let Some(bundle) = bundle_dir() else {
-        eprintln!("skipping: set VELA_NATIVE_BUNDLE to an exported bundle");
-        return;
-    };
+    let bundle = bundle_dir();
     let heads = Heads::load(&bundle).expect("heads load");
     let cal = Calibration::load(&bundle).expect("calibration loads");
     let logits_gate = std::env::var("VELA_HEADS_LOGIT_GATE")

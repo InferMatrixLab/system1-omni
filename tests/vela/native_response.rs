@@ -1,7 +1,8 @@
 //! The SystemOne response finishing, replayed from the recorded
 //! reference logits against the frozen oracle responses (the same
 //! engine produced both on CPU FP32, so this checks the finishing
-//! mirror exactly). Opt-in via `VELA_NATIVE_BUNDLE` (calibration).
+//! mirror exactly). Opt-in via `VELA_NATIVE_BUNDLE` behind
+//! `-- --ignored` (calibration).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -61,12 +62,11 @@ fn f32_stack(raw: &[u8], name: &str) -> Vec<Vec<Vec<f32>>> {
 }
 
 #[test]
+#[ignore = "requires VELA_NATIVE_BUNDLE at an exported bundle; CPU only"]
 fn the_systemone_finishing_matches_the_frozen_oracles() {
-    let Ok(bundle) = std::env::var("VELA_NATIVE_BUNDLE") else {
-        eprintln!("skipping: set VELA_NATIVE_BUNDLE");
-        return;
-    };
-    let bundle = PathBuf::from(bundle);
+    let bundle = PathBuf::from(
+        std::env::var("VELA_NATIVE_BUNDLE").expect("set VELA_NATIVE_BUNDLE to an exported bundle"),
+    );
     let cal = Calibration::load(&bundle).expect("calibration");
     let heads = omni_vela_native::heads::Heads::load(&bundle).expect("heads");
     let gate = 2e-6;
@@ -330,6 +330,7 @@ fn max_drift(a: &Value, b: &Value) -> f64 {
         (Value::Number(x), Value::Number(y)) => {
             (x.as_f64().unwrap_or(0.0) - y.as_f64().unwrap_or(0.0)).abs()
         }
+        (Value::Array(x), Value::Array(y)) if x.len() != y.len() => 1.0,
         (Value::Array(x), Value::Array(y)) => x
             .iter()
             .zip(y)
@@ -340,7 +341,7 @@ fn max_drift(a: &Value, b: &Value) -> f64 {
             .map(|(k, v)| y.get(k).map(|w| max_drift(v, w)).unwrap_or(1.0))
             .chain(y.keys().filter(|k| !x.contains_key(*k)).map(|_| 1.0))
             .fold(0.0, f64::max),
-        (Value::String(x), Value::String(y)) if x != y => 1.0,
-        _ => 0.0,
+        (_, _) if a == b => 0.0,
+        _ => 1.0,
     }
 }

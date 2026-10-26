@@ -65,16 +65,17 @@ cargo fmt --all --check
 cargo clippy -p omni-vela-native --all-targets -- -D warnings
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
   cargo test -p omni-vela-native --test vela_native_processing \
-    --test vela_native_heads --test vela_native_response -- --nocapture
+    --test vela_native_heads --test vela_native_response -- --ignored --nocapture
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
 VELA_CUDA_LIB=/path/to/libqwen3_5_cuda.so \
-  cargo test -p omni-vela-native --test vela_native_executor -- --nocapture
+  cargo test -p omni-vela-native --test vela_native_executor -- --ignored --nocapture
 ~~~
 
-29 tests run everywhere with no weights and no GPU: the wire contract
+25 tests run everywhere with no weights and no GPU: the wire contract
 against the pinned runtime's 422/400 bodies, the bundle manifest gate,
-and the predict-mapping/plan parity on every frozen fixture. The
-opt-in checks replay the fixtures through the Rust implementation:
+and the predict-mapping/plan parity on every frozen fixture. The four
+opt-in checks (behind `-- --ignored`) replay the fixtures through the
+Rust implementation:
 
 - render parity — the token plans match field-for-field (5/5);
 - head parity — head-logit drift ≤ 3.8e-5, predict-answer drift
