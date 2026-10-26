@@ -55,8 +55,8 @@ contents for every group. This is within-question reuse, with no reuse of reques
 contents across requests. Response `metadata.prefix_cache` separates configured
 `policy` (currently `default`) from actual `enabled`/`scope` and `saved_tokens`.
 Savings count avoided prefix computations after compatibility grouping, with
-zero for singleton fallbacks; suffix packing adds no prefix savings. The legacy
-`mode` and active `shared_tokens` prefix-length fields remain available.
+zero for singleton fallbacks; suffix packing adds no prefix savings. These four
+fields are the complete contract; `mode` and `shared_tokens` are not emitted.
 Input usage still counts complete prompts. See the
 [native recipe](../../../recipe/open_jev/native.md#validation-and-optimization-scope)
 for field semantics and the unchanged default-path numerical validation gates.

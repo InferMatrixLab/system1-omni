@@ -71,7 +71,6 @@ impl DecisionHead {
 /// Model results and execution facts for response metadata.
 pub struct ExecutedRequest {
     pub scores: Vec<Vec<f32>>,
-    pub shared_prefix_tokens: usize,
     pub saved_prefix_tokens: usize,
 }
 
@@ -143,7 +142,6 @@ impl Executor {
                 } else {
                     None
                 };
-                let shared_prefix_tokens = if shared.is_some() { prefix_len } else { 0 };
                 let saved_prefix_tokens = shared.as_ref().map_or(0, |output| output.saved_tokens);
                 if let Some(output) = shared {
                     for last in output.hidden {
@@ -166,7 +164,6 @@ impl Executor {
                         .iter()
                         .map(|candidates| scores.by_ref().take(candidates.len()).collect())
                         .collect(),
-                    shared_prefix_tokens,
                     saved_prefix_tokens,
                 })
             })

@@ -200,9 +200,8 @@ Each compatible group of `n` candidates with a prefix of `p` tokens saves
 compute their own prefix. For three candidates with a 3072-token prefix, all
 sharing saves 6144 tokens, while two sharing and one falling back saves only
 3072. Splitting or packing the suffixes does not change this prefix count.
-The existing `mode` field remains `within_question` or `independent_candidates`
-for compatibility. Active sharing also retains `shared_tokens`, which is the
-prefix length, not the saving. `usage.input_tokens` still counts every complete
+These four fields are the complete prefix metadata contract; `mode` and
+`shared_tokens` are not emitted. `usage.input_tokens` still counts every complete
 candidate's input. No sharing returns `enabled=false`, `scope=none` and
 `saved_tokens=0`. This worker does not implement the explicit fixed/shared/auto
 policy switches or cross-question reuse proposed in
