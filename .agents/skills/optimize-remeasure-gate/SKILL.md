@@ -76,10 +76,15 @@ screen_primary_p50_ms: TBD — measure on primary SHA same 60 IDs
 screen_primary_p95_ms: TBD — measure on primary SHA same 60 IDs
 ```
 
-Fill it only from an hk2 `--fast-screen` run whose decision is
-`screen_primary`. A full-C1 KEEP moves the full-C1 primary; it does not by
-itself fill this slot. Measure the new primary on the same 60 IDs before
-the next tip screen.
+Fill it only from a completed `--fast-screen` whose decision is
+`screen_primary` on the primary SHA, same machine, same 60 IDs. A full-C1
+KEEP moves the full-C1 primary; it does not by itself fill this slot.
+StartLux Instant is still TBD. hk2 refused the Instant
+`usage.input_tokens` index before any screened request: bucket 1024–2047
+has 6 prompts, quota 8 (`fast-screen bucket 1024-2047 needs 8 requests;
+found 6`). Do not write 7.338/51.816 as that screen primary. Unblock only
+with an Instant-valid length index of at least 8 prompts in 1024–2047, or
+an InferRSI-approved quota change. This gate does not choose between those.
 
 Early DROP only when both screen Δp50 and Δp95 are worse than that same-60
 baseline. A metric is worse when its delta (tip minus baseline) is ≥ +2%
@@ -96,10 +101,13 @@ next baseline. A negative screen delta is not a gain and is not a KEEP. An
 KEEP, merge, and ready-for-review require the full C1 dual gate: pooled p50
 and pooled p95 both strictly lower, pooled 2048+ p95 strictly lower, and no
 quality collapse under the rules in the next section. The +2% / +0.5 ms
-band does not make a full-C1 tie a KEEP. Ready-for-review also requires hk2
-evidence of `--fast-screen` (screen primary, and the tip screen when a tip
-is claimed). Offline MockTransport tests are not that evidence and are not
-a review PASS.
+band does not make a full-C1 tie a KEEP. hk2 contract smoke of client
+`d2fab1e08f231fe2e23540f3b25b2650cd416d09` against Instant at `51f80ad`
+passed 4/4 with `evidence_complete` true; that client has no StartLux or
+CUDA diff versus `51f80ad`, and offline `tests/benchmarks` there were 109
+OK. That smoke is not the screen primary. Offline MockTransport tests are
+not a review PASS. The Instant screen primary is still blocked on the short
+1024–2047 bucket.
 
 ## INCONCLUSIVE stops the loop
 
@@ -115,7 +123,9 @@ these are true:
 - a DROP has no `dropped_at`
 - a KEEP, a gain, or a new primary is claimed from fast-screen numbers
 - ready or review PASS is claimed from offline MockTransport output without
-  hk2 `--fast-screen` evidence
+  the hk2 contract smoke, or a screen-primary p50/p95 is filled from the
+  full-C1 pooled pair or from the refused Instant index (1024–2047 found 6,
+  needs 8)
 - the fast-screen decision was `full_c1` but fewer than three measured
   rounds finished
 - a completed `drop` is treated as a KEEP or as the next baseline

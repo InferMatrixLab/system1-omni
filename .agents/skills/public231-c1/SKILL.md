@@ -77,15 +77,25 @@ Clef and pplx-decider keep their full-C1 primaries in their recipes and in
 [the latency leaderboard](../../../benchmarks/latency-leaderboard.md). Do not
 paste any model's pooled C1 pair into the screen.
 
-Screen primary, same 60 IDs (fill only after that screen is measured; do not
-invent the pair):
+Screen primary, same 60 IDs. Fill this only from a completed
+`--fast-screen` whose decision is `screen_primary`. Do not invent the pair,
+and do not copy the full-C1 pooled pair into it:
 
 ```text
 screen_primary_p50_ms: TBD — measure on primary SHA same 60 IDs
 screen_primary_p95_ms: TBD — measure on primary SHA same 60 IDs
 ```
 
-Record the screen primary with `--fast-screen` and no `--baseline-screen`.
+StartLux Instant is still that TBD. An hk2 `--fast-screen` of Instant,
+indexed by `usage.input_tokens`, was refused before any screened request:
+bucket 1024–2047 has 6 prompts and the quota is 8
+(`fast-screen bucket 1024-2047 needs 8 requests; found 6`). Fail-closed is
+correct. Unblock only with an Instant-valid length index that has at least
+8 prompts in 1024–2047, or with an InferRSI-approved quota change. This
+protocol does not choose between those. Do not write 7.338/51.816, or any
+other stand-in, as the screen primary.
+
+Record a screen primary with `--fast-screen` and no `--baseline-screen`.
 That run's decision is `screen_primary`. It is not a tip verdict and not a
 KEEP. Later tips pass that directory.
 
@@ -124,13 +134,16 @@ not a KEEP. Do not claim a speedup from fast-screen numbers. Percentiles
 use the same median and nearest-rank p95 as full C1, on this one round of
 60, not an average of rounds.
 
-Before this protocol change is marked ready for review, the PR must include
-hk2 evidence of `python benchmarks/bench.py run --fast-screen` for the
-screen primary (and the tip comparison, when a tip is claimed). That
-evidence records the SHA, `device`, `compute capability`, the 60 IDs, and
-`summary.json`. An offline `httpx.MockTransport` unit test is not that
-evidence and is not a review PASS. Room posts still omit hostnames; the
-hk2 requirement is the ready/review evidence, not a room post.
+hk2 contract smoke of client
+`d2fab1e08f231fe2e23540f3b25b2650cd416d09` against StartLux Instant served
+at `51f80ad681c8f7b1be9b22b5e700bef34e33534c` passed: 4/4,
+`evidence_complete` true. That client has no StartLux or CUDA diff versus
+`51f80ad`. Offline `tests/benchmarks` on that client: 109 OK. An offline
+`httpx.MockTransport` unit test is not a substitute for that smoke and is
+not a review PASS. The 4/4 smoke is not a screen primary, not a 60-request
+latency pair, and not a KEEP. The Instant screen primary remains the TBD
+above because the 1024–2047 bucket was short. Room posts still omit
+hostnames; the hk2 note is PR evidence.
 
 ## Full C1 KEEP
 

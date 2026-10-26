@@ -43,11 +43,15 @@ is a blocking review finding, not a note.
    output directory fail closed. The screen-primary slot stays
    `TBD — measure on primary SHA same 60 IDs` until that screen exists.
    Do not accept a paste that fills the slot from the pooled pair.
-2. **hk2 smoke.** Ready and review PASS require hk2 evidence of
-   `python benchmarks/bench.py run --fast-screen` (the screen-primary run,
-   and the tip comparison when a tip is claimed), including SHA, device,
-   compute capability, the 60 IDs, and `summary.json`. An offline
-   `httpx.MockTransport` unit test does not satisfy this check.
+2. **hk2 smoke.** Contract smoke on hk2 is required before ready.
+   Recorded PASS: client `d2fab1e08f231fe2e23540f3b25b2650cd416d09` against
+   StartLux Instant served at `51f80ad681c8f7b1be9b22b5e700bef34e33534c`,
+   4/4, `evidence_complete` true, no StartLux or CUDA diff versus
+   `51f80ad`, offline `tests/benchmarks` 109 OK. MockTransport output is
+   not that smoke and is not a PASS. The 4/4 smoke is not a screen primary.
+   The Instant `--fast-screen` attempt was refused: bucket 1024–2047 has 6
+   prompts, quota 8. Do not PASS a review that writes 7.338/51.816, or any
+   other fabricated pair, into the screen-primary slot.
 3. **`dropped_at`.** A screen DROP writes `fast_screen_drop.json` and puts
    `dropped_at` (`YYYY-MM-DDTHH:MM:SSZ`) on the summary. A DROP missing that
    field is not auditable and is not a valid DROP.

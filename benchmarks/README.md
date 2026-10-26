@@ -129,8 +129,11 @@ samples 60 requests from a manifest whose cases include integer `prompt_tokens`
 concurrency 1, warmup 5. The screen baseline is an earlier `--fast-screen` of
 the primary SHA on those same 60 IDs (`--baseline-screen`). Do not pass
 `--baseline-p50-ms` or `--baseline-p95-ms`; full-C1 pooled numbers, including
-StartLux Instant 7.338/51.816, are refused. Until that same-60 screen exists,
-the screen primary is `TBD — measure on primary SHA same 60 IDs`.
+StartLux Instant 7.338/51.816, are refused. The StartLux Instant screen
+primary is `TBD — measure on primary SHA same 60 IDs`. An Instant
+`usage.input_tokens` index was refused: bucket 1024–2047 has 6 prompts and
+the quota is 8. Do not fill the slot until that bucket has at least 8, or
+InferRSI approves a quota change.
 `fast_screen_decision` is `screen_primary`, `drop` (only when both p50 and p95
 are worse by ≥ +2% or ≥ +0.5 ms), `full_c1`, or `inconclusive`. A `drop` writes
 `dropped_at` in `fast_screen_drop.json`. The field is never a KEEP. The gate is

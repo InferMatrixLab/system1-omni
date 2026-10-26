@@ -1013,6 +1013,17 @@ class FastScreenTests(unittest.IsolatedAsyncioTestCase):
         bad["prompt_tokens"] = True
         with self.assertRaisesRegex(ValueError, "nonnegative integer"):
             bench.fast_screen_sample([bad, *cases[1:]])
+        mid = [case for case in cases if 1024 <= case["prompt_tokens"] < 2048]
+        self.assertGreaterEqual(len(mid), 8)
+        under = [
+            case for case in cases if not (1024 <= case["prompt_tokens"] < 2048)
+        ]
+        under.extend(mid[:6])
+        with self.assertRaisesRegex(
+            ValueError,
+            r"fast-screen bucket 1024-2047 needs 8 requests; found 6",
+        ):
+            bench.fast_screen_sample(under)
 
     def test_drop_only_when_both_percentiles_are_clearly_worse(self):
         relative_tip = 10 * (1 + bench.FAST_SCREEN_RELATIVE)
