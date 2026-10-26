@@ -17,6 +17,8 @@
 #include <cuda_runtime.h>
 #include <mma.h>
 #include <stdint.h>
+#include <algorithm>
+#include <limits>
 
 #include "mma.cuh"
 #include "ops.h"
@@ -107,10 +109,11 @@ static_assert(C * HB * 2 <= C * CP * 4, "k exp(cum) as bf16 fits over A");
 static_assert(C * sizeof(Tf32Row) <= R3 - R2, "packed qn fits in R2");
 static_assert(C * HB * 2 <= R2 - R1, "v as bf16 fits over kn");
 
-__global__ void __launch_bounds__(THREADS) gdn_chunk_prep(
+template<int BLOCK_THREADS>
+__device__ __forceinline__ void gdn_chunk_prep_body(
     const __nv_bfloat16* __restrict__ q, const __nv_bfloat16* __restrict__ k,
     const __nv_bfloat16* __restrict__ v, const float* __restrict__ g,
-    const __nv_bfloat16* __restrict__ beta, Work ws, int T, int H, int HK, float scale) {
+    const __nv_bfloat16* __restrict__ beta, Work ws, int T, int H, int HK, float scale, int NC) {
     extern __shared__ __align__(128) unsigned char sm[];
     Tf32Row* kn = reinterpret_cast<Tf32Row*>(sm + R1);
     Tf32Row* qn = reinterpret_cast<Tf32Row*>(sm + R2);
@@ -126,7 +129,7 @@ __global__ void __launch_bounds__(THREADS) gdn_chunk_prep(
     __nv_bfloat16* tb = reinterpret_cast<__nv_bfloat16*>(sm + R2 + TBF);
     __nv_bfloat16* kw = reinterpret_cast<__nv_bfloat16*>(sm + R3);
 
-    const int c = blockIdx.x, h = blockIdx.y, NC = gridDim.x, NCC = NC * C;
+    const int c = blockIdx.x, h = blockIdx.y, NCC = NC * C;
     const int hk = h / (H / HK);
     const int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5;
 
@@ -167,7 +170,7 @@ __global__ void __launch_bounds__(THREADS) gdn_chunk_prep(
 
     // 2. L2-normalize q/k in float32 and form decayed q/k before rounding to
     //    bfloat16. Convert the pair-product operands to TF32 once per row.
-    for (int r = warp; r < C; r += THREADS / 32) {
+    for (int r = warp; r < C; r += BLOCK_THREADS / 32) {
         const int t = c * C + r;
         float kv[4], qv[4], ks = 0.f, qs = 0.f;
 #pragma unroll
@@ -207,7 +210,7 @@ __global__ void __launch_bounds__(THREADS) gdn_chunk_prep(
     // 3. pair products on tensor cores: the 10 lower 16x16 tiles of k.k (into A) and of
     //    q.k (into P, in global memory), then the masks and decays elementwise
     float* pout = ws.p + ((size_t)h * NC + c) * C * C;
-    for (int e = warp; e < 20; e += THREADS / 32) {
+    for (int e = warp; e < 20; e += BLOCK_THREADS / 32) {
         const int tile = e % 10;
         const int it = tile < 1 ? 0 : tile < 3 ? 1 : tile < 6 ? 2 : 3;
         const int jt = tile - it * (it + 1) / 2;
@@ -239,7 +242,7 @@ __global__ void __launch_bounds__(THREADS) gdn_chunk_prep(
     }
     __syncthreads();
     __nv_bfloat16* pb = ws.pb + ((size_t)h * NC + c) * C * C;
-    for (int x = tid; x < C * C; x += THREADS) {
+    for (int x = tid; x < C * C; x += BLOCK_THREADS) {
         const int i = x / C, j = x % C;
         const float dec = j <= i ? expf(cum[i] - cum[j]) : 0.f;
         am[i * CP + j] = j < i ? bet[i] * am[i * CP + j] * dec : 0.f;
@@ -248,7 +251,7 @@ __global__ void __launch_bounds__(THREADS) gdn_chunk_prep(
     __syncthreads();
 
     // 4. T = (I + A)^-1 in 16x16 blocks
-    for (int x = tid; x < C * CP; x += THREADS) tm[x] = 0.f;
+    for (int x = tid; x < C * CP; x += BLOCK_THREADS) tm[x] = 0.f;
     __syncthreads();
     if (tid < C) {
         const int base = 16 * (tid / 16), col = tid % 16;
@@ -266,7 +269,7 @@ __global__ void __launch_bounds__(THREADS) gdn_chunk_prep(
     __syncthreads();
     for (int lv = 1; lv < 4; lv++) {
         const int nb = 4 - lv;
-        for (int x = tid; x < nb * 256; x += THREADS) {
+        for (int x = tid; x < nb * 256; x += BLOCK_THREADS) {
             const int bi = lv + x / 256, bj = bi - lv, r = (x % 256) / 16, cc = x % 16;
             float acc = 0.f;
             for (int kb = bj; kb < bi; kb++)
@@ -276,7 +279,7 @@ __global__ void __launch_bounds__(THREADS) gdn_chunk_prep(
             sc[x] = acc;
         }
         __syncthreads();
-        for (int x = tid; x < nb * 256; x += THREADS) {
+        for (int x = tid; x < nb * 256; x += BLOCK_THREADS) {
             const int bi = lv + x / 256, bj = bi - lv, r = (x % 256) / 16, cc = x % 16;
             const float* s0 = sc + (x / 256) * 256 + cc;
             float acc = 0.f;
@@ -288,24 +291,24 @@ __global__ void __launch_bounds__(THREADS) gdn_chunk_prep(
 
     // 5. bfloat16 operands: k exp(cum) over A, T beta after T, then v over kn;
     //    u = T (beta v) and w = T (beta exp(cum) k) on tensor cores, stored as bfloat16
-    for (int x = tid; x < C * K; x += THREADS) {
+    for (int x = tid; x < C * K; x += BLOCK_THREADS) {
         const int j = x / K, d = x % K;
         const int t = c * C + j;
         const float kx = t < T ? __bfloat162float(k[((size_t)t * HK + hk) * K + d]) : 0.f;
         kw[j * HB + d] = __float2bfloat16((kx * kinvs[j]) * ecum[j]);
     }
-    for (int x = tid; x < C * C; x += THREADS) {
+    for (int x = tid; x < C * C; x += BLOCK_THREADS) {
         const int i = x / C, j = x % C;
         tb[i * TB + j] = __float2bfloat16(tm[i * CP + j] * bet[j]);
     }
     __syncthreads();
-    for (int x = tid; x < C * V; x += THREADS) {
+    for (int x = tid; x < C * V; x += BLOCK_THREADS) {
         const int j = x / V, d = x % V;
         const int t = c * C + j;
         vb[j * HB + d] = t < T ? v[((size_t)t * H + h) * V + d] : __float2bfloat16(0.f);
     }
     __syncthreads();
-    for (int e = warp; e < 64; e += THREADS / 32) {
+    for (int e = warp; e < 64; e += BLOCK_THREADS / 32) {
         const bool is_u = e < 32;
         const int it = (e % 32) / 8, dt = e % 8;
         const __nv_bfloat16* bsrc = is_u ? vb : kw;
@@ -337,7 +340,7 @@ constexpr int SS_LD = BVS + 8;      // bfloat16 row stride of the S copy and v_n
 constexpr int STAGE = C * WS_LD;    // elements of one staged w or kd
 constexpr size_t SMEM2_BYTES = (4 * STAGE + K * SS_LD + C * SS_LD) * 2;
 
-__global__ void __launch_bounds__(ST_THREADS) gdn_chunk_state(Work ws, int NC, const float* __restrict__ S_IN,
+__device__ __forceinline__ void gdn_chunk_state_body(Work ws, int NC, const float* __restrict__ S_IN,
                                                               float* __restrict__ S_OUT) {
     extern __shared__ __align__(128) unsigned char sm[];
     bf16* wbuf = reinterpret_cast<bf16*>(sm);  // [2][C][WS_LD]
@@ -478,13 +481,13 @@ constexpr int P_LD = C + 8;  // bfloat16 row stride of P
 constexpr size_t SMEM3_BYTES = (C * O_LD + K * O_LD + C * P_LD + C * O_LD) * 2;
 static_assert(K == V, "S, qd and v_new share a row stride");
 
-__global__ void __launch_bounds__(OUT_THREADS) gdn_chunk_out(Work ws, bf16* __restrict__ o, int T, int H) {
+__device__ __forceinline__ void gdn_chunk_out_body(Work ws, bf16* __restrict__ o, int T, int H, int NC) {
     extern __shared__ __align__(128) unsigned char sm[];
     bf16* qs = reinterpret_cast<bf16*>(sm);  // [C][O_LD]
     bf16* ss = qs + C * O_LD;                // [K][O_LD]
     bf16* ps = ss + K * O_LD;                // [C][P_LD]
     bf16* vs = ps + C * P_LD;                // [C][O_LD]
-    const int c = blockIdx.x, h = blockIdx.y, NC = gridDim.x, NCC = NC * C;
+    const int c = blockIdx.x, h = blockIdx.y, NCC = NC * C;
     const int tid = threadIdx.x, warp = tid / 32, lane = tid % 32, g = lane / 4, t = lane % 4;
     const size_t rows = (size_t)h * NCC + (size_t)c * C;
     for (int x = tid; x < C * K / 8; x += OUT_THREADS) {
@@ -543,6 +546,132 @@ __global__ void __launch_bounds__(OUT_THREADS) gdn_chunk_out(Work ws, bf16* __re
     }
 }
 
+// Both dispatch paths execute the same arithmetic body. A batched launch has
+// separate state/workspace for each sequence; no operation crosses a boundary.
+__global__ void __launch_bounds__(THREADS) gdn_chunk_prep(
+    const bf16* __restrict__ q, const bf16* __restrict__ k, const bf16* __restrict__ v,
+    const float* __restrict__ g, const bf16* __restrict__ beta,
+    Work ws, int T, int H, int HK, float scale) {
+    gdn_chunk_prep_body<THREADS>(q, k, v, g, beta, ws, T, H, HK, scale, gridDim.x);
+}
+// More warps share independent rows/tiles; each reduction and FMA order stays fixed.
+template<int N>
+__global__ void __launch_bounds__(N) gdn_chunk_prep_wide(
+    const bf16* q, const bf16* k, const bf16* v, const float* g, const bf16* beta,
+    Work ws, int T, int H, int HK, float scale) {
+    gdn_chunk_prep_body<N>(q, k, v, g, beta, ws, T, H, HK, scale, gridDim.x);
+}
+__global__ void __launch_bounds__(ST_THREADS) gdn_chunk_state(
+    Work ws, int NC, const float* __restrict__ si, float* __restrict__ so) {
+    gdn_chunk_state_body(ws, NC, si, so);
+}
+__global__ void __launch_bounds__(OUT_THREADS) gdn_chunk_out(Work ws, bf16* __restrict__ o, int T, int H) {
+    gdn_chunk_out_body(ws, o, T, H, gridDim.x);
+}
+
+// Split only independent value columns; preserve each accumulator's MMA order.
+// The legacy output body stays separate for existing batch and stateful entries.
+template<int N>
+__device__ __forceinline__ void gdn_chunk_out_tiled_body(Work ws, bf16* __restrict__ o, int T, int H, int NC) {
+    static_assert(N == 256 || N == 512, "disjoint value-column partitions");
+    extern __shared__ __align__(128) unsigned char sm[];
+    bf16* qs = reinterpret_cast<bf16*>(sm);  // [C][O_LD]
+    bf16* ss = qs + C * O_LD;                // [K][O_LD]
+    bf16* ps = ss + K * O_LD;                // [C][P_LD]
+    bf16* vs = ps + C * P_LD;                // [C][O_LD]
+    const int c = blockIdx.x, h = blockIdx.y, NCC = NC * C;
+    const int tid = threadIdx.x, warp = tid / 32, lane = tid % 32, g = lane / 4, t = lane % 4;
+    constexpr int PART = V / (N / 128);
+    const int row_warp = warp % 4, vb0 = (warp / 4) * PART;
+    const size_t rows = (size_t)h * NCC + (size_t)c * C;
+    for (int x = tid; x < C * K / 8; x += N) {
+        const int r = x / (K / 8), col = (x % (K / 8)) * 8;
+        cs1::cp_async16(qs + r * O_LD + col, ws.qd + (rows + r) * K + col);
+        cs1::cp_async16(vs + r * O_LD + col, ws.vn + (rows + r) * V + col);
+    }
+    for (int x = tid; x < K * V / 8; x += N) {
+        const int r = x / (V / 8), col = (x % (V / 8)) * 8;
+        cs1::cp_async16(ss + r * O_LD + col, ws.s + ((size_t)h * NC + c) * K * V + (size_t)r * V + col);
+    }
+    for (int x = tid; x < C * C / 8; x += N) {
+        const int r = x / (C / 8), col = (x % (C / 8)) * 8;
+        cs1::cp_async16(ps + r * P_LD + col, ws.pb + ((size_t)h * NC + c) * C * C + r * C + col);
+    }
+    cs1::cp_async_commit();
+    cs1::cp_async_wait<0>();
+    __syncthreads();
+
+    float acc[PART / 8][4];
+#pragma unroll
+    for (int nt = 0; nt < PART / 8; nt++) acc[nt][0] = acc[nt][1] = acc[nt][2] = acc[nt][3] = 0.f;
+    // qd S
+#pragma unroll 2
+    for (int kk = 0; kk < K; kk += 16) {
+        uint32_t a[4];
+        cs1::load_a(a, qs, O_LD, row_warp * 16, kk, lane);
+#pragma unroll
+        for (int nt = 0; nt < PART / 8; nt += 2) {
+            uint32_t b[4];
+            cs1::load_b_kn(b, ss, O_LD, kk, vb0 + nt * 8, lane);
+            cs1::mma16816(acc[nt], a, b[0], b[1]);
+            cs1::mma16816(acc[nt + 1], a, b[2], b[3]);
+        }
+    }
+    // P v_new: each row warp needs only its lower-triangular prefix.
+    for (int kk = 0; kk < (row_warp + 1) * 16; kk += 16) {
+        uint32_t a[4];
+        cs1::load_a(a, ps, P_LD, row_warp * 16, kk, lane);
+#pragma unroll
+        for (int nt = 0; nt < PART / 8; nt += 2) {
+            uint32_t b[4];
+            cs1::load_b_kn(b, vs, O_LD, kk, vb0 + nt * 8, lane);
+            cs1::mma16816(acc[nt], a, b[0], b[1]);
+            cs1::mma16816(acc[nt + 1], a, b[2], b[3]);
+        }
+    }
+#pragma unroll
+    for (int r = 0; r < 2; r++) {
+        const int tok = c * C + row_warp * 16 + g + r * 8;
+        if (tok >= T) continue;
+        bf16* dst = o + ((size_t)tok * H + h) * V + vb0 + 2 * t;
+#pragma unroll
+        for (int nt = 0; nt < PART / 8; nt++)
+            *reinterpret_cast<uint32_t*>(dst + nt * 8) = cs1::pack_bf16(acc[nt][2 * r], acc[nt][2 * r + 1]);
+    }
+}
+
+
+template<int N>
+__global__ void __launch_bounds__(N) gdn_chunk_out_tiled(Work ws, bf16* o, int T, int H) {
+    gdn_chunk_out_tiled_body<N>(ws, o, T, H, gridDim.x);
+}
+
+constexpr int MAX_SEQUENCES = 16;
+struct Sequence { Work ws; int tokens; int offset; };
+struct Batch { Sequence sequences[MAX_SEQUENCES]; };
+static_assert(sizeof(Batch) < 2048, "batched descriptors fit pre-Hopper kernel parameters");
+
+__global__ void __launch_bounds__(THREADS) gdn_batch_prep(
+    const bf16* q, const bf16* k, const bf16* v, const float* g, const bf16* beta,
+    Batch batch, int H, int HK, float scale) {
+    const auto sequence = batch.sequences[blockIdx.z];
+    if (blockIdx.x >= (sequence.tokens + C - 1) / C) return;
+    const size_t offset = sequence.offset;
+    gdn_chunk_prep_body<THREADS>(q + offset * HK * K, k + offset * HK * K,
+                       v + offset * H * V, g + offset * H, beta + offset * H,
+                       sequence.ws, sequence.tokens, H, HK, scale, (sequence.tokens + C - 1) / C);
+}
+__global__ void __launch_bounds__(ST_THREADS) gdn_batch_state(Batch batch) {
+    const auto sequence = batch.sequences[blockIdx.z];
+    gdn_chunk_state_body(sequence.ws, (sequence.tokens + C - 1) / C, nullptr, nullptr);
+}
+__global__ void __launch_bounds__(OUT_THREADS) gdn_batch_out(Batch batch, bf16* o, int H) {
+    const auto sequence = batch.sequences[blockIdx.z];
+    if (blockIdx.x >= (sequence.tokens + C - 1) / C) return;
+    gdn_chunk_out_body(sequence.ws, o + static_cast<size_t>(sequence.offset) * H * V,
+                       sequence.tokens, H, (sequence.tokens + C - 1) / C);
+}
+
 Work split(float* workspace, int T, int H) {
     const Layout l(T, H);
     unsigned char* b = reinterpret_cast<unsigned char*>(workspace);
@@ -567,7 +696,7 @@ size_t cs1_gdn_workspace_floats(int T, int H) { return (Layout(T, H).total + 3) 
 
 static int gdn_prefill_run(const void* q, const void* k, const void* v, const float* g,
                            const void* beta, void* o, float* workspace, int T, int H, int HK,
-                           float scale, const void* s_in, void* s_out, void* stream) {
+                           float scale, const void* s_in, void* s_out, void* stream, bool wide = false) {
     if (T < 0 || HK <= 0 || H % HK != 0) return cudaErrorInvalidValue;
     const float* si = static_cast<const float*>(s_in);
     float* so = static_cast<float*>(s_out);
@@ -595,11 +724,39 @@ static int gdn_prefill_run(const void* q, const void* k, const void* v, const fl
     const int NC = (T + C - 1) / C;
     const Work ws = split(workspace, T, H);
     cudaStream_t st = static_cast<cudaStream_t>(stream);
-    gdn_chunk_prep<<<dim3(NC, H), THREADS, SMEM1_BYTES, st>>>(
-        static_cast<const __nv_bfloat16*>(q), static_cast<const __nv_bfloat16*>(k),
-        static_cast<const __nv_bfloat16*>(v), g, static_cast<const __nv_bfloat16*>(beta), ws, T, H, HK, scale);
+    if (wide) {
+        static const cudaError_t wide_configured = [] {
+            auto e = cudaFuncSetAttribute(gdn_chunk_prep_wide<512>,
+                cudaFuncAttributeMaxDynamicSharedMemorySize, (int)SMEM1_BYTES);
+            if (e == cudaSuccess) e = cudaFuncSetAttribute(gdn_chunk_prep_wide<768>,
+                cudaFuncAttributeMaxDynamicSharedMemorySize, (int)SMEM1_BYTES);
+            if (e == cudaSuccess) e = cudaFuncSetAttribute(gdn_chunk_out_tiled<256>,
+                cudaFuncAttributeMaxDynamicSharedMemorySize, (int)SMEM3_BYTES);
+            if (e == cudaSuccess) e = cudaFuncSetAttribute(gdn_chunk_out_tiled<512>,
+                cudaFuncAttributeMaxDynamicSharedMemorySize, (int)SMEM3_BYTES);
+            return e;
+        }();
+        if (wide_configured != cudaSuccess) return wide_configured;
+        if (T <= 128)
+            gdn_chunk_prep_wide<768><<<dim3(NC, H), 768, SMEM1_BYTES, st>>>(
+                static_cast<const bf16*>(q), static_cast<const bf16*>(k), static_cast<const bf16*>(v),
+                g, static_cast<const bf16*>(beta), ws, T, H, HK, scale);
+        else
+            gdn_chunk_prep_wide<512><<<dim3(NC, H), 512, SMEM1_BYTES, st>>>(
+                static_cast<const bf16*>(q), static_cast<const bf16*>(k), static_cast<const bf16*>(v),
+                g, static_cast<const bf16*>(beta), ws, T, H, HK, scale);
+    } else {
+        gdn_chunk_prep<<<dim3(NC, H), THREADS, SMEM1_BYTES, st>>>(
+            static_cast<const bf16*>(q), static_cast<const bf16*>(k), static_cast<const bf16*>(v),
+            g, static_cast<const bf16*>(beta), ws, T, H, HK, scale);
+    }
     gdn_chunk_state<<<dim3(H, V / BVS), ST_THREADS, SMEM2_BYTES, st>>>(ws, NC, si, so);
-    gdn_chunk_out<<<dim3(NC, H), OUT_THREADS, SMEM3_BYTES, st>>>(ws, static_cast<bf16*>(o), T, H);
+    if (wide && T > 128 && T <= 2048)
+        gdn_chunk_out_tiled<512><<<dim3(NC, H), 512, SMEM3_BYTES, st>>>(ws, static_cast<bf16*>(o), T, H);
+    else if (wide)
+        gdn_chunk_out_tiled<256><<<dim3(NC, H), 256, SMEM3_BYTES, st>>>(ws, static_cast<bf16*>(o), T, H);
+    else
+        gdn_chunk_out<<<dim3(NC, H), OUT_THREADS, SMEM3_BYTES, st>>>(ws, static_cast<bf16*>(o), T, H);
     return cudaGetLastError();
 }
 
@@ -608,10 +765,61 @@ int cs1_gdn_prefill(const void* q, const void* k, const void* v, const float* g,
     return gdn_prefill_run(q, k, v, g, beta, o, workspace, T, H, HK, scale, nullptr, nullptr, stream);
 }
 
+// Opt-in 27B head layout. Keep the legacy entry and longer-input capacity intact.
+int cs1_gdn_prefill_wide(const void* q, const void* k, const void* v, const float* g, const void* beta,
+                         void* o, float* workspace, int T, int H, int HK, float scale, void* stream) {
+    const bool wide = H == 48 && HK == 16 && T > 0 && T <= 16384;
+    return gdn_prefill_run(q, k, v, g, beta, o, workspace, T, H, HK, scale, nullptr, nullptr, stream, wide);
+}
+
 int cs1_gdn_prefill_x(const void* q, const void* k, const void* v, const float* g, const void* beta,
                       void* o, float* workspace, int T, int H, int HK, float scale,
                       const void* s_in, void* s_out, void* stream) {
     return gdn_prefill_run(q, k, v, g, beta, o, workspace, T, H, HK, scale, s_in, s_out, stream);
+}
+
+// Bound the sum of per-sequence layouts: up to (count-1)*63 extra padded rows,
+// plus one 256-byte alignment gap per layout part per sequence.
+size_t cs1_gdn_batch_workspace_floats(int tokens, int H, int count) {
+    if (tokens <= 0 || H <= 0 || count <= 0 || count > MAX_SEQUENCES ||
+        tokens > std::numeric_limits<int>::max() - count * C) return 0;
+    return (Layout(tokens + (count - 1) * (C - 1), H).total + count * 9 * 256 + 3) / 4;
+}
+
+int cs1_gdn_prefill_batch(const void* q, const void* k, const void* v, const float* g,
+                         const void* beta, void* o, float* workspace, size_t workspace_bytes,
+                         const size_t* lengths, size_t count, int H, int HK, float scale, void* stream) {
+    if (!q || !k || !v || !g || !beta || !o || !workspace || !lengths || !count ||
+        count > MAX_SEQUENCES || H <= 0 || HK <= 0 || H % HK != 0) return cudaErrorInvalidValue;
+    Batch batch{};
+    size_t rows = 0, bytes = 0;
+    int chunks = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (!lengths[i] || lengths[i] > static_cast<size_t>(std::numeric_limits<int>::max() - C) - rows)
+            return cudaErrorInvalidValue;
+        const int length = static_cast<int>(lengths[i]);
+        const size_t needed = Layout(length, H).total;
+        if (bytes > workspace_bytes || needed > workspace_bytes - bytes) return cudaErrorInvalidValue;
+        batch.sequences[i] = {split(reinterpret_cast<float*>(reinterpret_cast<char*>(workspace) + bytes), length, H),
+                              length, static_cast<int>(rows)};
+        rows += lengths[i];
+        bytes += needed;
+        chunks = std::max(chunks, (length + C - 1) / C);
+    }
+    static const cudaError_t configured = [] {
+        cudaError_t e = cudaFuncSetAttribute(gdn_batch_prep, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)SMEM1_BYTES);
+        if (e == cudaSuccess) e = cudaFuncSetAttribute(gdn_batch_state, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)SMEM2_BYTES);
+        if (e == cudaSuccess) e = cudaFuncSetAttribute(gdn_batch_out, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)SMEM3_BYTES);
+        return e;
+    }();
+    if (configured != cudaSuccess) return configured;
+    const auto st = static_cast<cudaStream_t>(stream);
+    gdn_batch_prep<<<dim3(chunks, H, count), THREADS, SMEM1_BYTES, st>>>(
+        static_cast<const bf16*>(q), static_cast<const bf16*>(k), static_cast<const bf16*>(v), g,
+        static_cast<const bf16*>(beta), batch, H, HK, scale);
+    gdn_batch_state<<<dim3(H, V / BVS, count), ST_THREADS, SMEM2_BYTES, st>>>(batch);
+    gdn_batch_out<<<dim3(chunks, H, count), OUT_THREADS, SMEM3_BYTES, st>>>(batch, static_cast<bf16*>(o), H);
+    return cudaGetLastError();
 }
 
 }  // extern "C"

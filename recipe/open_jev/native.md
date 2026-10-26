@@ -69,11 +69,13 @@ target below is Ada (`89`); pass your GPU's compute capability explicitly.
 The CUDA shared library and Rust workers must be rebuilt together for ABI
 version 9, which includes shared vision, CUDA Graph, canonical prefix continuation,
 fixed-GEMM selection and device-feature validation.
+The 27B worker also requires the additive packed-GEMM and batched-GDN
+symbols from this checkout; rebuild the worker and library together.
 
 ```sh
 src/backends/cuda/qwen3_5/build.sh target/release 89
 cargo build --release --locked -p omni-open-jev-native -p omni-jev
-OPEN_JEV_MODEL=weights/open-jev-27b-merged \
+OPEN_JEV_MODEL=weights/open-jev-27b-merged RAYON_NUM_THREADS=4 \
   target/release/omni-open-jev-native
 ```
 
@@ -81,6 +83,10 @@ For 9B, set `OPEN_JEV_MODEL=weights/open-jev-9b-merged`.
 
 `OPEN_JEV_HOST` and `OPEN_JEV_PORT` default to `127.0.0.1` and `8000`.
 `OPEN_JEV_CUDA_LIB` overrides the default library next to the executable.
+For 27B, `RAYON_NUM_THREADS=4` bounds the tokenizer's thread pool in the example;
+select a thread count appropriate to the worker's CPU allocation. Tokenization
+processes at most 16 candidates from one question at a time. Single candidates,
+configured padding and the 9B checkpoint keep per-candidate encoding.
 The worker loads all text weights onto visible CUDA device 0, performs a real
 warmup inference, then exposes `/health` and `/v1/systemone`.
 Use a reservation before any GPU command on hosts with a GPU scheduler.
@@ -127,7 +133,8 @@ OPEN_JEV_MODEL=weights/open-jev-9b-merged \
 CUA_S1_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
   cargo test --release --locked -p omni-qwen3-5-native --test kernels -- --ignored
 
-# Full-checkpoint packing, ordering and graph-shape checks, in the reservation:
+# Full-checkpoint packing, ordering, graph replay and prefix-buffer reuse checks:
+# Run inside the reservation; repeat with CUA_S1_GRAPH=0 for eager execution.
 OPEN_JEV_MODEL=$PWD/weights/open-jev-27b-merged \
 OPEN_JEV_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so CUA_S1_GRAPH=1 \
   cargo test --release --locked -p omni-open-jev-native --test prefill_batch \
@@ -155,24 +162,97 @@ This recipe leaves `CUA_S1_GRAPH` unset and uses eager prefill. For
 Open-Jev-27B-v1.1, candidates within a request are packed in prepared order, up
 to 16 sequences and 4096 total tokens per group; longer prompts execute alone
 without truncation. Input and gate/up
-projections share GEMMs. Output/down projections preserve their per-prompt shapes
-and reduction order, and each sequence retains independent attention, positions,
-convolution and GDN state. Calibration still uses every candidate in its question.
+projections share GEMMs. Output/down projections combine consecutive candidates
+only when their original cuBLASLt algorithms are identical and the combined shape
+passes its workspace check. Unsupported shapes retain separate calls. This keeps
+the original algorithm and reduction configuration; numerical validation is still
+required for each supported hardware/toolchain combination. Batched GDN launches
+keep independent state and chunk-rounded workspace for every sequence. Attention,
+positions and convolution also remain independent. Calibration still uses every
+candidate in its question.
 The [H200 packing comparison](../../benchmarks/prefill_batching/README.md)
 records latency, exact output checks and frozen controls.
-Packing validation covers H200 (sm_90); other CUDA architectures remain unverified.
+That historical comparison covers the earlier packing implementation on H200
+(sm_90). The newer projection/GDN paths have exact-output regression coverage on
+an SM90 device; their execution on other CUDA architectures remains unverified.
 Open-Jev-9B runs one forward pass per candidate: packing is not validated for it.
 
+For one question with 2–16 candidates all longer than 2048 tokens, the worker can
+share an exact token prefix within compatible candidate groups. The prefix must
+be at least 512 tokens, aligned to 64 tokens, with a nonempty suffix for every
+candidate. Compatibility checks retain the complete prompt's algorithms for every
+prefix/suffix projection. A declined group uses complete forwards. Group outputs
+are restored to the original candidate order before normalization. The model
+retains allocation capacity for one prefix, up to the loaded maximum length;
+every request invalidates and rewrites its numeric state. It does not cache request
+contents across requests. The response reports executed reuse through
+`metadata.prefix_cache`:
+
+| Field | Meaning in this worker |
+| --- | --- |
+| `policy` | `default`: no explicit prefix-policy override; compatible long candidates may still share automatically. |
+| `enabled` | Whether this request actually reused a prefix after compatibility checks. |
+| `scope` | `within_question` when sharing ran, otherwise `none`. |
+| `saved_tokens` | Prefix tokens whose repeated computation was avoided, summed over executed compatible groups. |
+
+Each compatible group of `n` candidates with a prefix of `p` tokens saves
+`(n - 1) * p` token computations. Singletons save zero; separate groups each
+compute their own prefix. For three candidates with a 3072-token prefix, all
+sharing saves 6144 tokens, while two sharing and one falling back saves only
+3072. Splitting or packing the suffixes does not change this prefix count.
+These four fields are the complete prefix metadata contract; `mode` and
+`shared_tokens` are not emitted. `usage.input_tokens` still counts every complete
+candidate's input. No sharing returns `enabled=false`, `scope=none` and
+`saved_tokens=0`. This worker does not implement the explicit fixed/shared/auto
+policy switches or cross-question reuse proposed in
+[PR #179](https://github.com/InferMatrixLab/system1-omni/pull/179).
+
+The default 27B optimization is validated against the original default
+complete-prompt execution with the same weights, inputs and temperature:
+maximum absolute candidate-probability and ordinal-score error at most 0.001,
+zero Choice changes, zero Noul flips at the `>= 0.5` threshold, and zero request
+failures. These are comparison-test gates, not a second baseline inference on
+every served request. Retaining the original projection algorithms and falling
+back when incompatible remains the execution policy. Equality to an alternative
+fixed-algorithm path alone does not establish these default-path gates. The
+accepted historical latency tradeoff below does not relax numerical validation.
+
+Compatible suffixes can also share compact storage and projection calls, bounded
+to 16 sequences and 4096 suffix tokens per group. Attention reads immutable prefix
+keys/values separately; convolution reads the prefix's three retained rows; each
+linear-attention sequence starts from its own copy of the group state. If the
+optional compact-suffix symbols or an algorithm check are unavailable, suffixes
+use the original continuation path.
+
+The 27B opt-in also uses vector convolution for aligned layouts, wider work
+assignment for Gated DeltaNet preparation, and independent-column output tiling.
+These preserve each accumulator's arithmetic and BF16 rounding boundaries. For
+one ordinary text execution unit of 512–16384 tokens, only the final position
+needs the last layer's feed-forward network and final norms. The model skips
+unused rows only when both projections accept one row with their original
+complete-prompt algorithms. Prefix/suffix, multimodal, bidirectional, unmerged,
+reference and incompatible paths retain their complete computation.
+
+Packed projection plans and retained prefix/suffix plans each have a separate
+512-entry host LRU cache. These hold shape/algorithm descriptions, not token values.
+GPU tests cover replay of an older graph after plan eviction, changed request
+contents and prefix-buffer growth/shrinkage. Batched GDN adds approximately
+96 MiB of bounded workspace for this 27B configuration; prefix storage grows with
+the largest shared prefix encountered. Include both allocations in memory
+measurements and distinguish first traversal from warmed latency.
+
 Set `CUA_S1_GRAPH=1` on the worker to enable CUDA Graph replay. The
-shared backend retains at most 64 graphs, keyed by ordered sequence token lengths;
-growing the scratch buffer clears them. A new shape first runs an eager forward
+27B packed text path retains at most 256 graphs; other modes retain 64. Keys are
+ordered sequence token lengths. Graph-enabled packed text initially reserves
+scratch for at least 4096 rows, rounded up in 1024-row increments. Longer supported
+inputs can still grow the buffer; growth synchronizes work and clears graphs
+whose addresses would become invalid. A new shape first runs an eager forward
 to initialize its plans and captures the layer loop for later replay.
 This adds cost for new lengths, so graph mode remains opt-in. The earlier
 single-prompt graph comparison with Open-Jev-27B-v1.1 on the 74-case H200 workload
 measured mean HTTP latency 2.03% below eager execution after all lengths were
-warmed. Combined
-packing and graph performance remains unmeasured. Tokenization, transfers
-and the CPU scalar head remain outside the graph. Prefix sharing, GEMM autotuning,
+warmed. These historical numbers describe that earlier implementation. Tokenization, transfers
+and the CPU scalar head remain outside the graph. Cross-request prefix-content caching, GEMM autotuning,
 quantization and multimodal inference are not implemented. The
 [H200 validation](validation.md) reports Open-Jev-27B-v1.1 results for 74
 single-candidate requests, including probability differences and timing
@@ -180,3 +260,46 @@ variability. It does not establish general accuracy parity or a speedup over
 OpenJev-Fast; the author's B300 results use different hardware and workloads.
 The [Open-Jev-9B validation](validation-9b.md) compares the 9B worker with the
 reference on one RTX 6000 Ada; it makes no claim about 27B.
+
+### Cumulative 27B experiment and accepted tradeoff
+
+The October 22–24, 2026 experiment compared frozen baseline
+`d577bb824a5dbf0f5e385cf829bb6b9025dabf8d` with cumulative candidate P19
+(patch SHA-256 `5bb08cafffcf1825c1467de36705ae78baf07e0f7b24662c67ed7237b6504799`).
+P19 predates integration with the current shared executor; its measurements are
+historical evidence, not measurements of every later checkout.
+
+The workload was 231 fixed public JevBench requests (139 Choice, 74 Noul,
+18 Score), single-request concurrency through the Rust frontend, with complete
+response receipt, parsing and validation inside the client timer. Twelve balanced
+blocks compared baseline, parent P18 and P19; each service start had one separate
+feasibility traversal and eight measured traversals. Baseline used eager execution;
+both candidates enabled Graph replay. Across all three arms, 66,528 responses
+were timed and 8,316 were feasibility responses. No observations were excluded.
+
+| Historical metric | Baseline | P19 | Change |
+| --- | ---: | ---: | ---: |
+| Mean full-request latency | 216.31 ms | 123.02 ms | -43.13% |
+| Median full-request latency | 61.04 ms | 44.67 ms | -26.82% |
+| 95th-percentile full-request latency | 1081.56 ms | 471.11 ms | -56.44% |
+| Noul, 513–2048 tokens, 95th percentile | 116.32 ms | 119.77 ms | **+2.97%** |
+| Sampled whole-invocation peak device memory | 50,949 MiB | 52,035 MiB | +1086 MiB |
+
+Device: driver-reported **NVIDIA L20X**, measured compute capability **9.0**,
+132 streaming multiprocessors, about 150.1 GB visible memory; the conflicting
+name/properties do not establish a commercial model. CUDA 13.0.88, driver
+570.133.20, BF16 merged weights and the unchanged FP32 scalar head were used.
+Memory was sampled approximately every 0.5 seconds, including loading and warmup;
+brief peaks may be missed. Loading is outside the request timer.
+
+All 74,844 historical responses had zero observed probability/Score drift,
+decision flips and request failures. The six-request Noul group above regressed
+in all 12 blocks; its paired approximate 95% interval was +2.32% to +3.70%.
+The contributor accepts this specific tradeoff for submission. The original
+2% all-group guard did not pass: four additional tail checks were inconclusive
+(baseline: Score 129–512; parent: Noul 1–128, Score 1–128 and Score 129–512).
+They remain inconclusive, and the conditional final synthetic timing stage was
+not run. Earlier candidate synthetic passes do not validate P19's missing stage.
+Multi-request concurrency, other architectures and other complete checkpoints
+remain unverified for these optimizations. Source reconstruction, current-head
+checks and exact reproduction/evidence records belong to the accompanying PR.

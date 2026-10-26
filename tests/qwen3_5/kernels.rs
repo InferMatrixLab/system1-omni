@@ -393,6 +393,16 @@ fn fused_attention_gate_matches_separate_pass() {
 #[test]
 #[ignore = "needs a GPU and CUA_S1_CUDA_LIB"]
 fn flash_attention_matches_float64_reference() {
+    check_flash_attention_reference(false);
+}
+
+#[test]
+#[ignore = "needs a GPU and CUA_S1_CUDA_LIB with bidirectional attention"]
+fn bidirectional_attention_reads_future_keys_after_shared_suffix_refactor() {
+    check_flash_attention_reference(true);
+}
+
+fn check_flash_attention_reference(bidirectional: bool) {
     let st = setup();
     let (hq, hk, dh) = (16usize, 4usize, 256usize);
     for (t, amp) in [
@@ -409,21 +419,45 @@ fn flash_attention_matches_float64_reference() {
         let qkvh = random(t * ldv, 3, 1.0);
         let (q, k, qkv) = (to_device(&qh, st), to_device(&kh, st), to_device(&qkvh, st));
         let out = DeviceBuffer::new(t * hq * dh * 2).unwrap();
+        // Zero gates multiply the bidirectional result by sigmoid(0) = 0.5.
+        // The separate oracle checks future keys after factoring the shared body.
+        let gate = if bidirectional {
+            Some(to_device(&vec![bf16::ZERO; t * hq * dh], st))
+        } else {
+            None
+        };
         // SAFETY: every buffer holds t rows of the given widths.
         let code = unsafe {
-            (api().cs1_attention)(
-                q.at(0),
-                k.at(0),
-                qkv.at(v_at * 2),
-                ldv as i32,
-                out.at(0),
-                t as i32,
-                hq as i32,
-                hk as i32,
-                dh as i32,
-                0.0625,
-                st,
-            )
+            if let Some(gate) = &gate {
+                (api().attention_gated_bidirectional().unwrap())(
+                    q.at(0),
+                    k.at(0),
+                    qkv.at(v_at * 2),
+                    ldv as i32,
+                    gate.at(0),
+                    out.at(0),
+                    t as i32,
+                    hq as i32,
+                    hk as i32,
+                    dh as i32,
+                    0.0625,
+                    st,
+                )
+            } else {
+                (api().cs1_attention)(
+                    q.at(0),
+                    k.at(0),
+                    qkv.at(v_at * 2),
+                    ldv as i32,
+                    out.at(0),
+                    t as i32,
+                    hq as i32,
+                    hk as i32,
+                    dh as i32,
+                    0.0625,
+                    st,
+                )
+            }
         };
         check(code, "attention").unwrap();
         let got = from_device(&out, t * hq * dh, st);
@@ -431,14 +465,15 @@ fn flash_attention_matches_float64_reference() {
             got.iter().all(|x| x.is_finite()),
             "non-finite output at t = {t}"
         );
-        // about 64 query rows per length, each against causal attention in float64;
+        // about 64 query rows per length, each against the selected attention mask in float64;
         // per (row, head): the largest difference over the largest magnitude
         let mut worst = 0f64;
         for i in (0..t).step_by(t.div_ceil(64)).chain([t - 1]) {
             for h in 0..hq {
                 let g = h / (hq / hk);
                 let qi = &qh[(i * hq + h) * dh..][..dh];
-                let s: Vec<f64> = (0..=i)
+                let keys = if bidirectional { t } else { i + 1 };
+                let s: Vec<f64> = (0..keys)
                     .map(|j| {
                         let kj = &kh[(j * hk + g) * dh..][..dh];
                         qi.iter()
@@ -453,10 +488,11 @@ fn flash_attention_matches_float64_reference() {
                 let z: f64 = w.iter().sum();
                 let want: Vec<f64> = (0..dh)
                     .map(|d| {
-                        (0..=i)
+                        (0..keys)
                             .map(|j| w[j] * qkvh[j * ldv + v_at + g * dh + d].to_f64())
                             .sum::<f64>()
                             / z
+                            * if bidirectional { 0.5 } else { 1.0 }
                     })
                     .collect();
                 let row = &got[(i * hq + h) * dh..][..dh];
@@ -1453,3 +1489,15 @@ fn fixed_gemm_rows_do_not_depend_on_m() {
 }
 #[path = "vision_v2_kernels.rs"]
 mod vision_v2;
+
+mod batched_gdn;
+
+mod packed_gemm;
+
+mod reused_gemm;
+
+mod shared_suffix;
+
+mod vector_conv;
+
+mod wide_gdn;
