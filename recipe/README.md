@@ -14,6 +14,9 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
 - [Valen-Preview-0923 reference worker](valen/reference.md): prepare the pinned
   Preview checkpoint and Qwen base, start the text-or-image `choice`/`noul`/`score`
   worker and verify the frontend.
+- [Valen-Preview-0923 checkpoint export](valen/export.md): export the pinned
+  checkpoint and base to a manifest-described safetensors artifact set and run
+  the export regression.
 - [Cua-S1 4B 0.2 native text worker](cua_s1/native.md): build the CUDA library and
   the Rust worker, export BF16 weights with the original FP32 adapter and start
   the worker.
