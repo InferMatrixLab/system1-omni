@@ -6,6 +6,11 @@
 //! inventory, and re-hashes every bundle file before the (future)
 //! executor touches it — the same provenance-before-import discipline
 //! as the reference worker's package gate.
+//!
+//! The three verbatim runtime files are additionally cross-checked
+//! against the repository's own pin table ([`RUNTIME_FILE_SHA256`],
+//! mirrored from the reference worker's package gate), so a bundle
+//! exported from a tampered package fails even with a valid anchor.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -21,6 +26,26 @@ pub const SOURCE_REVISION: &str = "326b01d81f61fff7fd4ae570e54b87a49119e490";
 /// head tensors (CandidateHead, set_bias, span2 router, span_broad).
 pub const BACKBONE_TENSORS: (usize, usize, usize) = (320, 204, 116);
 pub const HEAD_TENSORS: usize = 37;
+/// The runtime files the export copies verbatim from the pinned
+/// package, with the repository's pin digests from
+/// `src/models/vela/hybrid.py`'s `PINNED_FILES_SHA256`. The bundle
+/// gate cross-checks the manifest's digests for these three against
+/// this table, so a self-consistently rewritten bundle fails the same
+/// way the reference worker's package gate fails a rewritten package.
+pub const RUNTIME_FILE_SHA256: &[(&str, &str)] = &[
+    (
+        "calibration.json",
+        "d96e447962d0dc1d58fa8422dddbae8b99960e21fd75a10ef9b096f700a211f5",
+    ),
+    (
+        "tokenizer.json",
+        "06b9509352d2af50381ab2247e083b80d32d5c0aba91c272ca9ff729b6a0e523",
+    ),
+    (
+        "tokenizer_config.json",
+        "bee8eba30f0eb4af73c0fe2cd06d0f89b657d7819941c438157ec42f7c80ea87",
+    ),
+];
 
 #[derive(Debug)]
 pub struct Bundle {
@@ -36,6 +61,18 @@ impl Bundle {
     /// is checked against a value fixed outside the bundle directory
     /// (the exporter prints it) instead of against itself.
     pub fn load(dir: &Path, pinned_manifest_sha256: &str) -> Result<Self> {
+        Self::load_with_runtime_pins(dir, pinned_manifest_sha256, RUNTIME_FILE_SHA256)
+    }
+
+    /// Test seam mirroring the reference gate's injectable pin table:
+    /// the same anchored verification against caller-supplied digests
+    /// for the three verbatim runtime files (production always passes
+    /// [`RUNTIME_FILE_SHA256`]).
+    pub fn load_with_runtime_pins(
+        dir: &Path,
+        pinned_manifest_sha256: &str,
+        runtime_pins: &[(&str, &str)],
+    ) -> Result<Self> {
         let manifest_bytes = std::fs::read(dir.join("vela_native_manifest.json"))
             .context("export the pinned package first; see recipe/vela/export_native.py")?;
         ensure!(
@@ -77,6 +114,15 @@ impl Bundle {
                 "{name} does not match the manifest SHA-256"
             );
         }
+        // The verbatim runtime files must also match the repository's
+        // own pin table, not just the manifest's anchored one.
+        for (name, pinned) in runtime_pins {
+            ensure!(
+                files.get(*name).and_then(Value::as_str) == Some(*pinned),
+                "{name} does not match the repository pin for the pinned package; \
+                 re-export from the pinned package"
+            );
+        }
         // The uniform-BF16 backbone the executor runs is pinned too.
         if manifest["files_sha256"]
             .get("bf16/model.safetensors")
@@ -91,7 +137,8 @@ impl Bundle {
         // package root: a top-level entry must be a pinned file, this
         // manifest, or a directory holding pinned paths (the export's
         // bf16/ backbone) — anything else is unlisted, and inside an
-        // admitted directory every file must be pinned too.
+        // admitted directory every file must be pinned too; a pinned
+        // entry must be a regular file, never a symlink.
         let pinned: HashSet<&str> = files
             .keys()
             .map(String::as_str)
@@ -103,6 +150,11 @@ impl Bundle {
         {
             let entry = entry.context("a readable bundle entry")?;
             let name = entry.file_name().to_string_lossy().into_owned();
+            let file_type = entry.file_type().context("a typed bundle entry")?;
+            ensure!(
+                !file_type.is_symlink(),
+                "bundle entry {name} is a symlink; the gate walks regular files"
+            );
             if pinned.contains(name.as_str()) {
                 continue;
             }
