@@ -151,6 +151,10 @@ many short candidates, is drift between runs.
   earlier state of this change on `main` `7b4c194`. Its later changes (the
   `CUA_S1_GRAPH` check, tests and documentation) and `main` up to `51f80ad` leave
   the responses with no switch, shared and `auto` unchanged.
+- On 2026-10-26, on the same GPU, the `prefix` and `prefill_batch` GPU tests and
+  `fixed_gemm_rows_do_not_depend_on_m` pass at `01c84c6` and again at `2a19ed2`, which
+  adds the startup check of fixed GEMM rows. On this export the check takes 0.37 s
+  at startup.
 - Device memory after warmup, and after the 22 M1 to M3 requests and the five
   longest JevBench tasks: 15,874 and 16,674 MiB with no switch, 15,906 and
   16,884 MiB with `OPEN_JEV_PREFIX=1`. The difference is the fixed-algorithm GEMM
