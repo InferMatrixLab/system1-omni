@@ -131,6 +131,7 @@ async fn text_prefix_buffers_grow_and_shrink_without_reusing_prior_contents() {
             actual.shared_prefix_tokens, prefix,
             "exercise actual prefix reuse"
         );
+        assert_eq!(actual.saved_prefix_tokens, 2 * prefix);
         assert_eq!(actual.scores, vec![expected.clone()]);
         if token == 42 {
             if let Some(first) = &first {

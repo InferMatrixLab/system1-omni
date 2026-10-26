@@ -185,9 +185,38 @@ prefix/suffix projection. A declined group uses complete forwards. Group outputs
 are restored to the original candidate order before normalization. The model
 retains allocation capacity for one prefix, up to the loaded maximum length;
 every request invalidates and rewrites its numeric state. It does not cache request
-contents across requests. Successful sharing is reported as
-`metadata.prefix_cache.enabled=true`, with `mode=within_question` and the reused
-prefix length in `shared_tokens`; fallback reports `independent_candidates`.
+contents across requests. The response reports executed reuse through
+`metadata.prefix_cache`:
+
+| Field | Meaning in this worker |
+| --- | --- |
+| `policy` | `default`: no explicit prefix-policy override; compatible long candidates may still share automatically. |
+| `enabled` | Whether this request actually reused a prefix after compatibility checks. |
+| `scope` | `within_question` when sharing ran, otherwise `none`. |
+| `saved_tokens` | Prefix tokens whose repeated computation was avoided, summed over executed compatible groups. |
+
+Each compatible group of `n` candidates with a prefix of `p` tokens saves
+`(n - 1) * p` token computations. Singletons save zero; separate groups each
+compute their own prefix. For three candidates with a 3072-token prefix, all
+sharing saves 6144 tokens, while two sharing and one falling back saves only
+3072. Splitting or packing the suffixes does not change this prefix count.
+The existing `mode` field remains `within_question` or `independent_candidates`
+for compatibility. Active sharing also retains `shared_tokens`, which is the
+prefix length, not the saving. `usage.input_tokens` still counts every complete
+candidate's input. No sharing returns `enabled=false`, `scope=none` and
+`saved_tokens=0`. This worker does not implement the explicit fixed/shared/auto
+policy switches or cross-question reuse proposed in
+[PR #179](https://github.com/InferMatrixLab/system1-omni/pull/179).
+
+The default 27B optimization is validated against the original default
+complete-prompt execution with the same weights, inputs and temperature:
+maximum absolute candidate-probability and ordinal-score error at most 0.001,
+zero Choice changes, zero Noul flips at the `>= 0.5` threshold, and zero request
+failures. These are comparison-test gates, not a second baseline inference on
+every served request. Retaining the original projection algorithms and falling
+back when incompatible remains the execution policy. Equality to an alternative
+fixed-algorithm path alone does not establish these default-path gates. The
+accepted historical latency tradeoff below does not relax numerical validation.
 
 Compatible suffixes can also share compact storage and projection calls, bounded
 to 16 sequences and 4096 suffix tokens per group. Attention reads immutable prefix

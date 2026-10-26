@@ -60,6 +60,14 @@ fn compatible_prefix_groups(
     Ok(groups.iter().any(|g| g.len() > 1).then_some(groups))
 }
 
+/// Each nonempty compatible group computes its prefix once. Singletons save nothing.
+fn shared_prefix_savings(groups: &[Vec<usize>], prefix_len: usize) -> usize {
+    groups
+        .iter()
+        .map(|group| (group.len() - 1) * prefix_len)
+        .sum()
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub hidden: usize,
@@ -780,6 +788,13 @@ pub struct PromptGroup<'a> {
     pub branches: Vec<&'a [u32]>,
 }
 
+/// A successful compatible-prefix execution, with results in original input order.
+pub struct SharedPrefixOutput {
+    pub hidden: Vec<Vec<f32>>,
+    /// Prefix tokens not recomputed, accounting for separate groups and singletons.
+    pub saved_tokens: usize,
+}
+
 /// The token runs `forward_shared` executes: the request prefix, then per group its own
 /// prefix and branches. Each prefix ends at the last multiple of `GDN_CHUNK` within it;
 /// its remaining tokens run with every group or branch after it.
@@ -1433,7 +1448,7 @@ impl Model {
         &mut self,
         inputs: &[&[u32]],
         prefix_len: usize,
-    ) -> Result<Option<Vec<Vec<f32>>>> {
+    ) -> Result<Option<SharedPrefixOutput>> {
         ensure!(
             self.lora.is_none(),
             "shared text prefix requires merged weights"
@@ -1523,6 +1538,7 @@ impl Model {
         let result = (|| {
             self.prepare_scratch(inputs.iter().map(|ids| ids.len()).max().unwrap())?;
             let mut hidden = vec![Vec::new(); inputs.len()];
+            let saved_tokens = shared_prefix_savings(&groups, prefix_len);
             for group in groups {
                 if group.len() == 1 {
                     hidden[group[0]] = self.forward(inputs[group[0]])?;
@@ -1628,7 +1644,10 @@ impl Model {
                     }
                 }
             }
-            Ok(hidden)
+            Ok(SharedPrefixOutput {
+                hidden,
+                saved_tokens,
+            })
         })();
         // A failed forward may have queued work. Finish it before retaining buffers;
         // on a synchronization error, drop them instead of recycling their state.

@@ -131,10 +131,54 @@ fn prepared_candidates_have_exact_ids_and_finished_responses_keep_mapping() {
     );
     assert_eq!(
         body["metadata"]["prefix_cache"],
-        json!({"enabled":false,"mode":"independent_candidates"})
+        json!({"policy":"default","enabled":false,"scope":"none","saved_tokens":0,
+            "mode":"independent_candidates"})
     );
     assert!(body["metadata"]["inference_seconds"].as_f64().unwrap() >= 0.0);
     assert_eq!(body["model"], CHECKPOINTS[0].model_id);
+}
+
+#[test]
+fn prefix_metadata_uses_executed_savings_without_changing_answers_or_usage() {
+    let request = serde_json::to_vec(&json!({
+        "state": "x ".repeat(768),
+        "questions": {"q": {"type": "choice", "instructions": "Route",
+            "criteria": {"billing": null, "security": null, "technical": null}}}
+    }))
+    .unwrap();
+    let rows = vec![vec![1.0, 2.0, 3.0]];
+    let baseline = processor(4096)
+        .prepare(&request)
+        .unwrap()
+        .context
+        .finish(rows.clone())
+        .unwrap();
+    // Same candidate count and common-prefix length, but different executed groups.
+    // All three share: save 1024. Two share and one falls back: save only 512.
+    for (prefix, saved) in [(512, 1024), (512, 512), (0, 0)] {
+        let actual = processor(4096)
+            .prepare(&request)
+            .unwrap()
+            .context
+            .finish_with_prefix(rows.clone(), prefix, saved)
+            .unwrap();
+        assert_eq!(actual["answers"], baseline["answers"]);
+        assert_eq!(actual["usage"], baseline["usage"]);
+        assert_eq!(actual["metadata"]["candidate_sequences"], 3);
+        let metadata = &actual["metadata"]["prefix_cache"];
+        assert_eq!(metadata["policy"], "default");
+        assert_eq!(metadata["saved_tokens"], saved);
+        assert_eq!(metadata["enabled"], saved > 0);
+        if saved > 0 {
+            assert_eq!(metadata["scope"], "within_question");
+            assert_eq!(metadata["mode"], "within_question");
+            assert_eq!(metadata["shared_tokens"], prefix);
+        } else {
+            assert_eq!(metadata["scope"], "none");
+            assert_eq!(metadata["mode"], "independent_candidates");
+            assert!(metadata.get("shared_tokens").is_none());
+        }
+    }
 }
 
 #[test]

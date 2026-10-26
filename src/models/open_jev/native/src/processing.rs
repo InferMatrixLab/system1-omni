@@ -87,7 +87,7 @@ impl Processor {
 impl ResponseContext {
     /// Restore the Noul baseline and normalize across each complete question.
     pub fn finish(self, rows: Vec<Vec<f32>>) -> Result<Value> {
-        self.finish_with_prefix(rows, 0)
+        self.finish_with_prefix(rows, 0, 0)
     }
 
     /// Report executed prefix reuse, rather than inferring it from token lengths.
@@ -95,6 +95,7 @@ impl ResponseContext {
         self,
         rows: Vec<Vec<f32>>,
         shared_prefix_tokens: usize,
+        saved_prefix_tokens: usize,
     ) -> Result<Value> {
         ensure!(rows.len() == self.questions.len(), "invalid logit rows");
         let mut answers = Map::new();
@@ -108,10 +109,13 @@ impl ResponseContext {
                 contract::answer(q, &logits, self.temperature)?,
             );
         }
-        let prefix_cache = if shared_prefix_tokens > 0 {
-            json!({"enabled": true, "mode": "within_question", "shared_tokens": shared_prefix_tokens})
+        let prefix_cache = if saved_prefix_tokens > 0 {
+            json!({"policy": "default", "enabled": true, "scope": "within_question",
+                "saved_tokens": saved_prefix_tokens,
+                "mode": "within_question", "shared_tokens": shared_prefix_tokens})
         } else {
-            json!({"enabled": false, "mode": "independent_candidates"})
+            json!({"policy": "default", "enabled": false, "scope": "none", "saved_tokens": 0,
+                "mode": "independent_candidates"})
         };
         Ok(
             json!({"model": self.checkpoint.model_id, "answers": answers,

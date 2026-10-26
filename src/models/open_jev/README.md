@@ -52,7 +52,14 @@ singletons use complete forwards, and all results return to their original indic
 before question-wide normalization. The model retains one bounded prefix-buffer
 capacity, invalidates its numeric contents after each request, and captures new
 contents for every group. This is within-question reuse, with no reuse of request
-contents across requests. Response `metadata.prefix_cache` reports actual use.
+contents across requests. Response `metadata.prefix_cache` separates configured
+`policy` (currently `default`) from actual `enabled`/`scope` and `saved_tokens`.
+Savings count avoided prefix computations after compatibility grouping, with
+zero for singleton fallbacks; suffix packing adds no prefix savings. The legacy
+`mode` and active `shared_tokens` prefix-length fields remain available.
+Input usage still counts complete prompts. See the
+[native recipe](../../../recipe/open_jev/native.md#validation-and-optimization-scope)
+for field semantics and the unchanged default-path numerical validation gates.
 Results are regrouped before question normalization.
 Open-Jev-9B runs candidates one at a time until packing is validated for it.
 The engine owns a

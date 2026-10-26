@@ -31,9 +31,11 @@ async fn decide(engine: &Engine, raw: &[u8]) -> Response {
             .executor
             .execute_detailed(&engine.scheduler, prepared.inputs)
             .await?;
-        prepared
-            .context
-            .finish_with_prefix(executed.scores, executed.shared_prefix_tokens)
+        prepared.context.finish_with_prefix(
+            executed.scores,
+            executed.shared_prefix_tokens,
+            executed.saved_prefix_tokens,
+        )
     }
     .await;
     match result {

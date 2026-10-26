@@ -1,5 +1,5 @@
 //! Shape compatibility changes execution order, never response order.
-use super::compatible_prefix_groups;
+use super::{compatible_prefix_groups, shared_prefix_savings};
 
 #[test]
 fn nonadjacent_compatible_candidates_keep_original_indices() {
@@ -10,6 +10,9 @@ fn nonadjacent_compatible_candidates_keep_original_indices() {
     .unwrap()
     .unwrap();
     assert_eq!(groups, [vec![0, 2, 4], vec![1, 3], vec![5]]);
+    // Six prompts, but each of two sharing groups computes its own prefix and the
+    // singleton keeps its complete forward: only three prefix computations saved.
+    assert_eq!(shared_prefix_savings(&groups, 3072), 9216);
     let mut restored = [0; 6];
     for group in groups {
         for index in group {
@@ -40,6 +43,22 @@ fn fully_compatible_candidates_use_one_check() {
     .unwrap();
     assert_eq!(checks, 1);
     assert_eq!(groups, vec![(0..16).collect::<Vec<_>>()]);
+    assert_eq!(shared_prefix_savings(&groups, 512), 7680);
+}
+
+#[test]
+fn partial_prefix_fallback_counts_only_reused_computation() {
+    let groups = compatible_prefix_groups(3, |ids| Ok(!ids.contains(&2)))
+        .unwrap()
+        .unwrap();
+    assert_eq!(groups, [vec![0, 1], vec![2]]);
+    assert_eq!(shared_prefix_savings(&groups, 3072), 3072);
+    // Splitting the two suffixes into different launches cannot change the saving.
+    assert_eq!(
+        super::suffix_segments(&groups[0], &[16384; 3], 3072).len(),
+        2
+    );
+    assert_eq!(shared_prefix_savings(&[vec![0], vec![1], vec![2]], 3072), 0);
 }
 
 #[test]
