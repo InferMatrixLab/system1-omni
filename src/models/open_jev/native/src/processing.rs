@@ -67,6 +67,7 @@ impl Processor {
             &self.suffix,
             self.max_length,
             &questions,
+            self.checkpoint.parallel_tokenization,
         )?;
         let input_tokens = inputs.iter().flatten().map(Vec::len).sum();
         let candidates = inputs.iter().map(Vec::len).sum();
@@ -140,15 +141,25 @@ fn encode_questions(
     suffix: &str,
     max_length: usize,
     questions: &[Question],
+    parallel: bool,
 ) -> Result<Vec<Vec<Vec<u32>>>> {
     questions
         .iter()
         .map(|q| {
-            q.prompts
-                .iter()
-                .map(|prompt| {
-                    let chat = format!("{prefix}{}{suffix}", prompt.trim());
-                    let enc = tokenizer.encode(chat, true).map_err(anyhow::Error::msg)?;
+            // BatchLongest padding would change each candidate's IDs and length.
+            // Keep the existing per-candidate semantics for all padded tokenizers.
+            let chunk_size = if parallel && tokenizer.get_padding().is_none() {
+                16
+            } else {
+                1
+            };
+            let mut inputs = Vec::with_capacity(q.prompts.len());
+            for chunk in q.prompts.chunks(chunk_size) {
+                let chats: Vec<_> = chunk
+                    .iter()
+                    .map(|prompt| format!("{prefix}{}{suffix}", prompt.trim()))
+                    .collect();
+                let validate = |enc: tokenizers::Encoding| -> Result<Vec<u32>> {
                     ensure!(
                         enc.len() <= max_length,
                         "question {}: {} tokens exceeds max_length={max_length}; no silent truncation",
@@ -156,8 +167,26 @@ fn encode_questions(
                         enc.len()
                     );
                     Ok(enc.get_ids().to_vec())
-                })
-                .collect()
+                };
+                if chats.len() > 1
+                    && let Ok(encodings) = tokenizer.encode_batch_fast(chats.iter().map(String::as_str).collect(), true)
+                {
+                    // Only token IDs are consumed; skip unused character offsets.
+                    // Batch encoding preserves input order; validate in that order too.
+                    for enc in encodings {
+                        inputs.push(validate(enc)?);
+                    }
+                } else {
+                    // A later tokenizer failure must not hide an earlier length error.
+                    // Retrying serially also preserves the original first-error message.
+                    for chat in chats {
+                        inputs.push(validate(
+                            tokenizer.encode(chat, true).map_err(anyhow::Error::msg)?,
+                        )?);
+                    }
+                }
+            }
+            Ok(inputs)
         })
         .collect()
 }

@@ -1,4 +1,4 @@
-use super::ranges;
+use super::{ranges, shared_prefix};
 
 #[test]
 fn preserves_all_candidates_across_token_and_sequence_limits() {
@@ -14,4 +14,18 @@ fn preserves_all_candidates_across_token_and_sequence_limits() {
         batches.into_iter().flatten().collect::<Vec<_>>(),
         (0..inputs.len()).collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn shared_prefix_is_exact_aligned_and_leaves_a_suffix() {
+    let a = vec![1u32; 2100];
+    let mut b = a.clone();
+    b[2000] = 2;
+    assert_eq!(shared_prefix(&[&a, &b]), 1984);
+    b[100] = 3;
+    assert_eq!(shared_prefix(&[&a, &b]), 0);
+    assert_eq!(shared_prefix(&[&a, &a]), 2048);
+    assert_eq!(shared_prefix(&[&a]), 0);
+    assert_eq!(shared_prefix(&[&a, &a[..2048]]), 0);
+    assert_eq!(shared_prefix(&vec![a.as_slice(); 17]), 0);
 }

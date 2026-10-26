@@ -122,8 +122,13 @@ impl Executor {
     ) -> Result<Self> {
         let (d, lib) = (dir.to_path_buf(), library.to_path_buf());
         let sharing = matches!(prefix, PrefixMode::Shared | PrefixMode::Auto);
+        let batch_gdn = checkpoint.pack_candidates;
         let model = tokio::task::spawn_blocking(move || {
             let mut model = Model::load_with_graph(&d, &lib, graph)?;
+            if batch_gdn {
+                model.enable_batched_gdn()?;
+                model.enable_packed_projections()?;
+            }
             // Shared prefixes reproduce the fixed rows only where rows do not depend on M.
             if sharing {
                 model
@@ -153,8 +158,10 @@ impl Executor {
     /// Admit one whole request. With prefix reuse selected (and, for `auto`, worth it),
     /// shared prefixes run once through `forward_shared`; with fixed or forced shared
     /// execution the candidates otherwise run one at a time with `forward_fixed`.
-    /// Otherwise, where the checkpoint allows it, independent candidates are packed for
-    /// shared GEMMs, or run one at a time.
+    /// Otherwise the default path runs: where the checkpoint packs candidates, a single
+    /// question's long candidates share their prefix through `try_forward_shared_prefix`
+    /// when the device allows it, and other candidates are packed for shared GEMMs or run
+    /// one at a time.
     pub async fn execute_with_prefix(
         &self,
         scheduler: &SerialScheduler,
@@ -194,15 +201,34 @@ impl Executor {
                     for ids in &inputs {
                         scores.push(head.score(model.forward_fixed(ids)?)?);
                     }
-                } else if pack {
-                    for range in batching::ranges(&inputs) {
-                        for last in model.forward_batch(&inputs[range])? {
+                } else {
+                    // The default path, which is also `auto`'s fallback.
+                    let prefix_len = if pack && ids.len() == 1 {
+                        batching::shared_prefix(&inputs)
+                    } else {
+                        0
+                    };
+                    let shared = if prefix_len > 0 {
+                        model.try_forward_shared_prefix(&inputs, prefix_len)?
+                    } else {
+                        None
+                    };
+                    if let Some(output) = shared {
+                        used.shared = true;
+                        used.saved_tokens = output.saved_tokens;
+                        for last in output.hidden {
                             scores.push(head.score(last)?);
                         }
-                    }
-                } else {
-                    for ids in &inputs {
-                        scores.push(head.score(model.forward(ids)?)?);
+                    } else if pack {
+                        for range in batching::ranges(&inputs) {
+                            for last in model.forward_batch(&inputs[range])? {
+                                scores.push(head.score(last)?);
+                            }
+                        }
+                    } else {
+                        for ids in &inputs {
+                            scores.push(head.score(model.forward(ids)?)?);
+                        }
                     }
                 }
                 ensure!(

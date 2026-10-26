@@ -138,6 +138,53 @@ fn prepared_candidates_have_exact_ids_and_finished_responses_keep_mapping() {
 }
 
 #[test]
+fn prefix_metadata_uses_executed_savings_without_changing_answers_or_usage() {
+    use crate::executor::PrefixUse;
+    use omni_qwen3_5_native::prefix::PrefixMode;
+    let request = serde_json::to_vec(&json!({
+        "state": "x ".repeat(768),
+        "questions": {"q": {"type": "choice", "instructions": "Route",
+            "criteria": {"billing": null, "security": null, "technical": null}}}
+    }))
+    .unwrap();
+    let rows = vec![vec![1.0, 2.0, 3.0]];
+    let baseline = processor(4096)
+        .prepare(&request)
+        .unwrap()
+        .context
+        .finish(rows.clone())
+        .unwrap();
+    // Same candidate count and common-prefix length, but different executed groups.
+    // All three share: save 1024. Two share and one falls back: save only 512.
+    for saved in [1024, 512, 0] {
+        let actual = processor(4096)
+            .prepare(&request)
+            .unwrap()
+            .context
+            .finish_with_prefix(
+                rows.clone(),
+                Some(&PrefixUse {
+                    mode: PrefixMode::Off,
+                    shared: saved > 0,
+                    across_questions: false,
+                    saved_tokens: saved,
+                }),
+            )
+            .unwrap();
+        assert_eq!(actual["answers"], baseline["answers"]);
+        assert_eq!(actual["usage"], baseline["usage"]);
+        assert_eq!(actual["metadata"]["candidate_sequences"], 3);
+        // Exact object equality also rejects obsolete or unexpected fields.
+        assert_eq!(
+            actual["metadata"]["prefix_cache"],
+            json!({"policy": "default", "enabled": saved > 0,
+                "scope": if saved > 0 { "within_question" } else { "none" },
+                "saved_tokens": saved})
+        );
+    }
+}
+
+#[test]
 fn responses_name_the_loaded_checkpoint() {
     let mut processor = processor(4096);
     processor.checkpoint = &CHECKPOINTS[1];
@@ -285,4 +332,80 @@ fn prefix_metadata_reports_how_candidates_ran() {
         finish(used(PrefixMode::Auto, false, false, 0)),
         json!({"policy": "auto", "enabled": false, "scope": "none", "saved_tokens": 0})
     );
+}
+
+fn question(id: &str, prompts: &[&str]) -> Question {
+    Question {
+        id: id.into(),
+        kind: Kind::Choice,
+        keys: (0..prompts.len()).map(|i| i.to_string()).collect(),
+        prompts: prompts.iter().map(|s| s.to_string()).collect(),
+        legend: None,
+    }
+}
+
+#[test]
+fn parallel_tokenization_keeps_candidate_order_across_chunks_and_questions() {
+    let p = processor(4096);
+    let prompts: Vec<_> = (1..=33).map(|i| "x ".repeat(i)).collect();
+    let refs: Vec<_> = prompts.iter().map(String::as_str).collect();
+    let questions = [
+        question("many", &refs),
+        question("last", &["billing", "security"]),
+    ];
+    let actual =
+        encode_questions(&p.tokenizer, "technical ", " Route", 4096, &questions, true).unwrap();
+    for (row, q) in actual.iter().zip(&questions) {
+        for (ids, prompt) in row.iter().zip(&q.prompts) {
+            let reference = p
+                .tokenizer
+                .encode(format!("technical {} Route", prompt.trim()), true)
+                .unwrap();
+            assert_eq!(ids, reference.get_ids());
+        }
+    }
+    assert_eq!(actual[0].len(), 33);
+    assert_eq!(actual[1][0], [1, 10, 8, 5]);
+    assert_eq!(actual[1][1], [1, 10, 9, 5]);
+}
+
+#[test]
+fn batch_longest_padding_retains_independent_candidate_lengths() {
+    let mut p = processor(4096);
+    p.tokenizer
+        .with_padding(Some(tokenizers::PaddingParams::default()));
+    let questions = [question("padding", &["x", "x x x"])];
+    let actual = encode_questions(&p.tokenizer, "", "", 4096, &questions, true).unwrap();
+    assert_eq!(actual, vec![vec![vec![1, 3], vec![1, 3, 3, 3]]]);
+}
+
+#[test]
+fn batch_failure_retains_the_first_candidate_error() {
+    let mut p = processor(4096);
+    // Known words still encode; unknown words fail because the unknown token is absent.
+    p.tokenizer.with_model(
+        WordLevel::builder()
+            .vocab([("x".to_owned(), 3)].into_iter().collect())
+            .unk_token("[missing]".into())
+            .build()
+            .unwrap(),
+    );
+    for prompts in [["x x", "unknown"], ["unknown", "x x"]] {
+        let questions = [question("error-order", &prompts)];
+        let reference = encode_questions(&p.tokenizer, "", "", 2, &questions, false)
+            .unwrap_err()
+            .to_string();
+        let actual = encode_questions(&p.tokenizer, "", "", 2, &questions, true)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(actual, reference);
+        if prompts[0] == "x x" {
+            assert_eq!(
+                actual,
+                "question error-order: 3 tokens exceeds max_length=2; no silent truncation"
+            );
+        } else {
+            assert!(actual.contains("Missing [UNK] token"), "{actual}");
+        }
+    }
 }
