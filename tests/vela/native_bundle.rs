@@ -102,6 +102,30 @@ fn an_unexpected_inventory_is_refused() {
 }
 
 #[test]
+fn an_extra_unlisted_file_fails_the_gate() {
+    let dir = temp_dir("extra");
+    write_bundle(&dir);
+    std::fs::write(dir.join("extra.bin"), b"not in the manifest").expect("write");
+    let error = Bundle::load(&dir).unwrap_err();
+    assert!(error.to_string().contains("extra.bin"), "{error}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_empty_files_map_fails_the_gate() {
+    let dir = temp_dir("empty-files");
+    write_bundle(&dir);
+    let manifest_path = dir.join("vela_native_manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).expect("read")).expect("json");
+    manifest["files_sha256"] = json!({});
+    std::fs::write(&manifest_path, serde_json::to_vec(&manifest).expect("json")).expect("write");
+    let error = Bundle::load(&dir).unwrap_err();
+    assert!(error.to_string().contains("files_sha256"), "{error}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn a_missing_manifest_names_the_export_step() {
     let dir = temp_dir("empty");
     std::fs::create_dir_all(&dir).expect("tempdir");

@@ -7,6 +7,7 @@
 //! executor touches it — the same provenance-before-import discipline
 //! as the reference worker's package gate.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
@@ -52,16 +53,45 @@ impl Bundle {
             manifest["heads"]["tensors"].as_u64() == Some(HEAD_TENSORS as u64),
             "unexpected head inventory; re-export from the pinned package"
         );
-        for (name, digest) in manifest["files_sha256"]
+        let files = manifest["files_sha256"]
             .as_object()
-            .context("files_sha256 must be an object")?
-        {
+            .context("files_sha256 must be an object")?;
+        ensure!(
+            !files.is_empty(),
+            "files_sha256 pins no files; the gate must cover the whole bundle"
+        );
+        for (name, digest) in files {
             let actual = hash_file(&dir.join(name))?;
             ensure!(
                 actual == digest.as_str().unwrap_or(""),
                 "{name} does not match the manifest SHA-256"
             );
         }
+        // Fail closed on the directory, as the reference gate walks the
+        // package root: the export writes a flat bundle, so the
+        // directory must hold exactly the pinned files plus this
+        // manifest — nothing unlisted, at any depth.
+        let pinned: HashSet<&str> = files
+            .keys()
+            .map(String::as_str)
+            .chain(std::iter::once("vela_native_manifest.json"))
+            .collect();
+        let mut unpinned: Vec<String> = std::fs::read_dir(dir)
+            .with_context(|| format!("cannot list the bundle directory {}", dir.display()))?
+            .map(|entry| {
+                entry
+                    .expect("a readable bundle entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .filter(|name| !pinned.contains(name.as_str()))
+            .collect();
+        unpinned.sort();
+        ensure!(
+            unpinned.is_empty(),
+            "unpinned file(s) in the bundle directory: {unpinned:?}"
+        );
         ensure!(
             manifest["max_length"].as_u64() == Some(16_384)
                 && manifest["model_name"].as_str() == Some(MODEL_ID),
