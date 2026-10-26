@@ -49,14 +49,15 @@ cargo test -p omni-vela-native
 cargo fmt --all --check
 cargo clippy -p omni-vela-native --all-targets -- -D warnings
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
-  cargo test -p omni-vela-native --test vela_native_processing -- --nocapture
+  cargo test -p omni-vela-native --test vela_native_processing -- --ignored --nocapture
 ~~~
 
-26 tests run everywhere with no weights and no GPU: the wire contract
+25 tests run everywhere with no weights and no GPU: the wire contract
 against the pinned runtime's 422/400 bodies, the bundle manifest gate,
 and the predict-mapping/plan parity on every frozen fixture. The
-opt-in render check replays the five token plans through the Rust
-processing field-for-field. For a field-level diff of one case:
+`#[ignore]`d render check (run it with `-- --ignored`, as above)
+replays the five token plans through the Rust processing
+field-for-field. For a field-level diff of one case:
 
 ~~~sh
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
