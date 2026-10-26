@@ -52,7 +52,7 @@ VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
   cargo test -p omni-vela-native --test vela_native_processing -- --ignored --nocapture
 ~~~
 
-25 tests run everywhere with no weights and no GPU: the wire contract
+27 tests run everywhere with no weights and no GPU: the wire contract
 against the pinned runtime's 422/400 bodies, the bundle manifest gate,
 and the predict-mapping/plan parity on every frozen fixture. The
 `#[ignore]`d render check (run it with `-- --ignored`, as above)
