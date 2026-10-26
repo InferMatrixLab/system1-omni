@@ -193,6 +193,33 @@ impl Config {
     fn value_dim(&self) -> usize {
         self.lin_v_heads * self.lin_v_dim
     }
+
+    /// Instant 4B GDN `in_proj` pack, or nothing for every other backbone.
+    ///
+    /// Qwen3.5-9B uses the same GDN row width and the same attention-head counts.
+    /// Those shapes stay on the fat `gdn_in` stride. This is also not the
+    /// prompt-bidirectional attention V pack.
+    pub fn instant_gdn_in_proj_pack(&self) -> Option<InstantGdnInProjPack> {
+        let every_fourth = self.full_attention.len() == 32
+            && self
+                .full_attention
+                .iter()
+                .enumerate()
+                .all(|(index, full)| *full == (index % 4 == 3));
+        instant_gdn_in_proj_pack(InstantGdnPackShape {
+            hidden: self.hidden,
+            intermediate: self.intermediate,
+            layers: self.full_attention.len(),
+            full_attention_every_fourth: every_fourth,
+            heads: self.heads,
+            kv_heads: self.kv_heads,
+            head_dim: self.head_dim,
+            lin_k_heads: self.lin_k_heads,
+            lin_v_heads: self.lin_v_heads,
+            lin_k_dim: self.lin_k_dim,
+            lin_v_dim: self.lin_v_dim,
+        })
+    }
 }
 
 /// A weight in the device arena.
@@ -450,6 +477,135 @@ impl Widths {
     }
 }
 
+/// Columns of one Instant 4B text config that select the GDN `in_proj` pack.
+///
+/// `full_attention_every_fourth` is the Instant layer pattern: layer `i` is full
+/// attention exactly when `i % 4 == 3`. The pack also requires 32 layers.
+/// Qwen3.5-9B matches the GDN row and the attention counts and still fails this
+/// gate on `hidden` / `intermediate`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InstantGdnPackShape {
+    pub hidden: usize,
+    pub intermediate: usize,
+    pub layers: usize,
+    pub full_attention_every_fourth: bool,
+    pub heads: usize,
+    pub kv_heads: usize,
+    pub head_dim: usize,
+    pub lin_k_heads: usize,
+    pub lin_v_heads: usize,
+    pub lin_k_dim: usize,
+    pub lin_v_dim: usize,
+}
+
+/// Instant 4B GDN planes copied out of the fat `gdn_in` row before conv, gates,
+/// and gated RMSNorm.
+///
+/// This is not the prompt-bidirectional attention V pack (tip1, PR #178). That
+/// path copies attention V (`Hk * Dh = 1024`) from column 9216 of the QKV row
+/// (`attn_in = 10240`). This plan copies GDN QKV, z, and the contiguous b|a
+/// strip from `gdn_in` (12352 on Instant 4B). `cs1_gdn_prefill` still reads the
+/// contiguous `lq` / `lk` / `lv` rows the conv kernel already writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InstantGdnInProjPack {
+    /// QKV channels. Leading dimension passed to `cs1_gdn_conv` after the pack.
+    pub channels: usize,
+    /// Fat `gdn_in` row, in elements. Source pitch of each `cs1_copy2d`.
+    pub gdn_in: usize,
+    /// First z column inside the fat row.
+    pub z_column: usize,
+    /// z width (`lin_v_heads * lin_v_dim`). `ldz` passed to `cs1_gated_rms_norm`.
+    pub z_width: usize,
+    /// First b column. a begins on the next column.
+    pub b_column: usize,
+    /// First a column.
+    pub a_column: usize,
+    /// Value heads. b and a are each this wide.
+    pub gate_heads: usize,
+}
+
+impl InstantGdnInProjPack {
+    /// Bytes in one packed QKV row. Destination pitch of the QKV copy.
+    pub fn qkv_row_bytes(self) -> usize {
+        self.channels * BF16
+    }
+
+    /// Bytes in one packed z row.
+    pub fn z_row_bytes(self) -> usize {
+        self.z_width * BF16
+    }
+
+    /// Bytes in one packed b|a row (`2 * gate_heads` bfloat16 values).
+    pub fn ba_row_bytes(self) -> usize {
+        self.gate_heads * 2 * BF16
+    }
+
+    /// Bytes between fat `gdn_in` rows.
+    pub fn source_pitch_bytes(self) -> usize {
+        self.gdn_in * BF16
+    }
+
+    pub fn qkv_offset(self, token: usize) -> usize {
+        token * self.qkv_row_bytes()
+    }
+
+    pub fn z_offset(self, token: usize) -> usize {
+        token * self.z_row_bytes()
+    }
+
+    pub fn ba_offset(self, token: usize) -> usize {
+        token * self.ba_row_bytes()
+    }
+
+    /// Byte offset of `a[token, 0]` inside the packed b|a strip.
+    pub fn a_offset(self, token: usize) -> usize {
+        self.ba_offset(token) + self.gate_heads * BF16
+    }
+
+    /// Element leading dimension of the packed b|a strip (`cs1_gdn_gates`).
+    pub fn gates_ld(self) -> usize {
+        self.gate_heads * 2
+    }
+}
+
+/// Layout of the Instant 4B GDN `in_proj` pack, or `None` for every other shape.
+///
+/// Instant 4B is hidden 2560, intermediate 9216, 32 layers with full attention
+/// on `i % 4 == 3`, attention 16/4/256, and GDN Hk=16, Hv=32, Dk=Dv=128. That
+/// is QKV channels 8192 inside a fat row of 12352. Qwen3.5-9B has the same GDN
+/// row and the same attention counts; it is not this pack.
+pub fn instant_gdn_in_proj_pack(shape: InstantGdnPackShape) -> Option<InstantGdnInProjPack> {
+    let instant = shape.hidden == 2560
+        && shape.intermediate == 9216
+        && shape.layers == 32
+        && shape.full_attention_every_fourth
+        && shape.heads == 16
+        && shape.kv_heads == 4
+        && shape.head_dim == 256
+        && shape.lin_k_heads == 16
+        && shape.lin_v_heads == 32
+        && shape.lin_k_dim == 128
+        && shape.lin_v_dim == 128;
+    if !instant {
+        return None;
+    }
+    let key_dim = shape.lin_k_heads * shape.lin_k_dim;
+    let value_dim = shape.lin_v_heads * shape.lin_v_dim;
+    let channels = 2 * key_dim + value_dim;
+    let z_column = channels;
+    let b_column = z_column + value_dim;
+    let a_column = b_column + shape.lin_v_heads;
+    Some(InstantGdnInProjPack {
+        channels,
+        gdn_in: a_column + shape.lin_v_heads,
+        z_column,
+        z_width: value_dim,
+        b_column,
+        a_column,
+        gate_heads: shape.lin_v_heads,
+    })
+}
+
 /// Per-request buffers for up to `cap` tokens, as byte offsets into one allocation,
 /// plus the rotary tables for positions below `cap`.
 struct Scratch {
@@ -460,6 +616,15 @@ struct Scratch {
     x: usize,
     delta: usize,
     gdn_in: usize,
+    /// Contiguous QKV `[cap, channels]` for the Instant 4B GDN `in_proj` pack.
+    /// Causal prefill and every non-Instant backbone leave this unused.
+    gqkv: usize,
+    /// Contiguous z `[cap, value_dim]` for that same pack.
+    gz: usize,
+    /// Contiguous b|a strip `[cap, 2 * Hv]` for that same pack.
+    gba: usize,
+    /// `gqkv` / `gz` / `gba` were reserved. False scratch must not be read as planes.
+    gdn_pack: bool,
     beta: usize,
     g: usize,
     lq: usize,
@@ -490,8 +655,17 @@ impl Scratch {
         lora: Option<&lora::Lora>,
         reference: Option<&cuda::Reference>,
         fp32_gdn: Option<&cuda::Fp32Gdn>,
+        gdn_pack: bool,
     ) -> Result<Self> {
         let (h, kd, vd, hv) = (cfg.hidden, cfg.key_dim(), cfg.value_dim(), cfg.lin_v_heads);
+        let pack = if gdn_pack {
+            Some(
+                cfg.instant_gdn_in_proj_pack()
+                    .context("GDN in_proj pack is Instant 4B only")?,
+            )
+        } else {
+            None
+        };
         let (hq, hk, hd) = (cfg.heads, cfg.kv_heads, cfg.head_dim);
         let w = Widths::of(cfg);
         let mut next = 0usize;
@@ -544,6 +718,19 @@ impl Scratch {
             take(cap * cfg.rotary_half * BF16),
             take(cap * cfg.rotary_half * BF16),
         ];
+        let (gqkv, gz, gba) = if let Some(pack) = pack {
+            ensure!(
+                pack.gdn_in == w.gdn_in && pack.channels == w.conv && pack.z_width == vd,
+                "Instant GDN in_proj pack does not match the fat row"
+            );
+            (
+                take(cap * pack.channels * BF16),
+                take(cap * pack.z_width * BF16),
+                take(cap * pack.ba_row_bytes()),
+            )
+        } else {
+            (0, 0, 0)
+        };
         let buf = DeviceBuffer::new(next)?;
         let [
             ids,
@@ -591,6 +778,10 @@ impl Scratch {
             x,
             delta,
             gdn_in,
+            gqkv,
+            gz,
+            gba,
+            gdn_pack,
             beta,
             g,
             lq,
@@ -1154,8 +1345,18 @@ impl Model {
     }
 
     fn prepare_scratch(&mut self, t: usize) -> Result<()> {
+        self.prepare_scratch_for(t, false)
+    }
+
+    /// `gdn_pack` reserves the Instant 4B GDN planes. A scratch built for the other
+    /// path is replaced, including when it is already large enough.
+    fn prepare_scratch_for(&mut self, t: usize, gdn_pack: bool) -> Result<()> {
         cuda::set_device(0)?;
-        if self.scratch.as_ref().is_none_or(|s| t > s.cap) {
+        if self
+            .scratch
+            .as_ref()
+            .is_none_or(|s| t > s.cap || s.gdn_pack != gdn_pack)
+        {
             cuda::synchronize(self.stream)?;
             if !self.graphs.is_empty() || !self.mm_graphs.is_empty() {
                 self.graph_stats.invalidations += 1;
@@ -1170,6 +1371,7 @@ impl Model {
                 self.lora.as_ref(),
                 self.reference,
                 self.fp32_gdn.as_ref(),
+                gdn_pack,
             )?);
         }
         Ok(())
@@ -1196,7 +1398,8 @@ impl Model {
             ids.iter().all(|&id| (id as usize) < self.embed.shape[0]),
             "token id outside the vocabulary"
         );
-        self.prepare_scratch(ids.len())?;
+        let gdn_pack = self.cfg.instant_gdn_in_proj_pack().is_some();
+        self.prepare_scratch_for(ids.len(), gdn_pack)?;
         let s = self.scratch.as_ref().unwrap();
         self.embed_tokens(s, ids)?;
         self.run(s, &[ids.len()], false, true)?;
@@ -1999,9 +2202,63 @@ impl Model {
             .collect())
     }
 
+    /// Copy one sequence's QKV, z, and b|a out of the fat `gdn_in` row.
+    ///
+    /// Sequences stay at their token offsets, so conv can keep its per-sequence
+    /// window and gates/norm can keep one call over the concatenated tokens.
+    /// The copy is `cs1_copy2d` only. Causal prefill does not call this.
+    fn pack_instant_gdn_in_proj(
+        &self,
+        s: &Scratch,
+        pack: InstantGdnInProjPack,
+        token: usize,
+        rows: usize,
+    ) -> Result<()> {
+        if rows == 0 {
+            return Ok(());
+        }
+        let src = s.gdn_in + token * pack.source_pitch_bytes();
+        // SAFETY: `gdn_in` holds `rows` fat rows starting at `token`. The packed
+        // planes were reserved at the Instant widths for at least that span.
+        unsafe {
+            cuda::copy2d(
+                s.at(s.gqkv + pack.qkv_offset(token)),
+                pack.qkv_row_bytes(),
+                s.at(src),
+                pack.source_pitch_bytes(),
+                pack.qkv_row_bytes(),
+                rows,
+                self.stream,
+            )?;
+            cuda::copy2d(
+                s.at(s.gz + pack.z_offset(token)),
+                pack.z_row_bytes(),
+                s.at(src + pack.z_column * BF16),
+                pack.source_pitch_bytes(),
+                pack.z_row_bytes(),
+                rows,
+                self.stream,
+            )?;
+            cuda::copy2d(
+                s.at(s.gba + pack.ba_offset(token)),
+                pack.ba_row_bytes(),
+                s.at(src + pack.b_column * BF16),
+                pack.source_pitch_bytes(),
+                pack.ba_row_bytes(),
+                rows,
+                self.stream,
+            )?;
+        }
+        Ok(())
+    }
+
     /// Queue language layers over packed embeddings, resetting sequence positions.
     /// Final-norm hidden states end up in `s.x`. `bidirectional` changes only the
-    /// full-attention mask; Gated DeltaNet stays causal and sequence-local.
+    /// full-attention mask. On Instant 4B it also packs GDN `in_proj` planes
+    /// before conv, gates, and gated RMSNorm. Other shapes, causal prefill, and
+    /// the prefix window keep the fat `gdn_in` stride. Gated DeltaNet stays
+    /// causal and sequence-local, and `cs1_gdn_prefill` still reads contiguous
+    /// `lq` / `lk` / `lv`.
     fn run(
         &self,
         s: &Scratch,
@@ -2034,6 +2291,20 @@ impl Model {
         let (kd, vd, hv) = (cfg.key_dim(), cfg.value_dim(), cfg.lin_v_heads);
         let (hq, hk, hd) = (cfg.heads as i32, cfg.kv_heads as i32, cfg.head_dim as i32);
         let w = Widths::of(cfg);
+        // Instant 4B prompt-bidirectional prefill only. Causal `run` and
+        // `run_window` keep the fat `gdn_in` leading dimension. This is not the
+        // attention V pack.
+        let gdn_pack = if bidirectional {
+            self.cfg.instant_gdn_in_proj_pack()
+        } else {
+            None
+        };
+        if gdn_pack.is_some() {
+            ensure!(
+                s.gdn_pack,
+                "Instant GDN in_proj pack scratch was not reserved"
+            );
+        }
         let p = |off: usize| s.at(off);
         let (cos, sin) = if custom_positions {
             (s.custom_cos, s.custom_sin)
@@ -2075,12 +2346,29 @@ impl Model {
                     let z = s.gdn_in + w.conv * BF16;
                     let b = z + vd * BF16;
                     let a = b + hv * BF16;
+                    if let Some(pack) = gdn_pack {
+                        ensure!(
+                            pack.gdn_in == w.gdn_in
+                                && pack.channels == w.conv
+                                && pack.z_width == vd
+                                && pack.gate_heads == hv,
+                            "Instant GDN in_proj pack does not match this layer"
+                        );
+                        for &(offset, length) in &sequences {
+                            self.pack_instant_gdn_in_proj(s, pack, offset, length.max(0) as usize)?;
+                        }
+                    }
                     unsafe {
                         for &(offset, length) in &sequences {
+                            let (qkv, conv_ld) = if let Some(pack) = gdn_pack {
+                                (p(s.gqkv + pack.qkv_offset(offset)), pack.channels as i32)
+                            } else {
+                                (p(s.gdn_in + offset * w.gdn_in * BF16), ld)
+                            };
                             check(
                                 (cuda::api().cs1_gdn_conv)(
-                                    p(s.gdn_in + offset * w.gdn_in * BF16),
-                                    ld,
+                                    qkv,
+                                    conv_ld,
                                     la.conv.ptr,
                                     p(s.lq + offset * kd * BF16),
                                     p(s.lk + offset * kd * BF16),
@@ -2093,11 +2381,20 @@ impl Model {
                                 "gdn conv",
                             )?;
                         }
+                        let (gates_b, gates_a, gates_ld) = if let Some(pack) = gdn_pack {
+                            (
+                                p(s.gba),
+                                p(s.gba + pack.a_offset(0)),
+                                pack.gates_ld() as i32,
+                            )
+                        } else {
+                            (p(b), p(a), ld)
+                        };
                         check(
                             (cuda::api().cs1_gdn_gates)(
-                                p(b),
-                                p(a),
-                                ld,
+                                gates_b,
+                                gates_a,
+                                gates_ld,
                                 la.a_log.ptr,
                                 la.dt_bias.ptr,
                                 p(s.beta),
@@ -2146,11 +2443,16 @@ impl Model {
                                 "gdn prefill",
                             )?;
                         }
+                        let (norm_z, norm_ld) = if let Some(pack) = gdn_pack {
+                            (p(s.gz), pack.z_width as i32)
+                        } else {
+                            (p(z), ld)
+                        };
                         check(
                             (cuda::api().cs1_gated_rms_norm)(
                                 p(s.lo),
-                                p(z),
-                                ld,
+                                norm_z,
+                                norm_ld,
                                 la.norm.ptr,
                                 p(s.ln),
                                 ti,

@@ -21,6 +21,10 @@ name = "config"
 path = "../../../../tests/qwen3_5/config.rs"
 
 [[test]]
+name = "gdn_in_proj_pack"
+path = "../../../../tests/qwen3_5/gdn_in_proj_pack.rs"
+
+[[test]]
 name = "kernels"
 path = "../../../../tests/qwen3_5/kernels.rs"
 
