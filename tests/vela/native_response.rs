@@ -283,9 +283,15 @@ fn the_systemone_finishing_matches_the_frozen_oracles() {
                 )
             })
             .collect();
-        let input_tokens = oracle["system_one"]["usage"]["input_tokens"]
-            .as_u64()
-            .unwrap_or(0) as usize;
+        // Usage comes from the plan's rendered rows, not from the
+        // oracle: the oracle's own usage must then survive the drift
+        // comparison below instead of being fed back.
+        let input_tokens: usize = plan["rows"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .map(|row| row["n_tokens"].as_u64().unwrap_or(0) as usize)
+            .sum();
         let response = system_one_response(
             "vllm-sr/Vela-2.0-0.8B",
             plan["plan"].as_array().unwrap(),
@@ -302,18 +308,19 @@ fn the_systemone_finishing_matches_the_frozen_oracles() {
             serde_json::to_string_pretty(&response).unwrap(),
             serde_json::to_string_pretty(want).unwrap(),
         );
-        // Structure: same key sets and discrete fields.
+        // Structure: same key sets in the same insertion order (the
+        // envelope's key order is part of the contract), discrete
+        // fields compared by the drift gate.
         for key in ["answers", "spans", "sets", "thresholds", "span_heads"] {
-            assert_eq!(
-                response
-                    .get(key)
-                    .and_then(Value::as_object)
-                    .map(serde_json::Map::len),
-                want.get(key)
-                    .and_then(Value::as_object)
-                    .map(serde_json::Map::len),
-                "{case}: {key} key set"
-            );
+            let got: Option<Vec<&String>> = response
+                .get(key)
+                .and_then(Value::as_object)
+                .map(|map| map.keys().collect());
+            let expected: Option<Vec<&String>> = want
+                .get(key)
+                .and_then(Value::as_object)
+                .map(|map| map.keys().collect());
+            assert_eq!(got, expected, "{case}: {key} keys and order");
         }
         println!("{case}: response drift {drift:.3e}");
     }
