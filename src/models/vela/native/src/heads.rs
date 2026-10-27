@@ -280,6 +280,9 @@ fn span_head(file: &SafeTensors, prefix: &str) -> Result<SpanHead> {
     );
     let slot = tensor(file, &format!("{prefix}.slot.weight"))?;
     let (slots, slot_hidden) = slot.ndim2(&format!("{prefix}.slot.weight"))?;
+    // decode() clamps a label index with slots - 1; zero slots would
+    // underflow there.
+    ensure!(slots > 0, "{}.slot.weight has no slots", prefix);
     ensure!(
         slot_hidden == hidden,
         "{prefix}.slot.weight is [ {slots}, {slot_hidden} ]; hidden is {hidden}"
