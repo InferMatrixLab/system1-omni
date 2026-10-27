@@ -3,6 +3,8 @@
 # this environment did not install or import that stack.
 torch>=2.11
 transformers==5.10.2
+# The pinned loader passes device_map to from_pretrained.
+accelerate>=1.0
 safetensors>=0.6
 huggingface_hub>=1.0
 tokenizers>=0.22
