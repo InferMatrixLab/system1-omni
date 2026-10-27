@@ -200,6 +200,11 @@ semantics.
   Preserve whole-request failure behavior, error status/body, and usage fields
   when splitting or regrouping work.
 
+Kev prepares one complete causal row per question, reads every candidate closing
+marker plus the final decision marker through the shared Qwen selected-position
+readout, and applies its FP32 pointer head. Its eager executor recomputes the state
+for each question and admits one whole request through the serial scheduler.
+
 Cua-S1 prepares one prompt per question and reads option-letter logits.
 Open-Jev prepares independent candidate prompts and normalizes across the
 complete question's candidates. Laya pads prepared questions into one request

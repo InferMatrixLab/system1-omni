@@ -1,8 +1,8 @@
 # Kev-4B: CPU export and pointer-head validation
 
 This is a preparation recipe for [#27](https://github.com/InferMatrixLab/system1-omni/issues/27),
-not a runnable Kev server. The [model contract](../../src/models/kev/README.md)
-records the pinned artifacts, numerical boundaries and missing worker pieces.
+with a separate [native worker recipe](native.md). The [model contract](../../src/models/kev/README.md)
+records the pinned artifacts, numerical boundaries and worker ownership.
 All commands below run from the repository root. No GPU is needed.
 
 ## Environment and downloads
@@ -66,12 +66,9 @@ upstream `PointerHead` class, and uses CPU PyTorch. It does not need Transformer
 PEFT or the backbone. The fixture's Torch version includes the wheel's local
 suffix, so a different wheel can change provenance even when numbers agree.
 
-## Next integration slice
+## Native worker
 
-There is no worker binary, frontend launch command, health endpoint or example
-HTTP request yet. The next slice adds exact prompt/row preparation and typed
-answers, verified export loading, shared Qwen execution and serial admission.
-It must qualify the BF16 merge against the full reference, then test real warmup
-and first inference directly and through the frontend. Record hardware, full
-dependency pins and numerical gates before those runs. No latency or accuracy
-claim follows from export success or isolated head agreement.
+The [native worker recipe](native.md) builds and serves the eager Rust/CUDA worker,
+reproduces exact processing fixtures, and runs the three-way full-model and HTTP
+acceptance checks. Export/head checks alone do not establish full-model parity.
+The export/head and complete worker remain separate review boundaries.
