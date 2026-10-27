@@ -4,8 +4,8 @@ Kev serves `choice`, `noul`, and `score` with its own processor and FP32 pointer
 head over the shared Qwen3.5 CUDA backbone. The [preparation recipe](../../../recipe/kev/README.md)
 remains independently reviewable; the [native recipe](../../../recipe/kev/native.md)
 covers the complete eager worker. Other sizes and prefix reuse are deferred.
-The declared gates passed on the 13-request / 23-question acceptance corpus;
-[results and limits](../../../recipe/kev/native.md#recorded-acceptance) include
+The historical FP32 diagnostics used a 13-request / 23-question corpus;
+[results and limits](../../../recipe/kev/native.md#historical-fp32-eager-diagnostics) include
 merge drift, hardware provenance, Score scale effects and HTTP checks.
 
 ## Pinned artifacts
@@ -108,9 +108,13 @@ rendering and answers; the opt-in tokenizer check compares every token and reado
 plus input/output usage. The native capture and HTTP harness are explicit GPU
 checks, never run by ordinary workspace tests.
 
-Full-model acceptance is fixed at maximum probability error 0.01, Choice agreement
+Primary acceptance uses the pinned official BF16 default service, with Score
+scalar error at most 0.1 ordinal level and maximum probability error 0.01.
+The [expanded qualification](../../../recipe/kev/service-acceptance.md) currently
+fails both numerical gates and Noul boundary coverage; the worker remains draft.
+Decision gates require Choice agreement
 for reference top-two margins above 0.02, and Noul agreement at threshold 0.5 when
 the reference distance exceeds 0.01. The comparator reports all near-boundary
-flips and separately compares unmerged official FP32, exported BF16 PyTorch and
+flips. Diagnostic comparisons retain unmerged official FP32, exported BF16 PyTorch and
 native execution. Failure never widens these limits. See the native recipe for
 commands and current validation status. No performance claim is made.
