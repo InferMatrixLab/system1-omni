@@ -206,18 +206,26 @@ primary a later tip has to beat.
 `omni-clef` removes the `ThreadingHTTPServer` path. An operator diagnosis on
 the L20X-labeled host put the first CUDA touch on a fresh HTTP thread near
 110 ms: HTTP about 162–175 ms, the same executor on a persistent thread
-about 48–65 ms. That diagnosis is not a Public231 paste for this server,
-and it is not a new primary. The primary to beat remains tip `594528a9`.
-The next concurrency-1 paste has to be taken against `omni-clef`. Against
+about 48–65 ms. That diagnosis is not a Public231 paste. Against
 the vLLM p50 cited with that diagnosis (~32 ms), a persistent-thread serve
 of ~48–65 ms would leave about 1.55×. That remainder is unverified here.
+The primary to beat remains tip `594528a9`. Operator-reported Public231 C1
+of `omni-clef` tip `f9127a03b732aaf6e88c99a0212e02acfdb01880` on that host,
+not re-run here: smoke 4/4, `/health` `fla+causal_conv1d`, R1 p50 169.605 ms
+and p95 220.003 ms (231/231), R2 53.580 / 97.031, R3 52.950 / 97.608,
+quality `choice_acc=0.8417`, `noul_acc=0.7973`, `score_mae=0.2488` (matches
+the `594528a9` baseline). This is a serve-path measurement, not a latency
+KEEP. R1 does not pass the dual gate against 164.969 / 216.755. R2 and R3
+are not a new primary. Start the binary with `CLEF_PYTHON` set to the
+recipe venv; the command is in the recipe. System `python3` lacks
+`causal-conv1d` and the executor dies before the port opens.
 
 ## Status
 
 | Path | Clef-flash | Clef |
 | --- | --- | --- |
-| Text `choice` / `noul` / `score`, non-thinking prompt | Contract tested. The recorded Public231 figures below are the previous `ThreadingHTTPServer` worker, not a measurement of `omni-clef`. `9030065` run1 p50 247.518 ms, p95 413.025 ms. Tip `594528a9` primary on the L20X-labeled host: p50 164.969 ms, p95 216.755 ms, 231/231, `/health` `fla+causal_conv1d`, Δp50 −82.549 ms, Δp95 −196.270 ms. Answer parity not checked | Same loader pin; both latency campaigns were flash only |
+| Text `choice` / `noul` / `score`, non-thinking prompt | Contract tested. Kept primary is the previous `ThreadingHTTPServer` worker: `9030065` run1 p50 247.518 ms, p95 413.025 ms; tip `594528a9` p50 164.969 ms, p95 216.755 ms, 231/231, `/health` `fla+causal_conv1d`, Δp50 −82.549 ms, Δp95 −196.270 ms. `omni-clef` `f9127a0` is recorded above and is not a KEEP | Same loader pin; the recorded latency campaigns were flash only |
 | Image and video | Rejected | Rejected |
-| Rust HTTP + persistent Python executor | Default serve path. CPU tests only; no GPU latency on this path | Same server, `--variant clef` |
+| Rust HTTP + persistent Python executor | Default serve path. CPU tests, plus the operator `f9127a0` paste above (not a KEEP). `CLEF_PYTHON` must be the recipe venv | Same server, `--variant clef` |
 | Joint-head native CUDA | Not implemented | Not implemented |
 | Workers AI proxy | Out of scope | Out of scope |

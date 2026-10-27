@@ -65,7 +65,13 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   lab host is the previous Python HTTP server. The primary is tip
   `594528a9`: p50 164.969 ms, p95 216.755 ms, `/health`
   `fla+causal_conv1d`, versus `9030065` run1 p50 247.518 ms, p95 413.025 ms
-  (Δp50 −82.549 ms, Δp95 −196.270 ms). `omni-clef` has no C1 paste.
+  (Δp50 −82.549 ms, Δp95 −196.270 ms). Operator-reported `omni-clef` tip
+  `f9127a0` is a serve-path paste, not a latency KEEP: R1 p50 169.605 ms,
+  p95 220.003 ms (231/231) does not pass the dual gate versus
+  164.969/216.755; R2 53.580/97.031 and R3 52.950/97.608 are not a new
+  primary. Smoke 4/4, `/health` `fla+causal_conv1d`. Start `omni-clef`
+  with `CLEF_PYTHON` set to the recipe venv; system `python3` lacks
+  `causal-conv1d`.
 
 - [LFM2.5-350M choice worker](lfm2/README.md): score text decisions with independent
   questions, hybrid cache branching and configurable candidate batches.
