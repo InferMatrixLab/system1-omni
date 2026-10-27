@@ -48,12 +48,12 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   verify its runtime manifest, and serve `choice`/`noul`/`score` decisions over
   text, image and video state through the Python worker and the Rust frontend
   (text serving and parity validated on A100; media budgets and caps in the recipe).
-- [Vela 2.0 reference workers (0.3B and the 0.8B hybrid)](vela/reference.md): download the pinned
+- [Vela 2.0 reference workers (0.3B and the decoder members 0.8B/4B/9B)](vela/reference.md): download the pinned
   vllm-sr/Vela-2.0-0.3B package, pass its full-hash package gate, and serve all
   five SystemOne question kinds (`choice`/`noul`/`score` plus the `span`/`set`
   extensions) through the Python worker and the Rust frontend on CPU FP32;
-  or vllm-sr/Vela-2.0-0.8B at revision `326b01d8` behind its own 10-file gate.
-- [Vela 2.0 0.8B native library](vela/native.md): export the pinned-bundle
+  or a decoder member (0.8B `326b01d8`, 4B `d6923941`, 9B `068425bb`) behind its own 10-file gate.
+- [Vela 2.0 decoder native library](vela/native.md): export the pinned-bundle
   manifest gate, wire contract and token-level processing for the 0.8B hybrid,
   checked against frozen fixtures; serving stays with the reference Python worker.
 - [Clef reference worker](clef/reference.md): load pinned Clef-flash (9B) or

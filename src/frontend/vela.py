@@ -1,13 +1,14 @@
-"""Python reference worker for the Vela 2.0 members (0.3B, 0.8B hybrid).
+"""Python reference worker for the Vela 2.0 members (0.3B, 0.8B/4B/9B hybrid).
 
 The Rust frontend remains the public transport layer. This worker owns
 only HTTP lifecycle and request orchestration; wire admission lives in
 models.vela.protocol, the pinned-runtime error mapping in
 models.vela.preprocess, the pinned runtimes and their package gates in
-models.vela.engine (0.3B) and models.vela.hybrid (0.8B), and response
-finishing in models.vela.postprocess. The executor is chosen by the
-package's declared ``model_type``; one worker process serves one pinned
-member.
+models.vela.engine (0.3B) and models.vela.hybrid (the decoder members),
+and response finishing in models.vela.postprocess. The executor is
+chosen by the package's declared ``model_type`` and, for the shared
+``vela2-decoder`` type, its ``model_name``; one worker process serves
+one pinned member.
 
 The error surface has two layers: transport errors follow the shared
 Python-worker discipline, and every request rejection the pinned runtime
@@ -34,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from models.vela.engine import Vela2Executor
-from models.vela.hybrid import EXPECTED_MODEL_NAME as HYBRID_MODEL_NAME, Vela2HybridExecutor
+from models.vela.hybrid import MEMBERS as HYBRID_MEMBERS, Vela2HybridExecutor
 from models.vela.postprocess import finish_response
 from models.vela.preprocess import map_runtime_error, to_request_error
 from models.vela.protocol import MODEL_NAME, MAX_BODY, RequestError, parse_body, admit_request
@@ -77,10 +78,19 @@ def detect_member(package: str | Path) -> tuple[type, str]:
     if model_type == "vela2-unified":
         return Vela2Executor, MODEL_NAME
     if model_type == "vela2-decoder":
-        return Vela2HybridExecutor, HYBRID_MODEL_NAME
+        # The decoder members share one model_type; config.json
+        # `model_name` names the member, and the executor's own gate is
+        # the authority on whether that member is pinned.
+        member = HYBRID_MEMBERS.get(config.get("model_name"))
+        if member is None:
+            raise ValueError(
+                f"config.json declares model_name {config.get('model_name')!r}; this worker "
+                f"serves the decoder members {', '.join(m.label for m in HYBRID_MEMBERS.values())}"
+            )
+        return Vela2HybridExecutor, member.model_name
     raise ValueError(
         f"config.json declares model_type {model_type!r}; this worker serves the "
-        "vela2-unified (0.3B) and vela2-decoder (0.8B) members of Vela 2.0"
+        "vela2-unified (0.3B) and vela2-decoder (0.8B, 4B, 9B) members of Vela 2.0"
     )
 
 
@@ -248,7 +258,7 @@ class Handler(BaseHTTPRequestHandler):
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Python reference worker for Vela 2.0 members")
     parser.add_argument("--model", required=True,
-                        help="pinned Vela 2.0 package directory (0.3B or the 0.8B hybrid)")
+                        help="pinned Vela 2.0 package directory (0.3B or a hybrid member: 0.8B/4B/9B)")
     parser.add_argument("--device", default="cpu",
                         help="torch device (reference contract: cpu; cuda runs the hybrid "
                              "backbone under bf16 autocast with FP32 heads)")

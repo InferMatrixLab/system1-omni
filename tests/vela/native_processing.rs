@@ -14,6 +14,27 @@ use omni_vela_native::questions::system_one_to_predict;
 use omni_vela_native::state::system_one_state;
 use serde_json::Value;
 
+/// The member whose fixtures this run replays: the bundle's manifest
+/// member when VELA_NATIVE_BUNDLE selects one, else the 0.8B baseline
+/// that ships unlabeled history-free under the labeled scheme.
+fn member_label() -> String {
+    if let Ok(dir) = std::env::var("VELA_NATIVE_BUNDLE") {
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(std::path::Path::new(&dir).join("vela_native_manifest.json"))
+                .expect("the bundle's manifest"),
+        )
+        .expect("vela_native_manifest.json must parse");
+        return manifest["model_id"]
+            .as_str()
+            .expect("model_id")
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .to_string();
+    }
+    "Vela-2.0-0.8B".to_string()
+}
+
 const CASES: [&str; 5] = [
     "example-request",
     "example-request-set-threshold",
@@ -24,8 +45,9 @@ const CASES: [&str; 5] = [
 
 fn fixture(case: &str) -> Value {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../tests/vela/fixtures");
+    let m = member_label();
     serde_json::from_str(
-        &std::fs::read_to_string(root.join(format!("native-plan-{case}.json")))
+        &std::fs::read_to_string(root.join(format!("native-plan-{m}-{case}.json")))
             .expect("fixture present; record it with recipe/vela/export_token_plan.py"),
     )
     .expect("fixture JSON")

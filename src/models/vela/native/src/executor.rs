@@ -42,13 +42,16 @@ impl Executor {
         Bundle::load(bundle).context("the exported bundle did not pass the manifest gate")?;
         let model = Model::load(&bundle.join("bf16"), library)
             .context("the shared qwen3_5 model did not load the uniform-BF16 backbone")?;
-        // heads.rs builds every projection at its private HIDDEN = 1024.
-        ensure!(
-            model.cfg.hidden == 1024,
-            "the backbone hidden size {} cannot feed the heads' 1024",
-            model.cfg.hidden
-        );
         let heads = Heads::load(bundle)?;
+        // The heads derive their widths from their own tensors; the
+        // backbone must agree with them — a mismatched pair of bundle
+        // files is an export error, not a member difference.
+        ensure!(
+            model.cfg.hidden == heads.hidden(),
+            "the backbone hidden size {} cannot feed the heads' {}",
+            model.cfg.hidden,
+            heads.hidden()
+        );
         Ok(Self {
             model,
             heads,

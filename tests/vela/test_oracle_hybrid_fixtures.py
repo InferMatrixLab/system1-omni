@@ -1,7 +1,7 @@
 """Ties the frozen hybrid oracle fixtures to the recipe examples they came from.
 
 The 0.8B hybrid fixtures recorded by ``recipe/vela/compare_reference.py``
-under the ``oracle-hybrid-`` prefix keep the recipe's example requests
+under the ``oracle-hybrid-<member>-`` prefix keep the recipe's example requests
 (with the ``model`` field rewritten to the hybrid's served name) and their
 recorded ``system_one`` responses, which must pass the production
 ``finish_response`` gate on the hybrid setting; the 0.3B oracles have no
@@ -22,10 +22,10 @@ TESTS = Path(__file__).parent
 RECIPE = TESTS.parent.parent / "recipe" / "vela"
 
 CASES = [
-    ("oracle-hybrid-example-request", "example-request.json"),
-    ("oracle-hybrid-example-request-cjk", "example-request-cjk.json"),
-    ("oracle-hybrid-example-request-set-threshold", "example-request-set-threshold.json"),
-    ("oracle-hybrid-example-request-score", "example-request-score.json"),
+    ("oracle-hybrid-Vela-2.0-0.8B-example-request", "example-request.json"),
+    ("oracle-hybrid-Vela-2.0-0.8B-example-request-cjk", "example-request-cjk.json"),
+    ("oracle-hybrid-Vela-2.0-0.8B-example-request-set-threshold", "example-request-set-threshold.json"),
+    ("oracle-hybrid-Vela-2.0-0.8B-example-request-score", "example-request-score.json"),
 ]
 
 

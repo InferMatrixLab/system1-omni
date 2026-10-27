@@ -1,12 +1,37 @@
-# Vela 2.0 0.8B native library
+# Vela 2.0 decoder native library
 
-The native implementation for
-[vllm-sr/Vela-2.0-0.8B](https://huggingface.co/vllm-sr/Vela-2.0-0.8B):
-the exported-bundle gate, the wire contract, the token-level
-processing, the F32 heads and scoring, and backbone execution on CUDA
+The native implementation for the Vela 2.0 decoder members
+([0.8B](https://huggingface.co/vllm-sr/Vela-2.0-0.8B), 4B, 9B — one
+program, member-parameterized): the exported-bundle gate, the wire
+contract, the token-level processing, the F32 heads (widths derived
+from the tensors' shapes) and scoring, and backbone execution on CUDA
 through the shared qwen3_5 crate — all mirrored from the pinned
 runtime and checked against frozen fixtures. This is a library; the
 HTTP worker is the [reference recipe](reference.md)'s Python worker.
+The recorded fixtures and parity evidence below are the 0.8B's (CPU
+FP32 recordings). The 4B's were recorded next, on an RTX 4090 48 GB
+(sm_89, driver CUDA 13.3, CUDA toolkit 13.2, `build.sh … 89`): all five
+token plans replay field-for-field; head-logit drift ≤ 8.97e-5 with
+answer drift ≤ 5.56e-3 (the calibration amplifies the ~1e-4 logit
+replay drift unevenly — see the per-member gates in the tests); the
+finished responses match the frozen 4B oracles within 5.56e-3; and the
+executor replays the GPU-recorded reference logits with a worst drift
+of 0.2271 across the four small cases (gate 0.35, the bf16 scale). One
+recorded divergence, kept deliberately: the synthetic long-span
+windowed case parks its recorded picks within a few 1e-3 of the 0.55
+threshold, so on the GPU-recorded member the replay's discrete span
+set flips there while its probabilities still match — the tests assert
+probabilities for that case and keep full structural assertion on the
+0.8B's CPU-recorded fixture (the 9B shows the same class on its cjk
+case: a street-address merge the reference itself left near its fill
+cutoff). The 9B ran the same commands on the same host (hidden 4096
+through the shared qwen3_5 config): head-logit drift ≤ 4.20e-5 with
+answer drift ≤ 6.80e-4, response drift ≤ 5.92e-3, and the recorded
+divergences noted above — all inside the member-calibrated gates. Its
+executor replay recorded two of the four small cases before the rented
+session ended — worst logit drift 0.1899 (example-request) and 0.0403
+(set-threshold), both inside the 0.35 bf16 gate — the cjk and score
+cases are not recorded and remain to be run.
 
 Run the commands from the repository root with the same `.venv` and
 pinned package as the reference recipe. The export needs about 6 GB of

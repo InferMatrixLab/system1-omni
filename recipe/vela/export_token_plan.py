@@ -8,7 +8,7 @@ question blocks; one span question per row), and the rendered records
 (``p_ids``, block token ids with option/label end positions, query
 positions, span word positions, truncation and segment lengths). The
 native Rust processor must reproduce these byte-for-byte; the frozen
-files under ``tests/vela/fixtures/native-plan-*.json`` are that parity
+files under ``tests/vela/fixtures/native-plan-<member>-*.json`` are that parity
 target. Model outputs are not recorded here — the oracle fixtures from
 ``compare_reference.py`` own the output side.
 
@@ -31,8 +31,9 @@ MODEL_NAME = "vllm-sr/Vela-2.0-0.8B"
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--model", required=True, help="pinned Vela 2.0 0.8B package directory")
+    parser.add_argument("--model", required=True, help="pinned Vela 2.0 decoder package directory")
     parser.add_argument("--out", default=None, help="fixture output directory")
+    parser.add_argument("--device", default="cpu", help="torch device (default: the CPU FP32 oracle)")
     return parser.parse_args(argv)
 
 
@@ -123,10 +124,11 @@ def rows_of(engine, body):
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+    label = json.loads((Path(args.model) / "config.json").read_text(encoding="utf-8"))["model_name"].rsplit("/", 1)[-1]
     sys.path.insert(0, str(Path(args.model).resolve()))
     from vela2_inference import Vela2
 
-    engine = Vela2.from_pretrained(args.model, backend="torch", device="cpu")
+    engine = Vela2.from_pretrained(args.model, backend="torch", device=args.device)
     out = Path(args.out) if args.out else HERE.parents[1] / "tests" / "vela" / "fixtures"
     out.mkdir(parents=True, exist_ok=True)
     for name, body in cases():
@@ -139,7 +141,7 @@ def main(argv=None) -> int:
             "rows": rows,
             "window_rows": windows,
         }
-        target = out / f"native-plan-{name}.json"
+        target = out / f"native-plan-{label}-{name}.json"
         target.write_text(json.dumps(fixture, ensure_ascii=False) + "\n", encoding="utf-8")
         tokens = sum(r["n_tokens"] for r in rows) + sum(r["n_tokens"] for r in windows)
         print(

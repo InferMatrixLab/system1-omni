@@ -16,6 +16,27 @@ use std::path::PathBuf;
 use omni_vela_native::executor::Executor;
 use serde_json::Value;
 
+/// The member whose fixtures this run replays: the bundle's manifest
+/// member when VELA_NATIVE_BUNDLE selects one, else the 0.8B baseline
+/// that ships unlabeled history-free under the labeled scheme.
+fn member_label() -> String {
+    if let Ok(dir) = std::env::var("VELA_NATIVE_BUNDLE") {
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(std::path::Path::new(&dir).join("vela_native_manifest.json"))
+                .expect("the bundle's manifest"),
+        )
+        .expect("vela_native_manifest.json must parse");
+        return manifest["model_id"]
+            .as_str()
+            .expect("model_id")
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .to_string();
+    }
+    "Vela-2.0-0.8B".to_string()
+}
+
 const CASES: [&str; 4] = [
     "example-request",
     "example-request-set-threshold",
@@ -47,14 +68,16 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.35);
 
+    let m = member_label();
+
     for case in CASES {
         let head_fixture: Value = serde_json::from_str(
-            &std::fs::read_to_string(fixtures_dir().join(format!("head-input-{case}.json")))
+            &std::fs::read_to_string(fixtures_dir().join(format!("head-input-{m}-{case}.json")))
                 .expect("fixture"),
         )
         .expect("json");
         let plan_fixture: Value = serde_json::from_str(
-            &std::fs::read_to_string(fixtures_dir().join(format!("native-plan-{case}.json")))
+            &std::fs::read_to_string(fixtures_dir().join(format!("native-plan-{m}-{case}.json")))
                 .expect("fixture"),
         )
         .expect("json");
@@ -65,7 +88,7 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
         let processor =
             omni_vela_native::processing::Processor::load(&bundle).expect("processor loads");
         let planned = processor.plan(&request).expect("plan");
-        let raw = std::fs::read(fixtures_dir().join(format!("head-input-{case}.safetensors")))
+        let raw = std::fs::read(fixtures_dir().join(format!("head-input-{m}-{case}.safetensors")))
             .expect("safetensors fixture");
         let _file = safetensors::SafeTensors::deserialize(&raw).expect("safetensors");
 

@@ -32,8 +32,9 @@ MODEL_NAME = "vllm-sr/Vela-2.0-0.8B"
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--model", required=True, help="pinned Vela 2.0 0.8B package directory")
+    parser.add_argument("--model", required=True, help="pinned Vela 2.0 decoder package directory")
     parser.add_argument("--out", default=None, help="fixture output directory")
+    parser.add_argument("--device", default="cpu", help="torch device (default: the CPU FP32 oracle)")
     return parser.parse_args(argv)
 
 
@@ -163,10 +164,11 @@ def rows_of(engine, body):
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+    label = json.loads((Path(args.model) / "config.json").read_text(encoding="utf-8"))["model_name"].rsplit("/", 1)[-1]
     sys.path.insert(0, str(Path(args.model).resolve()))
     from vela2_inference import Vela2
 
-    engine = Vela2.from_pretrained(args.model, backend="torch", device="cpu")
+    engine = Vela2.from_pretrained(args.model, backend="torch", device=args.device)
     import modeling_vela2
 
     recorder = Recorder(modeling_vela2, engine.run.model)
@@ -199,7 +201,7 @@ def main(argv=None) -> int:
             recorder._on = False
         for call, row in zip(calls, row_of_call):
             call["row"] = row
-        save_file(tensors, str(out / f"head-input-{name}.safetensors"))
+        save_file(tensors, str(out / f"head-input-{label}-{name}.safetensors"))
         fixture = {
             "case": name,
             "request": body,
@@ -214,7 +216,7 @@ def main(argv=None) -> int:
             "head_calls": calls,
             "predict": predict,
         }
-        (out / f"head-input-{name}.json").write_text(
+        (out / f"head-input-{label}-{name}.json").write_text(
             json.dumps(fixture, ensure_ascii=False) + "\n", encoding="utf-8"
         )
         span_calls = sum(1 for call in calls if call["kind"] == "span")
