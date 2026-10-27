@@ -12,9 +12,6 @@ use omni_vela_native::heads::Heads;
 use omni_vela_native::scoring::{Calibration, SpanOut, aggregate_windows, row_answers};
 use serde_json::Value;
 
-/// The member whose fixtures this run replays: the bundle's manifest
-/// member when VELA_NATIVE_BUNDLE selects one, else the 0.8B baseline
-/// that ships unlabeled history-free under the labeled scheme.
 /// Structural (order- and float-insensitive) view of a spans array:
 /// the (label, start, end) triples, sorted.
 fn json_of_spans(value: &Value) -> Vec<(String, i64, i64)> {
@@ -37,6 +34,9 @@ fn json_of_spans(value: &Value) -> Vec<(String, i64, i64)> {
         .unwrap_or_default()
 }
 
+/// The member whose fixtures this run replays: the bundle's manifest
+/// member when VELA_NATIVE_BUNDLE selects one, else the 0.8B baseline
+/// that ships unlabeled history-free under the labeled scheme.
 fn member_label() -> String {
     if let Ok(dir) = std::env::var("VELA_NATIVE_BUNDLE") {
         let manifest: serde_json::Value = serde_json::from_slice(
