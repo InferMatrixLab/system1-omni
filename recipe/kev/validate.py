@@ -51,6 +51,7 @@ def reference(args):
                   'dependencies': {n: importlib.metadata.version(n) for n in
                                    ('torch', 'transformers', 'peft', 'accelerate', 'pydantic', 'tokenizers', 'safetensors', 'numpy')}}
     corpus = json.loads((ROOT / 'tests/kev/data/processing.json').read_text())['cases']
+    m = None
     for kind in ('official', 'fp32-merged', 'merged'):
         path = args.out / f'{kind}.json'
         if path.exists():
@@ -58,6 +59,7 @@ def reference(args):
         print(f'Loading {kind}', flush=True)
         if kind == 'fp32-merged':
             # Isolate PEFT merge arithmetic from BF16 export/compute precision.
+            assert m is not None, 'the unmerged capture must precede FP32 merge'
             m.lm = m.lm.merge_and_unload(safe_merge=True)
         else:
             m = model.DecisionModel(str(args.base), tok, 'cuda', dtype=torch.float32 if kind == 'official' else torch.bfloat16, attn='eager')
@@ -91,7 +93,7 @@ def reference(args):
                 save(path, {'kind': kind, 'provenance': provenance, 'cases': results})
                 print(kind, case['name'], 'questions', len(ps), flush=True)
         if kind != 'official':
-            del m
+            m = None
             gc.collect()
             torch.cuda.empty_cache()
 
