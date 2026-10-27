@@ -10,15 +10,15 @@ question kinds (`choice`, `noul`, `score`, `span`, `set`) on
 `/v1/systemone`, one pinned member per worker process. The 0.3B
 worker's contract freezes the text/token_ids input, the
 position-level final-hidden readout contract, the error/length
-boundaries and the parity baseline.
+boundaries and the parity baseline; see [Native path](#native-path-08b)
+for the native library.
 
 The shared Vela 2.0 wire module is deliberately shaped for the family:
 the envelope admission (`protocol`), the pinned-runtime error mapping
 (`preprocess`) and response finishing (`postprocess`) are member-neutral;
 this directory ships the 0.3B pinned executor (`engine`) and the 0.8B
 hybrid executor (`hybrid`). The worker picks the executor from the
-package's declared `model_type`. The 4B/9B members are not
-implemented.
+package's declared `model_type`. The 4B/9B members are not implemented.
 
 ## Pinned artifacts
 
@@ -225,3 +225,66 @@ the shared worker-contract issue, and nothing is posted upstream.
   a deployment option outside these slices' evidence.
 - The serving procedure, hardware requirements and the recorded
   evidence pointer are [recipe/vela/reference.md](../../recipe/vela/reference.md).
+
+## Native path (0.8B)
+
+The native implementation lives in [`native/`](native/) as the
+`omni-vela-native` crate, a library around the exported bundle:
+
+- [`recipe/vela/export_native.py`](../../recipe/vela/export_native.py)
+  exports the pinned package into a native bundle: the 320 backbone
+  tensors re-keyed `backbone.` → `model.` with **per-tensor dtypes
+  preserved** (204 BF16 Linear/conv1d + 116 F32 embed/norms/A_log/
+  dt_bias — the reference's own layout), the 37 F32 head tensors
+  (CandidateHead, `set_bias`, span2 router, span_broad) in one file,
+  `backbone_config` at the config root, calibration and tokenizer
+  copied, and a manifest pinning the source revision, the worker
+  gate's own file table, the tensor inventory and every bundle file's
+  SHA-256. `--bf16-out` additionally writes the uniform-BF16 backbone
+  the shared qwen3_5 loader consumes.
+- `native/src/bundle.rs` re-verifies that manifest (revision,
+  inventory counts, per-file hashes) before anything loads it.
+- `native/src/contract.rs` is the wire admission, mirroring
+  `protocol.py` and the pinned runtime's preamble with byte-equal
+  422/400 bodies.
+- `native/src/{state,questions,words,render,processing}.rs` are the
+  token-level processing: the state → parts mapping, the SystemOne →
+  predict mapping with the pinned runtime's validation triples (Noul
+  folded into a two-option choice; choice renders `[ABS]`, the
+  reference's abstain default), the GLiNER2/CJK word splitter, the
+  six-rule span-head dispatch with the hallucination-alias label
+  replacement, the DEV2.0 prompt rendering (parts pass, question
+  blocks with option end and query positions, span layout a/c with
+  word positions, the truncation budget, the 16,384-window 413) and
+  the long-target window rows. All five frozen token plans
+  (`tests/vela/fixtures/native-plan-*.json`) match field-for-field.
+- `native/src/{heads,scoring}.rs` are the F32 heads and the scoring
+  path: CandidateHead, both SpanHeadV2 heads, `set_bias`, the
+  per-type temperatures, set thresholds, the PII length rule and
+  sparse gate, `span_decode_r4` (word units, unit vote, fill,
+  edge/URL trimming), label aliasing, score normalization and the
+  window aggregation — then `system_one_response` finishes the
+  SystemOne envelope (Noul views with the range-filtered max word
+  probability and set fan-out, span clipping to the plan's field
+  ranges with re-trim, `span_heads`, thresholds, confidence formulas,
+  usage). Replaying the recorded head-input fixtures
+  (`tests/vela/fixtures/head-input-*`): head-logit drift ≤ 3.8e-5,
+  predict-answer drift ≤ 7.3e-7, and the finished responses match the
+  frozen oracles within 1.5e-6 on four cases.
+- `native/src/executor.rs` runs the backbone on CUDA through the
+  shared qwen3_5 crate: the family `Model` exposes only last-position
+  hidden states, so every readout position runs as its own full
+  sequence — `[parts .. position]` — which causality makes identical
+  to the reference's in-tree readout, packed into `forward_batch`.
+  The backbone runs from the uniform-BF16 export (the shared loader's
+  format); the heads stay F32 on the faithful tensors. Recorded
+  execution on sm_120 (RTX 5060, CUDA 13.1): the four small frozen
+  cases replay the recorded reference logits with a worst drift of
+  0.285 — the bf16-vs-FP32-reference scale (gate 0.35).
+
+The crate is a library; the HTTP worker around `Processor` +
+`Executor` is not part of it. Long-span GPU parity and measured
+latency are not recorded. Checks: `cargo test -p omni-vela-native`
+(29 tests, no weights, no GPU; render, head and response parity are
+opt-in with `VELA_NATIVE_BUNDLE`, executor parity additionally with
+`VELA_CUDA_LIB`; see [recipe/vela/native.md](../../recipe/vela/native.md)).
