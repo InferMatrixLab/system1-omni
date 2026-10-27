@@ -72,7 +72,7 @@ impl Calibration {
                 )
             })
             .collect();
-        points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        points.sort_by(|a, b| a.0.total_cmp(&b.0));
         let x = (n_tokens.max(1) as f64).ln();
         let (xs, ys): (Vec<f64>, Vec<f64>) = points.into_iter().unzip();
         interp(&xs, &ys, x).exp()
@@ -607,9 +607,16 @@ pub fn aggregate_windows(
     // The reference accumulates in float64; the result casts to f32.
     let mut acc = vec![vec![0.0f64; labels]; original_offs.len()];
     let mut cnt = vec![0usize; original_offs.len()];
+    // First-match index per offset, as `position` found it, without the
+    // per-window linear scan.
+    let mut index: std::collections::HashMap<&(usize, usize), usize> =
+        std::collections::HashMap::with_capacity(original_offs.len());
+    for (u, off) in original_offs.iter().enumerate() {
+        index.entry(off).or_insert(u);
+    }
     for (logits, offs) in window_logits.iter().zip(window_offs) {
         for ((s, e), row) in offs.iter().zip(logits) {
-            if let Some(u) = original_offs.iter().position(|(os, oe)| os == s && oe == e) {
+            if let Some(&u) = index.get(&(*s, *e)) {
                 for (l, value) in row.iter().enumerate() {
                     acc[u][l] += *value as f64;
                 }
@@ -817,7 +824,7 @@ pub fn system_one_response(
 /// The top-two probability margin (the reference's `_choice_confidence`).
 pub fn choice_confidence(values: &[f64]) -> f64 {
     let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    sorted.sort_by(|a, b| b.total_cmp(a));
     if sorted.len() == 1 {
         return 1.0;
     }
