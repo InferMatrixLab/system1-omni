@@ -188,8 +188,11 @@ document is written.
 `torch_chunk_gated_delta_rule` and `F.conv1d` are not served.
 
 `--backbone` defaults to `eager`. `/health` `backbone` is `eager` and
-`backbone_graphs` is 0. `--backbone piecewise` compiles each
-`Qwen3_5DecoderLayer` with inductor CUDA graphs. The FLA
+`backbone_graphs` is 0. `--backbone piecewise` compiles the token mixer and the MLP inside each
+`Qwen3_5DecoderLayer` with inductor CUDA graphs. Both residuals are
+`hidden_states.clone()` in the eager layer forward, outside
+`torch.compile`, so a CUDAGraph output is not aliased into the next
+replay. The FLA
 `ChunkGatedDeltaRuleFunction` call is a `torch.compiler.disable` split,
 and `JointSchemaHead.forward` stays eager. `ClefModel`,
 `Qwen3_5TextModel`, and `Qwen3_5ForConditionalGeneration` are not

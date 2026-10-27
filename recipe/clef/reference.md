@@ -387,9 +387,12 @@ the `594528a9` primary. FlashInfer GDN prefill and FA3 stay deferred.
 that full-model compile was +773 ms, attributed to `.item()` in
 `JointSchemaHead.forward`, and was not remeasured here.
 
-`--backbone piecewise` compiles each `Qwen3_5DecoderLayer` with inductor
-`mode=reduce-overhead`, `fullgraph=False`, and `dynamic=False`. Capture
-splits, and only these:
+`--backbone piecewise` compiles the token mixer and the MLP inside each
+`Qwen3_5DecoderLayer` with inductor `mode=reduce-overhead`,
+`fullgraph=False`, and `dynamic=False`. The layer forward itself stays
+eager. Each residual is `hidden_states.clone()` outside `torch.compile`,
+once before the mixer and once before the MLP, so the next CUDAGraph
+replay cannot overwrite that output. Capture splits, and only these:
 
 - FLA `ChunkGatedDeltaRuleFunction`, via `torch.compiler.disable` on each
   `Qwen3_5GatedDeltaNet.chunk_gated_delta_rule`. The chunk runs eager. A

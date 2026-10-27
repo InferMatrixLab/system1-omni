@@ -110,8 +110,8 @@ def test_install_compiles_decoder_layers_and_splits_the_chunk_and_joint():
     root_forward = root.forward
     text_forward = text.forward
     install = _install(root)
-    assert seen == [DECODER_LAYER, DECODER_LAYER]
-    assert install.compiled_owners == [DECODER_LAYER, DECODER_LAYER]
+    assert seen == [DECODER_LAYER, DECODER_LAYER, DECODER_LAYER, DECODER_LAYER]
+    assert install.compiled_owners == [DECODER_LAYER, DECODER_LAYER, DECODER_LAYER, DECODER_LAYER]
     assert install.split_boundaries == 2
     assert install.joint_modules == 1
     assert gdn_a.chunk_gated_delta_rule is not chunk_a
@@ -121,7 +121,8 @@ def test_install_compiles_decoder_layers_and_splits_the_chunk_and_joint():
     assert joint.forward.clef_disabled is True
     assert root.forward is root_forward
     assert text.forward is text_forward
-    assert layer_a.forward() == "layer-a"
+    assert layer_a.forward.clef_residual == "outside-compile"
+    assert layer_a.forward is not root_forward
     engine_source = (
         Path(__file__).resolve().parents[2] / "src" / "models" / "clef" / "engine.py"
     ).read_text(encoding="utf-8")
@@ -183,6 +184,111 @@ def test_install_refuses_a_missing_joint_or_a_missing_chunk():
         assert "no Qwen3_5DecoderLayer" in str(exc)
     else:
         raise AssertionError("missing layers")
+
+
+def test_residual_clone_runs_outside_the_compiled_regions():
+    inside = {"on": False}
+    compiled: list[str] = []
+
+    class Hidden:
+        def __init__(self, name: str, cloned: bool = False):
+            self.name = name
+            self.cloned = cloned
+
+        def clone(self):
+            assert not inside["on"]
+            return Hidden(self.name + "*", cloned=True)
+
+        def __add__(self, other):
+            assert not inside["on"]
+            assert self.cloned
+            return Hidden(f"sum({self.name},{other.name})")
+
+    def record(label):
+        def fn(hidden, *_args, **_kwargs):
+            assert inside["on"]
+            assert not getattr(hidden, "cloned", False)
+            return Hidden(label)
+
+        return fn
+
+    class Delta:
+        def __init__(self):
+            self._modules = {}
+            self.chunk_gated_delta_rule = lambda *_a, **_k: "chunk"
+
+        def __call__(self, hidden_states=None, **_kwargs):
+            assert inside["on"]
+            assert not hidden_states.cloned
+            return Hidden("attn")
+
+    Delta.__name__ = "Qwen3_5GatedDeltaNet"
+
+    class FullAttn:
+        def __call__(self, hidden_states=None, **_kwargs):
+            assert inside["on"]
+            assert not hidden_states.cloned
+            return Hidden("full"), Hidden("weights")
+
+    delta = Delta()
+    linear = _mod(
+        DECODER_LAYER,
+        {"linear_attn": delta},
+        forward=_forward("lin"),
+        layer_type="linear_attention",
+    )
+    linear.linear_attn = delta
+    linear.input_layernorm = record("ln")
+    linear.post_attention_layernorm = record("post")
+    linear.mlp = record("mlp")
+    full = _mod(
+        DECODER_LAYER,
+        {},
+        forward=_forward("full"),
+        layer_type="full_attention",
+    )
+    full.self_attn = FullAttn()
+    full.input_layernorm = record("fln")
+    full.post_attention_layernorm = record("fpost")
+    full.mlp = record("fmlp")
+    text = _mod(
+        "Qwen3_5TextModel",
+        {"layers": _mod("ModuleList", {"0": linear, "1": full})},
+        forward=_forward("text"),
+    )
+    root = _mod(
+        "ClefModel",
+        {
+            "language_model": text,
+            "joint_head": _mod("JointSchemaHead", forward=_forward("joint")),
+        },
+        forward=_forward("clef"),
+    )
+
+    def compile_region(fn, owner):
+        assert_compile_owner(owner)
+        compiled.append(fn.clef_region)
+
+        def wrapped(*args, **kwargs):
+            inside["on"] = True
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                inside["on"] = False
+
+        return wrapped
+
+    install_piecewise_backbone(
+        root,
+        compile_region=compile_region,
+        disable_fn=_disable,
+        capturing=lambda: False,
+        compiling=lambda: False,
+    )
+    assert compiled == ["mixer", "mlp", "mixer", "mlp"]
+    assert linear.forward.clef_residual == "outside-compile"
+    assert full.forward(Hidden("in"), position_embeddings=("cos", "sin")).name.startswith("sum(")
+    assert linear.forward(Hidden("in")).name.startswith("sum(")
 
 
 def test_piecewise_install_record_alone_is_not_a_health_string():

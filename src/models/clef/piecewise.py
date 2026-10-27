@@ -1,8 +1,11 @@
 """Opt-in piecewise inductor CUDA graphs for the Qwen3.5 backbone.
 
-The default Clef path is eager FLA. ``--backbone piecewise`` compiles each
-``Qwen3_5DecoderLayer`` with inductor ``reduce-overhead`` and leaves two
-call sites outside every captured graph:
+The default Clef path is eager FLA. ``--backbone piecewise`` compiles the
+token mixer and the MLP inside each ``Qwen3_5DecoderLayer`` with inductor
+``reduce-overhead``. The residual add stays in the eager layer forward:
+``hidden_states.clone()`` runs outside ``torch.compile`` so a CUDAGraph
+output is not aliased into the next replay. Two other call sites also stay
+outside every captured graph:
 
 1. The FLA chunk. Each ``Qwen3_5GatedDeltaNet.chunk_gated_delta_rule`` is
    wrapped and marked ``torch.compiler.disable``. That wrapper is the split
@@ -206,6 +209,97 @@ def _joint_modules(root: Any) -> list[Any]:
     return found
 
 
+def move_residual(hidden_states: Any) -> Any:
+    """Copy a decoder residual out of CUDAGraph output storage.
+
+    ``residual = hidden_states`` aliases a graph output. The next replay
+    overwrites that storage and PyTorch raises ``accessing tensor output of
+    CUDAGraphs that has been overwritten by a subsequent run``. The clone
+    has to run outside ``torch.compile``.
+    """
+
+    return hidden_states.clone()
+
+
+def _bind_decoder_forward(
+    layer: Any,
+    compile_region: CompileRegion,
+    compiled_owners: list[str],
+) -> None:
+    """Compile the mixer and the MLP. Clone both residuals in the eager forward."""
+
+    owner = type(layer).__name__
+    assert_compile_owner(owner)
+    # Bind this layer in a local so the compiled closures do not share the loop variable.
+    bound = layer
+
+    def token_mixer(
+        hidden_states: Any,
+        position_embeddings: Any,
+        attention_mask: Any,
+        position_ids: Any,
+        past_key_values: Any,
+        **kwargs: Any,
+    ) -> Any:
+        hidden_states = bound.input_layernorm(hidden_states)
+        if bound.layer_type == "linear_attention":
+            return bound.linear_attn(
+                hidden_states=hidden_states,
+                cache_params=past_key_values,
+                attention_mask=attention_mask,
+                **kwargs,
+            )
+        if bound.layer_type == "full_attention":
+            mixed, _weights = bound.self_attn(
+                hidden_states=hidden_states,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                past_key_values=past_key_values,
+                position_embeddings=position_embeddings,
+                **kwargs,
+            )
+            return mixed
+        raise RuntimeError(
+            f"unsupported Qwen3_5DecoderLayer layer_type {bound.layer_type!r}"
+        )
+
+    def mlp_block(hidden_states: Any) -> Any:
+        hidden_states = bound.post_attention_layernorm(hidden_states)
+        return bound.mlp(hidden_states)
+
+    token_mixer.clef_region = "mixer"  # type: ignore[attr-defined]
+    mlp_block.clef_region = "mlp"  # type: ignore[attr-defined]
+    compiled_mixer = compile_region(token_mixer, owner)
+    compiled_mlp = compile_region(mlp_block, owner)
+    compiled_owners.append(owner)
+    compiled_owners.append(owner)
+
+    def forward(
+        hidden_states: Any,
+        position_embeddings: Any = None,
+        attention_mask: Any = None,
+        position_ids: Any = None,
+        past_key_values: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        residual = move_residual(hidden_states)
+        hidden_states = compiled_mixer(
+            hidden_states,
+            position_embeddings,
+            attention_mask,
+            position_ids,
+            past_key_values,
+            **kwargs,
+        )
+        hidden_states = residual + hidden_states
+        residual = move_residual(hidden_states)
+        hidden_states = compiled_mlp(hidden_states)
+        return residual + hidden_states
+
+    forward.clef_residual = "outside-compile"  # type: ignore[attr-defined]
+    layer.forward = forward
+
+
 def make_chunk_split(
     original: Callable[..., Any],
     install: PiecewiseInstall,
@@ -282,10 +376,7 @@ def install_piecewise_backbone(
     for layer in layers:
         if not callable(getattr(layer, "forward", None)):
             raise RuntimeError("Qwen3_5DecoderLayer.forward is not callable")
-        owner = type(layer).__name__
-        assert_compile_owner(owner)
-        layer.forward = compile_region(layer.forward, owner)
-        install.compiled_owners.append(owner)
+        _bind_decoder_forward(layer, compile_region, install.compiled_owners)
     return install
 
 
