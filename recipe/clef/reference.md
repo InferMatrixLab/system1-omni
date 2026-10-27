@@ -9,8 +9,8 @@ paths are in the [model README](../../src/models/clef/README.md). Commands
 below run from the repository root.
 
 Clef-flash is the bring-up variant: about 19.1 GB of safetensors versus
-about 55.0 GB for Clef. Both use the same text contract. The recorded
-Public231 concurrency-1 result is later in this recipe.
+about 55.0 GB for Clef. Both use the same text contract. The [controlled migration acceptance](#controlled-migration-acceptance)
+records the flash text service; 27B has not been run.
 
 ## Pins
 
@@ -24,8 +24,8 @@ The card names torch 2.11 and transformers 5.10.2. Install
 build of that torch is required for the worker process. CPU inference is
 not a supported path. Storage for the flash snapshot is about 19.1 GB plus
 the download cache; the 27B snapshot is about 55.0 GB. Device memory has
-to hold the bf16 weights and one prefill. No specific GPU size was measured
-here.
+to hold the bf16 weights and one prefill. The controlled flash acceptance records device-memory samples in its
+local evidence bundle; it does not establish a minimum supported GPU size.
 
 ## Start
 
@@ -33,8 +33,12 @@ here.
 python -m pip install -r recipe/clef/requirements.txt
 ```
 
-The requirements pin `causal-conv1d>=1.5`, `flash-linear-attention==0.5.2`,
-and `flashinfer-python==0.6.16.post3`. The worker imports `causal_conv1d`,
+The default requirements pin `causal-conv1d==1.7.0` and
+`flash-linear-attention==0.5.2`. They also include Accelerate for the
+loader's `device_map` and torchvision for the shared processor, even for text.
+FlashInfer is optional and was absent from the FLA acceptance environment;
+install `flashinfer-python==0.6.16.post3` separately to try its unvalidated
+opt-in path. The worker imports `causal_conv1d`,
 then `fla.ops.gated_delta_rule`, then tries `flashinfer.gdn_prefill`, and
 only then imports `transformers.models.qwen3_5.modeling_qwen3_5`. That
 order binds `FusedRMSNormGated` and `causal_conv1d_fn`. The default
@@ -95,6 +99,7 @@ recipe, for example:
 
 ```sh
 export CLEF_PYTHON="$HOME/envs/clef-ref/bin/python"
+export PYTHONDONTWRITEBYTECODE=1
 ```
 
 Use that venv's `bin/python`, or another interpreter that imports
@@ -176,6 +181,88 @@ PYTHONPATH=src python recipe/clef/export_prompt_fixture.py \
   --check
 ```
 
+## Controlled migration acceptance
+
+The 2026-10-27 local issue #162 acceptance compares the original #165 Python
+HTTP server at `504b272c46dc1963f981c6bed9ef0c7ebdd40c69` with the Rust service
+at `3364dbd7f8b2cb414c24e73f24b74dd785888ecc`, based on main `22b7717` including
+#182. Later recipe/documentation edits do not change the measured runtime.
+Both services ran sequentially in one GPU allocation: NVIDIA L20X as reported
+by the device, PyTorch capability 9.0 (nvidia-smi reports 8.9), driver
+570.133.20, Torch CUDA 13.0. Both capability readings are retained. Do not
+relabel this device H200/H800 or combine these measurements with the
+historical results below.
+
+Controls: the Clef-flash snapshot above, BF16, Torch 2.11.0, torchvision 0.26.0,
+Transformers 5.10.2, Accelerate 1.15.0, FLA/fla-core 0.5.2, causal-conv1d
+1.7.0, no FlashInfer. Model, prompt and postprocessing sources are identical.
+Each server starts with an identical copy of the retained reference Triton
+cache; the nine selected autotune configurations remain unchanged after the
+run. There is no kernel change, CUDA graph, `torch.compile` or cross-request
+batching.
+
+Matching FLA package versions alone is insufficient for a zero-tolerance
+comparison. The first attempt used independent empty caches and had 146/231
+different responses and one Choice flip per round, despite zero HTTP failures.
+A two-request main-thread/new-thread crossover traced the difference to four
+different autotune selections. That failed experiment is retained. The corrected
+run below freezes the reference's existing choices, with no search for faster
+configurations and no relaxed tolerance. This control belongs in subsequent
+#173 comparisons too; newly compiled configurations require their own parity check.
+
+Input: all 231 easy/original/hard tasks from JevBench `7ce310c7`, with
+`thinking.enabled: false`. Canonical task SHA256:
+`dc3995d8ae1e2fc8e81ce38431add509eb8bb39b85aadfd0c7c32079382dde51`.
+This export's JSONL SHA256:
+`d35da44333e0bed0cea45ee3565147c041e480769c3bcba0279749f62f3fe761`.
+The encoding differs from the historical export; both services use these
+same bytes. Each service completed one four-case feasibility and three C1
+rounds, five warmups before each round, without restarting its server.
+No retries. Latency includes POST through body receipt, JSON decoding and
+schema validation; loading, warmups and direct model calls are excluded.
+
+| HTTP service | Round | Successful | Failed | p50 (ms) | p95 (ms) |
+| --- | --- | --- | --- | --- | --- |
+| python | 1 | 231/231 | 0 | 181.643 | 271.345 |
+| python | 2 | 231/231 | 0 | 181.229 | 249.311 |
+| python | 3 | 231/231 | 0 | 181.815 | 251.320 |
+| rust | 1 | 231/231 | 0 | 177.692 | 241.648 |
+| rust | 2 | 231/231 | 0 | 53.209 | 96.859 |
+| rust | 3 | 231/231 | 0 | 52.484 | 96.036 |
+
+All 693 measured response pairs match exactly, including JSON ordering, model
+echo and token usage. Probability/score drift and decision flips are zero.
+First/repeated mixed requests and the three invalid-input cases also match.
+Real-GPU checks pass for four concurrent requests, two client disconnect
+timings followed by correct responses, and health/inference 503 after killing
+the idle executor. CPU barriers separately establish the cancellation and
+resource lifetime boundaries described [below](#service-lifecycle-acceptance).
+
+This is a warmed compiler-cache comparison. Retain round 1 as well as rounds
+2 and 3; do not substitute the historical baseline or direct-call timings.
+The changed path includes persistent model-thread ownership and HTTP/1.1
+connection reuse. The experiment does not assign every saved millisecond to
+CUDA thread initialization. Baseline-then-candidate order and shared host
+activity limit causal precision. 27B, media, FlashInfer, other GPUs, a native
+joint head and sustained-load behavior remain unverified.
+
+The local delivery includes `validation-report.md`, `protocol.md`, per-round
+raw responses/metadata, the failure and crossover evidence, the frozen cache,
+and checksummed reproduction scripts in `issue-162-evidence.tar.gz`. It has
+not been published to GitHub. `handoff.md` identifies the service commit and
+exact local launch command for #173. The selected-config manifest SHA256 is
+`bd8c86c615878419578d96593ede668ff257e52ef082b3405b4df3a4c852cf3f`.
+
+For a matched comparison, copy the retained reference cache into a fresh
+directory for each service, export `TRITON_CACHE_DIR` to that directory before
+starting it, and preserve it through all three rounds. Compare the selected
+`*.autotune.json` configurations before/after. The cache is tied to the pinned
+software/device stack; a cache miss on another stack is not the same control.
+The [measurement procedure](#next-code-tip-on-the-l20x-labeled-host) below
+records the HTTP samples. Use `bench.py compare` on each corresponding round
+with `--max-probability-drift 0 --max-score-drift 0 --max-flips 0`, and check
+the full response JSON/order/usage separately.
+
 ## Public231 C1 on lab L20X (sm_89)
 
 Operator-reported, not re-run in the environment that edited this recipe.
@@ -208,8 +295,7 @@ Those three rounds are the baseline at HEAD `9030065` on the lab host
 ## Public231 C1 of tip `594528a9`
 
 Operator-reported remeasure on that same L20X-labeled lab host. Not re-run
-in the environment that edited this recipe. This paste is the primary a
-later tip has to beat.
+in the environment that edited this recipe. This was the primary within that historical experiment.
 
 Worker `594528a9f9c1ca38ce0dbb58a549191dfbde5bf3`. The paste states warmup
 5, concurrency 1, stock Public231 with `thinking.enabled` false, and metric
@@ -226,9 +312,9 @@ because that HEAD returned HTTP 422 on `thinking`. This remeasure names
 stock Public231 with `thinking.enabled` false. Neither paste includes a
 `sha256sum` of the file that was sent.
 
-This code tip stays. A later prefill change is a new tip and needs its own
-Public231 C1 paste before another delta is claimed. Compare that paste
-with p50 164.969 ms and p95 216.755 ms.
+These numbers describe that historical comparison only. Use a matched
+reference/candidate run for a new prefill change; do not reuse them as a
+measurement of the current Rust service.
 
 ## Public231 C1 of `omni-clef` tip `f9127a0`
 
@@ -263,9 +349,9 @@ returns. The standalone GDN timings in
 [benchmarks/gdn/README.md](../../benchmarks/gdn/README.md) are a different
 experiment and are not a Clef HTTP result.
 
-The primary to beat is the `594528a9` remeasure: p50 164.969 ms, p95
-216.755 ms, 231/231, `/health` `fla+causal_conv1d`. A new tip needs its
-own paste against those two figures.
+Use the frozen service/configuration from the controlled migration acceptance
+as the starting point for #173, then measure baseline and candidate under
+matched controls. Historical `594528a9` numbers are not a fresh baseline.
 
 This is the operator checklist for the next concurrency-1 latency
 measurement of the flash worker. It uses the existing
@@ -288,8 +374,8 @@ in a commit.
    executor dies before the port opens. Leave that process up for every
    traversal. The recorded `9030065` and `594528a9` pastes used the
    previous Python HTTP server. Tip `f9127a0` is an `omni-clef` paste and
-   is not a KEEP; the primary remains `594528a9`. A later code tip still
-   needs its own paste.
+   is not a KEEP; those historical figures remain attributed to that experiment.
+   A later code tip needs its own matched comparison.
    `GET /health` is absent until the startup forward returns, then must
    show `status` `ready`. The default `linear_attention` is
    `fla+causal_conv1d`. `flashinfer+fla+causal_conv1d` means the process
@@ -297,20 +383,17 @@ in a commit.
    process that exits at startup did not bind `causal_conv1d_fn` and a
    chunk kernel. Do not measure a process that is still on the PyTorch
    chunk or `F.conv1d` path.
-3. Obtain the frozen Public231 request manifest whose file SHA-256 is
-   `00d1f10ca1142499a598b5f1c6602d329cce1cef04c961c46fc0318daa2c67d3`.
-   That is the JSONL byte hash cited for the JevBench `7ce310c7` export in
-   [the latency leaderboard](../../benchmarks/latency-leaderboard.md).
-   The canonical task hash
+3. Freeze the exact Public231 request manifest sent to both services. The
+   controlled migration export from JevBench `7ce310c7` has file SHA-256
+   `d35da44333e0bed0cea45ee3565147c041e480769c3bcba0279749f62f3fe761`.
+   The canonical task hash is
    `dc3995d8ae1e2fc8e81ce38431add509eb8bb39b85aadfd0c7c32079382dde51`
-   is a different encoding and must not be substituted. Check the file
-   with `sha256sum` before `validate`. The `9030065` rounds did not use
-   that byte string: the `thinking` key had been removed, and the resulting
-   file hash was not reported. The `594528a9` remeasure names stock
-   Public231 with `thinking.enabled` false and also does not report a file
-   hash. Record `sha256sum` of whichever file the next run actually sends.
+   and is not a JSONL byte hash. Check the file with `sha256sum` before
+   `validate`. The older leaderboard export used byte hash `00d1f10c...`;
+   do not substitute it for this export. Record the bytes actually sent.
    Keep `thinking` when its `enabled` value is false; stripping it is no
-   longer required for admission.
+   longer required for admission. The local acceptance bundle includes the
+   export script and manifest.
 4. Install `benchmarks/requirements.txt` (`httpx==0.28.1`) into the client
    environment. The client and the worker may use different environments.
 5. Write a metadata JSON file. Required keys are `gpu`, `gpu_ids`,
@@ -327,8 +410,8 @@ in a commit.
      "precision": "bfloat16",
      "model_revision": "Cloudflare/clef-flash@f0b7d3cd65296abfe459e6c228b618f5d8b26d2f",
      "runtime_revision": "<git rev-parse HEAD of this worker>",
-     "cache_policy": "one request at a time on the executor main thread; Rust FIFO admission; no prefix cache; no CUDA graph; transformers cache left at its default",
-     "cuda_evidence": "nvidia-smi name NVIDIA L20X, compute capability as printed (8.9 on the lab host), while the worker was running with --device cuda. Copy /health linear_attention.",
+     "cache_policy": "one request at a time; identical copies of the frozen reference Triton cache per service; record selected-config hash; persistent server/cache through all rounds; no prefix cache or CUDA graph",
+     "cuda_evidence": "record both nvidia-smi and PyTorch name/capability, device UUID, and /health linear_attention while the worker runs with --device cuda",
      "reservation": "<allocation id>"
    }
    ```
@@ -344,7 +427,7 @@ in a commit.
 
    ```sh
    python benchmarks/bench.py validate <public231.jsonl>
-   python benchmarks/bench.py run <public231.jsonl> \
+   python benchmarks/bench.py run benchmarks/smoke.jsonl \
      --endpoint http://127.0.0.1:8000/v1/systemone \
      --model clef-flash \
      --metadata <metadata.json> \
@@ -353,9 +436,10 @@ in a commit.
      --output <fresh-directory>/feasibility
    ```
 
-   Repeat `run` three times with `--phase measured` and the same manifest,
-   metadata, timeout, warmup and concurrency. Exclude feasibility from the
-   pooled latency.
+   For the three measured traversals, replace `benchmarks/smoke.jsonl` with
+   the frozen `<public231.jsonl>` and use `--phase measured`, distinct output
+   directories, and the same metadata, timeout, warmup and concurrency. Leave
+   the service alive between traversals. Exclude feasibility from pooled latency.
 8. For each measured directory, recompute
    `python benchmarks/bench.py summary <directory>`. Pool only the three
    rounds if each summary has `evidence_complete` true and zero failures.
@@ -366,32 +450,17 @@ in a commit.
    `post_to_body_json_and_schema_validation` clock. It is not the H800
    leaderboard clock. Record the `nvidia-smi` name, the printed capability,
    and `/health` `linear_attention` with the p50 and p95. Compare a new
-   code tip with the recorded primary, tip `594528a9` at p50 164.969 ms
-   and p95 216.755 ms, only after that new tip has its own paste. The
-   `9030065` run1 figures remain the baseline of that recorded comparison.
+   code tip with its newly measured reference under the same fixed operator
+   configuration. Keep the historical `9030065`/`594528a9` comparison separate.
 
 ## What remains unverified
 
-Image and video inputs, and a native joint head. The `9030065`
-rounds use metric `successful_latency` and clock
-`post_to_body_json_and_schema_validation`. The tip `594528a9` remeasure
-states metric `successful_latency`, warmup 5, concurrency 1, and stock
-Public231 with `thinking.enabled` false. It does not restate the clock
-name, manifest hash, driver, CUDA version, or answer parity. This
-environment has no GPU and did not repeat either campaign, and it did
-not repeat the `f9127a0` `omni-clef` paste above. That paste is not a
-KEEP, and it does not replace tip `594528a9` as the primary. H1, one encode
-per request, is already inside the `9030065` baseline, so its isolated
-effect is unknown. The recorded win, and the primary a later tip has to
-beat, is the FLA chunk plus `causal_conv1d` on the reported-8.9 host:
-p50 164.969 ms, p95 216.755 ms. The default prefill remains that FLA
-chunk, including on reported majors 9, 10, and 12. `--gdn-prefill
-flashinfer` is opt-in. It has no measured forward and no answer parity
-against `fla+causal_conv1d`; that parity run is the named follow-up
-blocker before the flag becomes the default. The startup forward that
-runs before `/health` is separate from the client warmup in the C1
-protocol and has no latency claim. A later code change is unmeasured
-until its own paste.
+Clef 27B, images/video, the native joint head, FlashInfer and other GPUs have
+not been run in this acceptance. The default remains FLA; making another
+prefill path the default needs its own forward, output-parity and HTTP evidence.
+The earlier `9030065`, `594528a9` and `f9127a0` operator reports retain their
+original provenance and limitations; they were not reproduced or relabelled
+as results for this service. No vLLM performance comparison is established.
 
 ## Service lifecycle acceptance
 
@@ -418,6 +487,9 @@ inference. An IPC failure during execution returns `500 {"detail": "inference
 failed"}` to a still-connected caller, marks the executor unavailable before
 releasing admission, and makes later health checks and requests return 503.
 This failure publication also occurs when the original client has disconnected.
+Requests already past the initial liveness check, including queued requests,
+can return 500 if the executor fails before their exchange. New requests after
+failure is detected return 503.
 Restart the server to recover from a dead or invalid IPC stream. A valid
 model-generated error response retains its original status/body and does not by
 itself poison the stream.
