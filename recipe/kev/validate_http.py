@@ -13,6 +13,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def port():
@@ -25,7 +26,7 @@ def request(url, value=None, raw=None, content_type='application/json'):
     data = raw if raw is not None else (json.dumps(value, ensure_ascii=False).encode() if value is not None else None)
     req = urllib.request.Request(url, data=data, headers={'Content-Type': content_type})
     try:
-        with urllib.request.urlopen(req, timeout=180) as response:
+        with HTTP.open(req, timeout=180) as response:
             return response.status, json.load(response)
     except urllib.error.HTTPError as error:
         return error.code, json.loads(error.read())

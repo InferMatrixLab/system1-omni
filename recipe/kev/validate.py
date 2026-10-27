@@ -9,6 +9,7 @@ import hashlib
 import importlib.metadata
 import importlib.util
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -110,6 +111,9 @@ def compare(args):
             assert len(ca['probabilities']) == len(cb['probabilities']) == len(expected['meta'])
             for meta, pa, pb in zip(expected['meta'], ca['probabilities'], cb['probabilities']):
                 assert len(pa) == len(pb) == len(meta['keys'])
+                for probabilities in (pa, pb):
+                    assert all(math.isfinite(v) and 0 <= v <= 1 for v in probabilities), 'invalid probabilities'
+                    assert abs(sum(probabilities)-1) < 1e-4, 'unnormalized probabilities'
                 error = max(abs(x-y) for x, y in zip(pa, pb))
                 row = {'case': expected['name'], 'question': meta['id'], 'type': meta['type'], 'probability_max_abs': error}
                 if error > 0.01:
