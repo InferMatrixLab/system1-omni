@@ -1580,6 +1580,7 @@ fn matched_gemm_rows_equal_complete_ordinary_projection() {
         }
     }
 }
+
 mod batched_gdn;
 
 mod packed_gemm;

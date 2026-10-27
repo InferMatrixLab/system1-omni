@@ -16,7 +16,6 @@
 // runs on.
 #include <cublasLt.h>
 
-#include <cstring>
 #include <map>
 #include <list>
 #include <iterator>

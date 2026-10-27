@@ -131,7 +131,7 @@ fn prepared_candidates_have_exact_ids_and_finished_responses_keep_mapping() {
     );
     assert_eq!(
         body["metadata"]["prefix_cache"],
-        json!({"policy":"default","enabled":false,"scope":"none","saved_tokens":0})
+        json!({"policy": "default", "enabled": false, "scope": "none", "saved_tokens": 0})
     );
     assert!(body["metadata"]["inference_seconds"].as_f64().unwrap() >= 0.0);
     assert_eq!(body["model"], CHECKPOINTS[0].model_id);
@@ -139,6 +139,8 @@ fn prepared_candidates_have_exact_ids_and_finished_responses_keep_mapping() {
 
 #[test]
 fn prefix_metadata_uses_executed_savings_without_changing_answers_or_usage() {
+    use crate::executor::PrefixUse;
+    use omni_qwen3_5_native::prefix::PrefixMode;
     let request = serde_json::to_vec(&json!({
         "state": "x ".repeat(768),
         "questions": {"q": {"type": "choice", "instructions": "Route",
@@ -159,7 +161,15 @@ fn prefix_metadata_uses_executed_savings_without_changing_answers_or_usage() {
             .prepare(&request)
             .unwrap()
             .context
-            .finish_with_prefix(rows.clone(), saved)
+            .finish_with_prefix(
+                rows.clone(),
+                Some(&PrefixUse {
+                    mode: PrefixMode::Off,
+                    shared: saved > 0,
+                    across_questions: false,
+                    saved_tokens: saved,
+                }),
+            )
             .unwrap();
         assert_eq!(actual["answers"], baseline["answers"]);
         assert_eq!(actual["usage"], baseline["usage"]);
@@ -280,6 +290,48 @@ fn finishing_rejects_missing_candidates_and_nonfinite_scores() {
                 .is_err()
         );
     }
+}
+
+#[test]
+fn prefix_metadata_reports_how_candidates_ran() {
+    use crate::executor::PrefixUse;
+    use omni_qwen3_5_native::prefix::PrefixMode;
+    let finish = |prefix: Option<PrefixUse>| {
+        processor(4096)
+            .prepare(REQUEST)
+            .unwrap()
+            .context
+            .finish_with_prefix(vec![vec![3.0, 3.0], vec![0.0]], prefix.as_ref())
+            .unwrap()["metadata"]["prefix_cache"]
+            .clone()
+    };
+    let used = |mode, shared, across_questions, saved_tokens| {
+        Some(PrefixUse {
+            mode,
+            shared,
+            across_questions,
+            saved_tokens,
+        })
+    };
+    let off = json!({"policy": "default", "enabled": false, "scope": "none", "saved_tokens": 0});
+    assert_eq!(finish(None), off);
+    assert_eq!(finish(used(PrefixMode::Off, false, false, 0)), off);
+    assert_eq!(
+        finish(used(PrefixMode::Fixed, false, false, 0)),
+        json!({"policy": "fixed", "enabled": false, "scope": "none", "saved_tokens": 0})
+    );
+    assert_eq!(
+        finish(used(PrefixMode::Shared, true, false, 128)),
+        json!({"policy": "shared", "enabled": true, "scope": "within_question", "saved_tokens": 128})
+    );
+    assert_eq!(
+        finish(used(PrefixMode::Auto, true, true, 704)),
+        json!({"policy": "auto", "enabled": true, "scope": "across_questions", "saved_tokens": 704})
+    );
+    assert_eq!(
+        finish(used(PrefixMode::Auto, false, false, 0)),
+        json!({"policy": "auto", "enabled": false, "scope": "none", "saved_tokens": 0})
+    );
 }
 
 fn question(id: &str, prompts: &[&str]) -> Question {

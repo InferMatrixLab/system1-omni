@@ -6,6 +6,8 @@ impl Model {
     /// Returns `None` without invoking `execute` if independent full prompts use
     /// different descriptors or a window is unsupported. Legacy fixed-M64 calls
     /// outside this scope keep their own handle, including after errors.
+    /// Both CUDA symbols are required even for a non-sharing warmup, so an
+    /// explicitly selected matched worker fails before reporting readiness.
     ///
     /// Descriptor equality is an admission check, not a portable cuBLAS numerical
     /// guarantee: requalify row invariance on each GPU/library/model combination.
@@ -24,6 +26,12 @@ impl Model {
                 .all(|&m| m > 0 && m <= self.cfg.max_positions && m <= i32::MAX as usize),
             "invalid matched prompt/window length"
         );
+        let create = cuda::api()
+            .matched_create()
+            .context("rebuild libqwen3_5_cuda for matched prefix execution")?;
+        let compatible = cuda::api()
+            .matched_compatible()
+            .context("rebuild libqwen3_5_cuda for matched prefix execution")?;
         if lengths.len() < 2 || windows.is_empty() {
             return Ok(None);
         }
@@ -36,15 +44,9 @@ impl Model {
                 unsafe { (cuda::api().cs1_gemm_destroy)(h) };
             }
         }
-        let compatible = cuda::api()
-            .matched_compatible()
-            .context("rebuild libqwen3_5_cuda for matched prefix execution")?;
         let handle = if let Some(&h) = self.matched_handles.get(&m) {
             h
         } else {
-            let create = cuda::api()
-                .matched_create()
-                .context("rebuild libqwen3_5_cuda for matched prefix execution")?;
             // SAFETY: validated positive i32 length; this model owns the handle.
             let h = unsafe { create(GEMM_WORKSPACE, m as i32) };
             ensure!(!h.is_null(), "matched cuBLASLt setup failed");

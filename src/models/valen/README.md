@@ -1,10 +1,10 @@
 # Valen-Preview-0923 reference contract
 
-This directory contains the first System1-Omni integration slice for
+This directory contains the System1-Omni reference integration for
 Valen-Preview-0923. It is a reference-serving boundary only: the Python worker,
 processor, executor, and postprocessor serve the pinned text and single-image
 `choice`, `noul`, and `score` questions. Native CUDA execution is not part of
-this slice.
+it.
 
 ## Pinned artifacts
 
@@ -89,7 +89,7 @@ The pinned compiler builds every question type from the same record family:
   with unspecified sides filled from the same fixed wording — `P(true)` still
   comes from the two-candidate softmax.
 
-Postprocessing keeps Valen's original formulas for this reference slice:
+Postprocessing keeps Valen's original formulas:
 
 ~~~text
 choice/noul confidence (n candidates):
@@ -168,6 +168,15 @@ The status is `422` when a well-formed request cannot be evaluated:
 
 Any other failure is `500` with a generic detail and no request content in
 the log (the exception type only).
+
+## Checkpoint export
+
+The pinned checkpoint and base also export to a native-loadable
+safetensors artifact set — the language LoRA served separately as unmerged
+FP32 adapters, vision-top and merger replaced, FP32 decision head — with
+every transformation recorded in a JSON
+manifest: see [recipe/valen/export.md](../../../recipe/valen/export.md).
+Consuming that export does not change this worker.
 
 ## Ownership boundary
 

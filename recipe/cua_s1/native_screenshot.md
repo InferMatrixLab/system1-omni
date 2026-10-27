@@ -173,7 +173,9 @@ export CUA_S1_GRAPH=0 CUA_S1_DEVICE_FEATURES=0
 ```
 
 This mode requires the optional additive ABI 9 symbols `cs1_gemm_create_matched`
-and `cs1_gemm_compatible`; older libraries still serve the existing modes.
+and `cs1_gemm_compatible`. Both are checked during the single-question startup
+warmup, before the worker binds its health endpoint; an incomplete library fails
+with a rebuild error. Older libraries still serve the existing modes.
 The engine retains at most 16 matched GEMM workspaces, 32 MiB each. On a new
 reference length beyond that cap, it drains the language stream and releases the
 previous generation before allocating another. This is separate from retained
@@ -196,8 +198,9 @@ cargo test --release --locked -p omni-qwen3-5-native --test kernels \
 # Also run the prefix_tests command above with vision Graph 0 and 1.
 ```
 
-On RTX 4090/SM8.9, driver 595.71.05, CUDA 13.0/cuBLASLt 13.1.1.3, a fresh
-comparison against `d4908d95c` used concurrency 1 and a direct native-worker HTTP
+At runtime source `02d75b3b4`, on RTX 4090/SM8.9, driver 595.71.05,
+CUDA 13.0/cuBLASLt 13.1.1.3, a comparison against `d4908d95c` used concurrency 1
+and a direct native-worker HTTP
 POST through full JSON/schema validation. Each configuration ran in forward and
 reverse order, four timed traversals per visit, after excluding growth,
 all-shape stabilization and five warmups. The frozen real suite uses 12 screenshots
@@ -237,6 +240,8 @@ need qualification.
 Raw timings, exclusions, logits, model/source/binary hashes, reproduction inputs
 and acquisition scripts, failures and final-source mapping are in the
 [2026-10-26 qualification](https://github.com/Levius-Fubuki/system1-omni/releases/download/cua-mm-qualification-20261026/cua-mm-matched-qualification-20261026.tar.gz). Original real screenshot pixels are omitted.
+These measurements precede the startup-symbol guard. That guard has host-only
+missing-symbol regression coverage; no new GPU numerical or timing run is claimed.
 
 ### Resident matched prefixes with window Graphs
 

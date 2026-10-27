@@ -5,6 +5,9 @@ First harness for #39: replay the same labelled requests against CUDA-backed
 required (`python -m pip install -r benchmarks/requirements.txt`). Reuse an
 existing benchmark environment when available.
 
+[Decision traces](traces/README.md) record what agents actually send, measure how much of
+it repeats, and replay it at the agent's pace.
+
 The [latency leaderboard](latency-leaderboard.md) records the five-model H800
 comparison and its timing rules. Its historical body-receipt clock is kept
 separate from this runner's body/JSON/schema-validation clock.

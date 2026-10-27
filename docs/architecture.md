@@ -23,7 +23,9 @@ preserves the original complete-prompt arithmetic choices; it is separate from
 the fixed-algorithm `forward_shared` interface described below.
 Decider optionally packs up to four complete rows and 4096 tokens within
 one request, or selects request-local shared prefixes through the same canonical
-continuation path used by JEV-VL (below). Both optimizations default off.
+continuation path used by JEV-VL (below). Both optimizations default off. Open-Jev
+can select the same shared prefixes for the candidates of one request, also
+default off.
 [Laya's native worker](../src/models/laya/README.md)
 uses a separate Hopper CUDA backend for one complete padded request. These workers
 coordinate independent processors and executors through
@@ -104,8 +106,10 @@ synchronizes its stream before returning, also on error. Its GEMMs keep one
 algorithm per weight shape, so on GPUs where that keeps rows independent of M
 (checked by `fixed_gemm_rows_do_not_depend_on_m`, so far on sm_89) each result equals
 `forward_fixed` on the full prompt bit for bit; it differs from `forward` by
-rounding. Both take merged weights with the default numerics only, and refuse an
-unmerged adapter, reference numerics or FP32 GDN before any device work. Each
+rounding. `check_fixed_rows` repeats a short version of that check for a loaded
+model's projection shapes; Open-Jev runs it at startup when sharing is selected.
+Both take merged weights with the default numerics only, and refuse an unmerged
+adapter, reference numerics or FP32 GDN before any device work. Each
 prefix state takes about 50 MiB on Qwen3.5-4B and 9B, plus 32 KiB per position of
 its prefix rounded up to 1,024 positions, and the GEMM handle a 32 MiB workspace.
 
