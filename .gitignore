@@ -30,3 +30,9 @@ weights/
 # Documentation site build and environment
 /site/
 .venv-docs/
+
+# Vela 4B/9B head-input binaries are re-exported from the pinned
+# packages, not committed (the JSON sidecars and the 0.8B binaries
+# are); see recipe/vela/native.md
+tests/vela/fixtures/head-input-Vela-2.0-4B-*.safetensors
+tests/vela/fixtures/head-input-Vela-2.0-9B-*.safetensors

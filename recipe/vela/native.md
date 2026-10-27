@@ -74,6 +74,15 @@ PYTHONPATH=src .venv/bin/python recipe/vela/export_head_inputs.py \
   --model weights/vela-2.0-0.8b --out tests/vela/fixtures/
 ~~~
 
+Both scripts pass `--model` through the worker's pin gate before any
+package code is imported, and stamp the recorded request with the
+member's served name. Only the 0.8B binaries are committed; the 4B/9B
+`.safetensors` are re-exported on demand (they are gitignored) —
+point `--model` at the pinned `Vela-2.0-4B`/`Vela-2.0-9B` package and
+re-run `export_head_inputs.py` (add `--device cuda` to record the
+bf16-autocast numbers the member-calibrated gates expect) before the
+opt-in head/response/executor replays below.
+
 The token plans record what the pinned runtime feeds the backbone (the
 predict mapping, the per-row decomposition, the rendered `p_ids`,
 blocks and readout positions, truncation, a windowed long-span case);
@@ -96,9 +105,10 @@ VELA_CUDA_LIB=/path/to/libqwen3_5_cuda.so \
   cargo test -p omni-vela-native --test vela_native_executor -- --ignored --nocapture
 ~~~
 
-27 tests run everywhere with no weights and no GPU: the wire contract
+30 tests run everywhere with no weights and no GPU: the wire contract
 against the pinned runtime's 422/400 bodies, the bundle manifest gate,
-and the predict-mapping/plan parity on every frozen fixture. The four
+and the predict-mapping/plan parity on every frozen fixture of every
+member. The four
 opt-in checks (behind `-- --ignored`) replay the fixtures through the
 Rust implementation:
 
