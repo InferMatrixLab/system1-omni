@@ -1,10 +1,12 @@
 # Clef reference worker
 
-Serve Cloudflare Clef-flash or Clef on `POST /v1/systemone` by loading the
-pinned snapshot's joint schema model. The contract, hashes and the
-unsupported image, video and native-CUDA paths are in the
-[model README](../../src/models/clef/README.md). Commands below run from the
-repository root.
+Serve Cloudflare Clef-flash or Clef on `POST /v1/systemone`. The HTTP server
+is the Rust binary `omni-clef`. It admits one request at a time and forwards
+the body to one Python executor process. That process loads the pinned
+snapshot's joint schema model and scores every request on its main thread.
+The contract, hashes, and the unsupported image, video, and native joint-head
+paths are in the [model README](../../src/models/clef/README.md). Commands
+below run from the repository root.
 
 Clef-flash is the bring-up variant: about 19.1 GB of safetensors versus
 about 55.0 GB for Clef. Both use the same text contract. The recorded
@@ -84,8 +86,24 @@ PY
 Use the directory that command prints as `<snapshot>`. Do not point the
 worker at a different revision; the hash gate refuses it.
 
+`omni-clef` starts the executor with `CLEF_PYTHON` when that variable is
+set, and with `python3` otherwise. The interpreter has to be the recipe
+environment from the install above: the one that has `causal-conv1d`.
+The default system `python3` does not, and the executor dies during
+startup before the port opens. Export the venv that installed this
+recipe, for example:
+
 ```sh
-PYTHONPATH=src python -m frontend.clef \
+export CLEF_PYTHON="$HOME/envs/clef-ref/bin/python"
+```
+
+Use that venv's `bin/python`, or another interpreter that imports
+`causal_conv1d`, if the environment lives somewhere else. The same
+export applies when the process is started through `python -m frontend.clef`.
+
+```sh
+cargo build --release --locked -p omni-clef
+./target/release/omni-clef \
   --model <snapshot> \
   --variant clef-flash \
   --device cuda \
@@ -94,7 +112,12 @@ PYTHONPATH=src python -m frontend.clef \
   --port 8000
 ```
 
-The process runs one text forward, then binds. `GET
+`PYTHONPATH=src python -m frontend.clef` with the same flags execs that
+binary. It does not bind a Python HTTP server. If `omni-clef` is not built,
+the launcher exits before opening a port. `CLEF_PYTHON` still selects the
+executor interpreter after the exec.
+
+The executor process runs one text forward, then `omni-clef` binds. `GET
 http://127.0.0.1:8000/health` is not served until that forward returns.
 It then returns `status: ready`, `variant: clef-flash`,
 `prompt_mode: non-thinking`, `modalities: ["text"]`,
@@ -139,6 +162,7 @@ loaded repo id.
 PYTHONPATH=src python -m pip install pytest
 PYTHONPATH=src python -m pytest tests/clef -q
 PYTHONPATH=src python -m compileall -q src/models/clef src/frontend/clef.py tests/clef
+cargo test --locked -p omni-clef
 ```
 
 To confirm the checked-in token fixture against a downloaded loader and
@@ -206,6 +230,27 @@ This code tip stays. A later prefill change is a new tip and needs its own
 Public231 C1 paste before another delta is claimed. Compare that paste
 with p50 164.969 ms and p95 216.755 ms.
 
+## Public231 C1 of `omni-clef` tip `f9127a0`
+
+Operator-reported on the same L20X-labeled lab host. Not re-run in the
+environment that edited this recipe. Worker
+`f9127a03b732aaf6e88c99a0212e02acfdb01880`. Smoke 4/4. `/health`
+`linear_attention` was `fla+causal_conv1d`. Three Public231 concurrency-1
+rounds versus the primary pair 164.969 / 216.755 ms:
+
+| Round | p50 (ms) | p95 (ms) | Successful |
+| --- | --- | --- | --- |
+| R1 | 169.605 | 220.003 | 231/231 |
+| R2 | 53.580 | 97.031 | pass count not restated in this handoff |
+| R3 | 52.950 | 97.608 | pass count not restated in this handoff |
+
+The operator reports quality `choice_acc=0.8417`, `noul_acc=0.7973`,
+`score_mae=0.2488`, matching the `594528a9` baseline. This paste is a
+serve-path measurement, not a latency KEEP. R1 does not pass the dual
+gate against 164.969 / 216.755. R2 and R3 are steady-state rounds and
+are not a KEEP and not a new primary. The primary remains tip
+`594528a9`.
+
 ## Next code tip on the L20X-labeled host
 
 That host is the measurement machine, including when `nvidia-smi` reports
@@ -237,8 +282,14 @@ in a commit.
    capability it prints, including 8.9. Do not stop because the name is
    not `NVIDIA H200`, and do not stop because the capability is not 9.0.
    Do not report the run as H800 or as the Public231 leaderboard.
-2. Start `frontend.clef` as above, on loopback port 8000, variant
-   `clef-flash`, device `cuda`. Leave that process up for every traversal.
+2. Export `CLEF_PYTHON` to the recipe venv, as in [Start](#start), then
+   start `omni-clef` on loopback port 8000, variant `clef-flash`, device
+   `cuda`. The default system `python3` lacks `causal-conv1d` and the
+   executor dies before the port opens. Leave that process up for every
+   traversal. The recorded `9030065` and `594528a9` pastes used the
+   previous Python HTTP server. Tip `f9127a0` is an `omni-clef` paste and
+   is not a KEEP; the primary remains `594528a9`. A later code tip still
+   needs its own paste.
    `GET /health` is absent until the startup forward returns, then must
    show `status` `ready`. The default `linear_attention` is
    `fla+causal_conv1d`. `flashinfer+fla+causal_conv1d` means the process
@@ -276,7 +327,7 @@ in a commit.
      "precision": "bfloat16",
      "model_revision": "Cloudflare/clef-flash@f0b7d3cd65296abfe459e6c228b618f5d8b26d2f",
      "runtime_revision": "<git rev-parse HEAD of this worker>",
-     "cache_policy": "one request at a time; no prefix cache; no CUDA graph; transformers cache left at its default",
+     "cache_policy": "one request at a time on the executor main thread; Rust FIFO admission; no prefix cache; no CUDA graph; transformers cache left at its default",
      "cuda_evidence": "nvidia-smi name NVIDIA L20X, compute capability as printed (8.9 on the lab host), while the worker was running with --device cuda. Copy /health linear_attention.",
      "reservation": "<allocation id>"
    }
@@ -321,13 +372,15 @@ in a commit.
 
 ## What remains unverified
 
-Image and video inputs, native CUDA, and answer parity. The `9030065`
+Image and video inputs, and a native joint head. The `9030065`
 rounds use metric `successful_latency` and clock
 `post_to_body_json_and_schema_validation`. The tip `594528a9` remeasure
 states metric `successful_latency`, warmup 5, concurrency 1, and stock
 Public231 with `thinking.enabled` false. It does not restate the clock
 name, manifest hash, driver, CUDA version, or answer parity. This
-environment has no GPU and did not repeat either campaign. H1, one encode
+environment has no GPU and did not repeat either campaign, and it did
+not repeat the `f9127a0` `omni-clef` paste above. That paste is not a
+KEEP, and it does not replace tip `594528a9` as the primary. H1, one encode
 per request, is already inside the `9030065` baseline, so its isolated
 effect is unknown. The recorded win, and the primary a later tip has to
 beat, is the FLA chunk plus `causal_conv1d` on the reported-8.9 host:

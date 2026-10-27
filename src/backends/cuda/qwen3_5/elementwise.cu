@@ -39,6 +39,64 @@ __global__ void gdn_conv_kernel(const bf16* __restrict__ qkv, int ld, const bf16
         v[(size_t)t * value_dim + c - 2 * key_dim] = y;
 }
 
+// Identical four-tap accumulation with the preceding three projection rows.
+__global__ void gdn_conv_prefix_kernel(const bf16* __restrict__ qkv, const bf16* __restrict__ history, int ld, const bf16* __restrict__ w,
+                                bf16* __restrict__ q, bf16* __restrict__ k, bf16* __restrict__ v, int T,
+                                int key_dim, int value_dim) {
+    const int channels = 2 * key_dim + value_dim;
+    const size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= (size_t)T * channels) return;
+    const int t = idx / channels, c = idx % channels;
+    float acc = 0.f;
+#pragma unroll
+    for (int j = 0; j < 4; j++) {
+        const int s = t - 3 + j;
+        const bf16* source = s < 0 ? history + (size_t)(s + 3) * ld : qkv + (size_t)s * ld;
+        acc = fmaf(f32(w[c * 4 + j]), f32(source[c]), acc);
+    }
+    const bf16 y = to_bf16(silu(round_bf16(acc)));
+    if (c < key_dim)
+        q[(size_t)t * key_dim + c] = y;
+    else if (c < 2 * key_dim)
+        k[(size_t)t * key_dim + c - key_dim] = y;
+    else
+        v[(size_t)t * value_dim + c - 2 * key_dim] = y;
+}
+
+// Eight adjacent channels retain the original four FMAs and both BF16 roundings.
+// Separate token/channel grid dimensions avoid per-element integer division.
+template<bool Prefix>
+__global__ void gdn_conv_vector_kernel(const Pack8* __restrict__ qkv,
+                                        const Pack8* __restrict__ history, int ld,
+                                        const Pack8* __restrict__ w, Pack8* __restrict__ q,
+                                        Pack8* __restrict__ k, Pack8* __restrict__ v,
+                                        int key_packs, int value_packs) {
+    const int t = blockIdx.y, c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= 2 * key_packs + value_packs) return;
+    const Pack8 weights[4] = {w[c * 4], w[c * 4 + 1], w[c * 4 + 2], w[c * 4 + 3]};
+    float acc[8] = {};
+#pragma unroll
+    for (int j = 0; j < 4; j++) {
+        const int row = t - 3 + j;
+        if (Prefix || row >= 0) {
+            const Pack8 value = row < 0 ? history[(size_t)(row + 3) * ld + c]
+                                        : qkv[(size_t)row * ld + c];
+#pragma unroll
+            for (int e = 0; e < 8; e++)
+                acc[e] = fmaf(f32(weights[e / 2].v[(e % 2) * 4 + j]), f32(value.v[e]), acc[e]);
+        }
+    }
+    Pack8 out;
+#pragma unroll
+    for (int e = 0; e < 8; e++) out.v[e] = to_bf16(silu(round_bf16(acc[e])));
+    if (c < key_packs)
+        q[(size_t)t * key_packs + c] = out;
+    else if (c < 2 * key_packs)
+        k[(size_t)t * key_packs + c - key_packs] = out;
+    else
+        v[(size_t)t * value_packs + c - 2 * key_packs] = out;
+}
+
 // beta = sigmoid(b) in bfloat16; g = -exp(A_log) * softplus(a + dt_bias) in float32
 // (F.softplus with threshold 20).
 __global__ void gdn_gates_kernel(const bf16* __restrict__ b, const bf16* __restrict__ a, int ld,
@@ -158,5 +216,46 @@ extern "C" int cs1_bf16_finite(const void* x, size_t n, uint32_t* flag, void* st
     if (e != cudaSuccess) return e;
     if (n) bf16_finite_kernel<<<static_cast<unsigned int>(((n - 1) / 256 + 1) < 65535 ? ((n - 1) / 256 + 1) : 65535), 256, 0, st>>>(
         static_cast<const uint16_t*>(x), n, flag);
+    return cudaGetLastError();
+}
+
+extern "C" int cs1_gdn_conv_prefix(const void* qkv, const void* history, int ld, const void* w,
+                                   void* q, void* k, void* v, int T, int key_dim, int value_dim,
+                                   void* stream) {
+    if (!qkv || !history || !w || !q || !k || !v || T <= 0 || key_dim <= 0 || value_dim <= 0 ||
+        ld < 2 * key_dim + value_dim) return cudaErrorInvalidValue;
+    const size_t n = (size_t)T * (2 * key_dim + value_dim);
+    const uintptr_t alignment = reinterpret_cast<uintptr_t>(qkv) | reinterpret_cast<uintptr_t>(history) |
+        reinterpret_cast<uintptr_t>(w) | reinterpret_cast<uintptr_t>(q) | reinterpret_cast<uintptr_t>(k) |
+        reinterpret_cast<uintptr_t>(v);
+    if (T >= 64 && T <= 65535 && key_dim % 8 == 0 && value_dim % 8 == 0 && ld % 8 == 0 && !(alignment & 15)) {
+        const int packs = (2 * key_dim + value_dim) / 8;
+        gdn_conv_vector_kernel<true><<<dim3((packs + THREADS - 1) / THREADS, T), THREADS, 0,
+                                       static_cast<cudaStream_t>(stream)>>>(
+            static_cast<const Pack8*>(qkv), static_cast<const Pack8*>(history), ld / 8,
+            static_cast<const Pack8*>(w), static_cast<Pack8*>(q), static_cast<Pack8*>(k),
+            static_cast<Pack8*>(v), key_dim / 8, value_dim / 8);
+    } else {
+    gdn_conv_prefix_kernel<<<blocks(n), THREADS, 0, static_cast<cudaStream_t>(stream)>>>(
+        static_cast<const bf16*>(qkv), static_cast<const bf16*>(history), ld, static_cast<const bf16*>(w),
+        static_cast<bf16*>(q), static_cast<bf16*>(k), static_cast<bf16*>(v), T, key_dim, value_dim);
+    }
+    return cudaGetLastError();
+}
+
+// Additive opt-in entry point; unsupported layouts preserve the scalar path.
+extern "C" int cs1_gdn_conv_vector(const void* qkv, int ld, const void* w, void* q,
+                                   void* k, void* v, int T, int key_dim, int value_dim,
+                                   void* stream) {
+    const uintptr_t alignment = reinterpret_cast<uintptr_t>(qkv) | reinterpret_cast<uintptr_t>(w) |
+        reinterpret_cast<uintptr_t>(q) | reinterpret_cast<uintptr_t>(k) | reinterpret_cast<uintptr_t>(v);
+    if (T < 64 || T > 65535 || key_dim <= 0 || value_dim <= 0 ||
+        key_dim % 8 || value_dim % 8 || ld % 8 || ld < 2 * key_dim + value_dim || (alignment & 15))
+        return cs1_gdn_conv(qkv, ld, w, q, k, v, T, key_dim, value_dim, stream);
+    const int packs = (2 * key_dim + value_dim) / 8;
+    gdn_conv_vector_kernel<false><<<dim3((packs + THREADS - 1) / THREADS, T), THREADS, 0,
+                                    static_cast<cudaStream_t>(stream)>>>(
+        static_cast<const Pack8*>(qkv), nullptr, ld / 8, static_cast<const Pack8*>(w),
+        static_cast<Pack8*>(q), static_cast<Pack8*>(k), static_cast<Pack8*>(v), key_dim / 8, value_dim / 8);
     return cudaGetLastError();
 }

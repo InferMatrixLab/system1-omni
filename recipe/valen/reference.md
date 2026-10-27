@@ -158,6 +158,10 @@ writes `valen_manifest.json`. Verify the final identity before serving:
 
 ~~~sh
 test "$(git -C "$VALEN_SRC" rev-parse HEAD)" = "$VALEN_SOURCE_REV"
+test -z "$(git -C "$VALEN_SRC" status --porcelain --untracked-files=no)"
+# Untracked *and* ignored modules Python can import by name (source,
+# sourceless bytecode, extension) must be absent; __pycache__ caches are fine.
+test -z "$(git -C "$VALEN_SRC" status --porcelain --untracked-files=all --ignored=matching | grep -E '^(\?\?|!!).*\.(py|pyc|pyd|so)$' | grep -v __pycache__)"
 test "$(sha256sum "$VALEN_CKPT/checkpoint.pt" | cut -d' ' -f1)" = "$VALEN_CHECKPOINT_SHA"
 .venv/bin/python - <<'PY'
 import json, os
@@ -175,6 +179,9 @@ print("artifact verification: PASS")
 print(manifest["versions"])
 PY
 ~~~
+
+The pinned checkpoint and base can also be exported to a manifest-described
+safetensors artifact set for non-Python consumers: [export.md](export.md).
 
 ## Start the worker
 
@@ -270,11 +277,11 @@ in the integration pull request):
 {
   "model": "valen-preview-0923",
   "answers": {
-    "duplicate": {"type": "noul", "noul": 0.0, "probabilities": {"true": 0.0, "false": 0.0}, "confidence": 0.0},
-    "authorized": {"type": "noul", "noul": 0.0, "probabilities": {"true": 0.0, "false": 0.0}, "confidence": 0.0}
+    "duplicate": {"type": "noul", "noul": "<p(true)>", "probabilities": {"true": "<p(true)>", "false": "<p(false)>"}, "confidence": "<confidence>"},
+    "authorized": {"type": "noul", "noul": "<p(true)>", "probabilities": {"true": "<p(true)>", "false": "<p(false)>"}, "confidence": "<confidence>"}
   },
-  "usage": {"input_tokens": 0, "output_tokens": 0},
-  "internal_usage": {"compute_tokens": 0}
+  "usage": {"input_tokens": "<count>", "output_tokens": 0},
+  "internal_usage": {"compute_tokens": "<count>"}
 }
 ~~~
 
@@ -296,13 +303,13 @@ in the integration pull request):
   "model": "valen-preview-0923",
   "answers": {"severity": {
     "type": "score",
-    "probabilities": {"0": 0.0, "1": 0.0, "2": 0.0},
-    "score": 0.0,
-    "legend": {"0": "level 0 text", "1": "level 1 text", "2": "level 2 text"},
-    "confidence": 0.0
+    "probabilities": {"0": "<p(0)>", "1": "<p(1)>", "2": "<p(2)>"},
+    "score": "<expected level>",
+    "legend": {"0": "<level 0 text>", "1": "<level 1 text>", "2": "<level 2 text>"},
+    "confidence": "<confidence>"
   }},
-  "usage": {"input_tokens": 0, "output_tokens": 0},
-  "internal_usage": {"compute_tokens": 0}
+  "usage": {"input_tokens": "<count>", "output_tokens": 0},
+  "internal_usage": {"compute_tokens": "<count>"}
 }
 ~~~
 
@@ -367,7 +374,7 @@ python recipe/valen/test_compare_reference.py
 Validated results:
 
 ~~~text
-pytest tests/valen: 47 passed in 1.21s
+pytest tests/valen: 47 passed in 1.21s (at 2192c27, before the export battery)
 compileall: passed
 cargo fmt --all --check: passed
 frontend integration: 12 passed; 0 failed
@@ -458,6 +465,89 @@ and [`example-score-request.json`](example-score-request.json) unless
 `--noul-body`/`--score-body` point elsewhere; `--case all` runs all four in
 one model load. Both blocks above are verbatim output of the committed tool;
 the `noul` and `score` blocks are recorded in the integration pull request.
+
+## Export parity
+
+The exported artifact set ([`export.md`](export.md)) was compared against the
+original pinned checkpoint stack with
+[`verify_export_parity.py`](verify_export_parity.py) on the same host as the
+records above. The two stacks are loaded serially, each in its own subprocess
+(the ~6.6 GiB BF16 stack does not fit twice in 8 GiB VRAM):
+
+- original: the worker's own `ValenExecutor` build — pinned base,
+  PEFT-wrapped language model with the FP32 LoRA applied unmerged, trained
+  vision-top blocks, merger and head from `checkpoint.pt`;
+- exported: the consumption path the export manifest documents —
+  `Qwen3_5ForConditionalGeneration.from_pretrained(weights/valen-export,
+  dtype=bf16, eager).model`, the language LoRA re-applied through the same
+  peft build the pinned reference uses (every language Linear wrapped at the
+  manifest-declared rank 32 / alpha 64, the 372 FP32 tensors of
+  `lora.safetensors` loaded by key, adapters kept FP32), plus the decision
+  head rebuilt from `head.safetensors` (DecisionHead 2048→256, FP32, no
+  bias), run through the pinned `Valen` class.
+
+Both stacks answer the text example and the image fixture compiled by the
+pinned `Compiler`; the declared gate is exact answer agreement with
+probability deltas ≤ 1e-6. The block below is the verbatim tool output
+(device `cuda:0`, NVIDIA GeForce RTX 5060 Laptop GPU, sm_120, 7.96 GiB,
+torch 2.11.0+cu128; recorded 2026-10-15):
+
+~~~text
+case: text
+logical tokens: 48
+compute tokens: 48
+max probability delta: 0.0000000000e+00
+answer agreement: PASS
+probability tolerance <= 1e-06: PASS
+token accounting: PASS
+
+case: image
+logical tokens: 108
+compute tokens: 108
+max probability delta: 0.0000000000e+00
+answer agreement: PASS
+probability tolerance <= 1e-06: PASS
+token accounting: PASS
+
+device: cuda:0 (NVIDIA GeForce RTX 5060 Laptop GPU (sm_120, 7.96 GiB))
+parity slot filled: weights/valen-export/valen_export.json
+verify_export_parity: ok
+~~~
+
+Per-candidate probabilities (original stack → exported stack, printed by the
+tool's own stage runner):
+
+~~~text
+text/refund: 0.5159630775 0.4840368927 -> 0.5159630775 0.4840368927  (both choose refund)
+image/color: 0.4459854066 0.5540145636 -> 0.4459854066 0.5540145636  (both choose black)
+~~~
+
+Verdict: **the parity gate passes at bit level**. The unmerged export
+answers both fixtures with probabilities identical to the original stack's
+(max delta exactly 0.0 on every candidate), the discrete answers and token
+accounting agree exactly, and the original side matches the committed
+serving records above (0.5159631044… / 0.5540145914…) within the ~3e-8
+worker-vs-reference spread. Both stacks apply the LoRA through
+the same peft 0.18.1 unmerged `Linear.forward` with FP32 adapters, and the
+exported backbone differs from the reference's `from_pretrained` state only
+in tensors that are bit-equal by construction (the trained vision-top and
+merger replacements, and the 36 FP32→BF16 downcasts the reference's own
+BF16 runtime performs at load), so the two forward graphs are numerically
+identical. The verdict — per-case deltas, device, tolerance — is recorded
+with `parity.status = "passed"` in
+`weights/valen-export/valen_export.json`.
+
+Reproduce (the export itself per [`export.md`](export.md) first):
+
+~~~sh
+PYTHONPATH=src .venv/bin/python recipe/valen/verify_export_parity.py \
+  --valen-source "$VALEN_SRC" --checkpoint "$VALEN_CKPT" \
+  --base "$VALEN_BASE" --export weights/valen-export --device cuda
+~~~
+
+The script validates the artifact set and its recorded source pins before
+loading, refuses to overwrite an existing manifest parity record unless
+`--force` is given, and exits 0 only when the gate passes.
 
 ## Troubleshooting and limits
 
