@@ -136,7 +136,7 @@ impl Processor {
         let mut rendered = Vec::new();
         let mut window_rows = Vec::new();
         let mut parts_by_role = std::collections::HashMap::new();
-        for part in self.prepared_parts(&state_parts, &span_roles) {
+        for part in self.prepared_parts(&state_parts, &span_roles)? {
             parts_by_role.insert(part.role.clone(), part);
         }
         for row in rows {
@@ -193,26 +193,29 @@ impl Processor {
         &self,
         state_parts: &[crate::state::Part],
         span_roles: &HashSet<String>,
-    ) -> Vec<PreparedPart> {
+    ) -> Result<Vec<PreparedPart>, RequestError> {
         state_parts
             .iter()
             .map(|part| {
-                let (ids, offsets) = self.encoder.ids_offsets(&part.text);
+                let (ids, offsets) = self
+                    .encoder
+                    .ids_offsets(&part.text)
+                    .map_err(|_| RequestError::internal())?;
                 if span_roles.contains(&part.r#type) {
                     let words = crate::words::word_first_tokens(&part.text, &offsets);
-                    PreparedPart {
+                    Ok(PreparedPart {
                         role: part.r#type.clone(),
                         ids,
                         offsets: Some(offsets),
                         words: Some(words),
-                    }
+                    })
                 } else {
-                    PreparedPart {
+                    Ok(PreparedPart {
                         role: part.r#type.clone(),
                         ids,
                         offsets: None,
                         words: None,
-                    }
+                    })
                 }
             })
             .collect()

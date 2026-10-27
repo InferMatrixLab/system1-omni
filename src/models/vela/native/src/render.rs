@@ -105,19 +105,19 @@ impl Encoder {
         })
     }
 
-    fn encode(&self, text: &str) -> (Vec<u32>, Vec<(usize, usize)>) {
+    /// The memoization cap. The reference's cache grows without bound;
+    /// a long-lived worker cannot afford that, so past the cap a miss
+    /// simply re-encodes instead of storing another entry.
+    const CACHE_MAX: usize = 4096;
+
+    fn encode(&self, text: &str) -> anyhow::Result<Encoded> {
         if let Some(hit) = self.cache.borrow().get(text) {
-            return hit.clone();
+            return Ok(hit.clone());
         }
-        let encoding = match self.tokenizer.encode(text, false) {
-            Ok(encoding) => encoding,
-            Err(error) => {
-                // The pinned tokenizer should never fail on valid UTF-8
-                // input; surface the error instead of panicking so a
-                // wrapping worker can map it.
-                unreachable!("the pinned tokenizer failed on valid input: {error}")
-            }
-        };
+        let encoding = self
+            .tokenizer
+            .encode(text, false)
+            .map_err(|error| anyhow::anyhow!("the pinned tokenizer failed: {error}"))?;
         let byte_offsets = encoding.get_offsets();
         // Byte → code-point offsets.
         let char_starts: Vec<usize> = text
@@ -131,19 +131,23 @@ impl Encoder {
             .map(|(start, end)| (to_char(*start), to_char(*end)))
             .collect();
         let entry = (encoding.get_ids().to_vec(), offsets);
-        self.cache
-            .borrow_mut()
-            .insert(text.to_owned(), entry.clone());
-        entry
+        if self.cache.borrow().len() < Self::CACHE_MAX {
+            self.cache
+                .borrow_mut()
+                .insert(text.to_owned(), entry.clone());
+        }
+        Ok(entry)
     }
 
     /// Memoized token ids of a whole string (the reference's `_ids`).
-    pub fn ids(&self, text: &str) -> Vec<u32> {
-        self.encode(text).0
+    /// A tokenizer failure surfaces as an error so a wrapping worker
+    /// can map it to its runtime-error response.
+    pub fn ids(&self, text: &str) -> anyhow::Result<Vec<u32>> {
+        Ok(self.encode(text)?.0)
     }
 
     /// Ids and char offsets (the reference's `_ids_offs`).
-    pub fn ids_offsets(&self, text: &str) -> (Vec<u32>, Vec<(usize, usize)>) {
+    pub fn ids_offsets(&self, text: &str) -> anyhow::Result<Encoded> {
         self.encode(text)
     }
 }
@@ -190,7 +194,7 @@ pub fn span_head_for(
     if let Some(head) = head_override {
         if !matches!(head, "router" | "broad") {
             return Err(format!(
-                "head must be one of ['router', 'broad'], got '{head:?}'"
+                "head must be one of ['router', 'broad'], got '{head}'"
             ));
         }
         if head == "broad" && !broad_available {
@@ -557,7 +561,9 @@ impl RenderContext<'_> {
         questions: &[GenericQuestion],
         dispatch: &SpanDispatch,
     ) -> Result<RenderedRow, RequestError> {
-        let ids_of = |text: &str| self.encoder.ids(text);
+        let ids_of = |text: &str| -> Result<Vec<u32>, RequestError> {
+            self.encoder.ids(text).map_err(|_| RequestError::internal())
+        };
         let roles: Vec<String> = parts.iter().map(|p| p.role.clone()).collect();
         // Question blocks and their schema costs.
         struct RenderedQ {
@@ -578,7 +584,7 @@ impl RenderContext<'_> {
             if question.kind == "span" {
                 span_question = Some(question);
                 for (name, desc) in question.names.iter().zip(&question.descriptions) {
-                    let tokens = ids_of(&option_block(name, desc, "label"));
+                    let tokens = ids_of(&option_block(name, desc, "label"))?;
                     el.push((name.clone(), tokens.clone()));
                 }
                 continue;
@@ -593,10 +599,10 @@ impl RenderContext<'_> {
                 &question.over,
                 &question.text,
                 false,
-            ));
-            let suffix = ids_of(suffix);
+            ))?;
+            let suffix = ids_of(suffix)?;
             let abstain_tokens = if has_abs {
-                ids_of(&option_block(ABS_KEY, ABS_DESC, "option"))
+                ids_of(&option_block(ABS_KEY, ABS_DESC, "option"))?
             } else {
                 Vec::new()
             };
@@ -604,7 +610,7 @@ impl RenderContext<'_> {
             let mut len =
                 1 + head.len() + suffix.len() + abstain_tokens.len() + usize::from(has_abs);
             for (name, desc) in question.names.iter().zip(&question.descriptions) {
-                let tokens = ids_of(&option_block(name, desc, "option"));
+                let tokens = ids_of(&option_block(name, desc, "option"))?;
                 len += 1 + tokens.len();
                 otoks.push(tokens);
             }
@@ -636,20 +642,20 @@ impl RenderContext<'_> {
             None => "",
         };
         // The schema overhead the budget does not see.
-        let mut budget = ids_of(PARTS_HEAD).len();
+        let mut budget = ids_of(PARTS_HEAD)?.len();
         for role in &roles {
-            budget += ids_of(&seg_open(role)).len() + ids_of(SEG_CLOSE).len();
+            budget += ids_of(&seg_open(role))?.len() + ids_of(SEG_CLOSE)?.len();
         }
         if let Some(over) = &span_over {
             let question = span_question.expect("span question");
-            let head = ids_of(&q_head("span", &question.over, &question.text, true));
-            let suffix = ids_of(SUFFIX_SPAN);
+            let head = ids_of(&q_head("span", &question.over, &question.text, true))?;
+            let suffix = ids_of(SUFFIX_SPAN)?;
             budget += head.len() + suffix.len();
             if layout == "c" {
                 let span_len = part_of(over).expect("span part").ids.len();
-                budget += ids_of(TEXT_HEAD).len()
-                    + ids_of(&seg_open(over)).len()
-                    + ids_of(SEG_CLOSE).len();
+                budget += ids_of(TEXT_HEAD)?.len()
+                    + ids_of(&seg_open(over))?.len()
+                    + ids_of(SEG_CLOSE)?.len();
                 let headroom = self.max_length.saturating_sub(budget);
                 budget += span_len.min(headroom / 2);
             }
@@ -670,15 +676,15 @@ impl RenderContext<'_> {
         )
         .map_err(|()| too_long(self.max_length))?;
         // The parts pass, in part order (not the sorted map).
-        let mut p_ids = ids_of(PARTS_HEAD);
+        let mut p_ids = ids_of(PARTS_HEAD)?;
         let mut start: HashMap<String, usize> = HashMap::new();
         for part in parts {
             let keep = seg_lens[&part.role];
-            let open = ids_of(&seg_open(&part.role));
+            let open = ids_of(&seg_open(&part.role))?;
             start.insert(part.role.clone(), p_ids.len() + open.len());
             p_ids.extend(open);
             p_ids.extend(part.ids.iter().take(keep));
-            p_ids.extend(ids_of(SEG_CLOSE));
+            p_ids.extend(ids_of(SEG_CLOSE)?);
         }
         // Question blocks.
         let mut blocks: Vec<Block> = Vec::new();
@@ -713,7 +719,7 @@ impl RenderContext<'_> {
             && !el.is_empty()
         {
             let question = span_question.expect("span question");
-            let mut ids = ids_of(&q_head("span", &question.over, &question.text, true));
+            let mut ids = ids_of(&q_head("span", &question.over, &question.text, true))?;
             let mut ends = Vec::new();
             let mut starts = Vec::new();
             for (_, tokens) in &el {
@@ -734,17 +740,17 @@ impl RenderContext<'_> {
                 .collect();
             let words_in_block = layout == "c";
             if words_in_block {
-                ids.extend(ids_of(TEXT_HEAD));
-                ids.extend(ids_of(&seg_open(over)));
+                ids.extend(ids_of(TEXT_HEAD)?);
+                ids.extend(ids_of(&seg_open(over))?);
                 let c0 = ids.len();
                 ids.extend(part.ids.iter().take(n));
-                ids.extend(ids_of(SEG_CLOSE));
+                ids.extend(ids_of(SEG_CLOSE)?);
                 row_w_pos = Some(keep.iter().map(|&i| c0 + first_tokens[i]).collect());
             } else {
                 let base = start[over];
                 row_w_pos = Some(keep.iter().map(|&i| base + first_tokens[i]).collect());
             }
-            ids.extend(ids_of(SUFFIX_SPAN));
+            ids.extend(ids_of(SUFFIX_SPAN)?);
             let query = ids.len() - 1;
             row_names = Some(el.iter().map(|(name, _)| name.clone()).collect());
             row_w_offs = Some(keep.iter().map(|&i| word_offsets[i]).collect());

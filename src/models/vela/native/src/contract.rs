@@ -33,6 +33,13 @@ impl RequestError {
         }
     }
 
+    /// A runtime failure the caller cannot influence: the worker's
+    /// `{"detail": "inference failed"}` 500, mirroring the reference
+    /// worker's `map_runtime_error`.
+    pub fn internal() -> Self {
+        Self::detail(500, "inference failed")
+    }
+
     /// One upstream `SystemOneError` as a whole-request 422 triple.
     pub fn envelope(loc: &[&str], msg: &str, type_: &str) -> Self {
         let mut path = vec![Value::from("body")];
