@@ -91,7 +91,14 @@ the Rust `omni-clef` worker. It admits one complete text request through
 `SerialScheduler` and forwards the body to a single executor process. That
 process runs the checkpoint's joint schema head on its main thread, which is
 the thread that initialized CUDA. The joint head is still that Python module.
-Clef does not use the shared Qwen CUDA executor.
+Clef does not use the shared Qwen CUDA executor. Its default GDN prefill
+is the FLA chunk. `--gdn-prefill flashinfer` is opt-in when
+`CLEF_PYTHON` is the recipe interpreter, `flashinfer-python` is
+`0.6.16.post3`, and the reported capability major is 9, 10, or 12.
+`/health` `linear_attention` is `flashinfer+fla+causal_conv1d` only after
+that wrapper is copied onto the loaded layers. The flag is not the
+default until answer parity against `fla+causal_conv1d` passes. CUDA
+graphs and FA3 are not part of that opt-in.
 
 The Qwen executor's `forward_shared` takes a request prefix, group prefixes and
 branches, ends each prefix at its last multiple of 64 tokens, and returns one final

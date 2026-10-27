@@ -180,7 +180,10 @@ flag is set, the reported capability major is 9, 10, or 12, and that
 package loads. A reported 8.9, including the lab name `NVIDIA L20X`, keeps
 the FLA chunk and still becomes ready. Startup does not require the name
 `NVIDIA H200`. `/health` `linear_attention` is `fla+causal_conv1d` by
-default, or `flashinfer+fla+causal_conv1d` when the opt-in flag bound.
+default, or `flashinfer+fla+causal_conv1d` when the opt-in flag bound and
+the loaded layers copied that wrapper. `CLEF_PYTHON` selects the recipe
+interpreter. Answer parity is `recipe/clef/answer_parity.py`. A GPU pass
+is not recorded here, so the default stays `fla`.
 The process runs one text forward before it binds, so `/health` is not
 served until that forward returns.
 `torch_chunk_gated_delta_rule` and `F.conv1d` are not served.
@@ -201,7 +204,7 @@ primary a later tip has to beat.
 | H1 | One `encode_record` per request, then the pinned forward. The handler does not tokenize the schema again before that encode. | Removes a second BPE pass from the critical path. Prefill and the joint head still dominate. | Included in HEAD `9030065`. Isolated delta unknown |
 | H2 | Fuse the joint head's per-question Python loop. | Fewer small launches after prefill. Needs a forked head and numerical parity against the pinned module. | Not implemented. No measured H200 delta |
 | H3 | `torch.compile` or CUDA graphs on the Qwen3.5 backbone. | Uncertain on the linear-attention layers. | Not implemented. No measured H200 delta |
-| H4 | Bind `flash-linear-attention` 0.5.2 and `causal-conv1d` >= 1.5 before the Qwen3.5 layers copy the chunk global. The default prefill is that FLA chunk. `--gdn-prefill flashinfer` uses FlashInfer GDN prefill 0.6.16.post3 with `use_cp` false only when the flag is set, the package loads, and the reported capability major is 9, 10, or 12. Reported 8.9, including nvidia-smi name `NVIDIA L20X`, stays on the FLA chunk and still starts. Startup is not ready on `torch_chunk` or `F.conv1d`. vLLM CuteDSL, CUDA graphs, and `torch.compile` are not used. | Replaces the PyTorch chunk loop. `/health` names the bind that started. | Tip `594528a9`, L20X-labeled host, warmup 5, concurrency 1, stock Public231 with `thinking.enabled` false, metric `successful_latency`, `/health` `fla+causal_conv1d`: p50 164.969 ms, p95 216.755 ms, 231/231. Versus `9030065` run1: Δp50 −82.549 ms (−33.35%), Δp95 −196.270 ms (−47.52%). This is the primary. FlashInfer has no forward and no answer parity against it |
+| H4 | Bind `flash-linear-attention` 0.5.2 and `causal-conv1d` >= 1.5 before the Qwen3.5 layers copy the chunk global. The default prefill is that FLA chunk. `--gdn-prefill flashinfer` uses FlashInfer GDN prefill 0.6.16.post3 with `use_cp` false only when the flag is set, the package loads, and the reported capability major is 9, 10, or 12. Reported 8.9, including nvidia-smi name `NVIDIA L20X`, stays on the FLA chunk and still starts. Startup is not ready on `torch_chunk` or `F.conv1d`. vLLM CuteDSL, CUDA graphs, and `torch.compile` are not used. | Replaces the PyTorch chunk loop. `/health` names the bind that started. | Tip `594528a9`, L20X-labeled host, warmup 5, concurrency 1, stock Public231 with `thinking.enabled` false, metric `successful_latency`, `/health` `fla+causal_conv1d`: p50 164.969 ms, p95 216.755 ms, 231/231. Versus `9030065` run1: Δp50 −82.549 ms (−33.35%), Δp95 −196.270 ms (−47.52%). This is the primary. FlashInfer remains opt-in. `recipe/clef/answer_parity.py` is the gate; a GPU pass is not recorded here, so it is not the default |
 
 `omni-clef` removes the `ThreadingHTTPServer` path. An operator diagnosis on
 the L20X-labeled host put the first CUDA touch on a fresh HTTP thread near

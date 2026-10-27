@@ -16,6 +16,7 @@ mod frame;
 mod server;
 
 pub use cli::{
-    Cli, ServeArgs, locate_pythonpath_from, parse_cli, python_worker_command, serve_from_env,
+    Cli, ServeArgs, executor_python_from, locate_pythonpath_from, parse_cli, python_worker_command,
+    serve_from_env,
 };
 pub use server::{Engine, MAX_BODY, router, serve_on};

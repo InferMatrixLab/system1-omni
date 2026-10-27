@@ -68,8 +68,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=FLA_PREFILL,
         choices=(FLA_PREFILL, GDN_PREFILL),
         help=(
-            "Linear-attention prefill. fla is the measured default. "
-            "flashinfer is opt-in and has no answer parity against that path."
+            "Linear-attention prefill. fla is the measured default and stays "
+            "the default. flashinfer is opt-in for reported majors 9, 10, and "
+            "12 with flashinfer-python==0.6.16.post3. Answer parity is "
+            "recipe/clef/answer_parity.py; do not make flashinfer the default "
+            "until that gate passes."
         ),
     )
     parser.add_argument("--host", default="127.0.0.1")

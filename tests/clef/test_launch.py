@@ -59,7 +59,27 @@ def test_main_execs_the_rust_binary(monkeypatch, tmp_path):
     assert argv[argv.index("--model") + 1] == "snapshot"
     assert argv[argv.index("--variant") + 1] == "clef"
     assert argv[argv.index("--port") + 1] == "9000"
+    assert argv[argv.index("--gdn-prefill") + 1] == "fla"
     assert "ThreadingHTTPServer" not in argv
+
+
+def test_main_forwards_flashinfer_and_leaves_the_default_fla(monkeypatch, tmp_path):
+    binary = tmp_path / "omni-clef"
+    binary.write_text("")
+    monkeypatch.setenv("OMNI_CLEF_BIN", str(binary))
+    seen: dict[str, object] = {}
+
+    def fake_exec(path, argv):
+        seen["argv"] = list(argv)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(clef.os, "execv", fake_exec)
+    with pytest.raises(SystemExit):
+        clef.main(["--model", "snapshot", "--gdn-prefill", "flashinfer"])
+    argv = seen["argv"]
+    assert isinstance(argv, list)
+    assert argv[argv.index("--gdn-prefill") + 1] == "flashinfer"
+    assert clef.parse_args(["--model", "snapshot"]).gdn_prefill == "fla"
 
 
 def test_main_refuses_to_serve_http_when_the_binary_is_missing(monkeypatch):

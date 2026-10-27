@@ -46,7 +46,9 @@ def main() -> None:
         "max_input_tokens": 16384,
         "modalities": ["text"],
         "prompt_mode": "non-thinking",
-        "linear_attention": "fla+causal_conv1d",
+        "linear_attention": os.environ.get(
+            "CLEF_FAKE_LINEAR_ATTENTION", "fla+causal_conv1d"
+        ),
         **identity(),
     }
     write_response(protocol, 200, health)

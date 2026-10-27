@@ -15,8 +15,8 @@ use std::{
 };
 
 use omni_clef::{
-    Cli, Engine, MAX_BODY, ServeArgs, locate_pythonpath_from, parse_cli, python_worker_command,
-    serve_on,
+    Cli, Engine, MAX_BODY, ServeArgs, executor_python_from, locate_pythonpath_from, parse_cli,
+    python_worker_command, serve_on,
 };
 use serde_json::Value;
 use tokio::net::TcpListener;
@@ -181,6 +181,38 @@ fn worker_command_is_the_persistent_python_executor() {
 }
 
 #[test]
+fn executor_python_defaults_to_python3_and_accepts_the_recipe_interpreter() {
+    assert_eq!(executor_python_from(None), "python3");
+    assert_eq!(
+        executor_python_from(Some("/opt/clef/bin/python".into())),
+        "/opt/clef/bin/python"
+    );
+}
+
+#[test]
+fn worker_command_can_request_flashinfer_on_the_recipe_interpreter() {
+    let args = ServeArgs {
+        model: "snap".into(),
+        variant: "clef-flash".into(),
+        device: "cuda".into(),
+        gdn_prefill: "flashinfer".into(),
+        host: "127.0.0.1".into(),
+        port: 8000,
+    };
+    let command = python_worker_command(&args, "/opt/clef/bin/python".as_ref(), "src".as_ref());
+    assert_eq!(command.get_program(), "/opt/clef/bin/python");
+    let rendered: Vec<_> = command
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+    let flag = rendered
+        .iter()
+        .position(|arg| arg == "--gdn-prefill")
+        .expect("flag");
+    assert_eq!(rendered[flag + 1], "flashinfer");
+}
+
+#[test]
 fn parse_cli_defaults_and_rejects_a_missing_model() {
     let Cli::Serve(args) = parse_cli(["--model", "snap"]).expect("parse") else {
         panic!("expected serve");
@@ -188,6 +220,12 @@ fn parse_cli_defaults_and_rejects_a_missing_model() {
     assert_eq!(args.variant, "clef-flash");
     assert_eq!(args.device, "cuda");
     assert_eq!(args.gdn_prefill, "fla");
+    let Cli::Serve(flashinfer) =
+        parse_cli(["--model", "snap", "--gdn-prefill", "flashinfer"]).expect("parse")
+    else {
+        panic!("expected serve");
+    };
+    assert_eq!(flashinfer.gdn_prefill, "flashinfer");
     assert_eq!(args.host, "127.0.0.1");
     assert_eq!(args.port, 8000);
     assert!(parse_cli(["--variant", "clef"]).is_err());
@@ -199,6 +237,21 @@ fn parse_cli_defaults_and_rejects_a_missing_model() {
 fn locates_src_from_the_crate_directory() {
     let src = locate_pythonpath_from(env!("CARGO_MANIFEST_DIR").as_ref()).expect("src");
     assert!(src.join("models/clef/worker.py").is_file());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn health_forwards_the_flashinfer_linear_attention_string() {
+    let running = boot(
+        &[("CLEF_FAKE_LINEAR_ATTENTION", "flashinfer+fla+causal_conv1d")],
+        Duration::from_secs(2),
+    )
+    .await;
+    let (status, body) = get(running.addr, "/health");
+    assert_eq!(status, 200);
+    let health = json_body(&body);
+    assert_eq!(health["status"], "ready");
+    assert_eq!(health["linear_attention"], "flashinfer+fla+causal_conv1d");
+    let _ = running.engine;
 }
 
 #[test]

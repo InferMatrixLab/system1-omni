@@ -236,14 +236,31 @@ def select_gdn_prefill(
     return FLA_PREFILL
 
 
+def describe_flashinfer_failure(status: str, installed: str | None) -> str:
+    """Name why an opt-in FlashInfer request cannot bind."""
+
+    if status == "version-mismatch":
+        found = installed if installed is not None else "unknown"
+        return f"{FI_DISTRIBUTION} {found} is loaded; expected {FI_VERSION}"
+    if status == "import-failed":
+        return f"{FI_DISTRIBUTION}=={FI_VERSION} did not import {FI_MODULE}"
+    return f"{FI_DISTRIBUTION}=={FI_VERSION} is not installed"
+
+
 def resolve_gdn_prefill(
-    capability: tuple[int, int] | None, requested: str, flashinfer_loaded: bool
+    capability: tuple[int, int] | None,
+    requested: str,
+    flashinfer_loaded: bool,
+    status: str = "absent",
+    installed: str | None = None,
 ) -> str:
     """Return the bind, or refuse an opt-in FlashInfer request that cannot run.
 
     The default request stays on FLA even when FlashInfer imported and the
-    reported major is 9, 10, or 12. That path has no forward and no answer
-    parity against ``fla+causal_conv1d``, so it is not selected by itself.
+    reported major is 9, 10, or 12. That path is not the default until
+    ``recipe/clef/answer_parity.py`` passes on a GPU. The device name is
+    not consulted. A reported major other than 9, 10, or 12 refuses the
+    opt-in and leaves the default FLA path startable.
     """
 
     backend = select_gdn_prefill(capability, requested)
@@ -253,12 +270,13 @@ def resolve_gdn_prefill(
             "Clef FlashInfer GDN prefill was requested with --gdn-prefill "
             f"flashinfer, but this device reports capability {printed}. "
             "That kernel is selected only for reported majors 9, 10, and 12. "
+            "The nvidia-smi name is not the gate. "
             "The measured path is --gdn-prefill fla."
         )
     if requested == GDN_PREFILL and not flashinfer_loaded:
         raise RuntimeError(
             "Clef FlashInfer GDN prefill was requested, but "
-            f"{FI_DISTRIBUTION}=={FI_VERSION} did not import. "
+            f"{describe_flashinfer_failure(status, installed)}. "
             "The measured path is --gdn-prefill fla."
         )
     return backend
@@ -289,18 +307,37 @@ def bind_selected_prefill(modeling: Any, backend: str, flashinfer_loaded: bool) 
 
 
 def activate_gdn_prefill(
-    device: str, flashinfer_loaded: bool, requested: str = FLA_PREFILL
-) -> None:
-    """Bind the requested prefill. The default is the FLA chunk."""
+    device: str,
+    flashinfer_loaded: bool,
+    requested: str = FLA_PREFILL,
+    status: str = "absent",
+    installed: str | None = None,
+) -> str:
+    """Bind the requested prefill and return the backend that was installed.
+
+    The default is the FLA chunk. FlashInfer is installed only when the
+    request, the pin, and the reported major all agree.
+    """
 
     modeling = sys.modules.get(MODELING)
     if modeling is None:
         raise RuntimeError(f"{MODELING} is not imported.")
-    bind_selected_prefill(
-        modeling,
-        resolve_gdn_prefill(cuda_capability(device), requested, flashinfer_loaded),
-        flashinfer_loaded,
+    backend = resolve_gdn_prefill(
+        cuda_capability(device), requested, flashinfer_loaded, status, installed
     )
+    bind_selected_prefill(modeling, backend, flashinfer_loaded)
+    return backend
+
+
+def pack_qk_for_l2norm(q: Any, k: Any) -> tuple[Any, Any]:
+    """Make q and k contiguous before FLA's L2-norm view.
+
+    ``l2norm_fwd`` views its input as ``[-1, D]``. A non-contiguous head
+    layout from the conv split dies in that view. ``contiguous`` does not
+    copy a tensor that is already packed.
+    """
+
+    return q.contiguous(), k.contiguous()
 
 
 def flashinfer_chunk_gated_delta_rule(
@@ -345,6 +382,7 @@ def flashinfer_chunk_gated_delta_rule(
     from fla.modules.l2norm import l2norm_fwd
 
     if use_qk_l2norm_in_kernel:
+        q, k = pack_qk_for_l2norm(q, k)
         q, _ = l2norm_fwd(q)
         k, _ = l2norm_fwd(k)
     q = q.squeeze(0).contiguous()
@@ -423,36 +461,46 @@ def check_distribution_version(
         raise RuntimeError(f"required >={joined}, found {installed}")
 
 
-def try_import_flashinfer() -> bool:
-    """Return whether the pinned FlashInfer GDN prefill module imported.
+def inspect_flashinfer() -> tuple[str, str | None]:
+    """Classify the FlashInfer pin without refusing the default FLA path.
 
-    A missing package, a different version, or an import error means the
-    FLA chunk remains the prefill. That is not a readiness failure.
+    The status is ``bound``, ``absent``, ``version-mismatch``, or
+    ``import-failed``. Only ``bound`` may serve ``--gdn-prefill flashinfer``.
+    A missing or different install leaves the FLA chunk in place when that
+    is the request.
     """
 
     try:
         installed = importlib.metadata.version(FI_DISTRIBUTION)
     except importlib.metadata.PackageNotFoundError:
-        return False
+        return "absent", None
     try:
         check_distribution_version(installed, exact=FI_VERSION)
     except RuntimeError:
-        return False
+        return "version-mismatch", installed
     try:
         importlib.import_module(FI_MODULE)
     except (ImportError, OSError):
-        return False
-    return True
+        return "import-failed", installed
+    return "bound", installed
 
 
-def require_fast_linear_attention() -> bool:
+def try_import_flashinfer() -> bool:
+    """Return whether the pinned FlashInfer GDN prefill module imported."""
+
+    status, _installed = inspect_flashinfer()
+    return status == "bound"
+
+
+def require_fast_linear_attention() -> tuple[str, str | None]:
     """Import conv and FLA before Transformers binds Qwen3.5.
 
     The modeling module chooses ``FusedRMSNormGated``, ``causal_conv1d_fn``,
     and the FLA chunk global once, at import. ``causal-conv1d`` and
     ``flash-linear-attention`` are required. A missing copy leaves
     ``torch_chunk_gated_delta_rule`` or ``F.conv1d``, so startup raises.
-    FlashInfer is attempted and the return value says whether it loaded.
+    FlashInfer is attempted. The return value is its status and version.
+    ``bound`` is the only status that can install the opt-in wrapper.
     The device choice patches the chunk global later, before
     ``load_release_model``.
     """
@@ -490,9 +538,66 @@ def require_fast_linear_attention() -> bool:
                 f"{distribution} did not import {module} ({type(exc).__name__}). "
                 "torch_chunk_gated_delta_rule and F.conv1d are not served."
             ) from exc
-    flashinfer_loaded = try_import_flashinfer()
+    status, installed = inspect_flashinfer()
     importlib.import_module(MODELING)
-    return flashinfer_loaded
+    return status, installed
+
+
+def _candidate_roots(model: Any) -> list[Any]:
+    roots = [model]
+    for name in ("model", "backbone", "language_model"):
+        child = getattr(model, name, None)
+        if child is not None and child not in roots:
+            roots.append(child)
+    return roots
+
+
+def copied_prefill_callables(model: Any) -> list[Any]:
+    """Return ``chunk_gated_delta_rule`` objects copied onto loaded modules."""
+
+    found: list[Any] = []
+    seen: set[int] = set()
+    for root in _candidate_roots(model):
+        modules = getattr(root, "modules", None)
+        iterator = modules() if callable(modules) else [root]
+        for module in iterator:
+            identity = id(module)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            chunk = getattr(module, "chunk_gated_delta_rule", None)
+            if chunk is not None:
+                found.append(chunk)
+    return found
+
+
+def assert_copied_prefill(model: Any, backend: str) -> None:
+    """Refuse a FlashInfer request whose layers did not copy the wrapper.
+
+    ``Qwen3_5GatedDeltaNet`` copies the modeling global at init. Patching
+    the global after that copy leaves the layers on FLA while ``/health``
+    would otherwise name FlashInfer. The default FLA path still starts
+    when no module exposes the attribute. It does not start when a layer
+    is holding the FlashInfer wrapper.
+    """
+
+    found = copied_prefill_callables(model)
+    if backend == GDN_PREFILL:
+        if not found:
+            raise RuntimeError(
+                "FlashInfer GDN prefill was requested, but no loaded module "
+                "copied chunk_gated_delta_rule. The modeling global is patched "
+                "before load_release_model; a layer that did not copy it would "
+                "still run the FLA chunk."
+            )
+        if any(chunk is not flashinfer_chunk_gated_delta_rule for chunk in found):
+            raise RuntimeError(
+                "FlashInfer GDN prefill was requested, but a loaded layer copied "
+                "a different chunk_gated_delta_rule."
+            )
+        return
+    if any(chunk is flashinfer_chunk_gated_delta_rule for chunk in found):
+        raise RuntimeError("The default FLA prefill loaded the FlashInfer chunk wrapper.")
 
 
 def require_bound_linear_attention(modeling: Any) -> str:
@@ -547,10 +652,17 @@ class ClefExecutor:
         self.max_length = MAX_INPUT_TOKENS
         self._warmed = False
         verify_snapshot(self.root, self.variant)
-        flashinfer_loaded = require_fast_linear_attention()
-        activate_gdn_prefill(device, flashinfer_loaded, gdn_prefill)
+        status, installed = require_fast_linear_attention()
+        self.gdn_prefill_bound = activate_gdn_prefill(
+            device,
+            status == "bound",
+            gdn_prefill,
+            status=status,
+            installed=installed,
+        )
         self.module = load_joint_schema_module(self.root / EXECUTABLE)
         self.model, self.processor = self.module.load_release_model(self.root, device=device)
+        assert_copied_prefill(self.model, self.gdn_prefill_bound)
         self.linear_attention = require_bound_linear_attention(sys.modules.get(MODELING))
         if self.processor.tokenizer.pad_token_id is None:
             raise ValueError("tokenizer pad_token_id is required")

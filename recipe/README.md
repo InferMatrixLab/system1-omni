@@ -71,7 +71,8 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   164.969/216.755; R2 53.580/97.031 and R3 52.950/97.608 are not a new
   primary. Smoke 4/4, `/health` `fla+causal_conv1d`. Start `omni-clef`
   with `CLEF_PYTHON` set to the recipe venv; system `python3` lacks
-  `causal-conv1d`.
+  `causal-conv1d`. `--gdn-prefill flashinfer` stays opt-in until
+  `recipe/clef/answer_parity.py` passes on a GPU.
 
 - [LFM2.5-350M choice worker](lfm2/README.md): score text decisions with independent
   questions, hybrid cache branching and configurable candidate batches.

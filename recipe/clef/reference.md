@@ -66,12 +66,14 @@ reports capability 8.9. vLLM's separate CuteDSL prefill backend, CUDA
 graphs, and `torch.compile` are not used.
 
 The lab host is the machine `nvidia-smi` names `NVIDIA L20X`, including
-when it reports compute capability 8.9. Startup does not require the name
-`NVIDIA H200` and does not refuse the default FLA path because the
-capability is not 9.0. The measured primary is that FLA path. FlashInfer
-GDN prefill has no measured forward and no answer parity against
-`fla+causal_conv1d`. That parity run is the named follow-up blocker
-before `--gdn-prefill flashinfer` can become the default.
+when it reports compute capability 8.9 or when torch reports 9.0. Startup
+does not require the name `NVIDIA H200` and does not refuse the default
+FLA path because the capability is not 9.0. The nvidia-smi name is not a
+gate. Requesting `--gdn-prefill flashinfer` on a reported major other
+than 9, 10, or 12 refuses startup; the default FLA command still starts.
+The measured primary is the FLA path. FlashInfer stays opt-in until
+[answer parity](#answer-parity-before-flashinfer-is-the-default) passes
+on a GPU. That run is not recorded in this checkout.
 
 ```sh
 python - <<'PY'
@@ -127,6 +129,65 @@ startup forward was not run in this editing environment.
 
 For the 27B checkpoint, download `Cloudflare/clef` at
 `a30162b99d68a481d8bd75d38df069a0cf83df40` and pass `--variant clef`.
+
+## FlashInfer opt-in
+
+This does not change the default. Start a second process only when the
+recipe venv imports `flashinfer-python==0.6.16.post3` and the device's
+reported capability major is 9, 10, or 12. `CLEF_PYTHON` is that venv's
+interpreter, the same variable as the FLA server. A wrong pin, a missing
+module, or another reported major exits before the port opens. The
+process also exits if the loaded layers did not copy the FlashInfer
+wrapper, so `/health` cannot name a bind the forward does not run.
+
+```sh
+CLEF_PYTHON="$HOME/envs/clef-ref/bin/python" \
+  ./target/release/omni-clef \
+  --model <snapshot> \
+  --variant clef-flash \
+  --device cuda \
+  --gdn-prefill flashinfer \
+  --host 127.0.0.1 \
+  --port 8001
+```
+
+`GET http://127.0.0.1:8001/health` then has
+`linear_attention` `flashinfer+fla+causal_conv1d`. The FLA server on
+port 8000 stays `fla+causal_conv1d`. CUDA graphs and FA3 are not part of
+this flag. vLLM CuteDSL and `torch.compile` are not selected.
+`use_cp` stays false. Q and K are packed with `contiguous` before FLA
+`l2norm_fwd` so that view does not see a conv-split layout.
+
+## Answer parity before FlashInfer is the default
+
+Compare the two servers on the same manifest before any claim that
+FlashInfer answers match FLA, and before changing the default. The
+repository does not contain the Public231 JSONL. Use that frozen file
+when it is the campaign manifest. `benchmarks/smoke.jsonl` is the
+contract smoke, not a substitute for that Public231 parity run.
+
+Save each `/health` document. Run `bench.py` once per server, same
+manifest bytes, concurrency 1. Then:
+
+```sh
+PYTHONPATH=src python recipe/clef/answer_parity.py \
+  --fla-run <fla-bench-dir> \
+  --flashinfer-run <flashinfer-bench-dir> \
+  --fla-health <fla-health.json> \
+  --flashinfer-health <flashinfer-health.json> \
+  --device "<nvidia-smi name>" \
+  --compute-capability "<capability the worker reported>" \
+  --report <fresh-report.json>
+```
+
+The gate is fixed: probability drift at most 0.002, score drift at most
+0.002, and zero decision flips. A choice value must match. A noul flips
+when the two sides disagree about `value >= 0.5`. Exit 1 fails the tip.
+Do not raise the tolerances to obtain a pass. The report records
+`device` and `compute_capability` only when those flags are passed. It
+does not invent them. A report with either field null is not a complete
+campaign paste. A passing report is not a latency KEEP, and it does not
+by itself make `flashinfer` the default.
 
 ## Example
 
@@ -258,8 +319,12 @@ compute capability 8.9. Do not require a card whose name is `NVIDIA H200`.
 On a reported 8.9 the ready bind is `fla+causal_conv1d`. That is also the
 default on reported majors 9, 10, and 12. `flashinfer+fla+causal_conv1d`
 is ready only when the process was started with `--gdn-prefill flashinfer`
-and that kernel could bind. Record the `/health` string the process
-returns. The standalone GDN timings in
+and that kernel could bind. A card `nvidia-smi` names `NVIDIA L20X` can
+report major 8 or major 9. The name is not a refusal. Major 8 keeps the
+FLA chunk when the flag is `fla`, and refuses the flag when it is
+`flashinfer`. Record the `/health` string the process returns. Answer
+parity has to pass before that bind becomes the default. The standalone
+GDN timings in
 [benchmarks/gdn/README.md](../../benchmarks/gdn/README.md) are a different
 experiment and are not a Clef HTTP result.
 
@@ -293,8 +358,13 @@ in a commit.
    `GET /health` is absent until the startup forward returns, then must
    show `status` `ready`. The default `linear_attention` is
    `fla+causal_conv1d`. `flashinfer+fla+causal_conv1d` means the process
-   was started with `--gdn-prefill flashinfer`. Record that string. A
-   process that exits at startup did not bind `causal_conv1d_fn` and a
+   was started with `--gdn-prefill flashinfer` and the layers copied that
+   wrapper. Record that string. Run
+   [answer parity](#answer-parity-before-flashinfer-is-the-default) on the
+   same manifest before a FlashInfer latency paste. Exit 1 from that
+   script fails the tip. Do not switch the default to `flashinfer` on a
+   failed or missing parity report. A process that exits at startup did
+   not bind `causal_conv1d_fn` and a
    chunk kernel. Do not measure a process that is still on the PyTorch
    chunk or `F.conv1d` path.
 3. Obtain the frozen Public231 request manifest whose file SHA-256 is
@@ -386,9 +456,10 @@ effect is unknown. The recorded win, and the primary a later tip has to
 beat, is the FLA chunk plus `causal_conv1d` on the reported-8.9 host:
 p50 164.969 ms, p95 216.755 ms. The default prefill remains that FLA
 chunk, including on reported majors 9, 10, and 12. `--gdn-prefill
-flashinfer` is opt-in. It has no measured forward and no answer parity
-against `fla+causal_conv1d`; that parity run is the named follow-up
-blocker before the flag becomes the default. The startup forward that
+flashinfer` is opt-in. The harness is
+[answer parity](#answer-parity-before-flashinfer-is-the-default). A GPU
+run of that harness is not recorded here, so the flag is not the default.
+The startup forward that
 runs before `/health` is separate from the client warmup in the C1
 protocol and has no latency claim. A later code change is unmeasured
 until its own paste.

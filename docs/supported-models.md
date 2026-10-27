@@ -68,9 +68,12 @@ smoke 4/4, `/health` `fla+causal_conv1d`, R1 p50 169.605 ms, p95 220.003 ms
 164.969/216.755. R2 and R3 are not a new primary. The
 primary remains tip `594528a9`. The
 worker starts on that host when the capability prints 8.9. The default
-prefill is the FLA chunk. `--gdn-prefill flashinfer` is opt-in and is the
-named follow-up blocker: it has no measured forward and no answer parity
-against `fla+causal_conv1d`. The 27B variant has no recorded timing.
+prefill is the FLA chunk. `--gdn-prefill flashinfer` is opt-in on
+reported majors 9, 10, and 12 with `flashinfer-python==0.6.16.post3`.
+`/health` reports `flashinfer+fla+causal_conv1d` when that wrapper bound.
+The answer-parity harness is `recipe/clef/answer_parity.py`. A GPU pass
+is not recorded here, so the default remains `fla`. The 27B variant has
+no recorded timing.
 
 pplx-decider's reference worker admits those three kinds for text and up to
 four images. The checked path is the CPU contract. The kept Public231

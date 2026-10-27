@@ -146,8 +146,18 @@ def test_linear_attention_name_follows_the_bound_callables():
     assert resolve_gdn_prefill((9, 0), "flashinfer", True) == "flashinfer"
     with pytest.raises(RuntimeError, match="reports capability 8.9"):
         resolve_gdn_prefill((8, 9), "flashinfer", True)
-    with pytest.raises(RuntimeError, match="did not import"):
+    with pytest.raises(RuntimeError, match="is not installed"):
         resolve_gdn_prefill((9, 0), "flashinfer", False)
+    with pytest.raises(RuntimeError, match="expected 0.6.16.post3"):
+        resolve_gdn_prefill(
+            (9, 0),
+            "flashinfer",
+            False,
+            status="version-mismatch",
+            installed="0.6.16",
+        )
+    with pytest.raises(RuntimeError, match="did not import"):
+        resolve_gdn_prefill((9, 0), "flashinfer", False, status="import-failed")
     reported_89 = _bound_pair()
     original_chunk = reported_89.chunk_gated_delta_rule
     bind_selected_prefill(reported_89, select_gdn_prefill((8, 9), "flashinfer"), True)
@@ -166,6 +176,53 @@ def test_linear_attention_name_follows_the_bound_callables():
         flashinfer_chunk_gated_delta_rule(object(), object(), object())
     with pytest.raises(RuntimeError, match="recurrent state"):
         flashinfer_chunk_gated_delta_rule(object(), object(), object(), output_final_state=True)
+
+
+def test_flashinfer_prefill_packs_qk_and_must_be_copied_onto_layers():
+    from models.clef.engine import (
+        FLA_PREFILL,
+        assert_copied_prefill,
+        flashinfer_chunk_gated_delta_rule,
+        pack_qk_for_l2norm,
+    )
+
+    class _Tensor:
+        def __init__(self):
+            self.packed = False
+
+        def contiguous(self):
+            self.packed = True
+            return self
+
+    query, key = _Tensor(), _Tensor()
+    packed_query, packed_key = pack_qk_for_l2norm(query, key)
+    assert packed_query.packed and packed_key.packed
+
+    class _Layer:
+        def __init__(self, chunk):
+            self.chunk_gated_delta_rule = chunk
+
+    class _Model:
+        def __init__(self, layers):
+            self._layers = layers
+
+        def modules(self):
+            return self._layers
+
+    fla_chunk = object()
+    hidden = _Model([])
+    assert_copied_prefill(hidden, FLA_PREFILL)
+    assert_copied_prefill(_Model([_Layer(fla_chunk)]), FLA_PREFILL)
+    with pytest.raises(RuntimeError, match="no loaded module"):
+        assert_copied_prefill(hidden, "flashinfer")
+    with pytest.raises(RuntimeError, match="different chunk"):
+        assert_copied_prefill(_Model([_Layer(fla_chunk)]), "flashinfer")
+    assert_copied_prefill(_Model([_Layer(flashinfer_chunk_gated_delta_rule)]), "flashinfer")
+    nested = type("Wrapper", (), {})()
+    nested.backbone = _Model([_Layer(flashinfer_chunk_gated_delta_rule)])
+    assert_copied_prefill(nested, "flashinfer")
+    with pytest.raises(RuntimeError, match="default FLA prefill"):
+        assert_copied_prefill(_Model([_Layer(flashinfer_chunk_gated_delta_rule)]), FLA_PREFILL)
 
 
 def test_linear_attention_pins_and_startup_fail_closed(monkeypatch):

@@ -46,6 +46,16 @@ Options:
   --host <addr>          127.0.0.1 (default)
   --port <port>          8000 (default)
   --help                 Show this help
+
+Environment:
+  CLEF_PYTHON            Interpreter for the executor. Default: python3.
+                         Point this at the recipe venv. That venv has
+                         causal-conv1d and, for --gdn-prefill flashinfer,
+                         flashinfer-python==0.6.16.post3. System python3
+                         does not, and the executor exits before the port
+                         opens. fla stays the default until answer parity
+                         passes.
+  CLEF_PYTHONPATH        Directory that contains models/clef/worker.py.
 ";
 
 pub fn parse_cli<I, T>(args: I) -> Result<Cli>
@@ -146,6 +156,10 @@ pub fn locate_pythonpath() -> Result<PathBuf> {
     )
 }
 
+pub fn executor_python_from(value: Option<std::ffi::OsString>) -> std::ffi::OsString {
+    value.unwrap_or_else(|| std::ffi::OsString::from("python3"))
+}
+
 pub fn python_worker_command(args: &ServeArgs, python: &OsStr, pythonpath: &Path) -> Command {
     let mut command = Command::new(python);
     command.arg("-u");
@@ -181,7 +195,7 @@ pub async fn serve_from_env() -> Result<()> {
             Ok(())
         }
         Cli::Serve(args) => {
-            let python = env::var_os("CLEF_PYTHON").unwrap_or_else(|| "python3".into());
+            let python = executor_python_from(env::var_os("CLEF_PYTHON"));
             let pythonpath = locate_pythonpath()?;
             let command = python_worker_command(&args, &python, &pythonpath);
             let engine = Arc::new(Engine::spawn(command)?);
