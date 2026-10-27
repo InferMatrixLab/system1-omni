@@ -1,10 +1,12 @@
 # Card-tested stack for Cloudflare/clef-flash and Cloudflare/clef:
 # torch 2.11 and transformers 5.10.2. This file is not a resolved lock;
-# this environment did not install or import that stack.
-torch>=2.11
+# serving validation records the resolved environment separately.
+torch==2.11.0
+# AutoProcessor instantiates the shared video processor even for text inputs.
+torchvision==0.26.0
 transformers==5.10.2
 # The pinned loader passes device_map to from_pretrained.
-accelerate>=1.0
+accelerate==1.15.0
 safetensors>=0.6
 huggingface_hub>=1.0
 tokenizers>=0.22
