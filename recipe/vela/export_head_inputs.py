@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Freeze the head inputs/outputs of the pinned Vela 2.0 0.8B runtime.
+"""Freeze the head inputs/outputs of a pinned Vela 2.0 decoder member.
 
 Records, per frozen case, exactly what
 the two F32 heads consume and produce — CandidateHead (option-end
@@ -9,7 +9,10 @@ heads' own setting, bit-deterministic) — so the Rust heads and the
 scoring/decode mirror are checked against these without any GPU. Also
 records the reference's calibrated predict answers for the same cases
 (the scoring target). Hidden matrices go to a per-case safetensors
-file; structure, small logits and answers go to JSON next to it.
+file; structure, small logits and answers go to JSON next to it. The
+package must pass the worker's pin gate first; ``--device`` records
+elsewhere (the committed 4B/9B fixtures were recorded under GPU
+bf16-autocast, which the member-calibrated test gates account for).
 
     PYTHONPATH=src .venv/bin/python recipe/vela/export_head_inputs.py \
       --model weights/vela-2.0-0.8b --out tests/vela/fixtures/
@@ -26,8 +29,6 @@ import numpy as np
 from safetensors.numpy import save_file
 
 HERE = Path(__file__).resolve().parent
-MODEL_NAME = "vllm-sr/Vela-2.0-0.8B"
-
 
 
 def parse_args(argv=None):
@@ -38,10 +39,10 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def long_span_body():
+def long_span_body(model_name: str):
     filler = " ".join(f"Sentence {i} reports a routine delivery event." for i in range(220))
     return {
-        "model": MODEL_NAME,
+        "model": model_name,
         "state": {"request": filler},
         "questions": {
             "claims": {
@@ -54,7 +55,7 @@ def long_span_body():
     }
 
 
-def cases():
+def cases(model_name: str):
     named = [
         ("example-request", HERE / "example-request.json"),
         ("example-request-set-threshold", HERE / "example-request-set-threshold.json"),
@@ -62,10 +63,10 @@ def cases():
         ("example-request-score", HERE / "example-request-score.json"),
     ]
     loaded = [
-        (name, {**json.loads(path.read_text(encoding="utf-8")), "model": MODEL_NAME})
+        (name, {**json.loads(path.read_text(encoding="utf-8")), "model": model_name})
         for name, path in named
     ]
-    loaded.append(("long-span-windowed", long_span_body()))
+    loaded.append(("long-span-windowed", long_span_body(model_name)))
     return loaded
 
 
@@ -164,8 +165,17 @@ def rows_of(engine, body):
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    label = json.loads((Path(args.model) / "config.json").read_text(encoding="utf-8"))["model_name"].rsplit("/", 1)[-1]
-    sys.path.insert(0, str(Path(args.model).resolve()))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+    from models.vela.hybrid import verify_package
+
+    package = Path(args.model)
+    # The worker's own gate, before the package is imported: fixtures
+    # freeze only what a pinned member produced, and the recorded
+    # request carries that member's served name.
+    member = verify_package(package)
+    model_name = member.model_name
+    label = model_name.rsplit("/", 1)[-1]
+    sys.path.insert(0, str(package.resolve()))
     from vela2_inference import Vela2
 
     engine = Vela2.from_pretrained(args.model, backend="torch", device=args.device)
@@ -175,7 +185,7 @@ def main(argv=None) -> int:
     out = Path(args.out) if args.out else HERE.parents[1] / "tests" / "vela" / "fixtures"
     out.mkdir(parents=True, exist_ok=True)
 
-    for name, body in cases():
+    for name, body in cases(model_name):
         req, plan, rows, windows = rows_of(engine, body)
         # One row per backend call so every recorded head call is
         # attributable; question blocks arrive stacked in row order.
