@@ -74,12 +74,20 @@ def main():
     p.add_argument('--reference', type=Path, required=True)
     p.add_argument('--base', type=Path, required=True)
     p.add_argument('--out', type=Path, required=True)
+    p.add_argument('--unicode-only', action='store_true', help='small Qwen2Tokenizer Unicode-mark regression oracle')
     args = p.parse_args()
     api, model = official(args.reference)
     tok = model.load_tokenizer(args.base)
-    data = {'reference': '2074cc44256200bb37540103fa4572901faa10f3', 'source_hashes': SOURCE_HASHES,
-            'cases': [capture(c, api, model, tok) for c in cases()]}
-    args.out.write_text(json.dumps(data, ensure_ascii=False, separators=(',', ':')) + '\n')
+    if args.unicode_only:
+        sample = {'name': 'unicode-marks', 'request': {'state': '😤❤️❤️❤️ e\u0301 क् हिन्दी',
+                  'questions': {'q': {'type': 'noul', 'instructions': '❤️ café'}}}}
+        data = {'reference': '2074cc44256200bb37540103fa4572901faa10f3', 'transformers': '5.17.0',
+                'cases': [capture(sample, api, model, tok)]}
+        args.out.write_text(json.dumps(data, ensure_ascii=False, indent=2)+'\n')
+    else:
+        data = {'reference': '2074cc44256200bb37540103fa4572901faa10f3', 'source_hashes': SOURCE_HASHES,
+                'cases': [capture(c, api, model, tok) for c in cases()]}
+        args.out.write_text(json.dumps(data, ensure_ascii=False, separators=(',', ':')) + '\n')
 
 
 if __name__ == '__main__':

@@ -51,16 +51,24 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     for flag in ('worker-bin', 'frontend-bin', 'export', 'cuda-lib', 'out', 'native'):
         p.add_argument('--'+flag, type=Path, required=True)
+    p.add_argument('--corpus', type=Path, default=ROOT/'tests/kev/data/processing.json')
+    p.add_argument('--boundaries', type=Path, help='official-only boundary membership; select first ten per type')
     args = p.parse_args()
     args.out.mkdir(parents=True, exist_ok=False)
     worker_port, frontend_port = port(), port()
     worker_url, frontend_url = f'http://127.0.0.1:{worker_port}', f'http://127.0.0.1:{frontend_port}'
     env = {**os.environ, 'KEV_MODEL': str(args.export), 'KEV_CUDA_LIB': str(args.cuda_lib), 'KEV_PORT': str(worker_port),
            'KEV_HOST': '127.0.0.1', 'OMNI_JEV_BIND': f'127.0.0.1:{frontend_port}', 'OMNI_JEV_BACKEND_URL': worker_url}
-    corpus = json.loads((ROOT/'tests/kev/data/processing.json').read_text())['cases']
-    native = {case['name']: case['body'] for case in json.loads(args.native.read_text())['cases']}
+    corpus = json.loads(args.corpus.read_text())['cases']
+    if args.boundaries:
+        boundary = json.loads(args.boundaries.read_text())['items']
+        selected = {r['case'] for kind in ('choice', 'noul') for r in [b for b in boundary if b['type'] == kind][:10]}
+        corpus = [c for c in corpus if c['population'] in ('contract', 'repeat') or c['name'] in selected]
+    captured = ([json.loads(line) for line in args.native.read_text().splitlines() if line.strip()]
+                if args.native.suffix == '.jsonl' else json.loads(args.native.read_text())['cases'])
+    native = {case['name']: case['body'] for case in captured}
     processes = []
-    report = {'cases': [], 'errors': []}
+    report = {'cases': [], 'errors': [], 'selected': [c['name'] for c in corpus]}
     started = time.monotonic()
     with (args.out/'worker.log').open('w') as wlog, (args.out/'frontend.log').open('w') as flog:
         try:

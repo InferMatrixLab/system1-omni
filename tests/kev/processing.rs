@@ -105,7 +105,18 @@ fn ties_and_whole_question_temperature() {
 fn exact_tokens_readouts_and_billing_match_official() {
     let dir = std::env::var("KEV_EXPORT").expect("KEV_EXPORT");
     let processor = Processor::load(std::path::Path::new(&dir)).unwrap();
-    for case in fixture()["cases"].as_array().unwrap() {
+    let unicode: Value =
+        serde_json::from_str(include_str!("data/unicode-processing.json")).unwrap();
+    let external: Value = std::env::var("KEV_CORPUS")
+        .map(|path| serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap())
+        .unwrap_or_else(|_| json!({"cases":[]}));
+    for case in fixture()["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(unicode["cases"].as_array().unwrap())
+        .chain(external["cases"].as_array().unwrap())
+    {
         let request = json::parse(&serde_json::to_vec(&case["request"]).unwrap()).unwrap();
         let prepared = processor.prepare(&request).unwrap();
         assert_eq!(json!(prepared.rows), case["rows"], "{}", case["name"]);

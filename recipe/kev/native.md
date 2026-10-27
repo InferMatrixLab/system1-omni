@@ -66,7 +66,20 @@ non-JSON content types 415; invalid/unsupported requests 422; capacity exhaustio
 fields are ignored as in the reference. Unlike the official server, arbitrary
 model names are refused and timing fields are omitted.
 
-## Reproduce correctness checks
+## Primary acceptance status
+
+**Draft: numerical qualification is failing.** The expanded fixed official BF16
+default-service comparison has probability max error 0.06492195 (gate 0.01),
+Score-255 error 0.16675543 levels (gate 0.1), and only 3/10 required near-boundary
+Noul examples. Task-quality gates on 896 labeled questions pass, as do exact
+processing and HTTP checks. See the [service acceptance protocol and results](service-acceptance.md)
+for every gate, the corpus, reproducible commands and preserved failures.
+
+The processor follows the effective tokenizer loaded by the pinned Transformers
+5.17 Qwen2Tokenizer, including its split regex for Unicode marks. Merely loading
+the base tokenizer JSON yields different tokens for some emoji sequences.
+
+## Reproduce diagnostic correctness checks
 
 Ordinary checks require no checkpoint or GPU:
 
@@ -141,7 +154,7 @@ top-two margin is `> 0.02`; matching Noul decisions at threshold 0.5 when the
 reference is farther than 0.01 from it. Every near-boundary disagreement is listed.
 A failed merge baseline is reported separately and never justifies widening a gate.
 
-## Recorded acceptance
+## Historical FP32 eager diagnostics
 
 Local author-run at source `57e239b681f84d56609ed7cef45889a115381172`, over 13
 requests / 23 questions (10 Choice, 7 Noul, 6 Score):
@@ -154,7 +167,7 @@ requests / 23 questions (10 Choice, 7 Noul, 6 Score):
 | Exported BF16 PyTorch → native | 0.00607389 |
 | Official FP32 unmerged → native | 0.00553775 |
 
-All declared probability/decision gates passed. All 10 Choice and 7 Noul decisions
+The original small-corpus probability/decision gates passed. This historical result does not qualify the BF16 default service. All 10 Choice and 7 Noul decisions
 agree; three additional native mixed requests are identical. There were no
 near-boundary disagreements; this corpus's smallest nontrivial Choice margin is
 0.121829 and smallest Noul threshold distance is 0.023158, so it does not establish
@@ -162,8 +175,8 @@ real near-boundary coverage. Synthetic checker tests verify boundary reporting.
 
 For the 255-level Score, the expected level is 96.7645 officially versus 96.6496
 natively (absolute difference 0.1149 on a 0–254 scale). Its maximum probability
-error is 0.000169017. The declared gate is on probabilities; no scalar Score
-threshold was specified. Other datasets and longer contexts need their own
+error is 0.000169017. That historical protocol had no scalar Score threshold. The current primary BF16
+service gate is 0.1 ordinal level, following merged Decider #110. Other datasets and longer contexts need their own
 qualification; this small deterministic corpus is not a model-quality benchmark.
 
 The exact processing/head CPU gates passed. Workspace tests: 397 passed, 91

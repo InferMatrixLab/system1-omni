@@ -45,3 +45,47 @@ fn native_corpus_capture() {
         .unwrap();
     }
 }
+
+#[test]
+#[ignore = "requires a frozen KEV_CORPUS and KEV_NATIVE_OUT, checkpoint and reserved CUDA GPU"]
+fn native_service_capture() {
+    use std::io::Write;
+    let dir = std::path::PathBuf::from(std::env::var("KEV_EXPORT").expect("KEV_EXPORT"));
+    let lib = std::path::PathBuf::from(std::env::var("KEV_CUDA_LIB").expect("KEV_CUDA_LIB"));
+    let corpus = std::env::var("KEV_CORPUS").expect("KEV_CORPUS");
+    let output = std::env::var("KEV_NATIVE_OUT").expect("KEV_NATIVE_OUT");
+    let mut stream = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output)
+        .expect("choose a fresh evidence file");
+    let fixture: Value = serde_json::from_slice(&std::fs::read(corpus).unwrap()).unwrap();
+    checkpoint::verify(&dir).unwrap();
+    let processor = Processor::load(&dir).unwrap();
+    let mut executor = Executor::load(&dir, &lib).unwrap();
+    for (i, case) in fixture["cases"].as_array().unwrap().iter().enumerate() {
+        let prepared = processor
+            .prepare(case["request"].as_object().unwrap())
+            .unwrap();
+        assert_eq!(json!(prepared.rows), case["rows"], "{}", case["name"]);
+        let logits = executor.execute(&prepared.rows).unwrap();
+        let probabilities: Vec<_> = logits
+            .iter()
+            .map(|row| {
+                crate::postprocess::probabilities(row, crate::contract::TEMPERATURE).unwrap()
+            })
+            .collect();
+        let body = prepared.context.finish(logits.clone()).unwrap();
+        assert_eq!(body["usage"]["input_tokens"], case["input_tokens"]);
+        serde_json::to_writer(
+            &mut stream,
+            &json!({"name":case["name"],"logits":logits,"probabilities":probabilities,"body":body}),
+        )
+        .unwrap();
+        writeln!(stream).unwrap();
+        stream.flush().unwrap();
+        if i % 25 == 0 {
+            eprintln!("native {} {}", i + 1, case["name"]);
+        }
+    }
+}

@@ -52,6 +52,20 @@ impl Processor {
                 "base tokenizer delimiter mismatch: {text}"
             );
         }
+        // The pinned Transformers 5.17 Qwen2Tokenizer rebuilds this component:
+        // its regex treats Unicode marks differently from the base JSON file.
+        // Match the loaded official tokenizer, including emoji variation selectors.
+        let pretokenizer: tokenizers::pre_tokenizers::PreTokenizerWrapper = serde_json::from_value(
+            serde_json::json!({
+                "type": "Sequence", "pretokenizers": [
+                    {"type": "Split", "pattern": {"Regex": r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"},
+                     "behavior": "Isolated", "invert": false},
+                    {"type": "ByteLevel", "add_prefix_space": false,
+                     "trim_offsets": true, "use_regex": false}
+                ]
+            }),
+        )?;
+        tokenizer.with_pre_tokenizer(Some(pretokenizer));
         // Fragment encoding must never pad or truncate silently.
         tokenizer.with_padding(None);
         tokenizer
