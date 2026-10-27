@@ -342,7 +342,6 @@ fn the_systemone_finishing_matches_the_frozen_oracles() {
         // spans array drops out of the drift comparison and the
         // divergence is recorded; everything else — probabilities,
         // answers, sets, thresholds, span_heads — still compares.
-        let m = member_label();
         let mut response_cmp = response.clone();
         let mut want_cmp = want.clone();
         if m != "Vela-2.0-0.8B"
