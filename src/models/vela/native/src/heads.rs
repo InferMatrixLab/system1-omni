@@ -397,6 +397,14 @@ impl Heads {
             scalar.out,
             scalar.input
         );
+        let router = span_head(&file, "span2")?;
+        let broad = span_head(&file, "span_broad")?;
+        ensure!(
+            router.hidden == hidden && broad.hidden == hidden,
+            "span2/span_broad are {} and {} wide; the candidate head is {hidden}",
+            router.hidden,
+            broad.hidden
+        );
         Ok(Self {
             candidate_norm,
             query_norm,
@@ -408,8 +416,8 @@ impl Heads {
             d,
             hidden,
             set_bias: set_bias.data[0],
-            router: span_head(&file, "span2")?,
-            broad: span_head(&file, "span_broad")?,
+            router,
+            broad,
         })
     }
 

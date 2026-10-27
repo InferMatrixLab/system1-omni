@@ -205,3 +205,38 @@ fn a_missing_manifest_names_the_export_step() {
     assert!(error.to_string().contains("export_native.py"), "{error}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_stray_file_inside_a_pinned_directory_fails_the_gate() {
+    let dir = temp_dir("stray-nested");
+    write_bundle(&dir, first_member());
+    let bf16 = dir.join("bf16");
+    std::fs::create_dir(&bf16).expect("mkdir");
+    let backbone = b"bf16 backbone tensors";
+    std::fs::write(bf16.join("model.safetensors"), backbone).expect("write");
+    std::fs::write(bf16.join("stray.bin"), b"unlisted").expect("write");
+    let manifest_path = dir.join("vela_native_manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).expect("read")).expect("json");
+    manifest["files_sha256"]["bf16/model.safetensors"] = json!(sha256(backbone));
+    std::fs::write(&manifest_path, serde_json::to_vec(&manifest).expect("json")).expect("write");
+    let error = Bundle::load(&dir).unwrap_err();
+    assert!(
+        error.to_string().contains("bf16/stray.bin"),
+        "the nested stray file must be named: {error}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_directory_with_no_pinned_paths_fails_the_gate() {
+    let dir = temp_dir("stray-dir");
+    write_bundle(&dir, first_member());
+    std::fs::create_dir(dir.join("junk")).expect("mkdir");
+    let error = Bundle::load(&dir).unwrap_err();
+    assert!(
+        error.to_string().contains("junk"),
+        "the stray directory must be named: {error}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

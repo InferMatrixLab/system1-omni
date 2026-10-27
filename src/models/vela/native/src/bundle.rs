@@ -133,28 +133,14 @@ impl Bundle {
             );
         }
         // Fail closed on the directory, as the reference gate walks the
-        // package root: a top-level entry must be a pinned file, this
-        // manifest, or a directory holding pinned paths (the export's
-        // bf16/ backbone) — anything else is unlisted.
-        let pinned: HashSet<&str> = files
-            .keys()
-            .map(String::as_str)
-            .chain(std::iter::once("vela_native_manifest.json"))
-            .collect();
-        let mut unpinned: Vec<String> = std::fs::read_dir(dir)
-            .with_context(|| format!("cannot list the bundle directory {}", dir.display()))?
-            .map(|entry| {
-                entry
-                    .expect("a readable bundle entry")
-                    .file_name()
-                    .to_string_lossy()
-                    .into_owned()
-            })
-            .filter(|name| {
-                let prefix = format!("{name}/");
-                !pinned.contains(name.as_str()) && !files.keys().any(|key| key.starts_with(&prefix))
-            })
-            .collect();
+        // package root: every file under the bundle, at any depth, must
+        // be pinned (or be this manifest), and every directory must lie
+        // on the path of a pinned file (the export's bf16/ backbone) —
+        // anything else is unlisted.
+        let pinned: HashSet<&str> = files.keys().map(String::as_str).collect();
+        let mut unpinned: Vec<String> = Vec::new();
+        walk_unpinned(dir, "", &pinned, &mut unpinned)
+            .with_context(|| format!("cannot walk the bundle directory {}", dir.display()))?;
         unpinned.sort();
         ensure!(
             unpinned.is_empty(),
@@ -185,6 +171,32 @@ impl Bundle {
             .as_u64()
             .unwrap_or(self.member.max_length) as usize
     }
+}
+
+/// One level of the fail-closed walk: `prefix` is the bundle-relative
+/// path of `dir` (with a trailing `/` below the root).
+fn walk_unpinned(
+    dir: &Path,
+    prefix: &str,
+    pinned: &HashSet<&str>,
+    unpinned: &mut Vec<String>,
+) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let rel = format!("{prefix}{name}");
+        if entry.path().is_dir() {
+            let nested = format!("{rel}/");
+            if pinned.iter().any(|key| key.starts_with(&nested)) {
+                walk_unpinned(&entry.path(), &nested, pinned, unpinned)?;
+            } else {
+                unpinned.push(rel);
+            }
+        } else if rel != "vela_native_manifest.json" && !pinned.contains(rel.as_str()) {
+            unpinned.push(rel);
+        }
+    }
+    Ok(())
 }
 
 fn hash_file(path: &Path) -> Result<String> {
