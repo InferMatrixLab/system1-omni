@@ -23,8 +23,11 @@ pillow>=10
 # becomes ready. The device name is not required to be NVIDIA H200.
 # FlashInfer has no measured forward and no answer parity against the FLA
 # path. That parity run is the follow-up blocker before the flag is default.
-# vLLM's separate CuteDSL prefill backend, CUDA graphs, and torch.compile
-# are not selected. The recorded L20X-labeled C1 primary is tip 594528a9
+# vLLM's separate CuteDSL prefill backend is not selected. CUDA graphs and
+# torch.compile are off unless --backbone piecewise is passed. That flag
+# compiles each Qwen3_5DecoderLayer only. It does not compile ClefModel,
+# and it does not select FA3 or change the FLA default. The recorded
+# L20X-labeled C1 primary is tip 594528a9
 # on the FLA chunk: warmup 5, concurrency 1, stock Public231 with
 # thinking.enabled false, metric successful_latency, p50 164.969 ms,
 # p95 216.755 ms, 231/231. Versus 9030065 run1: Δp50 −82.549 ms

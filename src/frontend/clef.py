@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 from models.clef.engine import DEFAULT_VARIANT, FLA_PREFILL, GDN_PREFILL, VARIANTS
+from models.clef.piecewise import BACKBONE_EAGER, BACKBONE_PIECEWISE
 from models.clef.worker import decide
 
 __all__ = ["decide", "main"]
@@ -72,6 +73,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "flashinfer is opt-in and has no answer parity against that path."
         ),
     )
+    parser.add_argument(
+        "--backbone",
+        default=BACKBONE_EAGER,
+        choices=(BACKBONE_EAGER, BACKBONE_PIECEWISE),
+        help=(
+            "Qwen3.5 backbone. eager is the default. piecewise is the opt-in "
+            "inductor CUDA-graph split and is not the default."
+        ),
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     return parser.parse_args(argv)
@@ -90,6 +100,8 @@ def main(argv: list[str] | None = None) -> None:
         args.device,
         "--gdn-prefill",
         args.gdn_prefill,
+        "--backbone",
+        args.backbone,
         "--host",
         args.host,
         "--port",

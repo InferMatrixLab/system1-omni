@@ -66,7 +66,11 @@ smoke 4/4, `/health` `fla+causal_conv1d`, R1 p50 169.605 ms, p95 220.003 ms
 `choice_acc=0.8417`, `noul_acc=0.7973`, `score_mae=0.2488` (matches the
 `594528a9` baseline). R1 does not pass the dual gate versus
 164.969/216.755. R2 and R3 are not a new primary. The
-primary remains tip `594528a9`. The
+primary remains tip `594528a9`. `--backbone piecewise` is an unmeasured
+opt-in on that same server: inductor CUDA graphs on each Qwen3.5 decoder
+layer, with the FLA chunk and the joint head outside the capture.
+`/health` `backbone` stays `eager` unless a real capture publishes
+`piecewise+inductor`. The
 worker starts on that host when the capability prints 8.9. The default
 prefill is the FLA chunk. `--gdn-prefill flashinfer` is opt-in and is the
 named follow-up blocker: it has no measured forward and no answer parity

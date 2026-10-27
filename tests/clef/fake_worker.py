@@ -47,6 +47,8 @@ def main() -> None:
         "modalities": ["text"],
         "prompt_mode": "non-thinking",
         "linear_attention": "fla+causal_conv1d",
+        "backbone": "eager",
+        "backbone_graphs": 0,
         **identity(),
     }
     write_response(protocol, 200, health)

@@ -91,7 +91,11 @@ the Rust `omni-clef` worker. It admits one complete text request through
 `SerialScheduler` and forwards the body to a single executor process. That
 process runs the checkpoint's joint schema head on its main thread, which is
 the thread that initialized CUDA. The joint head is still that Python module.
-Clef does not use the shared Qwen CUDA executor.
+Clef does not use the shared Qwen CUDA executor. The default backbone is
+eager FLA. `--backbone piecewise` is an opt-in inductor CUDA-graph split
+of each Qwen3.5 decoder layer inside that same Python process; the FLA
+chunk and the joint head stay outside the captured regions, and `/health`
+names `piecewise+inductor` only after a real capture.
 
 The Qwen executor's `forward_shared` takes a request prefix, group prefixes and
 branches, ends each prefix at its last multiple of 64 tokens, and returns one final

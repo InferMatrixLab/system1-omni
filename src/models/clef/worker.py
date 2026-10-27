@@ -18,6 +18,7 @@ import threading
 from typing import Any, BinaryIO
 
 from models.clef.engine import DEFAULT_VARIANT, FLA_PREFILL, GDN_PREFILL, VARIANTS, ClefExecutor
+from models.clef.piecewise import BACKBONE_EAGER, BACKBONE_PIECEWISE
 from models.clef.ipc import (
     OPCODE_DECIDE,
     OPCODE_SHUTDOWN,
@@ -101,6 +102,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "flashinfer is opt-in and has no answer parity against that path."
         ),
     )
+    parser.add_argument(
+        "--backbone",
+        default=BACKBONE_EAGER,
+        choices=(BACKBONE_EAGER, BACKBONE_PIECEWISE),
+        help=(
+            "Qwen3.5 backbone execution. eager is the default and publishes "
+            "backbone eager. piecewise compiles each Qwen3_5DecoderLayer with "
+            "inductor CUDA graphs, splits around ChunkGatedDeltaRuleFunction, "
+            "and leaves the joint head eager. It publishes piecewise+inductor "
+            "only after a real capture. Full-model torch.compile is refused."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -113,6 +126,7 @@ def main(argv: list[str] | None = None) -> None:
         variant=args.variant,
         device=args.device,
         gdn_prefill=args.gdn_prefill,
+        backbone=args.backbone,
     )
     try:
         run_stdio(executor, sys.stdin.buffer, protocol_out)

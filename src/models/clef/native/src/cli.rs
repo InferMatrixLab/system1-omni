@@ -25,6 +25,7 @@ pub struct ServeArgs {
     pub variant: String,
     pub device: String,
     pub gdn_prefill: String,
+    pub backbone: String,
     pub host: String,
     pub port: u16,
 }
@@ -43,6 +44,7 @@ Options:
   --variant <name>       clef-flash (default) or clef
   --device <device>      cuda (default)
   --gdn-prefill <name>   fla (default) or flashinfer
+  --backbone <mode>      eager (default) or piecewise
   --host <addr>          127.0.0.1 (default)
   --port <port>          8000 (default)
   --help                 Show this help
@@ -61,6 +63,7 @@ where
     let mut variant = "clef-flash".to_string();
     let mut device = "cuda".to_string();
     let mut gdn_prefill = "fla".to_string();
+    let mut backbone = "eager".to_string();
     let mut host = "127.0.0.1".to_string();
     let mut port = 8000u16;
     let mut index = 0;
@@ -75,6 +78,7 @@ where
             "--variant" => variant = value,
             "--device" => device = value,
             "--gdn-prefill" => gdn_prefill = value,
+            "--backbone" => backbone = value,
             "--host" => host = value,
             "--port" => {
                 port = value
@@ -95,6 +99,9 @@ where
     if gdn_prefill != "fla" && gdn_prefill != "flashinfer" {
         bail!("gdn-prefill must be fla or flashinfer");
     }
+    if backbone != "eager" && backbone != "piecewise" {
+        bail!("backbone must be eager or piecewise");
+    }
     if host.is_empty() {
         bail!("host must not be empty");
     }
@@ -103,6 +110,7 @@ where
         variant,
         device,
         gdn_prefill,
+        backbone,
         host,
         port,
     }))
@@ -159,6 +167,8 @@ pub fn python_worker_command(args: &ServeArgs, python: &OsStr, pythonpath: &Path
     command.arg(&args.device);
     command.arg("--gdn-prefill");
     command.arg(&args.gdn_prefill);
+    command.arg("--backbone");
+    command.arg(&args.backbone);
     command.env("PYTHONUNBUFFERED", "1");
     command.stderr(Stdio::inherit());
     let mut path = pythonpath.as_os_str().to_os_string();

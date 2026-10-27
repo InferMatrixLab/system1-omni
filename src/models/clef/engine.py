@@ -23,6 +23,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from models.clef.piecewise import (
+    BACKBONE_EAGER,
+    BACKBONE_HEALTH_EAGER,
+    BACKBONE_HEALTH_PIECEWISE,
+    BACKBONE_PIECEWISE,
+    CAPTURE_FORWARDS,
+    bind_piecewise_backbone,
+    count_captured_cuda_graphs,
+    ready_backbone,
+    resolve_backbone,
+)
 from models.clef.preprocess import MAX_INPUT_TOKENS, enforce_limit
 from models.clef.prompt import render
 
@@ -535,6 +546,7 @@ class ClefExecutor:
         variant: str = DEFAULT_VARIANT,
         device: str = "cuda",
         gdn_prefill: str = FLA_PREFILL,
+        backbone: str = BACKBONE_EAGER,
     ) -> None:
         if variant not in VARIANTS:
             raise ValueError(f"variant must be one of {sorted(VARIANTS)}")
@@ -544,14 +556,24 @@ class ClefExecutor:
         self.root = Path(snapshot)
         self.device = device
         self.gdn_prefill_request = gdn_prefill
+        self.backbone_request = resolve_backbone(backbone)
         self.max_length = MAX_INPUT_TOKENS
         self._warmed = False
+        self._piecewise = None
+        self.backbone = (
+            BACKBONE_HEALTH_EAGER
+            if self.backbone_request == BACKBONE_EAGER
+            else "unbound"
+        )
+        self.backbone_graphs = 0
         verify_snapshot(self.root, self.variant)
         flashinfer_loaded = require_fast_linear_attention()
         activate_gdn_prefill(device, flashinfer_loaded, gdn_prefill)
         self.module = load_joint_schema_module(self.root / EXECUTABLE)
         self.model, self.processor = self.module.load_release_model(self.root, device=device)
         self.linear_attention = require_bound_linear_attention(sys.modules.get(MODELING))
+        if self.backbone_request == BACKBONE_PIECEWISE:
+            self._piecewise = bind_piecewise_backbone(self.model)
         if self.processor.tokenizer.pad_token_id is None:
             raise ValueError("tokenizer pad_token_id is required")
 
@@ -612,28 +634,60 @@ class ClefExecutor:
         }
 
     def warmup(self) -> None:
-        """Run one text forward before this process reports ready.
+        """Run text forwards before this process reports ready.
 
         The HTTP server is not bound until this returns. A CUDA context or
         kernel failure exits startup instead of the first live request.
-        The answer is discarded and is not a latency sample.
+        The answers are discarded and are not latency samples. The eager
+        path runs one forward. ``--backbone piecewise`` runs the same
+        forward three times so inductor can trace, capture, and leave a
+        ``CUDAGraphNode`` before ``/health`` is written. A piecewise request
+        that did not capture raises here and does not publish
+        ``piecewise+inductor``.
         """
 
-        self.serve(
-            {
-                "model": self.variant.name,
-                "state": "warmup",
-                "questions": {
-                    "ready": {
-                        "type": "noul",
-                        "instructions": "Is warmup complete?",
-                    }
-                },
-            }
+        payload = {
+            "model": self.variant.name,
+            "state": "warmup",
+            "questions": {
+                "ready": {
+                    "type": "noul",
+                    "instructions": "Is warmup complete?",
+                }
+            },
+        }
+        repeats = CAPTURE_FORWARDS if self.backbone_request == BACKBONE_PIECEWISE else 1
+        for _ in range(repeats):
+            self.serve(payload)
+        graphs = 0
+        if self._piecewise is not None:
+            import torch
+
+            device = next(self.model.parameters()).device
+            if device.type != "cuda":
+                raise RuntimeError("piecewise backbone capture requires the model on CUDA")
+            index = device.index if device.index is not None else torch.cuda.current_device()
+            graphs = count_captured_cuda_graphs(index)
+        self.backbone, self.backbone_graphs = ready_backbone(
+            self.backbone_request, graphs, self._piecewise
         )
         self._warmed = True
 
     def health(self) -> dict[str, Any]:
+        if self._warmed and self.backbone == BACKBONE_HEALTH_PIECEWISE and self.backbone_graphs < 1:
+            raise RuntimeError(
+                "refusing to publish piecewise+inductor without a captured CUDA graph"
+            )
+        if self._warmed and self.backbone_request == BACKBONE_EAGER and self.backbone != BACKBONE_HEALTH_EAGER:
+            raise RuntimeError("eager Clef health backbone is not eager")
+        if (
+            self._warmed
+            and self.backbone_request == BACKBONE_PIECEWISE
+            and self.backbone != BACKBONE_HEALTH_PIECEWISE
+        ):
+            raise RuntimeError(
+                "refusing to publish a piecewise health string that was not captured"
+            )
         return {
             "status": "ready" if self._warmed else "loading",
             "model": self.variant.repo_id,
@@ -644,6 +698,8 @@ class ClefExecutor:
             "modalities": ["text"],
             "prompt_mode": "non-thinking",
             "linear_attention": self.linear_attention,
+            "backbone": self.backbone,
+            "backbone_graphs": self.backbone_graphs,
         }
 
     def close(self) -> None:

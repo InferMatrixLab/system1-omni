@@ -136,6 +136,7 @@ fn worker_command_is_the_persistent_python_executor() {
         variant: "clef-flash".into(),
         device: "cuda".into(),
         gdn_prefill: "fla".into(),
+        backbone: "eager".into(),
         host: "127.0.0.1".into(),
         port: 8000,
     };
@@ -159,6 +160,8 @@ fn worker_command_is_the_persistent_python_executor() {
             "cuda",
             "--gdn-prefill",
             "fla",
+            "--backbone",
+            "eager",
         ]
     );
     let path = command
@@ -188,7 +191,10 @@ fn parse_cli_defaults_and_rejects_a_missing_model() {
     assert_eq!(args.variant, "clef-flash");
     assert_eq!(args.device, "cuda");
     assert_eq!(args.gdn_prefill, "fla");
+    assert_eq!(args.backbone, "eager");
     assert_eq!(args.host, "127.0.0.1");
+    assert!(parse_cli(["--model", "snap", "--backbone", "full"]).is_err());
+    assert!(parse_cli(["--model", "snap", "--backbone", "piecewise"]).is_ok());
     assert_eq!(args.port, 8000);
     assert!(parse_cli(["--variant", "clef"]).is_err());
     assert!(parse_cli(["--model", "snap", "--variant", "other"]).is_err());
@@ -230,6 +236,8 @@ async fn health_and_post_keep_the_python_envelope() {
     assert_eq!(health["modalities"], serde_json::json!(["text"]));
     assert_eq!(health["max_input_tokens"], 16384);
     assert_eq!(health["linear_attention"], "fla+causal_conv1d");
+    assert_eq!(health["backbone"], "eager");
+    assert_eq!(health["backbone_graphs"], 0);
     assert_eq!(health["cuda_main_thread"], true);
     assert!(
         body.windows(b"\"prompt_mode\": \"non-thinking\"".len())

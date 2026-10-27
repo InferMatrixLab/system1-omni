@@ -54,7 +54,9 @@ not, by itself, refuse the default FLA path. Requesting
 reported major is not 9, 10, or 12, refuses startup. `/health`
 `linear_attention` is the bind that started:
 `fla+causal_conv1d` by default, or `flashinfer+fla+causal_conv1d` when the
-opt-in flag bound. The PyTorch `torch_chunk_gated_delta_rule` and
+opt-in flag bound. `/health` `backbone` is `eager` and `backbone_graphs`
+is 0 unless the process was started with `--backbone piecewise` and
+inductor actually captured. The PyTorch `torch_chunk_gated_delta_rule` and
 `F.conv1d` paths are not served.
 
 FlashInfer prefill calls `flashinfer.gdn_prefill.chunk_gated_delta_rule`
@@ -62,8 +64,11 @@ with `use_cp=False`. Q and K L2 normalization uses FLA `l2norm_fwd`, and
 FlashInfer's `use_qk_l2norm_in_kernel` flag stays false. Log-space `g` is
 exponentiated. The call is one sequence and does not continue a recurrent
 state. FlashInfer 0.6.16 does not dispatch that kernel when the device
-reports capability 8.9. vLLM's separate CuteDSL prefill backend, CUDA
-graphs, and `torch.compile` are not used.
+reports capability 8.9. vLLM's separate CuteDSL prefill backend is not
+used. CUDA graphs and `torch.compile` stay off on the default
+`--backbone eager` path. `--backbone piecewise` is a separate opt-in
+described below. It does not select FA3 and it does not change the FLA
+prefill.
 
 The lab host is the machine `nvidia-smi` names `NVIDIA L20X`, including
 when it reports compute capability 8.9. Startup does not require the name
@@ -108,6 +113,7 @@ cargo build --release --locked -p omni-clef
   --variant clef-flash \
   --device cuda \
   --gdn-prefill fla \
+  --backbone eager \
   --host 127.0.0.1 \
   --port 8000
 ```
@@ -121,9 +127,10 @@ The executor process runs one text forward, then `omni-clef` binds. `GET
 http://127.0.0.1:8000/health` is not served until that forward returns.
 It then returns `status: ready`, `variant: clef-flash`,
 `prompt_mode: non-thinking`, `modalities: ["text"]`,
-`max_input_tokens: 16384`, and `linear_attention: fla+causal_conv1d` on
-the default flag. A CUDA init failure exits before the port opens. That
-startup forward was not run in this editing environment.
+`max_input_tokens: 16384`, `linear_attention: fla+causal_conv1d`,
+`backbone: eager`, and `backbone_graphs: 0` on the default flags. A CUDA
+init failure exits before the port opens. That startup forward was not
+run in this editing environment.
 
 For the 27B checkpoint, download `Cloudflare/clef` at
 `a30162b99d68a481d8bd75d38df069a0cf83df40` and pass `--variant clef`.
@@ -161,7 +168,7 @@ loaded repo id.
 ```sh
 PYTHONPATH=src python -m pip install pytest
 PYTHONPATH=src python -m pytest tests/clef -q
-PYTHONPATH=src python -m compileall -q src/models/clef src/frontend/clef.py tests/clef
+PYTHONPATH=src python -m compileall -q src/models/clef src/frontend/clef.py tests/clef recipe/clef/answer_parity.py
 cargo test --locked -p omni-clef
 ```
 
@@ -292,8 +299,10 @@ in a commit.
    needs its own paste.
    `GET /health` is absent until the startup forward returns, then must
    show `status` `ready`. The default `linear_attention` is
-   `fla+causal_conv1d`. `flashinfer+fla+causal_conv1d` means the process
-   was started with `--gdn-prefill flashinfer`. Record that string. A
+   `fla+causal_conv1d` and the default `backbone` is `eager` with
+   `backbone_graphs` 0. `flashinfer+fla+causal_conv1d` means the process
+   was started with `--gdn-prefill flashinfer`. `piecewise+inductor` means
+   `--backbone piecewise` captured. Record both strings. A
    process that exits at startup did not bind `causal_conv1d_fn` and a
    chunk kernel. Do not measure a process that is still on the PyTorch
    chunk or `F.conv1d` path.
@@ -327,7 +336,7 @@ in a commit.
      "precision": "bfloat16",
      "model_revision": "Cloudflare/clef-flash@f0b7d3cd65296abfe459e6c228b618f5d8b26d2f",
      "runtime_revision": "<git rev-parse HEAD of this worker>",
-     "cache_policy": "one request at a time on the executor main thread; Rust FIFO admission; no prefix cache; no CUDA graph; transformers cache left at its default",
+     "cache_policy": "one request at a time on the executor main thread; Rust FIFO admission; no prefix cache; backbone eager (no CUDA graph); transformers cache left at its default",
      "cuda_evidence": "nvidia-smi name NVIDIA L20X, compute capability as printed (8.9 on the lab host), while the worker was running with --device cuda. Copy /health linear_attention.",
      "reservation": "<allocation id>"
    }
@@ -370,6 +379,90 @@ in a commit.
    and p95 216.755 ms, only after that new tip has its own paste. The
    `9030065` run1 figures remain the baseline of that recorded comparison.
 
+## Opt-in piecewise backbone
+
+This is a draft tip. It does not change the default and it does not move
+the `594528a9` primary. FlashInfer GDN prefill and FA3 stay deferred.
+`torch.compile` of `ClefModel` is refused: an operator negative control of
+that full-model compile was +773 ms, attributed to `.item()` in
+`JointSchemaHead.forward`, and was not remeasured here.
+
+`--backbone piecewise` compiles each `Qwen3_5DecoderLayer` with inductor
+`mode=reduce-overhead`, `fullgraph=False`, and `dynamic=False`. Capture
+splits, and only these:
+
+- FLA `ChunkGatedDeltaRuleFunction`, via `torch.compiler.disable` on each
+  `Qwen3_5GatedDeltaNet.chunk_gated_delta_rule`. The chunk runs eager. A
+  warmup that sees the chunk inside CUDA capture, or inside Dynamo
+  tracing, exits before `/health`.
+- `JointSchemaHead`. Its forward is disabled and is not compiled.
+  `ClefModel.forward` stays eager, so the head's `.item()` is outside
+  every graph.
+
+Full attention stays the checkpoint kernel. The flag does not select FA3
+and does not pass `--gdn-prefill flashinfer`. Start it with the same
+`CLEF_PYTHON` recipe interpreter as the eager server:
+
+```sh
+PYTHONPATH=src python -m frontend.clef \
+  --model <snapshot> \
+  --variant clef-flash \
+  --device cuda \
+  --gdn-prefill fla \
+  --backbone piecewise \
+  --host 127.0.0.1 \
+  --port 8000
+```
+
+`/health` `backbone` is `piecewise+inductor` and `backbone_graphs` is a
+positive integer only after the three startup forwards captured at least
+one inductor `CUDAGraphNode` and the chunk split ran outside that
+capture. Any other outcome exits. Do not treat a process that is still
+`eager`, or that died at startup, as this bind. `linear_attention` stays
+`fla+causal_conv1d`.
+
+Each new sequence length specializes a static graph. The first request of
+a length pays capture. Later requests of that length replay. This editing
+environment did not capture.
+
+Answer parity is the gate against eager FLA. Tolerances are fixed at
+probability drift 0.002, score drift 0.002, and zero decision flips. Do
+not widen them. From the repository root, after two bench runs and the
+two health documents:
+
+```sh
+PYTHONPATH=src python recipe/clef/answer_parity.py \
+  --eager-run <eager-bench-dir> \
+  --piecewise-run <piecewise-bench-dir> \
+  --eager-health <eager-health.json> \
+  --piecewise-health <piecewise-health.json> \
+  --device "<nvidia-smi name>" \
+  --compute-capability "<printed capability>" \
+  --report <fresh-report.json>
+```
+
+Exit 1 fails the tip. The report records `latency_keep: false`.
+
+GPU work for the parent, not run here. Record `device` and
+`compute capability` on every paste. Clock
+`post_to_body_json_and_schema_validation`. The operator-supplied
+comparison target for one measured round is omni p50 55.412 ms and p95
+129.859 ms, against the cited vLLM pair 36.407 / 96.107. Those figures
+were not produced in this checkout and are not a KEEP.
+
+1. Capture-boundary smoke. `benchmarks/smoke.jsonl` must validate, and
+   `/health` must show `status: ready`, `linear_attention:
+   fla+causal_conv1d`, `backbone: piecewise+inductor`, and
+   `backbone_graphs` of at least 1. A startup failure is not a latency
+   result.
+2. Answer parity, command above, on the same manifest for `--backbone
+   eager` and `--backbone piecewise`. Both sides stay on
+   `--gdn-prefill fla`.
+3. One Public231 measured round after warmup 5 and concurrency 1, only
+   if the parity gate passed. Compare that round with 55.412 / 129.859.
+   One round does not replace tip `594528a9` and does not authorize a
+   merge.
+
 ## What remains unverified
 
 Image and video inputs, and a native joint head. The `9030065`
@@ -388,7 +481,10 @@ p50 164.969 ms, p95 216.755 ms. The default prefill remains that FLA
 chunk, including on reported majors 9, 10, and 12. `--gdn-prefill
 flashinfer` is opt-in. It has no measured forward and no answer parity
 against `fla+causal_conv1d`; that parity run is the named follow-up
-blocker before the flag becomes the default. The startup forward that
+blocker before the flag becomes the default. `--backbone piecewise` is
+also opt-in and unmeasured. Its capture, answer parity, and the
+single-round comparison with the operator-supplied 55.412 / 129.859
+pair were not run here. The startup forward that
 runs before `/health` is separate from the client warmup in the C1
 protocol and has no latency claim. A later code change is unmeasured
 until its own paste.

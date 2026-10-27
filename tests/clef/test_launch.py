@@ -59,6 +59,7 @@ def test_main_execs_the_rust_binary(monkeypatch, tmp_path):
     assert argv[argv.index("--model") + 1] == "snapshot"
     assert argv[argv.index("--variant") + 1] == "clef"
     assert argv[argv.index("--port") + 1] == "9000"
+    assert argv[argv.index("--backbone") + 1] == "eager"
     assert "ThreadingHTTPServer" not in argv
 
 
@@ -82,5 +83,6 @@ def test_executor_module_help_is_not_an_http_server():
     )
     assert result.returncode == 0
     assert "--model" in result.stdout
+    assert "--backbone" in result.stdout
     assert "Not an HTTP server" in result.stdout
     assert "ThreadingHTTPServer" not in result.stdout
