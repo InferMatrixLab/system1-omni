@@ -126,7 +126,7 @@ def verify_config(root: Path) -> dict[str, Any]:
     return config
 
 
-def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
+def verify_files(root: Path, table: dict[str, str] | None = None, revision: str = REFERENCE_REVISION) -> list[str]:
     """Hash every pinned file in full and return their names.
 
     Must run before any package code is imported: the table names the
@@ -138,7 +138,9 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
     ``__init__`` in every module form, or a namespace package's nested
     modules — would shadow one of the pinned runtime's dependencies —
     and any ``__pycache__`` or directory symlink, whose contents the
-    walk cannot verify against the pin.
+    walk cannot verify against the pin. ``revision`` names the pin the
+    table belongs to in hash-failure messages (the hybrid member passes
+    its own).
     """
 
     table = dict(table or PINNED_FILES_SHA256)
@@ -151,7 +153,7 @@ def verify_files(root: Path, table: dict[str, str] | None = None) -> list[str]:
             problems.append(f"missing pinned file {name}")
             continue
         if _sha256_safe(target) != digest:
-            problems.append(f"{name}: SHA-256 differs from the pin for {REFERENCE_REVISION}")
+            problems.append(f"{name}: SHA-256 differs from the pin for {revision}")
     for entry in sorted(Path(root).iterdir()):
         if entry.name in table:
             continue
@@ -238,6 +240,10 @@ def verify_package(root: Path, table: dict[str, str] | None = None) -> None:
 
 class Vela2Executor:
     """Load and drive one immutable pinned Vela 2.0 0.3B runtime instance."""
+
+    # Response finishing uses this to refuse the hybrid-only ``span_heads``
+    # field (hybrid.py's executor sets it True).
+    is_hybrid = False
 
     def __init__(
         self,
