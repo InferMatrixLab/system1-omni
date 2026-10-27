@@ -17,6 +17,20 @@ SPEC.loader.exec_module(exporter)
 
 
 class ExportTests(unittest.TestCase):
+    def test_all_layers_and_projection_families_are_required(self):
+        targets = exporter.expected_targets()
+        self.assertEqual(len(targets), 248)
+        for name, count in (("gate_proj", 32), ("up_proj", 32), ("down_proj", 32),
+                            ("q_proj", 8), ("k_proj", 8), ("v_proj", 8), ("o_proj", 8),
+                            ("in_proj_qkv", 24), ("in_proj_a", 24), ("in_proj_z", 24),
+                            ("in_proj_b", 24), ("out_proj", 24)):
+            self.assertEqual(sum(t.endswith(f".{name}.weight") for t in targets), count)
+        exporter.validate_targets(targets)
+        missing = "model.language_model.layers.0.linear_attn.in_proj_b.weight"
+        # The same count with a different target is also invalid.
+        with self.assertRaisesRegex(ValueError, "target mismatch"):
+            exporter.validate_targets((targets - {missing}) | {missing.replace(".0.", ".3.")})
+
     def test_merge_includes_each_gdn_projection_with_one_rounding(self):
         # Includes all five GDN projections omitted by a Cua-S1-only target list.
         for module in (

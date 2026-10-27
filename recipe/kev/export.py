@@ -40,6 +40,30 @@ CHECKPOINT_FILES = {
 }
 
 
+def expected_targets():
+    """The pinned 32-layer model: 96 MLP, 32 attention and 120 GDN targets."""
+    targets = set()
+    for layer in range(32):
+        modules = [f"mlp.{p}_proj" for p in ("gate", "up", "down")]
+        if layer % 4 == 3:
+            modules += [f"self_attn.{p}_proj" for p in ("q", "k", "v", "o")]
+        else:
+            modules += [f"linear_attn.{p}" for p in (
+                "in_proj_qkv", "in_proj_a", "in_proj_z", "in_proj_b", "out_proj"
+            )]
+        targets.update(f"model.language_model.layers.{layer}.{m}.weight" for m in modules)
+    return targets
+
+
+def validate_targets(targets):
+    expected = expected_targets()
+    if set(targets) != expected:
+        raise ValueError(
+            f"LoRA target mismatch: missing={sorted(expected - set(targets))}, "
+            f"unexpected={sorted(set(targets) - expected)}"
+        )
+
+
 def sha256(path):
     h = hashlib.sha256()
     with path.open("rb") as stream:
@@ -155,8 +179,7 @@ def export(base, checkpoint, out):
     pairs = adapter_pairs(
         load_file(checkpoint / "adapter_model.safetensors", device="cpu")
     )
-    if len(pairs) != 248:
-        raise ValueError("expected all 248 Kev LoRA target matrices")
+    validate_targets(pairs)
     out.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{out.name}-", dir=out.parent))
     used, weight_map = set(), {}
