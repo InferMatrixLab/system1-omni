@@ -29,7 +29,7 @@ the three envelope 422s (missing field, extra field, wrong model
 name) that freeze the worker's preamble admission against the pinned
 runtime's. The example files' ``model`` field is rewritten to the
 served member's name, and the hybrid member's oracle fixtures export
-under an ``oracle-hybrid-<member>-`` prefix, so both members share one tool.
+under an ``oracle-hybrid-<member>-`` prefix, so every member shares one tool.
 CPU FP32 is the oracle setting; GPU bf16-autocast is a deployment
 option, not this tool's default.
 """

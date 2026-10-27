@@ -169,7 +169,7 @@ text and one-image state, CLM has a stub-encoder contract recipe, and OmniJev-4B
 v1.1 runs on a native Rust/CUDA worker. D3
 (Decision 3.0) has a Python reference worker that runs the checkpoint's own
 pinned runtime for text, image and video state, and the Vela 2.0 members (0.3B and the decoder
-hybrid) have one that serves all five
+members 0.8B/4B/9B) have one that serves all five
 SystemOne question kinds (`choice`/`noul`/`score` plus the `span`/`set`
 extensions) on each checkpoint's own pinned runtime.
 pplx-decider-v1.1-27b has a Python reference worker for the pinned Perplexity

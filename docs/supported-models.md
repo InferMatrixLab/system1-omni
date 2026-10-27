@@ -41,16 +41,16 @@ Models that are being added are also tracked in issues labeled [new model](https
 - **Planned:** not implemented yet; the linked issue tracks it.
 
 The Cua-S1 workers answer `choice` questions only.
-LAYA's English worker, Open-Jev and CLM support `choice`, `score`, and `noul` text questions.
 LAYA's English worker, Open-Jev, CLM, and StartLux Instant 4B support `choice`, `score`, and `noul` text questions.
 StartLux serves Instant only; AutoThink is not implemented, and the weights are CC BY-NC 4.0.
 D3's reference worker serves the same three kinds for text, image and video
 state (inline base64 media under the pinned runtime's per-item budgets);
 its media serving evidence is author-run on the A100 above.
-Vela 2.0's reference workers (0.3B and the 0.8B hybrid) serve all five
-kinds (`choice`, `noul`, `score`, plus the `span`/`set` extensions with
-their Noul views, and `span_heads` on the hybrid) for text state on CPU
-FP32; the larger hybrid members (4B/9B) are separate slices.
+Vela 2.0's reference workers (0.3B and the decoder members 0.8B/4B/9B
+behind one member registry) serve all five kinds (`choice`, `noul`,
+`score`, plus the `span`/`set` extensions with their Noul views, and
+`span_heads` on the decoder members) for text state; 0.3B and 0.8B were
+validated on CPU FP32, the 4B/9B members on GPU bf16-autocast.
 Clef-flash and Clef serve the same three kinds for text only. The worker
 refuses image and video inputs. The flash CUDA cell records two
 operator-reported Public231 concurrency-1 results on the L20X-labeled lab

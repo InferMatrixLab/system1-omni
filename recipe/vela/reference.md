@@ -40,8 +40,10 @@ Scope:
   calibrated readouts; zero generated tokens.
 
 Out of scope: the ONNX backend of
-the 0.3B, any native Rust/CUDA executor, and `noul_calibration` (off
-by default; documented as a reference-server feature only).
+the 0.3B, any native Rust/CUDA executor (the decoder members' native
+library is documented separately in [native.md](native.md)), and
+`noul_calibration` (off by default; documented as a reference-server
+feature only).
 
 ## Architecture and ownership
 
@@ -79,10 +81,10 @@ The ownership boundary follows
 | Artifact | 0.3B | decoder members |
 | --- | --- | --- |
 | Package | [vllm-sr/Vela-2.0-0.3B](https://huggingface.co/vllm-sr/Vela-2.0-0.3B) | 0.8B / [4B](https://huggingface.co/vllm-sr/Vela-2.0-4B) / [9B](https://huggingface.co/vllm-sr/Vela-2.0-9B), pinned per member in `hybrid.py`'s registry |
-| Pinned revision | `d6f03aa9baca4f9017fa8f8e9c2764d3bed3f409` | `326b01d81f61fff7fd4ae570e54b87a49119e490` |
+| Pinned revision | `d6f03aa9baca4f9017fa8f8e9c2764d3bed3f409` | 0.8B `326b01d81f61fff7fd4ae570e54b87a49119e490`, 4B `d692394127f6f87fc581d8634c9558fe4776efce`, 9B `068425bb145c05884a98b870c219047da22d9aea` |
 | Package gate | config structural identity + a 7-file SHA-256 table in `engine.py`; no unlisted importables, `__pycache__` or directory symlinks in the package root | config structural identity (incl. `model_name`) + a 10-file SHA-256 table in `hybrid.py`, cross-checked against the package's own SHA256SUMS |
-| Weights check | exact 1,236,473,252 bytes | exact 2,022,189,488 bytes + hashed `broad_head.safetensors` |
-| Served name | `vllm-sr/Vela-2.0-0.3B` | `vllm-sr/Vela-2.0-0.8B` (from `config.json`) |
+| Weights check | exact 1,236,473,252 bytes | exact per-member shard bytes (0.8B one shard 2,022,189,488; 4B three shards 9,705,025,832; 9B five shards 17,942,962,360) + hashed `broad_head.safetensors` |
+| Served name | `vllm-sr/Vela-2.0-0.3B` | the member's own `vllm-sr/Vela-2.0-<member>` (from `config.json`) |
 | Input window | 8,192 tokens | 16,384 tokens |
 | License | Apache-2.0; tokenizer material under Gemma Terms of Use | Apache-2.0; Qwen3.5 lineage notices in the package (`LICENSES/Qwen3.5-*-LICENSE.txt` per member) |
 
