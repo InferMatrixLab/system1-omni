@@ -132,6 +132,52 @@ fn shared_prefixes_match_full_prompts() {
 
 #[test]
 #[ignore = "needs a GPU, CUA_S1_CUDA_LIB and QWEN3_5_MODEL"]
+fn packing_options_leave_fixed_rows_unchanged() {
+    let groups: &[(usize, &[usize])] =
+        &[(0, &[1, 64]), (1, &[2, 65]), (70, &[1, 200]), (128, &[3])];
+    let case = Case::new(300, groups, 21);
+    let full: Vec<Vec<u32>> = groups
+        .iter()
+        .enumerate()
+        .flat_map(|(g, (_, branches))| (0..branches.len()).map(move |b| (g, b)))
+        .map(|(g, b)| case.full(g, b))
+        .collect();
+    let want: Vec<Vec<f32>> = {
+        let mut plain = model();
+        full.iter()
+            .map(|ids| plain.forward_fixed(ids).unwrap())
+            .collect()
+    };
+    // what Open-Jev selects at load for checkpoints that pack candidates (27B)
+    let mut model = model();
+    model.enable_batched_gdn().unwrap();
+    model.enable_packed_projections().unwrap();
+    model.check_fixed_rows().unwrap();
+    let flat = |rows: Vec<Vec<Vec<f32>>>| rows.into_iter().flatten().collect::<Vec<_>>();
+    let first = flat(model.forward_shared(&case.prompts()).unwrap());
+    // the packed default path in between, as when `auto` declines a request
+    let inputs: Vec<&[u32]> = full.iter().map(Vec::as_slice).collect();
+    model.forward_batch(&inputs).unwrap();
+    let again = flat(model.forward_shared(&case.prompts()).unwrap());
+    for (i, ids) in full.iter().enumerate() {
+        let fixed = model.forward_fixed(ids).unwrap();
+        for (name, row) in [
+            ("shared", &first[i]),
+            ("shared again", &again[i]),
+            ("fixed", &fixed),
+        ] {
+            assert!(
+                row.iter()
+                    .map(|v| v.to_bits())
+                    .eq(want[i].iter().map(|v| v.to_bits())),
+                "{name}, prompt {i}"
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "needs a GPU, CUA_S1_CUDA_LIB and QWEN3_5_MODEL"]
 fn shared_prefix_state_stays_inside_one_call() {
     let mut model = model();
     let a = Case::new(200, &[(10, &[3, 40, 1]), (0, &[64]), (65, &[2, 7])], 11);

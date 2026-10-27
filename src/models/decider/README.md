@@ -67,8 +67,10 @@ scratch growth, and falls back permanently to eager if capture fails. Effective
 mode and cumulative capture/replay counters appear in health/diagnostic metadata.
 The selected head and calibrated response remain outside the graph.
 
-`prefix.rs` independently plans exact request/question token prefixes from complete
-prepared rows. `DECIDER_PREFIX=1` uses shared Qwen continuation and fixed GEMM
+`prefix.rs` plans exact request/question token prefixes from complete prepared rows
+with the planner in the shared Qwen crate
+([`qwen3_5/native/src/prefix.rs`](../qwen3_5/native/src/prefix.rs)), which Open-Jev
+also uses. `DECIDER_PREFIX=1` uses shared Qwen continuation and fixed GEMM
 selection; `DECIDER_FIXED=1` provides independent fixed full rows for a matched
 control. Short/no-sharing cases run independent fixed rows. These paths require
 Graph off. The selected head keeps identical batch grouping; calibrated responses

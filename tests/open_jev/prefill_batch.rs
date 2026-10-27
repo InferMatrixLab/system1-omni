@@ -122,22 +122,22 @@ async fn text_prefix_buffers_grow_and_shrink_without_reusing_prior_contents() {
                     .unwrap()[0][0],
             );
         }
-        let actual = engine
+        let (scores, used) = engine
             .executor
-            .execute_detailed(&engine.scheduler, vec![inputs])
+            .execute_with_prefix(&engine.scheduler, vec![inputs])
             .await
             .unwrap();
         assert_eq!(
-            actual.saved_prefix_tokens,
+            used.saved_tokens,
             2 * prefix,
             "exercise actual prefix reuse"
         );
-        assert_eq!(actual.scores, vec![expected.clone()]);
+        assert_eq!(scores, vec![expected.clone()]);
         if token == 42 {
             if let Some(first) = &first {
-                assert_eq!(&actual.scores, first, "returning input after changed state");
+                assert_eq!(&scores, first, "returning input after changed state");
             } else {
-                first = Some(actual.scores);
+                first = Some(scores);
             }
         }
     }

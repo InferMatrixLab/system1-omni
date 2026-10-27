@@ -8,6 +8,8 @@ use serde_json::{Map, Value, json};
 use tokenizers::Tokenizer;
 
 use crate::contract::{self, Checkpoint, Kind, Question};
+use crate::executor::PrefixUse;
+use omni_qwen3_5_native::prefix::PrefixMode;
 
 pub struct Processor {
     checkpoint: &'static Checkpoint,
@@ -87,15 +89,29 @@ impl Processor {
 impl ResponseContext {
     /// Restore the Noul baseline and normalize across each complete question.
     pub fn finish(self, rows: Vec<Vec<f32>>) -> Result<Value> {
-        self.finish_with_prefix(rows, 0)
+        self.finish_with_prefix(rows, None)
     }
 
-    /// Report executed prefix reuse, rather than inferring it from token lengths.
+    /// `finish`, reporting in `metadata.prefix_cache` the configured policy, whether the
+    /// candidates ran on shared prefixes, within one question or across questions, and
+    /// the prefix tokens that were not recomputed.
     pub fn finish_with_prefix(
         self,
         rows: Vec<Vec<f32>>,
-        saved_prefix_tokens: usize,
+        prefix: Option<&PrefixUse>,
     ) -> Result<Value> {
+        let used = prefix.copied().unwrap_or_default();
+        let policy = match used.mode {
+            PrefixMode::Off => "default",
+            mode => mode.name(),
+        };
+        let scope = match (used.shared, used.across_questions) {
+            (false, _) => "none",
+            (true, false) => "within_question",
+            (true, true) => "across_questions",
+        };
+        let prefix_cache = json!({"policy": policy, "enabled": used.shared, "scope": scope,
+            "saved_tokens": used.saved_tokens});
         ensure!(rows.len() == self.questions.len(), "invalid logit rows");
         let mut answers = Map::new();
         for (q, mut logits) in self.questions.iter().zip(rows) {
@@ -108,12 +124,6 @@ impl ResponseContext {
                 contract::answer(q, &logits, self.temperature)?,
             );
         }
-        let prefix_cache = if saved_prefix_tokens > 0 {
-            json!({"policy": "default", "enabled": true, "scope": "within_question",
-                "saved_tokens": saved_prefix_tokens})
-        } else {
-            json!({"policy": "default", "enabled": false, "scope": "none", "saved_tokens": 0})
-        };
         Ok(
             json!({"model": self.checkpoint.model_id, "answers": answers,
             "usage": {"input_tokens": self.input_tokens, "output_tokens": 0},
