@@ -82,5 +82,79 @@ boundaries, and ticket episode duration is not request latency.
 Append a dated campaign and auditable evidence without replacing prior results.
 Compare new deployments with a reference measured in the same campaign. Different
 hardware, workloads, precision, concurrency, clocks or quantile methods need
-separate groups. Image replacement, repeated-image/cache workloads and higher
+separate groups. The [pplx-decider recipe](../recipe/pplx_decider/README.md)
+records a Public231 concurrency-1 run on 1× lab L20X (sm_89) at head
+`1ba07d1`: stripped no-thinking twin, warmup 5, concurrency 1, clock
+`successful_latency` / `post_to_body_json_and_schema_validation`. Primary
+run1 was 231/231, p50 98.777 ms, p95 341.202 ms. The prior primary is the
+remeasure of head `f968e576` on a lab GPU labeled L20X: warmup 5, concurrency
+1, stock Public231 with `thinking.enabled=false`, metric `successful_latency`,
+231/231, p50 94.077 ms, p95 300.200 ms. `/health` reported
+`causal_conv1d=1.7.0`, `fla=0.5.2`, `flashinfer=null`,
+`linear_attention=fla-chunk`, and `compute_capability=9.0`. Against run1,
+p50 is −4.700 ms (−4.76%) and p95 is −41.002 ms (−12.02%). An earlier paste
+of 98.037 / 302.569 is not a primary. `ffae182` measured 231/231, p50
+92.844 ms, p95 296.458 ms, p50 −1.31% and p95 −1.25% versus `f968e576`.
+`4b99b73` measured 231/231, p50 88.942 ms, p95 295.797 ms,
+p50 −4.20% (−3.902 ms) and p95 −0.22% (−0.661 ms) versus `ffae182`.
+The kept primary is `fcf5e2b`: 231/231, p50 87.782 ms, p95 291.183 ms,
+p50 −1.30% (−1.160 ms) and p95 −1.56% (−4.614 ms) versus `4b99b73`.
+`/health` reported `gdn_layout=gva`, `gva_layers=48`,
+`gdn_qk_contiguous` true, `gdn_use_cp` false, `gdn_cp_heuristic` null,
+`rms_norm=eager`, `fused_rms_norm_layers=0`, `cu_seqlens_slots=48`,
+`flashinfer_status=bound`, `flashinfer=0.6.16.post3`, `compile=default`,
+and `compile_median=eager`. Quality: `choice_acc=0.9065` (139),
+`noul_acc=0.8784` (74), `score_mae=0.2035` (18). Warmup, concurrency,
+the latency metric, and compute capability were not restated in that
+paste. The `4b99b73` paste reported `/health` `compile=default`,
+`compile_median=eager`, `sdpa=default`, `mlp=default`,
+`fused_gate_up_layers=0`, `linear_attention=flashinfer+fla+causal_conv1d`,
+`flashinfer_status=bound`, `flashinfer=0.6.16.post3`, and
+`cu_seqlens_slots=48`, with the same quality digits. Uncached
+all-sequence FlashInfer `3c72f02` measured 231/231, p50 88.808 ms, p95
+300.751 ms (p50 −5.60%, p95 +0.18% versus `f968e576`) and failed the gate
+that both percentiles must improve. It is not the primary. Short-sequence
+FlashInfer `a50b9aa` measured 231/231, p50 95.446 ms, p95 300.871 ms
+(p50 +1.46%, p95 +0.22% versus `f968e576`) and failed the same gate. It is
+not the primary. cuDNN-first SDPA `0dcaa0ac` measured 231/231, p50
+138.501 ms, p95 332.859 ms (p50 +47.22%, p95 +10.88%) and failed the same
+gate. It is not the primary. Fused gate-up `8b4ee326` measured 231/231,
+p50 102.437 ms, p95 304.970 ms (p50 +8.89%, p95 +1.59%) and failed the
+same gate. It is not the primary. Always-on dynamic compile `e36b32ed`
+measured 231/231, p50 97.751 ms, p95 263.124 ms (p50 +3.91%, p95 −12.35%)
+and failed the same gate because p50 rose. It is not the primary. The
+512-token compile split `7e3b1be` measured 231/231, p50 100.037 ms, p95
+257.084 ms (p50 +6.34%, p95 −14.36%) and failed the same gate. p95
+improved further and p50 was worse than always-on. It is not the primary.
+Isolated-median compile `34ba5de` measured 231/231, p50 97.084 ms, p95
+256.679 ms (p50 +3.20%, p95 −14.50%) and failed the same gate. The
+136-token probe was eager and added no compiled frames. It is not the
+primary. The FlashInfer state-workspace ring `17a7b120` measured
+231/231, p50 89.165 ms, p95 295.723 ms (p50 +0.25%, p95 −0.02%) and
+failed the same gate. Quality: `choice_acc=0.906` (139),
+`noul_acc=0.878` (74), `score_mae=0.203` (18). It is not the primary.
+Always-on FLA residual RMSNorm `3afb472` measured 231/231, p50
+93.935 ms, p95 274.902 ms (p50 +5.61%, p95 −7.06%) and failed the
+same gate. Quality: `choice_acc=0.9065` (139), `noul_acc=0.8784` (74),
+`score_mae=0.2052` (18). It is not the primary. Length-gated FLA
+residual RMSNorm `705ae089` measured 231/231, p50 94.604 ms, p95
+274.835 ms (p50 +6.37%, p95 −7.09%) and failed the same gate.
+Quality: `choice_acc=0.906` (139), `noul_acc=0.878` (74),
+`score_mae=0.205` (18). It is not the primary. `use_cp=auto`
+`a6f4d9a` measured 231/231, p50 112.294 ms, p95 299.419 ms
+(p50 +26.26%, p95 +1.22%) and failed the same gate. Quality:
+`choice_acc=0.906` (139), `noul_acc=0.878` (74),
+`score_mae=0.204` (18). It is not the primary. Grouped-value
+`3ecdf5a` returned 0/231, `stop_reason=warmup_failed`, with no p50
+or p95. Quality was N/A. It is not a latency result. FLA fused gated RMSNorm `801ef7b` measured 231/231, p50 89.172 ms,
+p95 274.790 ms (p50 +1.58%, p95 −5.63%) and failed the same gate.
+Quality: `choice_acc=0.9065` (139), `noul_acc=0.8784` (74),
+`score_mae=0.1992` (18). It is not the primary. FLA `swiglu_fwd`
+`2bbbe4e` is not the primary: the owner closeout records p50 97.613 ms
+and p95 292.795 ms. Success count, quality, and `/health` were not
+restated. The engine does not install it.
+These L20X measurements stay in this group and do not enter the H800
+table above. Ready is not limited to capability 9.0.
+
+Image replacement, repeated-image/cache workloads and higher
 concurrency have not been measured here; add their own frozen inputs before ranking.

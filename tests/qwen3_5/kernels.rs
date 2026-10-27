@@ -393,6 +393,16 @@ fn fused_attention_gate_matches_separate_pass() {
 #[test]
 #[ignore = "needs a GPU and CUA_S1_CUDA_LIB"]
 fn flash_attention_matches_float64_reference() {
+    check_flash_attention_reference(false);
+}
+
+#[test]
+#[ignore = "needs a GPU and CUA_S1_CUDA_LIB with bidirectional attention"]
+fn bidirectional_attention_reads_future_keys_after_shared_suffix_refactor() {
+    check_flash_attention_reference(true);
+}
+
+fn check_flash_attention_reference(bidirectional: bool) {
     let st = setup();
     let (hq, hk, dh) = (16usize, 4usize, 256usize);
     for (t, amp) in [
@@ -409,21 +419,45 @@ fn flash_attention_matches_float64_reference() {
         let qkvh = random(t * ldv, 3, 1.0);
         let (q, k, qkv) = (to_device(&qh, st), to_device(&kh, st), to_device(&qkvh, st));
         let out = DeviceBuffer::new(t * hq * dh * 2).unwrap();
+        // Zero gates multiply the bidirectional result by sigmoid(0) = 0.5.
+        // The separate oracle checks future keys after factoring the shared body.
+        let gate = if bidirectional {
+            Some(to_device(&vec![bf16::ZERO; t * hq * dh], st))
+        } else {
+            None
+        };
         // SAFETY: every buffer holds t rows of the given widths.
         let code = unsafe {
-            (api().cs1_attention)(
-                q.at(0),
-                k.at(0),
-                qkv.at(v_at * 2),
-                ldv as i32,
-                out.at(0),
-                t as i32,
-                hq as i32,
-                hk as i32,
-                dh as i32,
-                0.0625,
-                st,
-            )
+            if let Some(gate) = &gate {
+                (api().attention_gated_bidirectional().unwrap())(
+                    q.at(0),
+                    k.at(0),
+                    qkv.at(v_at * 2),
+                    ldv as i32,
+                    gate.at(0),
+                    out.at(0),
+                    t as i32,
+                    hq as i32,
+                    hk as i32,
+                    dh as i32,
+                    0.0625,
+                    st,
+                )
+            } else {
+                (api().cs1_attention)(
+                    q.at(0),
+                    k.at(0),
+                    qkv.at(v_at * 2),
+                    ldv as i32,
+                    out.at(0),
+                    t as i32,
+                    hq as i32,
+                    hk as i32,
+                    dh as i32,
+                    0.0625,
+                    st,
+                )
+            }
         };
         check(code, "attention").unwrap();
         let got = from_device(&out, t * hq * dh, st);
@@ -431,14 +465,15 @@ fn flash_attention_matches_float64_reference() {
             got.iter().all(|x| x.is_finite()),
             "non-finite output at t = {t}"
         );
-        // about 64 query rows per length, each against causal attention in float64;
+        // about 64 query rows per length, each against the selected attention mask in float64;
         // per (row, head): the largest difference over the largest magnitude
         let mut worst = 0f64;
         for i in (0..t).step_by(t.div_ceil(64)).chain([t - 1]) {
             for h in 0..hq {
                 let g = h / (hq / hk);
                 let qi = &qh[(i * hq + h) * dh..][..dh];
-                let s: Vec<f64> = (0..=i)
+                let keys = if bidirectional { t } else { i + 1 };
+                let s: Vec<f64> = (0..keys)
                     .map(|j| {
                         let kj = &kh[(j * hk + g) * dh..][..dh];
                         qi.iter()
@@ -453,10 +488,11 @@ fn flash_attention_matches_float64_reference() {
                 let z: f64 = w.iter().sum();
                 let want: Vec<f64> = (0..dh)
                     .map(|d| {
-                        (0..=i)
+                        (0..keys)
                             .map(|j| w[j] * qkvh[j * ldv + v_at + g * dh + d].to_f64())
                             .sum::<f64>()
                             / z
+                            * if bidirectional { 0.5 } else { 1.0 }
                     })
                     .collect();
                 let row = &got[(i * hq + h) * dh..][..dh];
@@ -1453,3 +1489,106 @@ fn fixed_gemm_rows_do_not_depend_on_m() {
 }
 #[path = "vision_v2_kernels.rs"]
 mod vision_v2;
+
+#[test]
+#[ignore = "needs sm89 CUDA, rebuilt matched symbols; requalify on other libraries/devices"]
+fn matched_gemm_rows_equal_complete_ordinary_projection() {
+    let st = setup();
+    let create = api().matched_create().unwrap();
+    let compatible = api().matched_compatible().unwrap();
+    // Actual 4B weight shapes and complete-prompt lengths from qualification.
+    for (n, k) in [
+        (12352usize, 2560usize),
+        (2560, 4096),
+        (10240, 2560),
+        (18432, 2560),
+        (2560, 9216),
+    ] {
+        for reference in [214usize, 219, 245, 309, 437, 867, 1179, 2293] {
+            // SAFETY: plain positive-size cuBLAS context creation, destroyed below.
+            let ordinary = unsafe { (api().cs1_gemm_create)(32 << 20) };
+            let matched = unsafe { create(32 << 20, reference as i32) };
+            assert!(!ordinary.is_null() && !matched.is_null());
+            let x = random(reference * k, reference as u64, 2.0);
+            let w = random(n * k, n as u64, 0.05);
+            let (xd, wd) = (to_device(&x, st), to_device(&w, st));
+            let y = DeviceBuffer::new(reference * n * 2).unwrap();
+            let project = |handle, at: usize, rows: usize| {
+                let mut output = vec![0; rows * n * 2];
+                // SAFETY: each checked window is inside x; y has reference rows.
+                unsafe {
+                    check(
+                        (api().cs1_gemm)(
+                            handle,
+                            xd.at(at * k * 2),
+                            wd.at(0),
+                            y.at(0),
+                            rows as i32,
+                            n as i32,
+                            k as i32,
+                            n as i32,
+                            st,
+                        ),
+                        "matched row probe",
+                    )
+                    .unwrap();
+                    cuda::download(&mut output, y.at(0), st).unwrap();
+                }
+                output
+            };
+            // SAFETY: valid handles/dimensions; comparison does not run kernels.
+            assert_eq!(
+                unsafe { compatible(ordinary, matched, reference as i32, n as i32, k as i32) },
+                1
+            );
+            let full = project(ordinary, 0, reference);
+            for (at, rows) in [
+                (0, 1),
+                (0, 63),
+                (0, 64),
+                (1, 64),
+                (17, 64),
+                (reference - 1, 1),
+                (reference / 2, reference - reference / 2),
+                (0, reference),
+            ] {
+                // Probe only legal windows of this admitted full matrix.
+                assert!(at + rows <= reference);
+                assert_eq!(
+                    unsafe {
+                        compatible(
+                            std::ptr::null_mut(),
+                            matched,
+                            rows as i32,
+                            n as i32,
+                            k as i32,
+                        )
+                    },
+                    1
+                );
+                assert_eq!(
+                    project(matched, at, rows),
+                    full[at * n * 2..(at + rows) * n * 2],
+                    "N={n} K={k} reference={reference} at={at} rows={rows}"
+                );
+            }
+            // SAFETY: downloads drained all uses, both contexts owned here.
+            unsafe {
+                (api().cs1_gemm_destroy)(matched);
+                (api().cs1_gemm_destroy)(ordinary);
+            }
+        }
+    }
+}
+
+mod batched_gdn;
+
+mod packed_gemm;
+
+mod reused_gemm;
+
+mod shared_suffix;
+
+mod vector_conv;
+
+mod wide_gdn;

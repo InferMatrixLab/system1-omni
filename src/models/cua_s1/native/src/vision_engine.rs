@@ -1,4 +1,5 @@
 //! Native screenshot-to-decision orchestration, with request-local vision reuse.
+mod prefix;
 pub use crate::vision_processing::PreparedRequest;
 use crate::vision_processing::{VisionProcessor, probabilities};
 use crate::{
@@ -24,6 +25,8 @@ pub struct VisionEngine {
     language: Model,
     letters: Vec<f32>,
     device_features: bool,
+    prefix_mode: prefix::Mode,
+    prefix_storage: Option<crate::model::PrefixState>,
 }
 
 pub struct Readout {
@@ -41,6 +44,7 @@ impl VisionEngine {
                 anyhow::bail!("CUA_S1_DEVICE_FEATURES must be unset, 0, or 1")
             }
         };
+        let prefix_mode = prefix::Mode::from_env(device_features)?;
         let marker: Value = serde_json::from_slice(
             &std::fs::read(language.join("cua_s1_language_export.json"))
                 .context("export the multimodal language checkpoint first")?,
@@ -82,6 +86,8 @@ impl VisionEngine {
             language: model,
             letters,
             device_features,
+            prefix_mode,
+            prefix_storage: None,
         })
     }
 
@@ -209,7 +215,42 @@ impl VisionEngine {
                 prepared.prompts.len() == counts.len() && !counts.is_empty(),
                 "question/prompt count mismatch"
             );
-            if self.device_features {
+            if self.prefix_mode == prefix::Mode::Matched {
+                let (lengths, windows) = prefix::matched_windows(&prepared.prompts)?;
+                let features = self.vision.forward(&prepared.image)?;
+                let result = self
+                    .language
+                    .with_matched_prefix(&lengths, &windows, |model| {
+                        prefix::execute(
+                            model,
+                            &self.letters,
+                            prepared,
+                            &features,
+                            prefix::Mode::Shared,
+                            &mut self.prefix_storage,
+                        )
+                    })?;
+                if let Some(logits) = result {
+                    Ok(logits)
+                } else {
+                    prepared
+                        .prompts
+                        .iter()
+                        .zip(counts)
+                        .map(|(p, n)| self.raw_score(p, &features, n).map(|(_, logits)| logits))
+                        .collect()
+                }
+            } else if self.prefix_mode != prefix::Mode::Off {
+                let features = self.vision.forward(&prepared.image)?;
+                prefix::execute(
+                    &mut self.language,
+                    &self.letters,
+                    prepared,
+                    &features,
+                    self.prefix_mode,
+                    &mut self.prefix_storage,
+                )
+            } else if self.device_features {
                 let features = self.vision.forward_device(&prepared.image)?;
                 // Each consumer synchronizes before returning, including errors;
                 // the view remains borrowed across all questions in this request.
@@ -325,3 +366,7 @@ mod device_copy_failure_tests;
 #[cfg(test)]
 #[path = "../../../../../tests/cua_s1/device_transient_failure_gpu.rs"]
 mod device_transient_failure_tests;
+
+#[cfg(test)]
+#[path = "../../../../../tests/cua_s1/multimodal_prefix.rs"]
+mod prefix_tests;

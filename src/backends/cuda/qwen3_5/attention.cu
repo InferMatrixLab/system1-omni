@@ -1,4 +1,8 @@
 // Full-attention layers of Qwen3.5: q/k preparation and causal attention.
+// `flash_kernel<Gated, true>` is the StartLux Instant prompt mask: every query
+// reads every key in the same prompt. The `<Gated, false>` specialization is the
+// causal kernel used by Cua-S1, Open-Jev, Decider and JEMM; its mask and early
+// key cutoff stay compile-time constants.
 //
 // cs1_attention is a FlashAttention-2 style kernel on tensor cores (mma.sync
 // m16n8k16, bfloat16 in, float32 accumulation): a block takes 64 queries of one head,
@@ -6,6 +10,7 @@
 // 32, keeping the output and the online softmax in registers. The probabilities are
 // rounded to bfloat16 for the P*V product, as in flash attention; the running sums
 // stay float32.
+#include <climits>
 #include "common.cuh"
 #include "mma.cuh"
 #include "ops.h"
@@ -81,11 +86,11 @@ constexpr int SMEM_BYTES = (BM + 2 * BN) * LDS * 2;
 // q_base offsets row 0 of the q/gate/out buffers: this launch covers the window
 // [q_base, T_total) while k/v cover [0, T_total). Used by the cached-prefix
 // continuation; q_base = 0 reduces to the plain full pass.
-template <bool Gated>
-__global__ void __launch_bounds__(THREADS)
-    flash_kernel(const bf16* __restrict__ q, const bf16* __restrict__ k, const bf16* __restrict__ v, int ldv,
+template <bool Gated, bool Shared, bool Bidirectional = false>
+__device__ __forceinline__ void flash_body(const bf16* __restrict__ q, const bf16* __restrict__ k, const bf16* __restrict__ v, int ldv,
                  const bf16* __restrict__ gate, bf16* __restrict__ out, int T, int Hq, int Hk,
-                 float scale_log2, int q_base) {
+                 float scale_log2, int q_base, const bf16* __restrict__ prefix_k,
+                 const bf16* __restrict__ prefix_v) {
     extern __shared__ __align__(16) unsigned char smem[];
     bf16* qs = reinterpret_cast<bf16*>(smem);
     bf16* ks = qs + BM * LDS;
@@ -98,7 +103,8 @@ __global__ void __launch_bounds__(THREADS)
 
     for (int c = tid; c < BM * (D / 8); c += THREADS) {
         const int r = c / (D / 8), col = (c % (D / 8)) * 8, row = q0 + r;
-        cp_async16(qs + r * LDS + col, q + ((size_t)min(row, T - 1) * Hq + h) * D + col, row < T);
+        const int source_row = min(row, T - 1) - (Shared ? q_base : 0);
+        cp_async16(qs + r * LDS + col, q + ((size_t)source_row * Hq + h) * D + col, row < T);
     }
     cp_async_commit();
 
@@ -107,23 +113,38 @@ __global__ void __launch_bounds__(THREADS)
     for (int n = 0; n < D / 8; n++) o[n][0] = o[n][1] = o[n][2] = o[n][3] = 0.f;
     float m[2] = {-INFINITY, -INFINITY}, l[2] = {0.f, 0.f};
 
-    const int kv_end = min(T, q0 + BM);
+    // Causal blocks stop at their last query. A bidirectional prompt reads every key.
+    const int kv_end = Bidirectional ? T : min(T, q0 + BM);
     for (int k0 = 0; k0 < kv_end; k0 += BN) {
         for (int c = tid; c < BN * (D / 8); c += THREADS) {
             const int r = c / (D / 8), col = (c % (D / 8)) * 8, s = k0 + r;
-            cp_async16(ks + r * LDS + col, k + ((size_t)min(s, T - 1) * Hk + hk) * D + col, s < T);
+            if constexpr (Shared) {
+                const int row = min(s, T - 1);
+                const bf16* source = row < q_base ? prefix_k + ((size_t)row * Hk + hk) * D
+                    : k + ((size_t)(row - q_base) * Hk + hk) * D;
+                cp_async16(ks + r * LDS + col, source + col, s < T);
+            } else {
+                cp_async16(ks + r * LDS + col, k + ((size_t)min(s, T - 1) * Hk + hk) * D + col, s < T);
+            }
         }
         cp_async_commit();
         for (int c = tid; c < BN * (D / 8); c += THREADS) {
             const int r = c / (D / 8), col = (c % (D / 8)) * 8, s = k0 + r;
-            cp_async16(vs + r * LDS + col, v + (size_t)min(s, T - 1) * ldv + (size_t)hk * D + col, s < T);
+            if constexpr (Shared) {
+                const int row = min(s, T - 1);
+                const bf16* source = row < q_base ? prefix_v + (size_t)row * Hk * D
+                    : v + (size_t)(row - q_base) * ldv;
+                cp_async16(vs + r * LDS + col, source + (size_t)hk * D + col, s < T);
+            } else {
+                cp_async16(vs + r * LDS + col, v + (size_t)min(s, T - 1) * ldv + (size_t)hk * D + col, s < T);
+            }
         }
         cp_async_commit();
         cp_async_wait<1>();  // Q and K
         __syncthreads();
 
-        // keys past every query of this warp contribute nothing
-        const bool active = k0 <= row0 + 15;
+        // Causal warps skip keys past their queries. Bidirectional warps cannot.
+        const bool active = Bidirectional || k0 <= row0 + 15;
         float sc[BN / 8][4];
 #pragma unroll
         for (int n = 0; n < BN / 8; n++) sc[n][0] = sc[n][1] = sc[n][2] = sc[n][3] = 0.f;
@@ -150,7 +171,8 @@ __global__ void __launch_bounds__(THREADS)
 #pragma unroll
                 for (int e = 0; e < 4; e++) {
                     const int key = k0 + n * 8 + 2 * t + (e & 1), row = row0 + g + (e >> 1) * 8;
-                    sc[n][e] = (key <= row && key < T) ? sc[n][e] * scale_log2 : -INFINITY;
+                    const bool visible = Bidirectional ? (key < T) : (key <= row && key < T);
+                    sc[n][e] = visible ? sc[n][e] * scale_log2 : -INFINITY;
                     mx[e >> 1] = fmaxf(mx[e >> 1], sc[n][e]);
                 }
             }
@@ -217,12 +239,13 @@ __global__ void __launch_bounds__(THREADS)
     for (int r = 0; r < 2; r++) {
         const int row = row0 + g + r * 8;
         if (row >= T) continue;
-        bf16* dst = out + ((size_t)row * Hq + h) * D + 2 * t;
+        const int output_row = row - (Shared ? q_base : 0);
+        bf16* dst = out + ((size_t)output_row * Hq + h) * D + 2 * t;
 #pragma unroll
         for (int n = 0; n < D / 8; n++) {
             float a = o[n][2 * r] * inv[r], b = o[n][2 * r + 1] * inv[r];
             if constexpr (Gated) {
-                const size_t idx = ((size_t)row * Hq + h) * D + 2 * t + n * 8;
+                const size_t idx = ((size_t)output_row * Hq + h) * D + 2 * t + n * 8;
                 // Match attention -> BF16 store -> BF16 sigmoid -> multiply.
                 // Rounding before the multiply is required even without that store.
                 a = round_bf16(a) * round_bf16(sigmoid(f32(gate[idx])));
@@ -233,20 +256,40 @@ __global__ void __launch_bounds__(THREADS)
     }
 }
 
-template <bool Gated>
+// Keep the legacy entry points and parameter layouts. The shared specialization
+// reads immutable prefix KV separately, while Q/gate/output hold suffix rows only.
+template <bool Gated, bool Bidirectional = false>
+__global__ void __launch_bounds__(THREADS)
+flash_kernel(const bf16* __restrict__ q, const bf16* __restrict__ k, const bf16* __restrict__ v, int ldv,
+             const bf16* __restrict__ gate, bf16* __restrict__ out, int T, int Hq, int Hk,
+             float scale_log2, int q_base) {
+    flash_body<Gated, false, Bidirectional>(q, k, v, ldv, gate, out, T, Hq, Hk, scale_log2, q_base, nullptr, nullptr);
+}
+
+__global__ void __launch_bounds__(THREADS)
+flash_shared_kernel(const bf16* __restrict__ q, const bf16* __restrict__ k, const bf16* __restrict__ v, int ldv,
+                    const bf16* __restrict__ gate, bf16* __restrict__ out, int T, int Hq, int Hk,
+                    float scale_log2, int prefix, const bf16* __restrict__ prefix_k,
+                    const bf16* __restrict__ prefix_v) {
+    flash_body<true, true>(q, k, v, ldv, gate, out, T, Hq, Hk, scale_log2, prefix, prefix_k, prefix_v);
+}
+
+template <bool Gated, bool Bidirectional = false>
 int launch(const void* q, const void* k, const void* v, int ldv, const void* gate, void* out,
            int T, int Hq, int Hk, int Dh, float scale, int q_base, void* stream) {
     if (Dh != D || Hk <= 0 || Hq <= 0 || Hq % Hk != 0 || ldv % 8 != 0 || ldv < Hk * Dh || T < 0)
         return cudaErrorInvalidValue;
     if (q_base < 0 || q_base % BM || q_base > T) return cudaErrorInvalidValue;
+    // Prefix continuation is causal. Instant reads each prompt whole from row 0.
+    if (Bidirectional && q_base != 0) return cudaErrorInvalidValue;
     if (T == q_base) return cudaSuccess;
     if (Gated && gate == nullptr) return cudaErrorInvalidValue;
     // Once per specialization (for the device current at the first call).
     static const cudaError_t configured = cudaFuncSetAttribute(
-        flash_kernel<Gated>, cudaFuncAttributeMaxDynamicSharedMemorySize, SMEM_BYTES);
+        flash_kernel<Gated, Bidirectional>, cudaFuncAttributeMaxDynamicSharedMemorySize, SMEM_BYTES);
     if (configured != cudaSuccess) return configured;
     constexpr float LOG2E = 1.4426950408889634f;
-    flash_kernel<Gated><<<dim3((T - q_base + BM - 1) / BM, Hq), THREADS, SMEM_BYTES,
+    flash_kernel<Gated, Bidirectional><<<dim3((T - q_base + BM - 1) / BM, Hq), THREADS, SMEM_BYTES,
                          static_cast<cudaStream_t>(stream)>>>(
         static_cast<const bf16*>(q), static_cast<const bf16*>(k), static_cast<const bf16*>(v), ldv,
         static_cast<const bf16*>(gate), static_cast<bf16*>(out), T, Hq, Hk, scale * LOG2E, q_base);
@@ -286,10 +329,38 @@ extern "C" int cs1_attention_gated(const void* q, const void* k, const void* v, 
     return flash::launch<true>(q, k, v, ldv, gate, out, T, Hq, Hk, Dh, scale, 0, stream);
 }
 
+// Additive ABI 9 symbol. Full-attention prompt mask for StartLux Instant:
+// query q reads key k when both are inside the prompt. GDN stays on the causal path.
+extern "C" int cs1_attention_gated_bidirectional(const void* q, const void* k, const void* v, int ldv,
+                                                 const void* gate, void* out, int T, int Hq, int Hk, int Dh,
+                                                 float scale, void* stream) {
+    return flash::launch<true, true>(q, k, v, ldv, gate, out, T, Hq, Hk, Dh, scale, 0, stream);
+}
+
 // Same layout contract as the full pass; only the covered query rows differ:
 // q_base is a multiple of 64 and rows below it keep whatever was already in k/v.
 extern "C" int cs1_attention_gated_prefix(const void* q, const void* k, const void* v, int ldv, const void* gate,
                                           void* out, int T, int Hq, int Hk, int Dh, float scale, int q_base,
                                           void* stream) {
     return flash::launch<true>(q, k, v, ldv, gate, out, T, Hq, Hk, Dh, scale, q_base, stream);
+}
+
+// Compact suffix tensors with one immutable, contiguous prefix KV allocation.
+extern "C" int cs1_attention_gated_shared(const void* q, const void* k, const void* v, int ldv,
+                                          const void* gate, void* out, const void* prefix_k,
+                                          const void* prefix_v, int suffix, int prefix, int Hq,
+                                          int Hk, int Dh, float scale, void* stream) {
+    if (!q || !k || !v || !gate || !out || !prefix_k || !prefix_v || suffix <= 0 || prefix <= 0 ||
+        prefix % flash::BM || prefix > INT_MAX - suffix || Dh != flash::D || Hq <= 0 || Hk <= 0 ||
+        Hq % Hk || ldv % 8 || ldv < Hk * Dh) return cudaErrorInvalidValue;
+    static const cudaError_t configured = cudaFuncSetAttribute(
+        flash::flash_shared_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, flash::SMEM_BYTES);
+    if (configured != cudaSuccess) return configured;
+    constexpr float LOG2E = 1.4426950408889634f;
+    flash::flash_shared_kernel<<<dim3((suffix + flash::BM - 1) / flash::BM, Hq), flash::THREADS,
+                                  flash::SMEM_BYTES, static_cast<cudaStream_t>(stream)>>>(
+        static_cast<const bf16*>(q), static_cast<const bf16*>(k), static_cast<const bf16*>(v), ldv,
+        static_cast<const bf16*>(gate), static_cast<bf16*>(out), prefix + suffix, Hq, Hk, scale * LOG2E,
+        prefix, static_cast<const bf16*>(prefix_k), static_cast<const bf16*>(prefix_v));
+    return cudaGetLastError();
 }

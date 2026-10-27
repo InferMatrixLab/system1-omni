@@ -1,6 +1,6 @@
 ---
 name: system1-omni-review
-description: Review ThinkFlowLab/system1-omni pull requests for Rust serving, model-contract, CUDA/Metal compatibility and numerical or performance evidence, with pinned review provenance.
+description: Review ThinkFlowLab/system1-omni pull requests for Rust serving, model-contract, CUDA/Metal compatibility and numerical or performance evidence, with pinned review provenance. For a Public231 fast-screen, check the same-request-ID screen baseline (quotas 10/10/8/8/6/16, cap-to-available, 2048+ below 16 is inconclusive), hk2 smoke evidence, dropped_at on DROP, and that KEEP is still full C1 only.
 ---
 
 # System1-Omni PR review
@@ -28,6 +28,52 @@ baseline; target code and configuration determine current paths and commands.
 - For processing or batching changes, apply the architecture contract's compatibility, reconstruction, numerical, and lifetime invariants to the affected model. For admission changes, inspect the [runtime contract](../../../src/runtime/README.md), execution-unit granularity, cancellation before/after dispatch and permit/resource lifetimes. Require executor/kernel evidence for batch capability.
 - For native/FFI/CUDA changes, inspect Rust and C ABI in lockstep, buffer and graph lifetimes, stream/device ownership, sizes/overflow, BF16 rounding locations, and error propagation/recovery. Compile success and ignored GPU tests do not validate kernels. Test changed inputs, reuse, growth, eviction and failure recovery when graph/cache behavior changes.
 - For performance or numerical claims, freeze baseline/candidate, hardware/toolchain, checkpoint, input manifest, precision, variables, tolerances and budget before comparing. Separate quality/parity from speed, native inference from frontend overhead, and cold/capture costs from warmed latency. Preserve errors and denominators; never relax tolerances or discard failures to produce a winner.
+
+## Public231 fast-screen
+
+When the change touches `benchmarks/bench.py`, the Public231 skills, or a
+claim that a tip was screened or dropped, check all four of these. A miss
+is a blocking review finding, not a note.
+
+1. **Same-ID screen baseline.** The tip screen p50/p95 are compared to the
+   primary SHA's own `--fast-screen` of those exact request IDs (same seed,
+   buckets, quotas 10/10/8/8/6/16, and device). Full-C1 pooled numbers are
+   not that baseline. StartLux Instant 7.338/51.816 from `51f80ad` is a
+   pooled C1 pair. Typed `--baseline-p50-ms` / `--baseline-p95-ms` and a
+   full-C1 output directory fail closed. A bucket shorter than its quota
+   records `quota_shortfall` and is not filled from another bucket. If
+   2048+ has fewer than 16, the screen is `inconclusive` and cannot
+   early-DROP or stand as a screen primary. StartLux Instant's measured
+   screen primary is SHA `51f80ad681c8f7b1be9b22b5e700bef34e33534c`, p50
+   19.112976267933846 ms, p95 73.46072793006897 ms, n=58, 58/58,
+   `evidence_complete` true, decision `screen_primary`, `quota_shortfall`
+   `{}`, buckets 10/10/8/8/6/16, device L20X, compute capability sm_89.
+   The measuring client was `923c8c739bcaf3cc2b098f3cf373c2b547d2666c` with
+   a local-only 1024–2047 quota patch from 8 to 6; the remote tip may still
+   have been on quota 8. Later screens use the committed n=58 quotas.
+   Artifacts:
+   `~/experiments/2026-10-26-pr181-screen-primary/screen-primary-n58/`
+   (`SCREEN_PRIMARY.json`, `fast-screen/`, `screen_ids.json`,
+   `local-quota-patch.diff`).
+   Do not accept a paste that fills the slot from the pooled pair, from
+   typed screen percentiles, or from another model's lengths.
+2. **hk2 smoke.** Contract smoke on hk2 is required before ready.
+   Recorded PASS: client `d2fab1e08f231fe2e23540f3b25b2650cd416d09` against
+   StartLux Instant served at `51f80ad681c8f7b1be9b22b5e700bef34e33534c`,
+   4/4, `evidence_complete` true, no StartLux or CUDA diff versus
+   `51f80ad`, offline `tests/benchmarks` 109 OK. Artifacts are under
+   `~/experiments/2026-10-26-pr181-screen-primary/primary/smoke/` on hk2.
+   MockTransport output is not that smoke and is not a PASS. The 4/4 smoke
+   is not a screen primary. The Instant screen primary is the n=58 pair in
+   check 1, not 7.338/51.816. Do not PASS a review that writes 7.338/51.816,
+   or any other fabricated pair, into the screen-primary slot.
+3. **`dropped_at`.** A screen DROP writes `fast_screen_drop.json` and puts
+   `dropped_at` (`YYYY-MM-DDTHH:MM:SSZ`) on the summary. A DROP missing that
+   field is not auditable and is not a valid DROP.
+4. **KEEP is full C1 only.** KEEP still requires the full Public231 C1 dual
+   gate: pooled p50 and pooled p95 both strictly lower, pooled 2048+ p95
+   strictly lower, and no quality collapse. `screen_primary`, `full_c1` on
+   the screen, or a negative screen delta is not a KEEP.
 
 ## Validate and report
 

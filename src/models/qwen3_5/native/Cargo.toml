@@ -37,6 +37,10 @@ name = "prefix"
 path = "../../../../tests/qwen3_5/prefix.rs"
 
 [[test]]
+name = "readout"
+path = "../../../../tests/qwen3_5/readout.rs"
+
+[[test]]
 name = "graph_loading"
 path = "../../../../tests/qwen3_5/graph_loading.rs"
 

@@ -7,14 +7,25 @@ design. Concrete input/output types follow each executor's supported layout.
 ## Implementation status
 
 The [Rust frontend](../src/frontend/README.md) currently forwards HTTP requests
-to separately running workers. Cua-S1, Open-Jev and Decider have native Rust/CUDA workers
-that share the [Qwen3.5/3.8 executor](../src/models/qwen3_5/native/), which accepts
-single prompts and bounded packed prefill. Cua-S1 and Open-Jev-9B use
+to separately running workers. Cua-S1, Open-Jev, Decider, and StartLux Instant
+4B have native Rust/CUDA workers that share the
+[Qwen3.5/3.8 executor](../src/models/qwen3_5/native/), which accepts
+single prompts and bounded packed prefill. StartLux Instant uses a
+bidirectional full-attention call on each prompt; its GDN stays causal, and
+it does not pack prompts or cache prefixes. Cua-S1 and Open-Jev-9B use
 single-prompt calls; Open-Jev-27B-v1.1 packs candidates within one request for
-input and gate/up GEMMs while preserving per-sequence mixers and output/down GEMM
-shapes. Decider optionally packs up to four complete rows and 4096 tokens within
+input and gate/up GEMMs. Its opt-in output/down packing retains each original
+matrix algorithm and checks the combined shape; incompatible groups keep separate
+calls. Its batched linear-attention kernels preserve independent sequence state.
+Long candidates from one question can share an exact prefix when every retained
+projection algorithm supports the prefix and suffix shapes. This Open-Jev path
+preserves the original complete-prompt arithmetic choices; it is separate from
+the fixed-algorithm `forward_shared` interface described below.
+Decider optionally packs up to four complete rows and 4096 tokens within
 one request, or selects request-local shared prefixes through the same canonical
-continuation path used by JEV-VL (below). Both optimizations default off.
+continuation path used by JEV-VL (below). Both optimizations default off. Open-Jev
+can select the same shared prefixes for the candidates of one request, also
+default off.
 [Laya's native worker](../src/models/laya/README.md)
 uses a separate Hopper CUDA backend for one complete padded request. These workers
 coordinate independent processors and executors through
@@ -24,9 +35,47 @@ per loaded executor. The [Decider native worker](../recipe/decider/README.md)
 also uses this runtime and can opt into outstanding-request and processed-token
 budgets plus HTTP request deadlines. Shared processing orchestration,
 cross-request batch assembly, compatibility grouping and dynamic batching are planned.
+The pplx-decider reference worker runs the checkpoint's own loader instead of
+this shared Qwen executor: the checkpoint's full-attention layers are
+noncausal, and the language kernels in `src/backends/cuda/qwen3_5/attention.cu`
+are causal. Its readout is a separate 255-row tensor. After that load, the
+worker marks those full-attention modules noncausal and omits the explicit
+SDPA mask when the padding mask is all true. Linear-attention chunk prefill
+on the lab L20X-labeled GPU uses FLA 0.5.2 plus causal_conv1d, including
+when that GPU reports capability 8.9. Capability 9.0 uses all-sequence FlashInfer when
+`flashinfer-python` 0.6.16.post3 imports. The kept primary rotates 48
+`cu_seqlens` buffers per device and length, passes `use_cp` false,
+skips the q/k repeat, and packs q and k before FLA's L2-norm view.
+`3ecdf5a` crashed in warmup on the unpacked view. `801ef7b` fused
+the 48 linear gated RMSNorms and missed the median, so that kernel
+stays off. `2bbbe4e` replaced `silu(gate) * up` with FLA `swiglu_fwd`
+and the owner closeout rejected it (p50 97.613 ms, p95 292.795 ms),
+so that kernel stays off. Gate and up GEMMs stay separate. Residual
+RMSNorm and the gated output norm stay eager. An unknown
+`PPLX_GDN_PREFILL` fails closed on every device, including capability
+8.9.
+`use_cp=auto` on `a6f4d9a` missed both percentiles.
+Always-on fusion `3afb472` and the 512-token
+gate `705ae089` both missed the median.
+FlashInfer allocates its own state workspace. The 48-slot state
+ring `17a7b120` missed the gate.
+`PPLX_GDN_PREFILL=fla` reproduces the prior `f968e576` chunk.
+`PPLX_GDN_PREFILL=short` is the rejected one-sequence ≤256
+dispatch. Capability 8.9, and capability 9.0 without that package, stay
+ready on FLA chunk. SDPA stays on the checkpoint order.
+`PPLX_SDPA=cudnn-first` and `PPLX_MLP=fused-gate-up` are refused.
+The forward stays eager. `PPLX_COMPILE=dynamic` and
+`PPLX_COMPILE=dynamic-tail` are rejected opt-ins. Ready accepts the
+FLA chunk and either FlashInfer dispatch. CuteDSL and CUDA graphs are
+not selected.
 
 Cua-S1 and Open-Jev compute their decision heads on the CPU after downloading
-the final hidden state. Decider projects its selected LM-head rows on CUDA.
+the final hidden state. Cua-S1 screenshots can opt into request-local
+aligned token/position prefix reuse with fixed-M64 or full-prompt-matched GEMMs,
+host features and language Graph off. Captured contents belong to one request; one engine-owned storage
+allocation may retain capacity for later captures. Suffixes execute independently,
+and the existing letter head and token accounting are preserved. Decider projects
+its selected LM-head rows on CUDA.
 JEMM uses the shared Qwen executor with separate unmerged
 FP32 adapters and framework-reference arithmetic. It computes selected BF16
 label-head logits on CUDA, then calibrates typed answers on the CPU. JEMM admits
@@ -37,7 +86,12 @@ before FP32 calibration and CPU response assembly. Laya computes its scorer and
 action head on CUDA. Its fixed-shape
 Graph captures Encoder/Decision; gather, scorer/action head and synchronized
 readback remain outside capture. Native Metal remains planned; Python workers
-retain their documented reference/serving roles.
+retain their documented reference/serving roles. Clef's default server is
+the Rust `omni-clef` worker. It admits one complete text request through
+`SerialScheduler` and forwards the body to a single executor process. That
+process runs the checkpoint's joint schema head on its main thread, which is
+the thread that initialized CUDA. The joint head is still that Python module.
+Clef does not use the shared Qwen CUDA executor.
 
 The Qwen executor's `forward_shared` takes a request prefix, group prefixes and
 branches, ends each prefix at its last multiple of 64 tokens, and returns one final
@@ -52,8 +106,10 @@ synchronizes its stream before returning, also on error. Its GEMMs keep one
 algorithm per weight shape, so on GPUs where that keeps rows independent of M
 (checked by `fixed_gemm_rows_do_not_depend_on_m`, so far on sm_89) each result equals
 `forward_fixed` on the full prompt bit for bit; it differs from `forward` by
-rounding. Both take merged weights with the default numerics only, and refuse an
-unmerged adapter, reference numerics or FP32 GDN before any device work. Each
+rounding. `check_fixed_rows` repeats a short version of that check for a loaded
+model's projection shapes; Open-Jev runs it at startup when sharing is selected.
+Both take merged weights with the default numerics only, and refuse an unmerged
+adapter, reference numerics or FP32 GDN before any device work. Each
 prefix state takes about 50 MiB on Qwen3.5-4B and 9B, plus 32 KiB per position of
 its prefix rounded up to 1,024 positions, and the GEMM handle a 32 MiB workspace.
 
@@ -72,6 +128,8 @@ and candidate identity, usage, and response metadata outside the executor.
 | Decider | Complete independent token-ID rows in question order; Score expands one no/yes row per level. | One BF16-projection-rounded FP32 selected-label logit vector per row. | Per-type calibration, whole-Score normalization, ordered typed answers and unique-prefix token usage. |
 | Laya | One padded request: token IDs, true lengths, question types and ordered option markers; at most 16 questions, 512 tokens per row and 2048 markers. | Per-question FP32 option logits and two action logits copied back after GPU heads. | Calibrate and decode ordered `choice`, `score` and `noul` answers, usage and metadata. |
 | JEMM | Ordered token IDs, three-axis positions, candidate counts and optional shared image patches for one complete request. | Per-question selected BF16 label logits copied back as FP32. | Apply checksum-covered text/image calibration and reconstruct ordered `choice`, `score` and `noul` answers and usage. |
+| StartLux Instant 4B | One unpadded token-ID prompt per question, or per knockout group and then a final prompt, in request order. | FP32 letter logits from a CPU dot of the tied embedding rows at the last position. | Per-type temperature, none-check split, wide-choice residual, and ordered `choice`, `noul`, and `score` answers with token usage. |
+| Clef | The raw `systemone` body. Preparation stays in the pinned Python encoder. | One joint-schema forward on the executor process main thread. The Rust closure only exchanges a frame. | The checkpoint's `systemone_answer` object, forwarded with its HTTP status unchanged. |
 
 Cua-S1 and Open-Jev-9B input collections are serial work. For Open-Jev-27B-v1.1,
 Open-Jev's model-specific batch adapter packs up to 16 independent candidates and
@@ -79,7 +137,7 @@ Open-Jev's model-specific batch adapter packs up to 16 independent candidates an
 execute alone. It restores question/candidate grouping before normalization.
 Laya batches questions within one request. Shared runtime
 admission precedes blocking dispatch: Cua-S1 admits one question forward at a
-time; Open-Jev, Decider and Laya admit one complete request. Cua-S1's CPU letter projection
+time; Open-Jev, Decider, Laya, StartLux Instant, and Clef admit one complete request. Clef's admitted work is the frame exchange with its executor process. StartLux runs each prompt inside that admission one at a time. Cua-S1's CPU letter projection
 stays outside admission; Open-Jev's scalar heads and Laya's GPU heads and
 synchronized readback remain inside their request unit. Decider includes every
 backbone row and CUDA head projection, synchronizes both streams and retires

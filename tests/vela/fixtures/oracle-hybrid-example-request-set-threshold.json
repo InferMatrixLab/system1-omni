@@ -1,0 +1,81 @@
+{
+ "case": "example-request-set-threshold",
+ "request": {
+  "model": "vllm-sr/Vela-2.0-0.8B",
+  "state": "My card was charged twice and the parcel never arrived.",
+  "questions": {
+   "issues": {
+    "type": "set",
+    "instructions": "Which issues does the customer report?",
+    "criteria": {
+     "billing": "payments, charges, refunds or invoices",
+     "shipping": "delivery of an order or a parcel",
+     "login": "signing in, passwords or account access"
+    },
+    "threshold": 0.15
+   }
+  }
+ },
+ "system_one": {
+  "model": "vllm-sr/Vela-2.0-0.8B",
+  "answers": {
+   "issues.billing": {
+    "type": "noul",
+    "noul": 0.6211446881608428
+   },
+   "issues.shipping": {
+    "type": "noul",
+    "noul": 0.8205402483597802
+   },
+   "issues.login": {
+    "type": "noul",
+    "noul": 0.00012988178108716601
+   }
+  },
+  "usage": {
+   "input_tokens": 133,
+   "output_tokens": 0
+  },
+  "sets": {
+   "issues": {
+    "selected": [
+     "billing",
+     "shipping"
+    ],
+    "probabilities": {
+     "billing": 0.6211446881608428,
+     "shipping": 0.8205402483597802,
+     "login": 0.00012988178108716601
+    }
+   }
+  },
+  "thresholds": {
+   "issues": 0.15
+  }
+ },
+ "predict": {
+  "answers": [
+   {
+    "id": "issues",
+    "type": "set",
+    "answer": [
+     "billing",
+     "shipping"
+    ],
+    "probabilities": {
+     "billing": 0.6211446881608428,
+     "shipping": 0.8205402483597802,
+     "login": 0.00012988178108716601
+    },
+    "threshold": 0.15
+   }
+  ],
+  "meta": {
+   "tokens": {
+    "user": 11
+   },
+   "windows": 0,
+   "sequences": 1
+  }
+ }
+}

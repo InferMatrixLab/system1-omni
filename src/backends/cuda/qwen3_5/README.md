@@ -16,7 +16,20 @@ The norm, elementwise and q/k preparation kernels round to bfloat16 where Transf
 `cs1_attention_gated` fuses the sigmoid gate into the attention epilogue, preserving
 the BF16 rounding of both attention and sigmoid before multiplication. The native
 workers use this entry point; the separate operations remain available for kernel
-comparisons. Rebuild the library and all native Rust consumers together for
+comparisons. `cs1_attention_gated_bidirectional` is an optional ABI 9 symbol with
+the same argument list. It is the Instant prompt mask: every query reads every
+key in that prompt, and a non-zero `q_base` is rejected. Causal
+`cs1_attention_gated` and prefix continuation stay causal. The second template
+parameter defaults to false, so existing causal launches keep that mask. Causal
+callers do not resolve the new symbol. StartLux Instant fails closed when it is
+missing. Rebuild this library before starting that worker. This tree does not
+claim that the causal specialization's SASS is bit-identical to the previous
+build; GPU revalidation of Cua-S1 and Open-Jev was not run with this change.
+
+HF Qwen3.5 folders store `linear_attn.A_log` and `linear_attn.norm.weight` as
+FP32. The shared loader rounds those two suffixes to BF16 at upload because the
+kernels consume BF16. Other non-BF16 language tensors still fail. That rounding
+is a parity gap versus an FP32 `exp(A_log)` and GDN norm in Transformers. Rebuild the library and all native Rust consumers together for
 **ABI version 9**, even with resident features disabled. ABI 9 retains the vision,
 CUDA Graph, gated attention and prefix-continuation entry points and ABI 8's
 `cs1_get_device` and `cs1_bf16_finite` for device feature validation, and adds the
@@ -38,10 +51,29 @@ M without split-K. `cs1_gemm_create` remains the default.
 Gated DeltaNet preparation stores converted TF32 operands in three-byte component planes, preserves the original four-term TF32 accumulation, and writes U/W fragments directly as bfloat16. Dynamic shared memory is 72 KiB per block. The [H200 comparison](../../../../benchmarks/gdn/README.md) records complete GDN call latency, numerical checks, and the small end-to-end change measured with the Open-Jev worker from PR #55.
 
 The shared Rust model can pack independent sequences for input and gate/up GEMMs.
-Output/down GEMMs retain each prompt's original shape and reduction order;
-attention, convolution and GDN calls remain sequence-local. Packing adds no CUDA
-entry points. Open-Jev uses this path within requests; Cua-S1 keeps single-prompt calls. Decider optionally packs complete
+Output/down GEMMs default to each prompt's original shape and reduction order;
+attention, convolution and GDN calls remain sequence-local in that default path.
+Cua-S1 keeps single-prompt calls. Decider optionally packs complete
 question rows within one admitted request.
+
+Open-Jev-27B also opts into additive `cs1_gemm_packed` and
+`cs1_gdn_prefill_batch` entry points. Packed projections combine only consecutive
+shapes with byte-identical original cuBLASLt algorithms that pass `AlgoCheck`
+within the existing workspace. Unsupported groups split back into smaller groups
+or independent calls. Batched GDN uses a by-value descriptor for up to 16 sequences,
+separate chunk-rounded workspace, and zero initial state for each sequence. The
+original single-sequence entry points remain available to other consumers.
+
+Optional `cs1_gemm_reuse_check` / `cs1_gemm_reuse` entry points retain a complete
+prompt's algorithm for a prefix or suffix window. A compatibility result of `-1`
+means the caller must fall back before executing the shared prefix. The model
+adapter owns candidate grouping and prefix state; the backend owns only the GEMM
+plans and execution. Packed plans and window plans each use a 512-entry host LRU,
+with graph replay tests after eviction. These additions keep ABI 9 and do not
+require other model consumers to enable the new paths. Rebuild the library and
+27B worker from the same checkout. New batched-kernel execution is validated on
+SM90; SM80/SM89 execution remains unverified.
+
 
 Prefix continuation retains full-attention KV, three convolution input rows,
 and FP32 Gated DeltaNet state at 64-token chunk boundaries. It is used by the
@@ -144,3 +176,22 @@ does not establish a fresh device pass or whole-model 27B qualification.
 
 Shared preprocessing and vision adaptation notices accompany the Qwen crate in
 [THIRD_PARTY_NOTICES.md](../../../models/qwen3_5/native/THIRD_PARTY_NOTICES.md).
+
+## Optional full-prompt-matched GEMMs
+
+`cs1_gemm_create_matched(workspace_bytes, reference_m)` and
+`cs1_gemm_compatible(ordinary, matched, M, N, K)` are additive ABI 9 symbols.
+Existing consumers do not resolve them. The matched handle retains the ordinary
+BF16 reduction mask and chooses one algorithm per weight shape at `reference_m`;
+legacy `cs1_gemm_create_fixed` still excludes split-K reductions. Compatibility
+returns 1 only for equal complete algorithm descriptors and supported layouts
+within the workspace budget. Passing a null ordinary handle checks window
+support without requiring another heuristic to choose the same algorithm.
+Neither compatibility check executes a GEMM.
+
+Rust owns admission, request scope and the bounded workspace cache. Descriptor
+matching is not a guarantee of row-invariant arithmetic on arbitrary hardware;
+run the matched projection regression in `tests/qwen3_5/kernels.rs` and the
+[Cua screenshot qualification](../../../../recipe/cua_s1/native_screenshot.md#full-prompt-matched-algorithms)
+for each supported GPU/library/model combination. Other numerical profiles,
+vision GEMMs and the existing default/fixed policies stay on their own handles.
