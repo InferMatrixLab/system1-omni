@@ -84,6 +84,7 @@ def _member(
     repo: str,
     revision: str,
     model_name: str,
+    max_length: int,
     weights_shards: dict[str, int],
     pinned: dict[str, str],
 ) -> HybridMember:
@@ -91,7 +92,7 @@ def _member(
         repo=repo,
         revision=revision,
         model_name=model_name,
-        max_length=16384,
+        max_length=max_length,
         weights_shards=weights_shards,
         pinned_files=pinned,
     )
@@ -106,6 +107,7 @@ MEMBERS: dict[str, HybridMember] = {
             repo="vllm-sr/Vela-2.0-0.8B",
             revision="326b01d81f61fff7fd4ae570e54b87a49119e490",
             model_name="vllm-sr/Vela-2.0-0.8B",
+            max_length=16384,
             weights_shards={
                 "model-00001-of-00001.safetensors": 2022189488,
             },
@@ -121,6 +123,7 @@ MEMBERS: dict[str, HybridMember] = {
             repo="vllm-sr/Vela-2.0-4B",
             revision="d692394127f6f87fc581d8634c9558fe4776efce",
             model_name="vllm-sr/Vela-2.0-4B",
+            max_length=16384,
             weights_shards={
                 "model-00001-of-00003.safetensors": 4280713812,
                 "model-00002-of-00003.safetensors": 4247826344,
@@ -138,6 +141,7 @@ MEMBERS: dict[str, HybridMember] = {
             repo="vllm-sr/Vela-2.0-9B",
             revision="068425bb145c05884a98b870c219047da22d9aea",
             model_name="vllm-sr/Vela-2.0-9B",
+            max_length=16384,
             weights_shards={
                 "model-00001-of-00005.safetensors": 4203284492,
                 "model-00002-of-00005.safetensors": 4232405584,
