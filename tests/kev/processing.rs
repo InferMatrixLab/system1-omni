@@ -119,6 +119,20 @@ fn exact_tokens_readouts_and_billing_match_official() {
     {
         let request = json::parse(&serde_json::to_vec(&case["request"]).unwrap()).unwrap();
         let prepared = processor.prepare(&request).unwrap();
+        let compiled = contract::compile(&request).unwrap();
+        assert_eq!(compiled.state, case["record"]["state"], "{}", case["name"]);
+        assert_eq!(
+            compiled.questions.len(),
+            case["meta"].as_array().unwrap().len()
+        );
+        for (q, expected) in compiled
+            .questions
+            .iter()
+            .zip(case["record"]["questions"].as_array().unwrap())
+        {
+            assert_eq!(q.instructions, expected["instr"], "{}", case["name"]);
+            assert_eq!(json!(q.options), expected["options"], "{}", case["name"]);
+        }
         assert_eq!(json!(prepared.rows), case["rows"], "{}", case["name"]);
         assert_eq!(
             prepared.context.input_tokens as u64,
