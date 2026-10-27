@@ -6,7 +6,8 @@
 //!     VELA_CUDA_LIB=.../libqwen3_5_cuda.so \
 //!     cargo test -p omni-vela-native --test vela_native_executor -- --ignored --nocapture
 //!
-//! The recorded reference ran CPU FP32; this path runs the uniform-BF16
+//! The recorded reference ran CPU FP32 (0.8B) or GPU bf16-autocast
+//! (4B/9B); this path runs the uniform-BF16
 //! backbone, so the gates are backbone-level numerical tolerances, not
 //! the reference worker's exact-match bar: logit drift is measured and
 //! asserted against the gate.
@@ -89,7 +90,9 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
             omni_vela_native::processing::Processor::load(&bundle).expect("processor loads");
         let planned = processor.plan(&request).expect("plan");
         let raw = std::fs::read(fixtures_dir().join(format!("head-input-{m}-{case}.safetensors")))
-            .expect("safetensors fixture");
+.unwrap_or_else(|error| panic!(
+                "head-input-{m}-{case}.safetensors is missing ({error}); only the 0.8B binaries are committed — regenerate 4B/9B with recipe/vela/export_head_inputs.py"
+            ));
         let _file = safetensors::SafeTensors::deserialize(&raw).expect("safetensors");
 
         // The recorded reference logits per call, in call order.

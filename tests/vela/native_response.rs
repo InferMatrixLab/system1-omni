@@ -123,7 +123,9 @@ fn the_systemone_finishing_matches_the_frozen_oracles() {
         let oracle_name = format!("oracle-hybrid-{m}-{case}.json");
         let oracle = load(&oracle_name);
         let raw = std::fs::read(fixtures_dir().join(format!("head-input-{m}-{case}.safetensors")))
-            .expect("safetensors");
+.unwrap_or_else(|error| panic!(
+                "head-input-{m}-{case}.safetensors is missing ({error}); only the 0.8B binaries are committed — regenerate 4B/9B with recipe/vela/export_head_inputs.py"
+            ));
         let request = plan["request"].as_object().expect("request").clone();
 
         let mut thresholds: HashMap<String, f64> = HashMap::new();

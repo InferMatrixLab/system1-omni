@@ -191,7 +191,9 @@ fn the_heads_reproduce_the_reference_logits_and_the_scoring_the_answers() {
         let fixture = load_json(&format!("head-input-{m}-{case}.json"));
         let plan = load_json(&format!("native-plan-{m}-{case}.json"));
         let raw = std::fs::read(fixtures_dir().join(format!("head-input-{m}-{case}.safetensors")))
-            .expect("safetensors fixture");
+            .unwrap_or_else(|error| panic!(
+                "head-input-{m}-{case}.safetensors is missing ({error}); only the 0.8B binaries are committed — regenerate 4B/9B with recipe/vela/export_head_inputs.py"
+            ));
         let request = fixture["request"].as_object().expect("request");
 
         // Re-derive the per-row thresholds (the request's own overrides).

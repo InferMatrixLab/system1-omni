@@ -43,11 +43,15 @@ const CASES: [&str; 5] = [
     "long-span-windowed",
 ];
 
-fn fixture(case: &str) -> Value {
+/// Every member's labeled plan fixtures: the plans are tokenizer-free,
+/// so the always-run mapping check replays all three members, not just
+/// the one a bundle selects.
+const MEMBERS: [&str; 3] = ["Vela-2.0-0.8B", "Vela-2.0-4B", "Vela-2.0-9B"];
+
+fn fixture(member: &str, case: &str) -> Value {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../tests/vela/fixtures");
-    let m = member_label();
     serde_json::from_str(
-        &std::fs::read_to_string(root.join(format!("native-plan-{m}-{case}.json")))
+        &std::fs::read_to_string(root.join(format!("native-plan-{member}-{case}.json")))
             .expect("fixture present; record it with recipe/vela/export_token_plan.py"),
     )
     .expect("fixture JSON")
@@ -55,8 +59,8 @@ fn fixture(case: &str) -> Value {
 
 // ------------------------------------------------------- mapping (no tokens)
 
-fn mapped(case: &str) -> Value {
-    let fix = fixture(case);
+fn mapped(member: &str, case: &str) -> Value {
+    let fix = fixture(member, case);
     let request = fix["request"].as_object().expect("request");
     let state = system_one_state(&request["state"]).expect("state maps");
     let questions = request["questions"].as_object().expect("questions");
@@ -69,14 +73,16 @@ fn mapped(case: &str) -> Value {
 
 #[test]
 fn the_predict_mapping_matches_every_fixture() {
-    for case in CASES {
-        let got = mapped(case);
-        let fix = fixture(case);
-        assert_eq!(
-            got["predict_request"], fix["predict_request"],
-            "predict_request differs for {case}"
-        );
-        assert_eq!(got["plan"], fix["plan"], "plan differs for {case}");
+    for member in MEMBERS {
+        for case in CASES {
+            let got = mapped(member, case);
+            let fix = fixture(member, case);
+            assert_eq!(
+                got["predict_request"], fix["predict_request"],
+                "predict_request differs for {member} {case}"
+            );
+            assert_eq!(got["plan"], fix["plan"], "plan differs for {member} {case}");
+        }
     }
 }
 
@@ -137,7 +143,7 @@ fn the_rendered_rows_match_every_fixture() {
     let processor = omni_vela_native::processing::Processor::load(&bundle)
         .expect("processor loads the exported bundle");
     for case in CASES {
-        let fix = fixture(case);
+        let fix = fixture(&member_label(), case);
         let request = fix["request"].as_object().expect("request");
         let planned = match processor.plan(request) {
             Ok(planned) => planned,
