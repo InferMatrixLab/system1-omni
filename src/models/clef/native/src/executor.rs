@@ -61,7 +61,18 @@ impl Executor {
     }
 
     pub(crate) fn ready(&self) -> bool {
-        self.ready.load(Ordering::Acquire)
+        if !self.ready.load(Ordering::Acquire) {
+            return false;
+        }
+        // Health must notice an idle process exit without sending an inference.
+        let alive = self
+            .child
+            .lock()
+            .is_ok_and(|mut child| matches!(child.try_wait(), Ok(None)));
+        if !alive {
+            self.ready.store(false, Ordering::Release);
+        }
+        alive
     }
 
     pub(crate) fn health(&self) -> &[u8] {
@@ -72,12 +83,20 @@ impl Executor {
         if !self.ready() {
             bail!("executor unavailable");
         }
-        let mut pipes = self
-            .pipes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("executor lock poisoned"))?;
-        frame::write_request(&mut pipes.stdin, frame::OPCODE_DECIDE, body)?;
-        frame::read_response(&mut pipes.stdout)
+        let result = (|| {
+            let mut pipes = self
+                .pipes
+                .lock()
+                .map_err(|_| anyhow::anyhow!("executor lock poisoned"))?;
+            frame::write_request(&mut pipes.stdin, frame::OPCODE_DECIDE, body)?;
+            frame::read_response(&mut pipes.stdout)
+        })();
+        if result.is_err() {
+            // This closure outlives a disconnected HTTP caller. Publish failure
+            // before releasing admission, even when nobody awaits the response.
+            self.fail();
+        }
+        result
     }
 
     pub(crate) fn fail(&self) {

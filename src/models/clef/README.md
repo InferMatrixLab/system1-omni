@@ -229,3 +229,13 @@ recipe venv; the command is in the recipe. System `python3` lacks
 | Rust HTTP + persistent Python executor | Default serve path. CPU tests, plus the operator `f9127a0` paste above (not a KEEP). `CLEF_PYTHON` must be the recipe venv | Same server, `--variant clef` |
 | Joint-head native CUDA | Not implemented | Not implemented |
 | Workers AI proxy | Out of scope | Out of scope |
+
+### Failure and cancellation ownership
+
+The Rust `Executor` owns child liveness and publishes IPC failure while its
+scheduled blocking exchange still holds admission. This keeps failure state
+correct even after the HTTP caller is cancelled. Health checks reap an exited
+idle child and return unavailable instead of serving stale ready data. The
+scheduler owns FIFO admission; its closure retains the executor until the full
+response has been read. See the [service lifecycle checks](../../../recipe/clef/reference.md#service-lifecycle-acceptance)
+for error statuses, cancellation boundaries and remaining queue/deadline limits.

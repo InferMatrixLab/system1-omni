@@ -392,3 +392,42 @@ blocker before the flag becomes the default. The startup forward that
 runs before `/health` is separate from the client warmup in the C1
 protocol and has no latency claim. A later code change is unmeasured
 until its own paste.
+
+## Service lifecycle acceptance
+
+Use a writable recipe environment and keep the pinned snapshot immutable. Set
+`PYTHONDONTWRITEBYTECODE=1` for both the Rust launcher and direct Python
+checks: the snapshot verifier rejects a `__pycache__` directory in the snapshot.
+Start the server through the execution host's GPU reservation mechanism.
+
+Readiness requires the executor's actual startup forward to finish before the
+HTTP listener opens. The first `/v1/systemone` request after readiness and a
+repeat of that request should return the same answers and token usage. The
+Python process owns the model; its main thread loads, warms and scores it.
+
+The server reads each complete HTTP body before FIFO admission. Unlike the
+previous Python handler's `503 worker busy`, concurrent requests wait for the
+single executor. A client that disconnects while waiting is removed from that
+queue. A disconnect after dispatch does not interrupt the model: the blocking
+IPC exchange retains the executor and scheduler permit until the response is
+fully read. The next request cannot consume the cancelled request's response.
+
+Health checks also inspect whether the child process has exited. An idle exit
+returns `503 {"detail": "worker unavailable"}` without requiring a probe
+inference. An IPC failure during execution returns `500 {"detail": "inference
+failed"}` to a still-connected caller, marks the executor unavailable before
+releasing admission, and makes later health checks and requests return 503.
+This failure publication also occurs when the original client has disconnected.
+Restart the server to recover from a dead or invalid IPC stream. A valid
+model-generated error response retains its original status/body and does not by
+itself poison the stream.
+
+The queue is not bounded and a live executor that never answers has no inference
+deadline. Client cancellation does not promise to stop submitted CUDA work.
+
+The CPU tests under `tests/clef/serve.rs` cover real TCP disconnects, queued
+cancellation, retained resources after dispatched cancellation, idle child exit,
+and protocol failure after the caller has gone away. Run those with
+`cargo test --locked -p omni-clef`; these fake-worker tests do not prove GPU
+output parity or latency. The shared scheduler's resource tests are in
+`cargo test --locked -p omni-runtime`.
