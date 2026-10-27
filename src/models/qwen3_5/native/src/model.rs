@@ -12,6 +12,8 @@
 //! `Model::forward_shared` runs prompts that share token prefixes, running each prefix
 //! once and every branch from the state after it (see `SharedPrompts`).
 
+mod matched;
+
 use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
 use std::path::Path;
@@ -847,6 +849,8 @@ pub struct Model {
     gemm: *mut c_void,
     /// One GEMM algorithm per weight shape for `forward_shared`; created on first use.
     fixed_gemm: *mut c_void,
+    matched_ref: usize,
+    matched_handles: HashMap<usize, *mut c_void>,
     reference: Option<&'static cuda::Reference>,
     fp32_gdn: Option<cuda::Fp32Gdn>,
     batched_gdn: Option<cuda::BatchedGdn>,
@@ -891,6 +895,9 @@ impl Drop for Model {
         self.fp32_gdn = None;
         // SAFETY: both GEMM handles are owned by this model and destroyed once.
         unsafe {
+            for (_, h) in self.matched_handles.drain() {
+                (cuda::api().cs1_gemm_destroy)(h);
+            }
             (cuda::api().cs1_gemm_destroy)(self.gemm);
             if !self.fixed_gemm.is_null() {
                 (cuda::api().cs1_gemm_destroy)(self.fixed_gemm);
@@ -1019,6 +1026,8 @@ impl Model {
             stream,
             gemm,
             fixed_gemm: std::ptr::null_mut(),
+            matched_ref: 0,
+            matched_handles: HashMap::new(),
             reference: None,
             fp32_gdn: None,
             batched_gdn: None,
@@ -2353,6 +2362,10 @@ impl Model {
 
     /// The GEMM handle with one algorithm per weight shape, created on first use.
     fn fixed_gemm(&mut self) -> Result<*mut c_void> {
+        if self.matched_ref > 0 {
+            return Ok(self.matched_handles[&self.matched_ref]);
+        }
+
         if self.fixed_gemm.is_null() {
             // SAFETY: plain allocation; checked for null below.
             self.fixed_gemm =

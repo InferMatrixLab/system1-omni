@@ -176,3 +176,22 @@ does not establish a fresh device pass or whole-model 27B qualification.
 
 Shared preprocessing and vision adaptation notices accompany the Qwen crate in
 [THIRD_PARTY_NOTICES.md](../../../models/qwen3_5/native/THIRD_PARTY_NOTICES.md).
+
+## Optional full-prompt-matched GEMMs
+
+`cs1_gemm_create_matched(workspace_bytes, reference_m)` and
+`cs1_gemm_compatible(ordinary, matched, M, N, K)` are additive ABI 9 symbols.
+Existing consumers do not resolve them. The matched handle retains the ordinary
+BF16 reduction mask and chooses one algorithm per weight shape at `reference_m`;
+legacy `cs1_gemm_create_fixed` still excludes split-K reductions. Compatibility
+returns 1 only for equal complete algorithm descriptors and supported layouts
+within the workspace budget. Passing a null ordinary handle checks window
+support without requiring another heuristic to choose the same algorithm.
+Neither compatibility check executes a GEMM.
+
+Rust owns admission, request scope and the bounded workspace cache. Descriptor
+matching is not a guarantee of row-invariant arithmetic on arbitrary hardware;
+run the matched projection regression in `tests/qwen3_5/kernels.rs` and the
+[Cua screenshot qualification](../../../../recipe/cua_s1/native_screenshot.md#full-prompt-matched-algorithms)
+for each supported GPU/library/model combination. Other numerical profiles,
+vision GEMMs and the existing default/fixed policies stay on their own handles.
