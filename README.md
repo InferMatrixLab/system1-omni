@@ -191,7 +191,7 @@ checkpoint. Public231 concurrency-1 latency for heads `1ba07d1`, `f968e576`,
 | CLM-v0.1-8B | [External worker with a CPU stub encoder](recipe/clm/README.md); contract checks only, real Qwen3-8B decisions unverified by this recipe |
 | LFM2.5-350M | [Transformers worker](recipe/lfm2/README.md); text state and independent choice questions |
 | OmniJev-4B v1.1 | [Native Rust/CUDA worker](recipe/omnijev/native.md), eager: one image, Choice, Noul and Score; [reference comparison on sm_89](recipe/omnijev/native.md#comparison-with-the-reference) |
-| Kev-4B | [Eager native Rust/CUDA text worker](recipe/kev/native.md); exact CPU processing and isolated head checked, full-model acceptance pending ([#27](https://github.com/InferMatrixLab/system1-omni/issues/27)) |
+| Kev-4B | [Eager native Rust/CUDA text worker](recipe/kev/native.md); Choice/Noul/Score with [bounded numerical and HTTP acceptance](recipe/kev/native.md#recorded-acceptance) ([#27](https://github.com/InferMatrixLab/system1-omni/issues/27)) |
 | D3 (Decision 3.0) | [Python reference worker](recipe/d3/reference.md) on the checkpoint's pinned runtime; `choice`/`noul`/`score` over text, image and video state; author-run on A100 for text and media serving (see the integration and media PRs) |
 | Vela 2.0 0.3B | [Python reference worker](recipe/vela/reference.md) on the checkpoint's pinned runtime; all five kinds (`choice`/`noul`/`score`/`span`/`set`) for text state; CPU FP32 validated (author-run, evidence in the integration PR) |
 | Vela 2.0 0.8B hybrid | [Python reference worker](recipe/vela/reference.md) on the checkpoint's pinned runtime; same surface plus `span_heads`; CPU FP32 parity recorded in the integration PR |

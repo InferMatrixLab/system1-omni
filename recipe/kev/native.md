@@ -7,7 +7,8 @@ No Python runs in the worker. Other Kev sizes, media encoding, prefix reuse,
 CUDA Graphs, and additional kernel optimization are outside this baseline.
 
 Run commands from the repository root. Build the backend for the actual GPU's
-compute capability (the lab L20X reports 8.9); the build itself does not use a GPU:
+compute capability; the build itself does not use a GPU. The acceptance below
+used the `89` build (including its PTX); see the hardware note before generalizing:
 
 ```sh
 src/backends/cuda/qwen3_5/build.sh target/release 89
@@ -140,6 +141,43 @@ top-two margin is `> 0.02`; matching Noul decisions at threshold 0.5 when the
 reference is farther than 0.01 from it. Every near-boundary disagreement is listed.
 A failed merge baseline is reported separately and never justifies widening a gate.
 
-**Validation status:** exact CPU processing fixtures and isolated released head
-have been checked. Full-model CUDA and direct/frontend acceptance are pending;
-this implementation is not yet an accepted numerical baseline.
+## Recorded acceptance
+
+Local author-run at source `57e239b681f84d56609ed7cef45889a115381172`, over 13
+requests / 23 questions (10 Choice, 7 Noul, 6 Score):
+
+| Comparison | Maximum probability absolute error |
+| --- | ---: |
+| Official FP32 unmerged → FP32 merged | 0.00000298023 |
+| FP32 merged → exported BF16 PyTorch | 0.00543183 |
+| Official FP32 unmerged → exported BF16 PyTorch | 0.00543272 |
+| Exported BF16 PyTorch → native | 0.00607389 |
+| Official FP32 unmerged → native | 0.00553775 |
+
+All declared probability/decision gates passed. All 10 Choice and 7 Noul decisions
+agree; three additional native mixed requests are identical. There were no
+near-boundary disagreements; this corpus's smallest nontrivial Choice margin is
+0.121829 and smallest Noul threshold distance is 0.023158, so it does not establish
+real near-boundary coverage. Synthetic checker tests verify boundary reporting.
+
+For the 255-level Score, the expected level is 96.7645 officially versus 96.6496
+natively (absolute difference 0.1149 on a 0–254 scale). Its maximum probability
+error is 0.000169017. The declared gate is on probabilities; no scalar Score
+threshold was specified. Other datasets and longer contexts need their own
+qualification; this small deterministic corpus is not a model-quality benchmark.
+
+The exact processing/head CPU gates passed. Workspace tests: 397 passed, 91
+ignored, zero failed; relevant ignored tokenizer, released-head and native
+capture checks were explicitly run. Real warmup and the first external request
+passed. Sixteen paired HTTP requests matched direct worker, frontend and native
+capture exactly; eight error cases matched status/body. No performance claim is
+made from these checks.
+
+The lab device is labelled NVIDIA L20X: the reserved Torch runtime reports
+capability 9.0 while `nvidia-smi` reports 8.9. The tested backend was built with
+CUDA 13.0 for sm_89 plus compute_89 PTX; its SHA-256 is
+`9a29aae12a35368481f61ccbe9ecf318230b658224ee1d46211bbe2a30703c71`.
+Reference Torch uses CUDA 12.8. Do not infer another hardware model from the label
+or claim the untested sm_90 build passed. Exact package pins are above; raw JSON,
+commands, hashes, and the retained outer-wrapper interruption are supplied in
+the local handoff archive. No public artifact upload was performed.

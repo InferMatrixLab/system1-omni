@@ -4,8 +4,9 @@ Kev serves `choice`, `noul`, and `score` with its own processor and FP32 pointer
 head over the shared Qwen3.5 CUDA backbone. The [preparation recipe](../../../recipe/kev/README.md)
 remains independently reviewable; the [native recipe](../../../recipe/kev/native.md)
 covers the complete eager worker. Other sizes and prefix reuse are deferred.
-Full-model numerical acceptance is pending; CPU processing and isolated head
-validation do not establish end-to-end parity.
+The declared gates passed on the 13-request / 23-question acceptance corpus;
+[results and limits](../../../recipe/kev/native.md#recorded-acceptance) include
+merge drift, hardware provenance, Score scale effects and HTTP checks.
 
 ## Pinned artifacts
 
@@ -15,7 +16,7 @@ validation do not establish end-to-end parity.
 | [Qwen/Qwen3.5-4B-Base](https://huggingface.co/Qwen/Qwen3.5-4B-Base/tree/1001bb4d826a52d1f399e183466143f4da7b741b) | `1001bb4d826a52d1f399e183466143f4da7b741b` |
 | [Kev reference code](https://github.com/jaredpalmer/kev/tree/2074cc44256200bb37540103fa4572901faa10f3) | `2074cc44256200bb37540103fa4572901faa10f3` |
 
-All are Apache-2.0; the adapted head's license is retained in
+All are Apache-2.0; the adapted model/API code's license is retained in
 [`native/LICENSE.kev`](native/LICENSE.kev). No model weights are committed.
 The source hash in the fixture generator covers the complete pinned `kev/model.py`.
 
@@ -59,7 +60,7 @@ modules even though both currently run on CPU.
 `contract::compile` follows the pinned `kev/api.py`: recursive text rendering,
 insertion order, Choice `name: description`, Noul `no`/`yes` candidates and ordered
 Score levels. `processing::Processor` owns the base tokenizer, rewrites caller
-`<|name|>` spellings to `<¦name¦>`, and encodes each fragment separately. Each
+`<|name|>` spellings to `<¦name¦>`, and encodes each fragment separately, without a chat template. Each
 prepared question owns one complete causal row and its candidate/decision indices.
 Question positions restart at the state length. No padding or truncation is used.
 
