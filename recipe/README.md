@@ -57,6 +57,9 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   five SystemOne question kinds (`choice`/`noul`/`score` plus the `span`/`set`
   extensions) through the Python worker and the Rust frontend on CPU FP32;
   or vllm-sr/Vela-2.0-0.8B at revision `326b01d8` behind its own 10-file gate.
+- [Vela 2.0 0.8B native library](vela/native.md): export the pinned-bundle
+  manifest gate, wire contract and token-level processing for the 0.8B hybrid,
+  checked against frozen fixtures; serving stays with the reference Python worker.
 - [Clef reference worker](clef/reference.md): load pinned Clef-flash (9B) or
   Clef (27B) and serve text `choice`/`noul`/`score`. Image, video and native
   CUDA are not served. Operator-reported flash Public231 concurrency-1
