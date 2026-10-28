@@ -147,12 +147,19 @@ def compare(corpus, official, native):
             'repeats': repeats, 'failures': errors, 'passed': not errors}
 
 
+def supplements(corpora, officials, natives):
+    """Keep each official service run separate, including repeated CLI inputs."""
+    if not len(corpora) == len(officials) == len(natives):
+        raise ValueError('all three supplement files are required for each run')
+    return list(zip(corpora, officials, natives, strict=True))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ('corpus', 'official', 'native', 'reference', 'base', 'out'):
         parser.add_argument('--'+flag, type=Path, required=True)
     for flag in ('supplement-corpus', 'supplement-official', 'supplement-native'):
-        parser.add_argument('--'+flag, type=Path)
+        parser.add_argument('--'+flag, type=Path, action='append', default=[])
     args = parser.parse_args()
     if args.out.exists():
         raise ValueError('preserve previous report')
@@ -160,18 +167,16 @@ def main():
     official = json.loads(args.official.read_text())['cases']
     native = read_lines(args.native)
     runs = [official]
-    extra = (args.supplement_corpus, args.supplement_official, args.supplement_native)
-    if any(extra):
-        if not all(extra):
-            parser.error('all three supplement files are required together')
-        supplement = json.loads(args.supplement_corpus.read_text())
+    extra = supplements(args.supplement_corpus, args.supplement_official, args.supplement_native)
+    for corpus_path, official_path, native_path in extra:
+        supplement = json.loads(corpus_path.read_text())
         if supplement['gates'] != GATES:
             raise ValueError('supplement gates differ')
-        additional = json.loads(args.supplement_official.read_text())['cases']
+        additional = json.loads(official_path.read_text())['cases']
         corpus['cases'] += supplement['cases']
         runs.append(additional)
         official = official + additional
-        native += read_lines(args.supplement_native)
+        native += read_lines(native_path)
     report = compare(corpus, official, native)
     fixture = module('kev_fixture', ROOT/'tests/kev/generate_processing_fixture.py')
     api, model = fixture.official(args.reference)
@@ -196,7 +201,11 @@ def main():
                 or runtime['remaining_lora_modules'] != 0 or runtime['temperature'] != 2.406050072164233):
             report['failures'].append({'failure': 'official_runtime', 'case': record['name'], 'runtime': runtime})
     report['provenance'] = {k: {'path': str(getattr(args, k)), 'sha256': digest(getattr(args, k))}
-                            for k in ('corpus', 'official', 'native', 'supplement_corpus', 'supplement_official', 'supplement_native') if getattr(args, k)}
+                            for k in ('corpus', 'official', 'native')}
+    report['provenance']['supplements'] = [
+        {k: {'path': str(path), 'sha256': digest(path)}
+         for k, path in zip(('corpus', 'official', 'native'), paths, strict=True)}
+        for paths in extra]
     report['passed'] = not report['failures']
     save(args.out, report)
     print(json.dumps({'passed': report['passed'], 'requests': report['requests'], 'questions': report['questions'],

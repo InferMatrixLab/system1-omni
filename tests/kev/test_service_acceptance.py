@@ -1,11 +1,38 @@
 """Regression checks for acceptance failures that must never be hidden by rounding."""
 import unittest
 
-from compare_service import compare, distribution, labeled_metrics, question
+from boundary_discovery import previous_keys
+from compare_service import (
+    compare,
+    distribution,
+    labeled_metrics,
+    question,
+    supplements,
+)
 from service_acceptance import GATES
 
 
 class ServiceAcceptanceTests(unittest.TestCase):
+    def test_supplement_runs_cannot_be_silently_truncated(self):
+        for paths in ((['a'], [], []), (['a', 'b'], ['a'], ['a', 'b'])):
+            with self.assertRaisesRegex(ValueError, 'each run'):
+                supplements(*paths)
+        self.assertEqual(supplements(['a', 'b'], ['c', 'd'], ['e', 'f']),
+                         [('a', 'c', 'e'), ('b', 'd', 'f')])
+
+    def test_discovery_deduplicates_source_questions_and_actual_tokens(self):
+        def case(name, ids, kind='noul', **extra):
+            return {'name': name, 'meta': [{'id': 'q', 'type': kind}],
+                    'rows': [{'ids': ids}], **extra}
+        cases = [case('suite-one:record', [1, 2]), case('suite-two:record', [1, 2]),
+                 case('synthetic', [3, 4]), case('choice', [5, 6], 'choice'),
+                 case('new-discovery', [7, 8], origin={'record_id': 'another', 'question_id': 'q'})]
+        identities, tokens = previous_keys([{'gates': GATES, 'cases': cases}])
+        self.assertEqual(identities, {('record', 'q'), ('another', 'q')})
+        self.assertEqual(tokens, {(1, 2), (3, 4), (7, 8)})
+        with self.assertRaisesRegex(ValueError, 'gates changed'):
+            previous_keys([{'gates': {**GATES, 'noul_distance': .02}, 'cases': cases}])
+
     def test_score_can_fail_while_every_probability_passes(self):
         p, n = [0.0]*255, [0.0]*255
         p[0] = 1.0

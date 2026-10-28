@@ -138,6 +138,12 @@ fn exact_tokens_readouts_and_billing_match_official() {
             prepared.context.input_tokens as u64,
             case["input_tokens"].as_u64().unwrap()
         );
+        if case.get("probabilities").is_none() {
+            // Discovery corpora deliberately omit artificial CPU probabilities.
+            // Their real output/billing is checked by the service comparator.
+            assert_eq!(case["population"], "discovery");
+            continue;
+        }
         let ps: Vec<Vec<f64>> = serde_json::from_value(case["probabilities"].clone()).unwrap();
         let body = prepared.context.finish_probabilities(&ps).unwrap();
         assert_eq!(body["answers"], case["answers"]);
