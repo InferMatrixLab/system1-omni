@@ -6,12 +6,15 @@ the shared Qwen selected-position readout, and Kev's trained FP32 pointer head.
 No Python runs in the worker. Other Kev sizes, media encoding, prefix reuse,
 CUDA Graphs, and additional kernel optimization are outside this baseline.
 
-Run commands from the repository root. Build the backend for the actual GPU's
+Run commands from the repository root. Prepare the CUDA-merged checkpoint first
+using the export recipe; old CPU-only exports are refused. Install the pinned
+[reference requirements](reference-requirements.txt) for build-time Torch headers.
+Build the backend for the actual GPU's
 compute capability; the build itself does not use a GPU. The acceptance below
 used the `89` build (including its PTX); see the hardware note before generalizing:
 
 ```sh
-src/backends/cuda/qwen3_5/build.sh target/release 89
+KEV_PYTHON=.venv-kev-reference/bin/python recipe/kev/build_cuda.sh target/release 89
 cargo build --release --locked -p omni-kev-native -p omni-jev
 # On hosts requiring reservations, keep gpu run outside the worker process.
 gpu run --gpus 1 --nonblock --timeout 2h --note 'Kev eager worker' -- \
@@ -66,14 +69,20 @@ non-JSON content types 415; invalid/unsupported requests 422; capacity exhaustio
 fields are ignored as in the reference. Unlike the official server, arbitrary
 model names are refused and timing fields are omitted.
 
+The optional CUDA build emits `PYTORCH-LICENSE`, `CUTLASS-LICENSE` and
+`KEV_CUDA_NOTICES.txt` beside the library. Keep them with redistributed binaries;
+see the [third-party notices](../../src/models/qwen3_5/native/THIRD_PARTY_NOTICES.md).
+
 ## Primary acceptance status
 
-**Draft: numerical qualification is failing.** The expanded fixed official BF16
-default-service comparison has probability max error 0.06492195 (gate 0.01),
-Score-255 error 0.16675543 levels (gate 0.1), and only 3/10 required near-boundary
-Noul examples. Task-quality gates on 896 labeled questions pass, as do exact
-processing and HTTP checks. See the [service acceptance protocol and results](service-acceptance.md)
-for every gate, the corpus, reproducible commands and preserved failures.
+**All frozen acceptance gates pass in the author-run campaign; review pending.** The fixed
+BF16 default-service comparison over 5,484 requests / 5,662 questions has maximum probability
+error 0.0024709404 (gate 0.01), maximum Score error 0.00000305218 levels (gate 0.1),
+and no decision disagreements. Noul boundary coverage is 36/10; all 36 qualify
+again on a fresh service. The 896-task quality gates, 55 HTTP response comparisons
+and 8 error checks pass. See the [boundary report](noul-boundary.md),
+[causal diagnosis and repair](numerical-diagnosis.md) and
+[unchanged acceptance protocol](service-acceptance.md).
 
 The processor follows the effective tokenizer loaded by the pinned Transformers
 5.17 Qwen2Tokenizer, including its split regex for Unicode marks. Merely loading

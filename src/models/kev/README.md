@@ -62,14 +62,17 @@ insertion order, Choice `name: description`, Noul `no`/`yes` candidates and orde
 Score levels. `processing::Processor` owns the base tokenizer, rewrites caller
 `<|name|>` spellings to `<¦name¦>`, and encodes each fragment separately, without a chat template. Each
 prepared question owns one complete causal row and its candidate/decision indices.
-Question positions restart at the state length. No padding or truncation is used.
+Question positions restart at the state length. Prepared rows are unpadded; the
+executor applies reference bucket padding, without truncation.
 
 `Engine` owns a shared `SerialScheduler` and one mutex-protected `Executor`.
 One admitted execution unit is a whole request. Questions run sequentially;
-`Model::forward_multimodal_readout` consumes a text-only input with identical
-T/H/W positions and returns final-normalized candidate and decision rows. The
+`planning` reproduces official question groups and projection shapes.
+`Model::forward_segmented_readout` consumes text-only state/question segments
+with identical T/H/W positions and returns final-normalized readout rows. The
 executor owns CUDA weights/scratch and the FP32 pointer head; only owned logits
-leave it. Every question starts with clean GDN state. The stream is synchronized
+leave it. Every question recomputes its state and continues from that temporary GDN/KV
+state. No prefix is retained across questions or requests. The stream is synchronized
 before execution resources and admission permits can be released, including on
 errors. Cancelled callers cannot free buffers while dispatched GPU work uses them.
 
@@ -111,7 +114,9 @@ checks, never run by ordinary workspace tests.
 Primary acceptance uses the pinned official BF16 default service, with Score
 scalar error at most 0.1 ordinal level and maximum probability error 0.01.
 The [expanded qualification](../../../recipe/kev/service-acceptance.md) currently
-fails both numerical gates and Noul boundary coverage; the worker remains draft.
+passes all frozen gates after the [v3 repair](../../../recipe/kev/numerical-diagnosis.md)
+and [v4 boundary qualification](../../../recipe/kev/noul-boundary.md): 36 Noul
+and 28 Choice boundary questions, with no decision disagreements. Contributor and maintainer review remain pending.
 Decision gates require Choice agreement
 for reference top-two margins above 0.02, and Noul agreement at threshold 0.5 when
 the reference distance exceeds 0.01. The comparator reports all near-boundary

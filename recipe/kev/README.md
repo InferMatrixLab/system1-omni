@@ -1,19 +1,20 @@
-# Kev-4B: CPU export and pointer-head validation
+# Kev-4B: checkpoint export and pointer-head validation
 
 This is a preparation recipe for [#27](https://github.com/InferMatrixLab/system1-omni/issues/27),
 with a separate [native worker recipe](native.md). The [model contract](../../src/models/kev/README.md)
 records the pinned artifacts, numerical boundaries and worker ownership.
-All commands below run from the repository root. No GPU is needed.
+All commands below run from the repository root. Native serving requires a CUDA
+FP32 LoRA merge matching the official default service. Head/unit tests remain CPU-only.
 
 ## Environment and downloads
 
-Use Python 3.12 and the stable Rust toolchain used by this repository. The CPU
+Use Python 3.12 and the stable Rust toolchain used by this repository. The
 export reads about 9.5 GB of inputs and writes about 8.5 GB; reserve at least 25 GB
 of free disk and 24 GB of host RAM. It processes one source shard at a time.
 
 ```sh
 python3.12 -m venv .venv-kev
-.venv-kev/bin/pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+.venv-kev/bin/pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 .venv-kev/bin/pip install -r recipe/kev/requirements.txt huggingface-hub==1.33.0
 
 .venv-kev/bin/hf download Qwen/Qwen3.5-4B-Base \
@@ -25,9 +26,16 @@ python3.12 -m venv .venv-kev
   --include 'adapter_config.json' 'adapter_model.safetensors' 'head.pt' \
   --local-dir weights/kev-adapter
 
-.venv-kev/bin/python recipe/kev/export.py \
+gpu run --gpus 1 --wait 2h --timeout 30m --note 'Kev pinned CUDA export' -- \
+  .venv-kev/bin/python recipe/kev/export.py \
   --base weights/kev-base --checkpoint weights/kev-adapter --out weights/kev-native
 ```
+
+For CPU-only export/head diagnosis, add `--merge-device cpu` and choose a separate
+output directory. That artifact is deliberately not accepted by the worker:
+nine BF16 weights can differ from official GPU merging despite both merges using
+FP32. `merge_numerics` records the device and exact Torch wheel. The CUDA export
+requires Torch 2.8.0+cu128 and disables TF32 for the LoRA matmul.
 
 Every required input must match its pinned SHA-256. The output directory must not
 already exist. `kev_export.json` lists merged targets, output hashes, FP32 head

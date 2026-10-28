@@ -3,7 +3,9 @@
 Declared before the first v2 model run. This supplements the original FP32 eager
 diagnostics; it does not replace, discard or retroactively qualify those runs.
 The recorded outcome and the separately frozen supplemental experiment follow
-the original protocol below. **Current status: failed numerical qualification.**
+the original protocol below. **Current status: all frozen gates pass after the [v3 repair](numerical-diagnosis.md)
+and [v4 boundary qualification](noul-boundary.md), with 36 Noul boundary questions.
+The failed v2 outcomes below remain historical evidence.**
 
 ## Primary reference and controls
 
@@ -110,7 +112,7 @@ Do not claim throughput or latency improvement from this correctness campaign.
 ## Reproduction
 
 Commands run from the repository root; use the pinned reference environment and
-the original exported checkpoint. Install [service-requirements.txt](service-requirements.txt)
+the CUDA-merged export produced by the current export recipe. Install [service-requirements.txt](service-requirements.txt)
 in a separate Python 3.12 environment. Build the native opt-in test before reserving
 a GPU. Write every run to a fresh output directory.
 
@@ -149,6 +151,8 @@ the JSONL capture. It selects contract/repeat requests and the first ten officia
 boundary questions of each type, retaining the actual subset in `http.json`.
 
 ## Recorded v2 result and preserved failures
+
+Historical results below remain unchanged. The [v3 report](numerical-diagnosis.md) records the repair under the same gates.
 
 The original pool has 1,213 requests / 1,391 questions. Its 896 labeled questions
 are 336 Choice, 280 Noul and 280 Score. Initial execution found a real tokenization
