@@ -64,3 +64,14 @@ def test_snapshot_comparison_distinguishes_exact_preparation_from_probabilities(
     actual["preparation"]["state_end"] = 64
     with pytest.raises(AssertionError, match="preparation"):
         compare_fixture(expected, actual)
+
+
+def test_snapshot_comparison_rejects_changed_request_even_with_same_error():
+    from .turbo_reference import compare_fixture
+
+    expected = {"request": {"state_repeat": {"text": "token ", "count": 32769}},
+                "preparation": {}, "probabilities": {}, "response": response()}
+    actual = copy.deepcopy(expected)
+    actual["request"]["state_repeat"]["text"] = "other "
+    with pytest.raises(AssertionError, match="request"):
+        compare_fixture(expected, actual)

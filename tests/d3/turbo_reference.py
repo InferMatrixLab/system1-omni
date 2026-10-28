@@ -57,6 +57,8 @@ def compare_response(expected, actual):
 
 
 def compare_fixture(expected, actual):
+    if "request" in expected:
+        assert expected["request"] == actual["request"], "request differs"
     assert expected["preparation"] == actual["preparation"], "preparation differs"
     numeric_delta(expected["probabilities"], actual["probabilities"], "probabilities")
     compare_response(expected["response"], actual["response"])
@@ -223,6 +225,18 @@ def serve(args):
 
     model = AutoModel.from_pretrained(str(root), trust_remote_code=True, device=args.device,
                                       batch_size=8, verify=args.verify, local_files_only=True)
+    if args.preparation_manifest:
+        if not args.prepared_output:
+            raise ValueError("--preparation-manifest requires --prepared-output")
+        rows = []
+        for line in Path(args.preparation_manifest).read_text().splitlines():
+            row = json.loads(line)
+            body = row["request"]
+            prepared = model.runtime.prepare(body.get("state"), body["questions"])
+            assert not prepared.errors and len(prepared.keys) == 1, "Public231 must contain valid single-question text requests"
+            row["prompt_tokens"] = sum(len(ids) for ids in prepared.sequences.values())
+            rows.append(json.dumps(row, ensure_ascii=False, allow_nan=False))
+        Path(args.prepared_output).write_text("\n".join(rows) + "\n")
     model.runtime.warmup()
     ready = model.system_one(state="Ready.", questions={"ready": {"type": "noul", "instructions": "Is this a readiness check?"}})
     assert "error" not in ready["answers"]["ready"]
@@ -260,6 +274,8 @@ def main():
         help="full repository SHA deployed for this fixture generation/check")
     commands.choices["serve"].add_argument("--port", type=int, default=8000)
     commands.choices["serve"].add_argument("--record")
+    commands.choices["serve"].add_argument("--preparation-manifest")
+    commands.choices["serve"].add_argument("--prepared-output")
     args = parser.parse_args()
     if args.command == "freeze" and (len(args.source_revision) != 40 or any(c not in "0123456789abcdef" for c in args.source_revision)):
         parser.error("--source-revision must be a full lowercase hexadecimal commit SHA")
