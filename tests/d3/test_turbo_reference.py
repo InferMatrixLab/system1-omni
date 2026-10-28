@@ -1,0 +1,66 @@
+"""Offline checks for the opt-in turbo oracle/fixture comparison tool."""
+
+import copy
+
+import pytest
+
+
+def response():
+    return {
+        "model": "d3-turbo",
+        "answers": {
+            "z": {"type": "choice", "choice": "refund", "probabilities": {"refund": 0.7, "wait": 0.3}},
+            "a": {"type": "noul", "noul": 0.5000001},
+        },
+        "usage": {"input_tokens": 97, "output_tokens": 0},
+    }
+
+
+def test_response_comparison_checks_threshold_flips_within_numeric_tolerance():
+    from .turbo_reference import compare_response
+
+    expected = response()
+    assert compare_response(expected, copy.deepcopy(expected)) == 0
+    actual = copy.deepcopy(expected)
+    actual["answers"]["a"]["noul"] = 0.4999999
+    with pytest.raises(AssertionError, match="decision"):
+        compare_response(expected, actual)
+
+
+def test_response_comparison_keeps_usage_order_and_errors_exact():
+    from .turbo_reference import compare_response
+
+    expected = response()
+    for change in ("usage", "order", "error"):
+        actual = copy.deepcopy(expected)
+        if change == "usage":
+            actual["usage"]["input_tokens"] += 1
+        elif change == "order":
+            actual["answers"] = dict(reversed(list(actual["answers"].items())))
+        else:
+            actual["answers"]["z"] = {"type": "choice", "error": "invalid_question", "message": "invalid"}
+        with pytest.raises(AssertionError):
+            compare_response(expected, actual)
+
+
+def test_response_comparison_rejects_nonfinite_or_large_drift():
+    from .turbo_reference import compare_response
+
+    for value in (float("nan"), float("inf"), 0.5001):
+        actual = response()
+        actual["answers"]["a"]["noul"] = value
+        with pytest.raises(AssertionError):
+            compare_response(response(), actual)
+
+
+def test_snapshot_comparison_distinguishes_exact_preparation_from_probabilities():
+    from .turbo_reference import compare_fixture
+
+    expected = {"preparation": {"state_end": 63, "token_ids": [1, 2]},
+                "probabilities": {"q": [0.25, 0.75]}, "response": response()}
+    actual = copy.deepcopy(expected)
+    actual["probabilities"]["q"][0] += 1e-7
+    compare_fixture(expected, actual)
+    actual["preparation"]["state_end"] = 64
+    with pytest.raises(AssertionError, match="preparation"):
+        compare_fixture(expected, actual)
