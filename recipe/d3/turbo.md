@@ -27,7 +27,7 @@ this full BF16 package. Full 32K-context memory capacity is not established by
 the small fixtures or Public231. The intended production target is H200 /
 SM90; this does not claim validation on that target.
 
-Use Python 3.12 and a CUDA-compatible PyTorch/torchvision pair. The A800
+Use stable Rust, Python 3.12 and a CUDA-compatible PyTorch/torchvision pair. The A800
 environment used torch 2.12.1+cu130, torchvision 0.27.1+cu130,
 Transformers 5.17.0 and flash-linear-attention 0.5.2. Install the matching
 PyTorch wheels for your environment first, then:
@@ -199,3 +199,47 @@ three measured rounds, exact source SHA, measured device/capability, complete
 serving counts and pooled median/nearest-rank p95. Keep image/many-question
 experiments separate. No native, optimization, throughput, H200 or Metal
 claim follows from this reference integration.
+
+
+## Measured reference baseline
+
+The 2026-10-28 campaign measured source
+`821d6f93336c45c61576a2787e26d3897aae9f27` on one **NVIDIA A800 80GB PCIe**,
+compute capability **8.0**, driver 595.71.05, torch 2.12.1+cu130 and the
+versions listed above. GDN used FLA 0.5.2; `causal_conv1d` was absent, so its
+operation used the package's PyTorch fallback on both paths. This is a
+reference baseline, with no native or optimized execution claim.
+
+| Deployment | Successful / planned | Pooled p50 | Pooled p95 |
+| --- | --- | --- | --- |
+| Official public AutoModel on bundled HTTP transport | 693 / 693 | 236.63 ms | 927.31 ms |
+| System1-Omni turbo worker through Rust frontend | 693 / 693 | 233.83 ms | 930.21 ms |
+
+Each deployment ran three rounds of the frozen 231-task JevBench Public231
+workload, with warmup 5, concurrency 1 and no retries. Timings include POST,
+complete body receipt, JSON decoding and schema validation. Pooled p50 is the
+median of 693 successful samples and p95 is nearest rank; round percentiles
+were not averaged. Loading, readiness, supplementary images/many-question
+requests and the independent full-row process are excluded.
+
+All 693 paired response bodies were semantically exact: maximum numerical
+difference 0, no classification flips, exact question ordering and usage.
+Each round had Choice 128/139, Noul 67/74 and Score MAE
+0.1253665383 over 18 questions. The services ran serially in fixed order;
+server order was not randomized. System1's round medians were 222.81,
+216.44 and 254.00 ms. The mixed percentile changes and this variation do not
+establish an acceleration benefit.
+
+The largest Public231 prompt was 3970 tokens. PNG/JPEG and 1/4/16-question
+checks are supplementary, not image-quality or full-context benchmarks.
+Both six-case oracle fixture sets (83 tensor arrays each) were regenerated
+and compared separately at the measured source. Client-rejection recovery,
+first/repeated requests, direct/frontend semantic parity and graceful worker
+shutdown passed. CPU checks do not qualify legacy D3's GPU path on this head.
+
+The [reference evidence release](https://github.com/Levius-Fubuki/system1-omni/releases/tag/d3-turbo-reference-821d6f933-20261028)
+contains raw repeated-run records, dependency/identity evidence, source and
+input hashes, independent recomputation instructions and the shutdown receipt.
+The integration remains [draft PR #198](https://github.com/InferMatrixLab/system1-omni/pull/198).
+Later documentation/CI-only commits retain the measured inference code;
+ready-for-review and merge require separate explicit owner approval.
