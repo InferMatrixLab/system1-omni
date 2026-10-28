@@ -14,10 +14,16 @@ import base64
 import hashlib
 import importlib
 import importlib.metadata
+import io
 import json
 import math
 from pathlib import Path
 import sys
+
+if __package__:
+    from .turbo_fixture_storage import load_fixture, write_fixture
+else:
+    from turbo_fixture_storage import load_fixture, write_fixture
 
 TOLERANCE = 1e-6
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -184,29 +190,20 @@ def freeze(args):
         for name, body in fixture_requests().items():
             document["cases"][name] = snapshot(executor, body, name, arrays)
         if args.check:
-            expected = json.loads(Path(args.check).read_text())
+            expected = load_fixture(Path(args.check))
             for field in ("package", "revision", "manifest_sha256", "state_once", "attention_mode"):
                 assert expected["metadata"][field] == document["metadata"][field], field
             assert list(expected["cases"]) == list(document["cases"]), "case order"
             for name, value in expected["cases"].items():
                 compare_fixture(value, document["cases"][name])
-        # Commit the pair only after all comparisons passed; a failing run never
-        # overwrites an existing fixture. Tensor bytes are preserved in the NPZ.
+        # Normalize only after comparisons pass. Existing shared inputs are
+        # immutable; a different preparation/tensor set needs a fresh directory.
         if args.output:
             import numpy as np
 
-            target = Path(args.output)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            tensor_path = target.with_suffix(".npz")
-            temporary_tensor = tensor_path.with_suffix(".npz.tmp")
-            with temporary_tensor.open("wb") as stream:
-                np.savez_compressed(stream, **arrays)
-            document["tensor_file"] = tensor_path.name
-            document["tensor_file_sha256"] = hashlib.sha256(temporary_tensor.read_bytes()).hexdigest()
-            temporary_json = target.with_suffix(target.suffix + ".tmp")
-            temporary_json.write_text(json.dumps(document, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
-            temporary_tensor.replace(tensor_path)
-            temporary_json.replace(target)
+            stream = io.BytesIO()
+            np.savez_compressed(stream, **arrays)
+            write_fixture(Path(args.output), document, stream.getvalue())
         print(json.dumps({"cases": len(document["cases"]), "tensor_arrays": len(arrays),
                           "checked": bool(args.check), "metadata": document["metadata"]}))
     finally:

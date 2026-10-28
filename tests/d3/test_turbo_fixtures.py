@@ -6,12 +6,13 @@ does not require NumPy, torch, a checkpoint or an accelerator on CPU CI.
 
 import ast
 import hashlib
-import json
 import math
 from pathlib import Path
 import zipfile
 
 import pytest
+
+from .turbo_fixture_storage import load_fixture
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -29,7 +30,7 @@ def array_header(raw):
 @pytest.mark.parametrize("mode,state_once", [("state-once", True), ("full-row", False)])
 def test_frozen_preparation_tensor_bytes_layout_and_accounting(mode, state_once):
     path = FIXTURES / f"turbo-oracle-{mode}.json"
-    fixture = json.loads(path.read_text())
+    fixture = load_fixture(path)
     metadata = fixture["metadata"]
     assert metadata["package"] == "vllm-sr/d3-turbo"
     assert metadata["revision"] == "a0f3e9e59ebd1202fe1d4de1c4c0f9a986758cbb"
@@ -39,8 +40,8 @@ def test_frozen_preparation_tensor_bytes_layout_and_accounting(mode, state_once)
     assert metadata["max_input_tokens"] == 32768
     assert metadata["tolerance"] == 1e-6
     assert len(fixture["provenance"]["source_revision"]) == 40
-    tensor_path = path.with_suffix(".npz")
-    assert fixture["tensor_file"] == tensor_path.name
+    tensor_path = path.parent / fixture["tensor_file"]
+    assert fixture["tensor_file"] == "turbo-inputs.npz"
     assert hashlib.sha256(tensor_path.read_bytes()).hexdigest() == fixture["tensor_file_sha256"]
     seen = set()
     with zipfile.ZipFile(tensor_path) as archive:
@@ -67,4 +68,5 @@ def test_frozen_preparation_tensor_bytes_layout_and_accounting(mode, state_once)
                 assert case["response"]["answers"]["over"]["error"] == "max_length_exceeded"
                 assert case["response"]["usage"]["input_tokens"] == 0
         assert set(archive.namelist()) == seen
+    assert len(seen) == 83
     assert len(fixture["cases"]) == 6

@@ -75,3 +75,26 @@ def test_snapshot_comparison_rejects_changed_request_even_with_same_error():
     actual["request"]["state_repeat"]["text"] = "other "
     with pytest.raises(AssertionError, match="request"):
         compare_fixture(expected, actual)
+
+
+def test_freeze_check_reads_shared_storage_without_numpy_or_accelerator(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from models.d3 import turbo
+    from . import turbo_reference as reference
+    from .test_turbo_fixture_storage import document
+    from .turbo_fixture_storage import write_fixture
+
+    expected = document()
+    expected["metadata"].update({"package": "pinned", "revision": "a" * 40,
+        "manifest_sha256": "b" * 64, "attention_mode": "prefix_bidir"})
+    path = tmp_path / "state.json"
+    write_fixture(path, expected, b"tensors")
+    closed = []
+    executor = SimpleNamespace(model=object(), warmup=lambda: None, close=lambda: closed.append(True))
+    monkeypatch.setattr(turbo, "D3TurboExecutor", lambda *args, **kwargs: executor)
+    monkeypatch.setattr(reference, "metadata", lambda model: copy.deepcopy(expected["metadata"]))
+    monkeypatch.setattr(reference, "fixture_requests", lambda: {"text": {}})
+    monkeypatch.setattr(reference, "snapshot", lambda *args: copy.deepcopy(expected["cases"]["text"]))
+    reference.freeze(SimpleNamespace(model="unused", device="cpu", verify="full", source_revision="c" * 40,
+                                     check=str(path), output=None))
+    assert closed == [True]
