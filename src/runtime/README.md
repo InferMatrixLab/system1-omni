@@ -98,6 +98,6 @@ See the [architecture contracts](../../docs/architecture.md) and
 [benchmark protocol](../../benchmarks/README.md) when changing admission policy.
 
 Clef's cached health payload is returned only while its child process remains
-alive. The executor checks child exit independently of admission. IPC failures
-publish unavailable state inside the blocking exchange, before its scheduler
+alive. The executor checks child exit independently of admission. IPC errors
+and unwinding exchange panics publish unavailable state inside the blocking exchange, before its scheduler
 permit is released, including when the waiting HTTP caller was cancelled.

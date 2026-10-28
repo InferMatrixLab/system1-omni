@@ -149,7 +149,7 @@ TCP disconnect recovery and child exit were exercised. The
 [recipe](../../../recipe/clef/reference.md#controlled-migration-acceptance)
 records the six latency results, controls, failed initial cache experiment
 and limitations; its historical section retains the earlier operator reports.
-CPU coverage is 16 Rust serving tests and 36 Python contract tests. The
+CPU coverage is 18 Rust lifecycle/serving tests and 36 Python contract tests. The
 fixed tokenizer fixture also matches the pinned loader.
 
 ## Status
@@ -164,7 +164,8 @@ fixed tokenizer fixture also matches the pinned loader.
 
 ### Failure and cancellation ownership
 
-The Rust `Executor` owns child liveness and publishes IPC failure while its
+The Rust `Executor` owns child liveness and publishes IPC errors or unwinding
+exchange panics while its
 scheduled blocking exchange still holds admission. This keeps failure state
 correct even after the HTTP caller is cancelled. Health checks reap an exited
 idle child and return unavailable instead of serving stale ready data. The

@@ -186,7 +186,8 @@ PYTHONPATH=src python recipe/clef/export_prompt_fixture.py \
 The 2026-10-27 local issue #162 acceptance compares the original #165 Python
 HTTP server at `504b272c46dc1963f981c6bed9ef0c7ebdd40c69` with the Rust service
 at `3364dbd7f8b2cb414c24e73f24b74dd785888ecc`, based on main `22b7717` including
-#182. Later recipe/documentation edits do not change the measured runtime.
+#182. The GPU measurements below apply to that exact commit. The subsequent
+panic-cleanup hardening has CPU regression coverage but no new GPU latency run.
 Both services ran sequentially in one GPU allocation: NVIDIA L20X as reported
 by the device, PyTorch capability 9.0 (nvidia-smi reports 8.9), driver
 570.133.20, Torch CUDA 13.0. Both capability readings are retained. Do not
@@ -487,6 +488,10 @@ inference. An IPC failure during execution returns `500 {"detail": "inference
 failed"}` to a still-connected caller, marks the executor unavailable before
 releasing admission, and makes later health checks and requests return 503.
 This failure publication also occurs when the original client has disconnected.
+An unwinding Rust panic during the pipe exchange also marks the executor
+unavailable and reaps the child before admission is released; a connected caller
+receives 500 and subsequent health checks and new requests receive 503. This
+does not cover process aborts or a live worker that never returns.
 Requests already past the initial liveness check, including queued requests,
 can return 500 if the executor fails before their exchange. New requests after
 failure is detected return 503.
@@ -499,7 +504,10 @@ deadline. Client cancellation does not promise to stop submitted CUDA work.
 
 The CPU tests under `tests/clef/serve.rs` cover real TCP disconnects, queued
 cancellation, retained resources after dispatched cancellation, idle child exit,
-and protocol failure after the caller has gone away. Run those with
+and protocol failure after the caller has gone away. `tests/clef/executor.rs`
+injects a Rust panic while the pipes are locked, with and without caller
+cancellation, and checks failure publication and child cleanup before the next
+admission. Run those with
 `cargo test --locked -p omni-clef`; these fake-worker tests do not prove GPU
 output parity or latency. The shared scheduler's resource tests are in
 `cargo test --locked -p omni-runtime`.
