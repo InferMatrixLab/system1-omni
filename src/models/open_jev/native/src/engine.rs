@@ -4,17 +4,16 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail, ensure};
 use omni_qwen3_5_native::prefix::PrefixMode;
-use omni_runtime::SerialScheduler;
 use serde_json::Value;
 
 use crate::contract::Checkpoint;
-use crate::executor::{DecisionHead, Executor};
+use crate::executor::{DecisionHead, Executor, Scheduler};
 use crate::processing::Processor;
 
 pub struct Engine {
     pub checkpoint: &'static Checkpoint,
     pub processor: Processor,
-    pub scheduler: SerialScheduler,
+    pub scheduler: Scheduler,
     pub executor: Executor,
 }
 
@@ -61,9 +60,36 @@ pub fn prefix_env() -> Result<PrefixMode> {
     )
 }
 
+/// Exact request-local reuse keeps each complete prompt's GEMM algorithms.
+/// It is separate from the fixed-algorithm prefix modes.
+pub fn exact_prefix_value(value: Option<&str>, prefix: PrefixMode) -> Result<Option<bool>> {
+    let enabled = match value {
+        None => None,
+        Some("0") => Some(false),
+        Some("1") => Some(true),
+        Some(_) => bail!("OPEN_JEV_EXACT_PREFIX must be 0 or 1"),
+    };
+    ensure!(
+        enabled != Some(true) || prefix == PrefixMode::Off,
+        "OPEN_JEV_EXACT_PREFIX cannot be combined with fixed/shared/auto prefix modes"
+    );
+    Ok(enabled)
+}
+
 impl Engine {
     pub async fn load(dir: &Path, library: &Path) -> Result<Self> {
-        Self::load_with_prefix(dir, library, prefix_env()?).await
+        let prefix = prefix_env()?;
+        let raw = match std::env::var("OPEN_JEV_EXACT_PREFIX") {
+            Ok(value) => Some(value),
+            Err(std::env::VarError::NotPresent) => None,
+            Err(error) => return Err(error).context("OPEN_JEV_EXACT_PREFIX"),
+        };
+        let exact = exact_prefix_value(raw.as_deref(), prefix)?;
+        let mut engine = Self::load_with_prefix(dir, library, prefix).await?;
+        if let Some(enabled) = exact {
+            engine.executor.set_exact_prefix(enabled);
+        }
+        Ok(engine)
     }
 
     pub async fn load_with_prefix(
@@ -100,10 +126,11 @@ impl Engine {
         let head = DecisionHead::load(dir, &manifest, checkpoint)?;
         let processor = Processor::load(dir, checkpoint, prefix, suffix, temperature, max_length)?;
         let executor = Executor::load(dir, library, head, checkpoint, prefix_mode, graph).await?;
+        let scheduler = executor.scheduler(checkpoint)?;
         Ok(Self {
             checkpoint,
             processor,
-            scheduler: SerialScheduler::default(),
+            scheduler,
             executor,
         })
     }

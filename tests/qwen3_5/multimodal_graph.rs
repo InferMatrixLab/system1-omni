@@ -332,7 +332,7 @@ fn graph_recording_failure_keeps_eager_result_and_disables_both_modes() -> Resul
                 .contains("injected record failure"),
             "must exercise the actual recording-error path"
         );
-        model.cache_graph(&[text.len()], multimodal, captured)?;
+        model.cache_graph(&[text.len()], multimodal, text.len(), captured)?;
         assert_hidden_eq(
             &model.last_hidden(model.scratch.as_ref().unwrap(), text.len())?,
             &prior_eager,

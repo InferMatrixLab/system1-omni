@@ -62,6 +62,7 @@ struct Gemm {
     cublasLtHandle_t handle = nullptr;
     void* workspace = nullptr;
     size_t workspace_bytes = 0;
+    bool equivalent_tiles = false;
     bool reference = false;
     bool matched = false;
     int reference_m = 0;  // > 0: one algorithm per weight shape, chosen at this M
@@ -72,6 +73,47 @@ struct Gemm {
     std::map<PackedKey, PackedPlan> packed_plans;
     std::list<PackedKey> packed_order;
 };
+
+template<typename T>
+bool config_value(const cublasLtMatmulAlgo_t& algo, cublasLtMatmulAlgoConfigAttributes_t attr, T& value) {
+    size_t written = 0;
+    return cublasLtMatmulAlgoConfigGetAttribute(&algo, attr, &value, sizeof(value), &written)
+        == CUBLAS_STATUS_SUCCESS && written == sizeof(value);
+}
+
+// Empirically validated SM90/cuBLASLt 13.1.1 long-prefill profile. cuBLAS
+// does not promise arithmetic equivalence between custom options; the optional
+// capability is version/device scoped and covered by full-row/packed/graph and
+// model precision tests. Keep split-K and all unknown configurations separate.
+bool validated_long_profile(const Plan& p, bool short_reuse = false) {
+    for (auto pair : {std::make_pair(CUBLASLT_ALGO_CONFIG_ID, 66u),
+                      std::make_pair(CUBLASLT_ALGO_CONFIG_SPLITK_NUM, 1u),
+                      std::make_pair(CUBLASLT_ALGO_CONFIG_REDUCTION_SCHEME, 0u),
+                      std::make_pair(CUBLASLT_ALGO_CONFIG_CTA_SWIZZLING, 0u),
+                      std::make_pair(CUBLASLT_ALGO_CONFIG_STAGES_ID, 35u)}) {
+        uint32_t value = 0;
+        if (!config_value(p.algo, pair.first, value) || value != pair.second) return false;
+    }
+    uint32_t option = 0;
+    uint16_t inner = 0, cluster = 0;
+    if (!config_value(p.algo, CUBLASLT_ALGO_CONFIG_CUSTOM_OPTION, option) ||
+        !config_value(p.algo, CUBLASLT_ALGO_CONFIG_INNER_SHAPE_ID, inner) ||
+        !config_value(p.algo, CUBLASLT_ALGO_CONFIG_CLUSTER_SHAPE_ID, cluster)) return false;
+    return (option == 0 || option == 1 || option == 2 || option == 4 || option == 5 || option == 6 || option == 7 || (short_reuse && option == 3)) && inner == 0 &&
+           (cluster == CUBLASLT_CLUSTER_SHAPE_2x1x1 || cluster == CUBLASLT_CLUSTER_SHAPE_4x1x1 ||
+            cluster == CUBLASLT_CLUSTER_SHAPE_1x2x1 ||
+            (short_reuse && cluster == CUBLASLT_CLUSTER_SHAPE_4x2x1));
+}
+
+bool compatible_algorithms(const Gemm& g, const Plan& a, const Plan& b, size_t ma, size_t mb, bool short_reuse = false) {
+    if (std::memcmp(&a.algo, &b.algo, sizeof(a.algo)) == 0) return true;
+    if (!g.equivalent_tiles || ma > 4096 || mb > 4096) return false;
+    if (ma >= 512 && mb >= 512) return validated_long_profile(a) && validated_long_profile(b);
+    // Only retained prefix/suffix projections can use the tested short profiles.
+    // Keep ordinary packed GEMM grouping and algorithm selection unchanged.
+    return short_reuse && ma >= 64 && mb >= 64 &&
+           validated_long_profile(a, true) && validated_long_profile(b, true);
+}
 
 int status(cublasStatus_t s) { return s == CUBLAS_STATUS_SUCCESS ? 0 : 1000 + (int)s; }
 
@@ -187,8 +229,9 @@ int plan_for(Gemm& g, int M, int N, int K, int ldy, Plan*& out, bool fp32 = fals
     return 0;
 }
 
-// Optional shape changes retain the exact original cuBLASLt algorithm. A return
-// of -1 means unsupported (the caller must use its unchanged complete forward).
+// Optional shape changes retain the original arithmetic profile. The original
+// algorithm must still support the target shape; only opted-in compatible profiles
+// may use the target-row heuristic. Return -1 keeps the complete-forward fallback.
 int reused_plan(Gemm& g, int M, int N, int K, int original_M, Plan*& out) {
     const auto key = std::make_tuple(M, N, K, original_M);
     auto it = g.reused_plans.find(key);
@@ -211,6 +254,21 @@ int reused_plan(Gemm& g, int M, int N, int K, int original_M, Plan*& out) {
         checked.workspaceSize > g.workspace_bytes) {
         destroy(p);
         return -1;
+    }
+    // Prefix sharing changes the executed row count, sometimes by a large factor.
+    // Keep the original eligibility check above, then choose the actual-row plan
+    // only inside the empirically validated SM90/Lt profile. Other handles and
+    // split-K/unknown algorithms retain the exact original choice.
+    if (g.equivalent_tiles && M != original_M) {
+        Plan* actual = nullptr;
+        if (plan_for(g, M, N, K, N, actual) == 0 &&
+            compatible_algorithms(g, *original, *actual, original_M, M, true)) {
+            cublasLtMatmulHeuristicResult_t candidate{};
+            const auto valid = cublasLtMatmulAlgoCheck(
+                g.handle, p.op, p.a, p.b, p.c, p.c, &actual->algo, &candidate);
+            if (valid == CUBLAS_STATUS_SUCCESS && candidate.state == CUBLAS_STATUS_SUCCESS &&
+                candidate.workspaceSize <= g.workspace_bytes) p.algo = actual->algo;
+        }
     }
     if (g.reused_plans.size() == MAX_REUSED_PLANS) {
         const auto oldest = g.reused_plans.find(g.reused_order.front());
@@ -271,7 +329,7 @@ extern "C" int cs1_gemm(void* gemm, const void* x, const void* w, void* y, int M
 
 // Additive opt-in for merged language models. Keep each original shape's
 // algorithm, including split-K and its reduction scheme. Pack only consecutive
-// shapes with identical algorithms, and split groups to fit the existing workspace.
+// shapes with compatible algorithms, and split groups to fit the existing workspace.
 extern "C" int cs1_gemm_packed(void* gemm, const void* x, const void* w, void* y,
                                 const size_t* lengths, size_t count, int N, int K,
                                 void* stream) {
@@ -300,8 +358,7 @@ extern "C" int cs1_gemm_packed(void* gemm, const void* x, const void* w, void* y
             // Equality of the opaque value is conservative: differences in
             // reserved bytes only decline packing. Original map pointers are stable.
             while (!g->reference && end < count &&
-                   std::memcmp(&originals[begin]->algo, &originals[end]->algo,
-                               sizeof(cublasLtMatmulAlgo_t)) == 0) {
+                   compatible_algorithms(*g, *originals[begin], *originals[end], lengths[begin], lengths[end])) {
                 rows += lengths[end++];
             }
             PackedSegment segment;
@@ -381,7 +438,7 @@ extern "C" int cs1_gemm_reuse_check(void* gemm, const size_t* original_rows, siz
         Plan* other = nullptr;
         rc = plan_for(*g, static_cast<int>(original_rows[i]), N, K, N, other);
         if (rc) return rc;
-        if (std::memcmp(&original->algo, &other->algo, sizeof(original->algo))) return -1;
+        if (!compatible_algorithms(*g, *original, *other, original_rows[0], original_rows[i], true)) return -1;
     }
     for (size_t i = 0; i < targets; ++i) {
         Plan* target = nullptr;
@@ -454,4 +511,18 @@ extern "C" int cs1_gemm_compatible(void* ordinary, void* matched, int M, int N, 
     if (!ordinary) return 1;
     if (plan_for(*static_cast<Gemm*>(ordinary), M, N, K, N, a)) return 0;
     return std::memcmp(&a->algo, &b->algo, sizeof(a->algo)) == 0;
+}
+
+// Additive ABI 9 capability. Select before creating plans/capturing any graph.
+// 1 = enabled, 0 = unsupported profile (unchanged fallback), negative = error.
+extern "C" int cs1_gemm_enable_equivalent_tiles(void* gemm) {
+    auto* g = static_cast<Gemm*>(gemm);
+    if (!g || g->reference || g->matched || g->reference_m || !g->plans.empty()) return -1;
+    int device = 0;
+    cudaDeviceProp prop{};
+    auto error = cudaGetDevice(&device);
+    if (error == cudaSuccess) error = cudaGetDeviceProperties(&prop, device);
+    if (error != cudaSuccess) return -static_cast<int>(error);
+    g->equivalent_tiles = prop.major == 9 && prop.minor == 0 && cublasLtGetVersion() == 130101;
+    return g->equivalent_tiles ? 1 : 0;
 }

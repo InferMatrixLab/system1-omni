@@ -11,6 +11,7 @@
 // rounded to bfloat16 for the P*V product, as in flash attention; the running sums
 // stay float32.
 #include <climits>
+#include <algorithm>
 #include "common.cuh"
 #include "mma.cuh"
 #include "ops.h"
@@ -86,17 +87,17 @@ constexpr int SMEM_BYTES = (BM + 2 * BN) * LDS * 2;
 // q_base offsets row 0 of the q/gate/out buffers: this launch covers the window
 // [q_base, T_total) while k/v cover [0, T_total). Used by the cached-prefix
 // continuation; q_base = 0 reduces to the plain full pass.
-template <bool Gated, bool Shared, bool Bidirectional = false>
+template <bool Gated, bool Shared, bool Bidirectional = false, bool Batched = false>
 __device__ __forceinline__ void flash_body(const bf16* __restrict__ q, const bf16* __restrict__ k, const bf16* __restrict__ v, int ldv,
                  const bf16* __restrict__ gate, bf16* __restrict__ out, int T, int Hq, int Hk,
                  float scale_log2, int q_base, const bf16* __restrict__ prefix_k,
-                 const bf16* __restrict__ prefix_v) {
+                 const bf16* __restrict__ prefix_v, int query_blocks = 0) {
     extern __shared__ __align__(16) unsigned char smem[];
     bf16* qs = reinterpret_cast<bf16*>(smem);
     bf16* ks = qs + BM * LDS;
     bf16* vs = ks + BN * LDS;
     const int h = blockIdx.y, hk = h / (Hq / Hk);
-    const int q0 = q_base + (gridDim.x - 1 - blockIdx.x) * BM;  // the longest blocks first
+    const int q0 = q_base + ((Batched ? static_cast<unsigned>(query_blocks) : gridDim.x) - 1 - blockIdx.x) * BM;  // the longest blocks first
     const int tid = threadIdx.x, warp = tid / 32, lane = tid % 32;
     const int g = lane / 4, t = lane % 4;
     const int row0 = q0 + warp * 16;  // this warp's first query
@@ -274,6 +275,28 @@ flash_shared_kernel(const bf16* __restrict__ q, const bf16* __restrict__ k, cons
     flash_body<true, true>(q, k, v, ldv, gate, out, T, Hq, Hk, scale_log2, prefix, prefix_k, prefix_v);
 }
 
+// Host descriptors are copied into the launch, including when a graph records it.
+// Every z slice keeps its own original query tiling and online-softmax order.
+struct SharedBatch {
+    int lengths[16];
+    int offsets[16];
+};
+template <bool Shared>
+__global__ void __launch_bounds__(THREADS)
+flash_batch_kernel(const bf16* q, const bf16* k, const bf16* v, int ldv,
+                          const bf16* gate, bf16* out, SharedBatch batch, int prefix,
+                          int Hq, int Hk, float scale_log2, const bf16* prefix_k,
+                          const bf16* prefix_v) {
+    const int suffix = batch.lengths[blockIdx.z];
+    const int blocks = (suffix + BM - 1) / BM;
+    if (blockIdx.x >= blocks) return;
+    const size_t offset = batch.offsets[blockIdx.z];
+    flash_body<true, Shared, false, true>(q + offset * Hq * D, k + offset * Hk * D,
+                          v + offset * ldv, ldv, gate + offset * Hq * D,
+                          out + offset * Hq * D, prefix + suffix, Hq, Hk,
+                          scale_log2, prefix, prefix_k, prefix_v, blocks);
+}
+
 template <bool Gated, bool Bidirectional = false>
 int launch(const void* q, const void* k, const void* v, int ldv, const void* gate, void* out,
            int T, int Hq, int Hk, int Dh, float scale, int q_base, void* stream) {
@@ -363,4 +386,60 @@ extern "C" int cs1_attention_gated_shared(const void* q, const void* k, const vo
         static_cast<const bf16*>(gate), static_cast<bf16*>(out), prefix + suffix, Hq, Hk, scale * LOG2E,
         prefix, static_cast<const bf16*>(prefix_k), static_cast<const bf16*>(prefix_v));
     return cudaGetLastError();
+}
+
+template <bool Shared>
+static int attention_batch_launch(const void* q, const void* k, const void* v,
+                                                int ldv, const void* gate, void* out,
+                                                const void* prefix_k, const void* prefix_v,
+                                                const size_t* lengths, size_t count, int prefix,
+                                                int Hq, int Hk, int Dh, float scale, void* stream) {
+    if (!q || !k || !v || !gate || !out || !lengths ||
+        count == 0 || count > 16 || prefix < 0 || prefix > INT_MAX - flash::BM ||
+        (Shared && (!prefix_k || !prefix_v || prefix == 0 || prefix % flash::BM)) ||
+        Dh != flash::D || Hq <= 0 || Hk <= 0 || Hk > INT_MAX / Dh || Hq % Hk ||
+        ldv % 8 || ldv < Hk * Dh) return cudaErrorInvalidValue;
+    flash::SharedBatch batch{};
+    size_t rows = 0;
+    int blocks = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (!lengths[i] || lengths[i] > static_cast<size_t>(INT_MAX - flash::BM - prefix) ||
+            lengths[i] > static_cast<size_t>(INT_MAX - flash::BM) - rows)
+            return cudaErrorInvalidValue;
+        const int suffix = static_cast<int>(lengths[i]);
+        batch.lengths[i] = suffix;
+        batch.offsets[i] = static_cast<int>(rows);
+        rows += lengths[i];
+        blocks = std::max(blocks, (suffix + flash::BM - 1) / flash::BM);
+    }
+    static const cudaError_t configured = cudaFuncSetAttribute(
+        flash::flash_batch_kernel<Shared>, cudaFuncAttributeMaxDynamicSharedMemorySize,
+        flash::SMEM_BYTES);
+    if (configured != cudaSuccess) return configured;
+    constexpr float LOG2E = 1.4426950408889634f;
+    flash::flash_batch_kernel<Shared><<<dim3(blocks, Hq, count), flash::THREADS,
+                                        flash::SMEM_BYTES, static_cast<cudaStream_t>(stream)>>>(
+        static_cast<const bf16*>(q), static_cast<const bf16*>(k), static_cast<const bf16*>(v),
+        ldv, static_cast<const bf16*>(gate), static_cast<bf16*>(out), batch, prefix,
+        Hq, Hk, scale * LOG2E, static_cast<const bf16*>(prefix_k), static_cast<const bf16*>(prefix_v));
+    return cudaGetLastError();
+}
+
+// Same arithmetic as separate shared-suffix calls; candidate rows are disjoint.
+extern "C" int cs1_attention_gated_shared_batch(const void* q, const void* k, const void* v,
+                                                int ldv, const void* gate, void* out,
+                                                const void* prefix_k, const void* prefix_v,
+                                                const size_t* lengths, size_t count, int prefix,
+                                                int Hq, int Hk, int Dh, float scale, void* stream) {
+    return attention_batch_launch<true>(q, k, v, ldv, gate, out, prefix_k, prefix_v,
+                                       lengths, count, prefix, Hq, Hk, Dh, scale, stream);
+}
+
+// Independent full sequences have their own key window and positions starting at zero.
+extern "C" int cs1_attention_gated_batch(const void* q, const void* k, const void* v, int ldv,
+                                         const void* gate, void* out, const size_t* lengths,
+                                         size_t count, int Hq, int Hk, int Dh, float scale,
+                                         void* stream) {
+    return attention_batch_launch<false>(q, k, v, ldv, gate, out, nullptr, nullptr,
+                                        lengths, count, 0, Hq, Hk, Dh, scale, stream);
 }

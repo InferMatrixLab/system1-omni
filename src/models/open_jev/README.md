@@ -69,3 +69,30 @@ every candidate with the same fixed GEMM algorithms as a control; see
 The engine owns a
 [shared serial scheduler](../../runtime/README.md) that admits the complete request
 before blocking dispatch. Cross-request batching and shared queue budgets remain planned.
+
+
+The experimental 9B layerwise prefix tree can batch the independent suffix
+attention queries into one CUDA launch per layer. Each candidate keeps its
+original query blocks, causal key order, softmax accumulation and BF16 rounding;
+only independent candidates execute together. Prefix K/V is immutable for that
+layer and every suffix writes a disjoint output range. The optional
+`cs1_attention_gated_shared_batch` entry consumes host lengths before returning
+and passes descriptors by value, including under graph capture. Libraries
+without the entry retain the separate candidate launches. The model continues
+to own scratch and stream lifetimes; this adds no request cache or device state.
+
+The same optional batching covers ordinary and pointwise-compacted 9B causal
+sequences: all candidates first prepare their separate Q/K/gate rows, then one
+`cs1_attention_gated_batch` launch computes independent attention windows.
+Sequence boundaries, original projection plans and output ordering remain
+unchanged. Single sequences, reference numerics, bidirectional attention and
+unvalidated adapter modes keep their previous entry points. Older CUDA
+libraries without the optional symbol also retain separate launches.
+
+For opted-in SM90 / cuBLASLt 13.1.1 prefix projections, the original algorithm
+must still support the actual row count. Within the already validated compatible
+arithmetic profiles, the runtime can then select the heuristic for that actual
+count. Unknown or split-K profiles and other hardware retain the original
+algorithm. Candidate grouping and fallback eligibility stay unchanged; full-row
+bitwise comparisons, changed-input graph replay and model output checks cover
+the choice. cuBLASLt does not guarantee arithmetic equivalence across algorithms.

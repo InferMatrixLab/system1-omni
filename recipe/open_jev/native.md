@@ -69,7 +69,7 @@ target below is Ada (`89`); pass your GPU's compute capability explicitly.
 The CUDA shared library and Rust workers must be rebuilt together for ABI
 version 9, which includes shared vision, CUDA Graph, canonical prefix continuation,
 fixed-GEMM selection and device-feature validation.
-The 27B worker also requires the additive packed-GEMM and batched-GDN
+Both checkpoints also require the additive packed-GEMM and batched-GDN
 symbols from this checkout; rebuild the worker and library together.
 
 ```sh
@@ -159,7 +159,7 @@ uses the general kernel. MLP SiLU uses
 both BF16 rounding points; other layouts use the scalar path.
 
 This recipe leaves `CUA_S1_GRAPH` unset and uses eager prefill. For
-Open-Jev-27B-v1.1, candidates within a request are packed in prepared order, up
+both Open-Jev checkpoints, candidates within a request are packed in prepared order, up
 to 16 sequences and 4096 total tokens per group; longer prompts execute alone
 without truncation. Input and gate/up
 projections share GEMMs. Output/down projections combine consecutive candidates
@@ -175,9 +175,10 @@ records latency, exact output checks and frozen controls.
 That historical comparison covers the earlier packing implementation on H200
 (sm_90). The newer projection/GDN paths have exact-output regression coverage on
 an SM90 device; their execution on other CUDA architectures remains unverified.
-Open-Jev-9B runs one forward pass per candidate: packing is not validated for it.
+Open-Jev-9B packing keeps prefix reuse disabled by default. Explicit
+`OPEN_JEV_PREFIX` modes retain their existing separate execution paths.
 
-For one question with 2–16 candidates all longer than 2048 tokens, the worker can
+On 27B, for one question with 2–16 candidates all longer than 2048 tokens, the worker can
 share an exact token prefix within compatible candidate groups. The prefix must
 be at least 512 tokens, aligned to 64 tokens, with a nonempty suffix for every
 candidate. Compatibility checks retain the complete prompt's algorithms for every
@@ -242,7 +243,7 @@ the largest shared prefix encountered. Include both allocations in memory
 measurements and distinguish first traversal from warmed latency.
 
 Set `CUA_S1_GRAPH=1` on the worker to enable CUDA Graph replay. The
-27B packed text path retains at most 256 graphs; other modes retain 64. Keys are
+packed Open-Jev text path retains at most 256 graphs; other modes retain 64. Keys are
 ordered sequence token lengths. Graph-enabled packed text initially reserves
 scratch for at least 4096 rows, rounded up in 1024-row increments. Longer supported
 inputs can still grow the buffer; growth synchronizes work and clears graphs
@@ -358,3 +359,83 @@ OPEN_JEV_MODEL=$PWD/weights/open-jev-9b-merged \
 OPEN_JEV_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
   cargo test --release --locked -p omni-open-jev-native --test prefix -- --ignored
 ```
+
+### Exact request-local prefix reuse on 9B
+
+Set `OPEN_JEV_EXACT_PREFIX=1` with `OPEN_JEV_PREFIX=0` to opt into the
+retained-algorithm prefix path already used by 27B. This computes an identical
+long prefix once within a single question, then evaluates independent candidate
+suffixes. It preserves the complete prompts' GEMM algorithms and falls back to
+ordinary packing when shapes are incompatible. All numeric prefix state is
+recomputed for every request; no historical request or answer is cached.
+
+The current eligibility rule requires 2–16 candidates, each longer than 2048
+tokens, and a common prefix of at least 512 tokens rounded down to a 64-token
+boundary. Input token usage still counts the complete candidate prompts.
+`metadata.prefix_cache` reports actual reuse and saved computation. The switch
+cannot be combined with fixed/shared/auto modes, which select a different
+algorithm policy. `OPEN_JEV_EXACT_PREFIX=0` explicitly disables this exact path;
+unset retains each checkpoint's default (9B off, 27B on).
+
+The explicit `Engine::load_with_prefix` API retains checkpoint defaults and does
+not read this additional environment override. With the 9B export and the new
+switch enabled, run the `text_prefix_buffers_grow_and_shrink_without_reusing_prior_contents`
+GPU test in `prefill_batch` for exact output equality and prefix-state lifetime.
+
+Both pinned Open-Jev tokenizers use bounded batch encoding for independent
+candidates (up to 16 at a time). This avoids computing unused character offsets
+and allows the tokenizer's worker pool to encode candidates in parallel. Padded
+tokenizers retain serial encoding, and any batch error is retried in original
+order so validation reports the same first error. The exact-token regression
+includes Unicode, special tokens, batch boundaries and oversized prompts for 9B.
+
+On SM90 with cuBLASLt 13.1.1, the 9B worker can combine 512–4096-row
+projections using a tested engine-66 profile (stage 35, no split-K or reduction,
+custom options 0/1/2/4/5/6/7, clusters 2×1×1, 4×1×1 or 1×2×1, undefined inner shape). It
+requires the listed configuration; other options retain the original comparison.
+Arithmetic equivalence between these options is empirically tested, not guaranteed
+by the cuBLAS API.
+This avoids redundant full-prefix computation for compatible long candidates.
+The optional CUDA capability defaults off for other consumers; older libraries,
+other hardware/library versions and unsupported shapes retain the conservative
+algorithm comparison. It neither changes ordinary GEMM algorithm selection nor
+shares numeric state between requests. Full-model output parity is required in
+addition to standalone tile-equivalence checks.
+
+For 9B exact-prefix mode, candidates of at least 512 tokens can also reuse a
+prefix when the original packed input/gate-up GEMMs are compatible with the
+candidate projections. The check includes each original batch's total row count.
+Any mismatch declines the entire sharing attempt before computation and retains
+the original candidate packing. Other prefix modes and the 27B policy are unchanged.
+
+The 9B default execution path batches already queued requests through the shared
+runtime, up to 16 candidates and 8192 tokens per GPU dispatch, without an added
+batching timer. Original candidate batches remain atomic: input/gate-up projection
+algorithms are selected at their original batch row counts, while output/down
+projections retain per-candidate row counts. Request-local prefix work runs alone.
+Question calibration waits for the complete request and retains candidate order.
+Fixed/shared/auto prefix modes and 27B retain serial scheduling. CUDA Graph keys
+include both original batch groups and candidate lengths. Queued cancellation,
+post-dispatch resource retention and errors follow the [runtime contract](../../src/runtime/README.md).
+
+With 9B exact-prefix mode, a bounded single-question batch can compact an exact
+16–511-token prefix for pointwise projections, residuals and the MLP. Before each
+mixer, projected rows are expanded into the original complete candidate layout;
+attention and GDN retain their original lengths, positions and sequence boundaries.
+Their outputs are gathered back into the compact layout. All projection algorithms
+are checked against the original packed input sizes and individual output sizes
+before execution; unsupported layouts keep the complete forward. Short retained
+checks use tested 64–511-row profiles, including custom option 3 and cluster 4×2×1,
+under the same SM90/cuBLASLt scope. Ordinary packed GEMM grouping is unchanged.
+
+This path stores only reusable row-index buffers and recomputes every request.
+It does not count projection-only reuse as full-prefix `saved_tokens`; reported
+input usage still includes every original token. The original full-prefix path
+remains available for longer prefixes.
+
+A 9B exact-prefix capture requests state only. Once the final full-attention
+layer has stored its K/V rows, it omits that prefix's attention output, output
+projection, MLP and final normalization: no caller reads those hidden rows.
+The suffix starts from fresh embeddings and consumes only the captured state.
+Other window/readout modes retain complete hidden outputs. State capture is
+synchronized before it becomes available to a suffix.

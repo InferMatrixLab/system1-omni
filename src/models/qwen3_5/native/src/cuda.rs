@@ -89,7 +89,7 @@ pub struct SharedSuffix {
     ) -> c_int,
 }
 
-/// Optional shape changes using a validated original-shape GEMM algorithm.
+/// Optional shape changes preserving a validated original-shape arithmetic profile.
 #[derive(Clone, Copy)]
 pub struct ReuseGemm {
     pub check: unsafe extern "C" fn(
@@ -124,6 +124,62 @@ pub type PackedGemm = unsafe extern "C" fn(
     usize,
     c_int,
     c_int,
+    Stream,
+) -> c_int;
+
+/// Optional causal attention over independent full sequences.
+pub type BatchedAttention = unsafe extern "C" fn(
+    *const c_void,
+    *const c_void,
+    *const c_void,
+    c_int,
+    *const c_void,
+    *mut c_void,
+    *const usize,
+    usize,
+    c_int,
+    c_int,
+    c_int,
+    f32,
+    Stream,
+) -> c_int;
+
+/// Optional attention over independent suffixes sharing immutable prefix KV.
+pub type SharedBatchedAttention = unsafe extern "C" fn(
+    *const c_void,
+    *const c_void,
+    *const c_void,
+    c_int,
+    *const c_void,
+    *mut c_void,
+    *const c_void,
+    *const c_void,
+    *const usize,
+    usize,
+    c_int,
+    c_int,
+    c_int,
+    c_int,
+    f32,
+    Stream,
+) -> c_int;
+
+/// Optional batched continuations of one immutable FP32 prefix state.
+pub type SharedBatchedGdn = unsafe extern "C" fn(
+    *const c_void,
+    *const c_void,
+    *const c_void,
+    *const f32,
+    *const c_void,
+    *mut c_void,
+    *mut f32,
+    usize,
+    *const usize,
+    usize,
+    c_int,
+    c_int,
+    f32,
+    *const c_void,
     Stream,
 ) -> c_int;
 
@@ -443,6 +499,18 @@ impl Api {
         }
     }
 
+    pub fn equivalent_tiles(&self) -> Option<unsafe extern "C" fn(*mut c_void) -> c_int> {
+        // SAFETY: optional additive signature matches ops.h; Api owns the library.
+        unsafe {
+            self._lib
+                .get::<unsafe extern "C" fn(*mut c_void) -> c_int>(
+                    b"cs1_gemm_enable_equivalent_tiles\0",
+                )
+                .ok()
+                .map(|f| *f)
+        }
+    }
+
     pub fn wide_gdn(&self) -> Option<GdnPrefill> {
         // SAFETY: the additive signature matches ops.h; API retains the library.
         unsafe {
@@ -492,6 +560,36 @@ impl Api {
                 .map(|f| *f)
         }
         .context("packed projections require the optional cs1_gemm_packed CUDA symbol")
+    }
+
+    pub fn batched_attention(&self) -> Option<BatchedAttention> {
+        // SAFETY: optional signature matches ops.h; this API owns the library.
+        unsafe {
+            self._lib
+                .get(b"cs1_attention_gated_batch\0")
+                .ok()
+                .map(|f| *f)
+        }
+    }
+
+    pub fn shared_batched_attention(&self) -> Option<SharedBatchedAttention> {
+        // SAFETY: optional signature matches ops.h; this API owns the library.
+        unsafe {
+            self._lib
+                .get(b"cs1_attention_gated_shared_batch\0")
+                .ok()
+                .map(|f| *f)
+        }
+    }
+
+    pub fn shared_batched_gdn(&self) -> Option<SharedBatchedGdn> {
+        // SAFETY: optional signature matches ops.h; the API owns the library.
+        unsafe {
+            self._lib
+                .get(b"cs1_gdn_prefill_batch_shared\0")
+                .ok()
+                .map(|f| *f)
+        }
     }
 
     pub fn batched_gdn(&self) -> Result<BatchedGdn> {

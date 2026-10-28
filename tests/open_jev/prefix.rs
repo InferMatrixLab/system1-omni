@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use omni_open_jev_native::{
-    engine::{Engine, check_graph, prefix_values},
+    engine::{Engine, check_graph, exact_prefix_value, prefix_values},
     executor::PrefixUse,
 };
 use omni_qwen3_5_native::{model::Model, prefix::PrefixMode};
@@ -133,4 +133,22 @@ async fn shared_prefixes_match_fixed_rows_and_auto_keeps_small_requests_on_the_d
         rows, off_small,
         "auto keeps small requests on the default path"
     );
+}
+
+#[test]
+fn exact_prefix_is_explicit_and_does_not_change_fixed_algorithms() {
+    assert_eq!(exact_prefix_value(None, PrefixMode::Off).unwrap(), None);
+    assert_eq!(
+        exact_prefix_value(Some("0"), PrefixMode::Off).unwrap(),
+        Some(false)
+    );
+    assert_eq!(
+        exact_prefix_value(Some("1"), PrefixMode::Off).unwrap(),
+        Some(true)
+    );
+    assert!(exact_prefix_value(Some("auto"), PrefixMode::Off).is_err());
+    for mode in [PrefixMode::Fixed, PrefixMode::Shared, PrefixMode::Auto] {
+        assert!(exact_prefix_value(Some("1"), mode).is_err());
+        assert_eq!(exact_prefix_value(Some("0"), mode).unwrap(), Some(false));
+    }
 }

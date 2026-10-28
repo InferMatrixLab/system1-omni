@@ -12,12 +12,19 @@ to separately running workers. Cua-S1, Open-Jev, Decider, and StartLux Instant
 [Qwen3.5/3.8 executor](../src/models/qwen3_5/native/), which accepts
 single prompts and bounded packed prefill. StartLux Instant uses a
 bidirectional full-attention call on each prompt; its GDN stays causal, and
-it does not pack prompts or cache prefixes. Cua-S1 and Open-Jev-9B use
-single-prompt calls; Open-Jev-27B-v1.1 packs candidates within one request for
+it does not pack prompts or cache prefixes. Cua-S1 uses single-prompt calls. Open-Jev-9B and Open-Jev-27B-v1.1
+pack candidates within one request for
 input and gate/up GEMMs. Its opt-in output/down packing retains each original
 matrix algorithm and checks the combined shape; incompatible groups keep separate
 calls. Its batched linear-attention kernels preserve independent sequence state.
-Long candidates from one question can share an exact prefix when every retained
+For compatible 9B short prefixes, pointwise rows can be compacted while mixers
+retain the complete candidate layout. The model owns expansion/gather maps and
+stream lifetime; the executor retains request and candidate ordering. Exact9B
+prefix capture explicitly requests state-only output; after final-layer K/V is
+captured, unconsumed prefix hidden outputs are omitted. Hidden-row readouts
+continue to request the complete window computation.
+On 27B (and 9B with `OPEN_JEV_EXACT_PREFIX=1`), long candidates from one question
+can share an exact prefix when every retained
 projection algorithm supports the prefix and suffix shapes. This Open-Jev path
 preserves the original complete-prompt arithmetic choices; it is separate from
 the fixed-algorithm `forward_shared` interface described below.
@@ -33,8 +40,10 @@ coordinate independent processors and executors through
 [native runtime](../src/runtime/README.md) for FIFO admission and blocking dispatch
 per loaded executor. The [Decider native worker](../recipe/decider/README.md)
 also uses this runtime and can opt into outstanding-request and processed-token
-budgets plus HTTP request deadlines. Shared processing orchestration,
-cross-request batch assembly, compatibility grouping and dynamic batching are planned.
+budgets plus HTTP request deadlines. Shared processing orchestration
+and cross-worker coordination remain planned. Open-Jev-9B default execution uses
+the runtime's weighted FIFO `BatchScheduler` to combine original candidate batches;
+exact-prefix requests remain exclusive execution items.
 The pplx-decider reference worker runs the checkpoint's own loader instead of
 this shared Qwen executor: the checkpoint's full-attention layers are
 noncausal, and the language kernels in `src/backends/cuda/qwen3_5/attention.cu`
@@ -116,7 +125,8 @@ its prefix rounded up to 1,024 positions, and the GEMM handle a 32 MiB workspace
 ## Native worker boundaries
 
 The native workers separate `processing.rs` from `executor.rs`; their worker
-assembly owns a `SerialScheduler` per loaded executor, and the HTTP handler
+assembly owns a scheduler per loaded executor (`BatchScheduler` for 9B default
+execution, `SerialScheduler` for the other paths), and the HTTP handler
 coordinates the three stages. Preparation validates the entire request before
 any forward call and returns executor inputs plus a response context. The context retains question
 and candidate identity, usage, and response metadata outside the executor.
@@ -131,13 +141,16 @@ and candidate identity, usage, and response metadata outside the executor.
 | StartLux Instant 4B | One unpadded token-ID prompt per question, or per knockout group and then a final prompt, in request order. | FP32 letter logits from a CPU dot of the tied embedding rows at the last position. | Per-type temperature, none-check split, wide-choice residual, and ordered `choice`, `noul`, and `score` answers with token usage. |
 | Clef | The raw `systemone` body. Preparation stays in the pinned Python encoder. | One joint-schema forward on the executor process main thread. The Rust closure only exchanges a frame. | The checkpoint's `systemone_answer` object, forwarded with its HTTP status unchanged. |
 
-Cua-S1 and Open-Jev-9B input collections are serial work. For Open-Jev-27B-v1.1,
+Cua-S1 input collections are serial work. For both Open-Jev checkpoints,
 Open-Jev's model-specific batch adapter packs up to 16 independent candidates and
 4096 tokens per group; longer prompts
-execute alone. It restores question/candidate grouping before normalization.
-Laya batches questions within one request. Shared runtime
+execute alone. For 9B default numerics, the runtime can combine these original
+batches across requests up to 16 candidates and 8192 tokens. Input/gate-up GEMMs
+retain original batch row counts; output/down GEMMs retain candidate lengths.
+Request-local prefixes run as exclusive items. It restores question/candidate
+grouping before normalization. Laya batches questions within one request. Shared runtime
 admission precedes blocking dispatch: Cua-S1 admits one question forward at a
-time; Open-Jev, Decider, Laya, StartLux Instant, and Clef admit one complete request. Clef's admitted work is the frame exchange with its executor process. StartLux runs each prompt inside that admission one at a time. Cua-S1's CPU letter projection
+time; serial Open-Jev modes, Decider, Laya, StartLux Instant, and Clef admit one complete request. Clef's admitted work is the frame exchange with its executor process. StartLux runs each prompt inside that admission one at a time. Cua-S1's CPU letter projection
 stays outside admission; Open-Jev's scalar heads and Laya's GPU heads and
 synchronized readback remain inside their request unit. Decider includes every
 backbone row and CUDA head projection, synchronizes both streams and retires
@@ -223,6 +236,13 @@ blocking work. The worker selects configuration and the processor defines token
 cost; shared runtime primitives own capacity accounting, cancellation/deadline
 checks and FIFO execution admission. These request budgets do not add
 cross-request batching or replace the scheduler's single execution permit.
+
+The implemented weighted batch scheduler similarly owns one FIFO execution queue
+per loaded executor. It combines already queued atomic items without waiting for
+more arrivals, enforces model-declared costs and exclusive items, and routes outputs
+back to the requesting futures. Queued cancellation skips a request before its
+first dispatch; afterward its complete work and resources are retained. A callback
+must retire device work on failure or panic before releasing that ownership.
 
 - Batch only work accepted by the same loaded executor, with compatible
   checkpoint/adapter identity, device, dtype, and input layout. Models declare
