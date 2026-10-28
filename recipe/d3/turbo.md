@@ -165,24 +165,35 @@ fixtures. It compares the public `AutoModel.system_one` with production
 `frontend.d3.decide` on the same pinned loaded model. It records prompt text,
 expanded token IDs, exact state/question boundaries, legal code order,
 processed tensor bytes/grids/positions, probabilities, typed answers/errors
-and usage. Compressed NPZ files preserve the full input tensors; JSON stores
-their shape, dtype and SHA-256. Preparation and decisions/order/usage are
-exact; numerical probability/Score tolerance is declared as 1e-6 before
-comparison, and Noul threshold flips fail even within that tolerance.
+and usage. The two mode-specific JSON oracles retain their own probabilities,
+answers, usage and generation provenance. They reference one SHA-256-pinned
+`turbo-preparation.json`, which stores the common requests/preparation and
+references one `turbo-inputs.npz` containing all 83 input tensor arrays. Token
+arrays stay inline in JSON; state/question token slices are reconstructed
+from the complete token IDs and exact state boundary. The loader verifies
+both references and reconstructs the original comparison structure.
+
+This storage normalization preserves the original oracle values and tensor
+bytes. The historical GPU evidence retains the original representation.
+Preparation and decisions/order/usage remain exact; numerical probability/Score
+tolerance is still 1e-6, and Noul threshold flips fail even within that tolerance.
 
 ```sh
+D3_TURBO_CHECK_DIR="$(mktemp -d)"
 D3_STATE_ONCE=1 PYTHONPATH=src python tests/d3/turbo_reference.py freeze \
   --model "$D3_TURBO_PACKAGE" --device cuda:0 \
   --source-revision "$(git rev-parse HEAD)" \
   --check tests/d3/fixtures/turbo-oracle-state-once.json \
-  --output /tmp/turbo-oracle-state-once.json
+  --output "$D3_TURBO_CHECK_DIR/turbo-oracle-state-once.json"
 D3_STATE_ONCE=0 PYTHONPATH=src python tests/d3/turbo_reference.py freeze \
   --model "$D3_TURBO_PACKAGE" --device cuda:0 \
   --source-revision "$(git rev-parse HEAD)" \
   --check tests/d3/fixtures/turbo-oracle-full-row.json \
-  --output /tmp/turbo-oracle-full-row.json
+  --output "$D3_TURBO_CHECK_DIR/turbo-oracle-full-row.json"
 ```
 
+The two commands share only the fresh output directory; conflicting shared
+inputs are rejected rather than overwriting an existing mode's fixtures.
 Each command uses a separate fresh reference process. Do not compare
 state-once numerics or usage against the full-row fixture as if they were
 identical: the two modes can differ. Full-row uses the same `prefix_bidir`

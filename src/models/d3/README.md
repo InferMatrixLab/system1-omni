@@ -38,7 +38,10 @@ Neither profile is a native CUDA executor.
 - Preparation and answer fixtures, generation tools and tests live under
   [`tests/d3/`](../../../tests/d3/). Exact preparation/order/decisions/usage and
   predeclared 1e-6 numerical checks are required. State-once and full-row
-  `prefix_bidir` fixtures are separate. Native bring-up must first establish
+  `prefix_bidir` response oracles remain separate and reference one shared,
+  hash-verified preparation/tensor fixture. Loading reconstructs the original
+  comparison inputs without changing answers, usage or tolerances.
+  Native bring-up must first establish
   the full-row baseline, then qualify state-once against state-once; an exact
   semantic state cut cannot be replaced by causal 64-token rounding.
 
