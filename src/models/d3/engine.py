@@ -112,7 +112,7 @@ def verify_runtime_files(root: Path, manifest: dict[str, Any]) -> list[str]:
     verification there is no size shortcut. It also refuses importable
     entries the table does not name — the package root is about to go first
     on ``sys.path``, where an extra source, ``.pyc`` or extension module,
-    or an ``__init__.py`` package would shadow one of the pinned runtime's
+    or an importable package initializer would shadow one of the pinned runtime's
     dependencies — and any ``__pycache__``, whose cached bytecode could
     execute in place of a verified source file.
     """
@@ -137,7 +137,10 @@ def verify_runtime_files(root: Path, manifest: dict[str, Any]) -> list[str]:
             problems.append("unexpected bytecode cache __pycache__/ in the package root")
         elif entry.is_file() and entry.suffix in IMPORTABLE_FILE_SUFFIXES:
             problems.append(f"unexpected importable file {entry.name} in the package root")
-        elif entry.is_dir() and (entry / "__init__.py").is_file():
+        elif entry.is_dir() and any(
+            (entry / ("__init__" + suffix)).is_file()
+            for suffix in IMPORTABLE_FILE_SUFFIXES
+        ):
             problems.append(f"unexpected importable package {entry.name}/ in the package root")
     if problems:
         raise ValueError("runtime verification failed: " + "; ".join(problems[:8]))
@@ -179,8 +182,11 @@ def runtime_import_guard(root: Path, profile: str, identity: str, files: list[st
         return {name: module for name, module in list(sys.modules.items())
                 if name in stems
                 or any(re.fullmatch(re.escape(stem) + r"_[0-9a-f]{16}", name) for stem in stems)
-                or (name.startswith("transformers_modules.")
-                    and name.rsplit(".", 1)[-1] in stems)}
+                # Cached package/source-hash ancestors carry __path__ and can
+                # redirect a newly copied wrapper's relative runtime imports.
+                # A fresh D3 worker therefore admits no preloaded descendants,
+                # even when no d3 leaf module has been imported yet.
+                or name.startswith("transformers_modules.")}
     with _RUNTIME_IMPORT_LOCK:
         key = (profile, str(root), identity)
         if _RUNTIME_SELECTION is None:

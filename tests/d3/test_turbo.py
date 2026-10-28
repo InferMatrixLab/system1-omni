@@ -2,6 +2,7 @@
 import hashlib
 import http.client
 import json
+from importlib.machinery import EXTENSION_SUFFIXES
 import sys
 import threading
 from pathlib import Path
@@ -384,3 +385,77 @@ def test_exact_public_response_is_not_recomputed_or_calibrated():
     executor = FakeTurbo()
     executor.response = {'model': 'd3-turbo', 'answers': {'q': {'type': 'choice', 'choice': 'b', 'probabilities': {'a': 0.125, 'b': 0.875}, 'confidence': 0.349102641}}, 'usage': {'input_tokens': 139, 'output_tokens': 0}}
     assert d3.decide(raw(), executor) is executor.response
+
+
+def test_sourceless_shadow_package_is_rejected_before_import(tmp_path, monkeypatch):
+    import importlib.machinery
+    import py_compile
+
+    turbo = make_package(tmp_path, monkeypatch)
+    shadow = tmp_path / 'shadow_dependency'
+    shadow.mkdir()
+    source = shadow / '__init__.py'
+    source.write_text('unverified_code_executed = True\n')
+    py_compile.compile(str(source), cfile=str(shadow / '__init__.pyc'), doraise=True)
+    source.unlink()
+    spec = importlib.machinery.PathFinder.find_spec('shadow_dependency', [str(tmp_path)])
+    assert isinstance(spec.loader, importlib.machinery.SourcelessFileLoader)
+    with pytest.raises(ValueError, match='unexpected importable package shadow_dependency'):
+        turbo.verify_package(tmp_path)
+
+
+@pytest.mark.parametrize('suffix', EXTENSION_SUFFIXES)
+def test_extension_shadow_package_is_rejected_before_import(tmp_path, monkeypatch, suffix):
+    import importlib.machinery
+
+    turbo = make_package(tmp_path, monkeypatch)
+    shadow = tmp_path / 'shadow_dependency'
+    shadow.mkdir()
+    (shadow / ('__init__' + suffix)).write_bytes(b'extension presence; never executed')
+    spec = importlib.machinery.PathFinder.find_spec('shadow_dependency', [str(tmp_path)])
+    assert isinstance(spec.loader, importlib.machinery.ExtensionFileLoader)
+    with pytest.raises(ValueError, match='unexpected importable package shadow_dependency'):
+        turbo.verify_package(tmp_path)
+
+
+def test_inert_download_cache_directories_remain_allowed(tmp_path, monkeypatch):
+    turbo = make_package(tmp_path, monkeypatch)
+    cache = tmp_path / '.cache' / 'huggingface' / 'download'
+    cache.mkdir(parents=True)
+    (cache / 'config.json.metadata').write_text('download bookkeeping')
+    assert turbo.verify_package(tmp_path)['repo_id'] == 'vllm-sr/d3-turbo'
+
+
+def test_preloaded_hf_parent_namespace_cannot_redirect_relative_runtime_import(tmp_path, monkeypatch):
+    import importlib.util
+    from types import ModuleType
+
+    turbo, model, _, events = fake_loaded_executor(tmp_path, monkeypatch)
+    stale = tmp_path.parent / (tmp_path.name + '-stale-cached-code')
+    stale.mkdir()
+    (stale / 'd3_runtime.py').write_text('SOURCE = "unverified cached runtime"\n')
+    wrapper = stale / 'copied-wrapper.py'
+    wrapper.write_text('from .d3_runtime import SOURCE\n')
+    for name in ('transformers_modules', 'transformers_modules.package', 'transformers_modules.package.sourcehash'):
+        namespace = ModuleType(name)
+        namespace.__path__ = [str(stale)]
+        monkeypatch.setitem(sys.modules, name, namespace)
+
+    def load(*args, **kwargs):
+        # Mirrors Transformers' get_class_in_module: the module itself comes
+        # from the new private cache, while its cached parent still controls
+        # the relative runtime import. No d3 leaf was imported before loading.
+        name = 'transformers_modules.package.sourcehash.modeling_d3'
+        spec = importlib.util.spec_from_file_location(name, wrapper)
+        module = importlib.util.module_from_spec(spec)
+        monkeypatch.setitem(sys.modules, name, module)
+        monkeypatch.setitem(sys.modules, 'transformers_modules.package.sourcehash.d3_runtime', None)
+        del sys.modules['transformers_modules.package.sourcehash.d3_runtime']
+        spec.loader.exec_module(module)
+        events.append(module.SOURCE)
+        return model
+
+    sys.modules['transformers'].AutoModel.from_pretrained = load
+    with pytest.raises(RuntimeError, match='already imported'):
+        turbo.D3TurboExecutor(tmp_path)
+    assert events == []
