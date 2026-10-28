@@ -13,6 +13,8 @@
 //! once and every branch from the state after it (see `SharedPrompts`).
 
 mod matched;
+mod service;
+use service::ServiceWindow;
 
 use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
@@ -23,7 +25,9 @@ use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value as Json;
 
 use crate::cuda::{self, DeviceBuffer, Stream, check};
-use crate::inputs::{DeviceMultimodalInput, MultimodalInput, rotary_tables};
+use crate::inputs::{
+    DeviceMultimodalInput, MultimodalInput, rotary_tables, rotary_tables_with_precision,
+};
 use crate::lora::{self, Group};
 
 const ALIGN: usize = 256;
@@ -852,6 +856,7 @@ pub struct Model {
     matched_ref: usize,
     matched_handles: HashMap<usize, *mut c_void>,
     reference: Option<&'static cuda::Reference>,
+    service_ops: Option<cuda::ServiceReadout>,
     fp32_gdn: Option<cuda::Fp32Gdn>,
     batched_gdn: Option<cuda::BatchedGdn>,
     packed_gemm: Option<cuda::PackedGemm>,
@@ -1029,6 +1034,7 @@ impl Model {
             matched_ref: 0,
             matched_handles: HashMap::new(),
             reference: None,
+            service_ops: None,
             fp32_gdn: None,
             batched_gdn: None,
             packed_gemm: None,
@@ -1603,6 +1609,7 @@ impl Model {
                     None,
                     self.gemm,
                     projection,
+                    None,
                 )?;
                 self.synchronize()?;
                 state.initialized = true;
@@ -1647,6 +1654,7 @@ impl Model {
                                 Some(&state),
                                 self.gemm,
                                 projection,
+                                None,
                             )?;
                             hidden[index] = self.last_hidden(s, ids.len())?;
                         }
@@ -1865,6 +1873,7 @@ impl Model {
             prefix,
             gemm,
             None,
+            None,
         )?;
         if let Some(cap) = capture {
             cap.initialized = true;
@@ -2001,11 +2010,12 @@ impl Model {
     }
 
     fn upload_positions(&self, s: &Scratch, positions: [&[i64]; 3]) -> Result<()> {
-        let (cos, sin) = rotary_tables(
+        let (cos, sin) = rotary_tables_with_precision(
             positions,
             self.cfg.rotary_half,
             self.cfg.rope_theta,
             self.cfg.mrope_section,
+            self.service_ops.is_some(),
         );
         // SAFETY: tables contain at most s.cap rows of rotary_half BF16 values.
         unsafe {
@@ -2072,6 +2082,10 @@ impl Model {
             len <= self.cfg.max_positions,
             "cached prefix exceeds the configured maximum length"
         );
+        self.alloc_prefix_storage(len)
+    }
+
+    fn alloc_prefix_storage(&self, len: usize) -> Result<PrefixState> {
         let kvrow = self.cfg.kv_heads * self.cfg.head_dim * BF16;
         let w = Widths::of(&self.cfg);
         let nfull = self.cfg.full_attention.iter().filter(|&&f| f).count();
@@ -2139,7 +2153,7 @@ impl Model {
         self.upload_positions(s, input.position_ids)?;
         self.embed_tokens(s, input.token_ids)?;
         self.overwrite_image_rows(s, input, 0)?;
-        self.run_window(s, 0, t, true, Some(state), None, self.gemm, None)?;
+        self.run_window(s, 0, t, true, Some(state), None, self.gemm, None, None)?;
         self.synchronize()?;
         state.initialized = true;
         Ok(())
@@ -2190,6 +2204,7 @@ impl Model {
             Some(prefix),
             self.gemm,
             None,
+            None,
         )?;
         self.last_hidden(s, tend)
     }
@@ -2220,7 +2235,7 @@ impl Model {
         let gemm = self.fixed_gemm()?;
         let s = self.scratch.as_ref().unwrap();
         self.embed_tokens(s, ids)?;
-        self.run_window(s, 0, t, false, None, None, gemm, None)?;
+        self.run_window(s, 0, t, false, None, None, gemm, None, None)?;
         self.last_hidden(s, t)
     }
 
@@ -2292,7 +2307,7 @@ impl Model {
             let request = match request {
                 Some(state) => {
                     self.embed_tokens(s, &runs.prefix)?;
-                    self.run_window(s, 0, p, false, Some(&mut *state), None, gemm, None)?;
+                    self.run_window(s, 0, p, false, Some(&mut *state), None, gemm, None, None)?;
                     Some(&*state)
                 }
                 None => None,
@@ -2307,7 +2322,17 @@ impl Model {
                     let state = group.as_deref_mut().unwrap();
                     state.len = start;
                     self.embed_tokens_at(s, &run.prefix, p)?;
-                    self.run_window(s, p, start, false, Some(&mut *state), request, gemm, None)?;
+                    self.run_window(
+                        s,
+                        p,
+                        start,
+                        false,
+                        Some(&mut *state),
+                        request,
+                        gemm,
+                        None,
+                        None,
+                    )?;
                     Some(&*state)
                 };
                 let rows = run
@@ -2316,7 +2341,7 @@ impl Model {
                     .map(|b| {
                         let end = start + b.len();
                         self.embed_tokens_at(s, b, start)?;
-                        self.run_window(s, start, end, false, None, from, gemm, None)?;
+                        self.run_window(s, start, end, false, None, from, gemm, None, None)?;
                         self.last_hidden(s, end)
                     })
                     .collect::<Result<Vec<_>>>()?;
@@ -2683,6 +2708,10 @@ impl Model {
         bidirectional: bool,
         suffix: Option<&SuffixBatch<'_>>,
     ) -> Result<()> {
+        ensure!(
+            self.service_ops.is_none(),
+            "use segmented readout for the service profile"
+        );
         let bidir = if bidirectional {
             ensure!(
                 self.reference.is_none() && self.lora.is_none() && suffix.is_none(),
@@ -3125,9 +3154,14 @@ impl Model {
         prefix: Option<&PrefixState>,
         gemm: *mut c_void,
         reuse: Option<(cuda::ReuseGemm, usize)>,
+        service: Option<&ServiceWindow>,
     ) -> Result<()> {
         ensure!(
-            self.fp32_gdn.is_none(),
+            self.service_ops.is_none() || service.is_some(),
+            "use segmented readout for the service profile"
+        );
+        ensure!(
+            self.fp32_gdn.is_none() || service.is_some(),
             "FP32 GDN does not support prefix continuation"
         );
         ensure!(
@@ -3140,6 +3174,46 @@ impl Model {
         let st = self.stream;
         let rows = tend - qb;
         let project = |x, weight: &Tensor, y, group| -> Result<()> {
+            if let Some(plan) = service.and_then(|p| p.projection.as_ref()) {
+                let (n, k) = (weight.shape[0], weight.shape[1]);
+                let x_offset = plan.index * rows * k * BF16;
+                let y_offset = plan.index * rows * n * BF16;
+                // SAFETY: each temporary has projection_rows * max_projection_width
+                // elements. Preserve the reference GEMM shape and this row's offset;
+                // other independent matrix rows are zero and never read back.
+                return unsafe {
+                    check(
+                        (service.unwrap().ops.zero)(plan.input, plan.rows * k * BF16, st),
+                        "zero projection padding",
+                    )?;
+                    cuda::copy_dd(
+                        plan.input.wrapping_byte_add(x_offset),
+                        s.at(x),
+                        rows * k * BF16,
+                        st,
+                    )?;
+                    check(
+                        (cuda::api().cs1_gemm)(
+                            gemm,
+                            plan.input,
+                            weight.ptr,
+                            plan.output,
+                            plan.rows as i32,
+                            n as i32,
+                            k as i32,
+                            n as i32,
+                            st,
+                        ),
+                        "service batch-shape projection",
+                    )?;
+                    cuda::copy_dd(
+                        s.at(y),
+                        plan.output.wrapping_byte_add(y_offset),
+                        rows * n * BF16,
+                        st,
+                    )
+                };
+            }
             if let Some((api, original_rows)) = reuse {
                 // SAFETY: compatibility was checked before prefix capture. Scratch
                 // owns rows at the offsets passed by the unchanged layer layout.
@@ -3225,6 +3299,22 @@ impl Model {
                         s.gdn_in + qb * ldbb,
                         &[rows],
                     )?;
+                    if let Some(plan) = service {
+                        unsafe {
+                            check(
+                                (plan.ops.zero)(p(s.gdn_in + qb * ldbb), plan.leading * ldbb, st),
+                                "mask leading GDN rows",
+                            )?;
+                            check(
+                                (plan.ops.zero)(
+                                    p(s.gdn_in + (qb + plan.real_end) * ldbb),
+                                    (rows - plan.real_end) * ldbb,
+                                    st,
+                                ),
+                                "mask trailing GDN rows",
+                            )?;
+                        }
+                    }
                     let ld = ldb as i32;
                     let z = s.gdn_in + w.conv * BF16;
                     let b = z + vd * BF16;
@@ -3235,7 +3325,7 @@ impl Model {
                         .as_deref()
                         .map_or(std::ptr::null_mut(), |cap| cap.gdn_state[la_i].at(0));
                     unsafe {
-                        if qb > 0 {
+                        if qb > 0 && service.is_none() {
                             cuda::copy_dd(
                                 p(s.gdn_in + (qb - 3) * ldbb),
                                 prefix.unwrap().conv_tail[la_i].at(0),
@@ -3258,18 +3348,38 @@ impl Model {
                         // those three outputs so continuation rows see all taps.
                         let conv_start = qb.saturating_sub(3);
                         check(
-                            (convolution)(
-                                p(s.gdn_in + conv_start * ldbb),
-                                ld,
-                                la.conv.ptr,
-                                p(s.lq + conv_start * kb),
-                                p(s.lk + conv_start * kb),
-                                p(s.lv + conv_start * vb),
-                                (tend - conv_start) as i32,
-                                kd as i32,
-                                vd as i32,
-                                st,
-                            ),
+                            if service.is_some()
+                                && let Some(pre) = prefix
+                            {
+                                let ops =
+                                    cuda::api().shared_suffix().context("service convolution")?;
+                                (ops.conv)(
+                                    p(s.gdn_in + qb * ldbb),
+                                    pre.conv_tail[la_i].at(0),
+                                    ld,
+                                    la.conv.ptr,
+                                    p(s.lq + qb * kb),
+                                    p(s.lk + qb * kb),
+                                    p(s.lv + qb * vb),
+                                    ti,
+                                    kd as i32,
+                                    vd as i32,
+                                    st,
+                                )
+                            } else {
+                                (convolution)(
+                                    p(s.gdn_in + conv_start * ldbb),
+                                    ld,
+                                    la.conv.ptr,
+                                    p(s.lq + conv_start * kb),
+                                    p(s.lk + conv_start * kb),
+                                    p(s.lv + conv_start * vb),
+                                    (tend - conv_start) as i32,
+                                    kd as i32,
+                                    vd as i32,
+                                    st,
+                                )
+                            },
                             "gdn conv",
                         )?;
                         check(
@@ -3288,26 +3398,62 @@ impl Model {
                             "gdn gates",
                         )?;
                         check(
-                            (cuda::api().cs1_gdn_prefill_x)(
-                                p(s.lq + qb * kb),
-                                p(s.lk + qb * kb),
-                                p(s.lv + qb * vb),
-                                p(s.g + qb * hv * F32).cast(),
-                                p(s.beta + qb * hv * BF16),
-                                p(s.lo + qb * vb),
-                                p(s.workspace).cast(),
-                                ti,
-                                hv as i32,
-                                cfg.lin_k_heads as i32,
-                                (cfg.lin_k_dim as f32).powf(-0.5),
-                                s_in,
-                                s_out,
-                                st,
-                            ),
+                            if let Some(gdn) = &self.fp32_gdn {
+                                if service.is_some() {
+                                    gdn.run_state(
+                                        p(s.lq + qb * kb),
+                                        p(s.lk + qb * kb),
+                                        p(s.lv + qb * vb),
+                                        p(s.g + qb * hv * F32).cast(),
+                                        p(s.beta + qb * hv * BF16),
+                                        p(s.lo + qb * vb),
+                                        p(s.workspace).cast(),
+                                        ti,
+                                        hv as i32,
+                                        cfg.lin_k_heads as i32,
+                                        (cfg.lin_k_dim as f32).powf(-0.5),
+                                        s_in,
+                                        s_out,
+                                        st,
+                                    )
+                                } else {
+                                    gdn.run(
+                                        p(s.lq + qb * kb),
+                                        p(s.lk + qb * kb),
+                                        p(s.lv + qb * vb),
+                                        p(s.g + qb * hv * F32).cast(),
+                                        p(s.beta + qb * hv * BF16),
+                                        p(s.lo + qb * vb),
+                                        p(s.workspace).cast(),
+                                        ti,
+                                        hv as i32,
+                                        cfg.lin_k_heads as i32,
+                                        (cfg.lin_k_dim as f32).powf(-0.5),
+                                        st,
+                                    )
+                                }
+                            } else {
+                                (cuda::api().cs1_gdn_prefill_x)(
+                                    p(s.lq + qb * kb),
+                                    p(s.lk + qb * kb),
+                                    p(s.lv + qb * vb),
+                                    p(s.g + qb * hv * F32).cast(),
+                                    p(s.beta + qb * hv * BF16),
+                                    p(s.lo + qb * vb),
+                                    p(s.workspace).cast(),
+                                    ti,
+                                    hv as i32,
+                                    cfg.lin_k_heads as i32,
+                                    (cfg.lin_k_dim as f32).powf(-0.5),
+                                    s_in,
+                                    s_out,
+                                    st,
+                                )
+                            },
                             "gdn prefill",
                         )?;
                         check(
-                            (cuda::api().cs1_gated_rms_norm)(
+                            (service.map_or(cuda::api().cs1_gated_rms_norm, |p| p.ops.gated_norm))(
                                 p(s.lo + qb * vb),
                                 p(z + qb * ldbb),
                                 ld,
@@ -3389,21 +3535,41 @@ impl Model {
                             cuda::copy2d(cap.attn_kv[fa_i].1.at(0), kvb, p(v), ab, kvb, tend, st)?;
                         }
                         check(
-                            (cuda::api().cs1_attention_gated_prefix)(
-                                p(s.aq),
-                                p(s.ak),
-                                p(v),
-                                w.attn_in as i32,
-                                p(s.agate),
-                                p(s.ao),
-                                t_flash,
-                                hq,
-                                hk,
-                                hd,
-                                scale,
-                                q_base,
-                                st,
-                            ),
+                            if let Some(plan) = service {
+                                (plan.ops.attention)(
+                                    p(s.aq + qb * ob),
+                                    p(s.ak),
+                                    p(v),
+                                    w.attn_in as i32,
+                                    p(s.agate + qb * ob),
+                                    p(s.ao + qb * ob),
+                                    ti,
+                                    tend as i32,
+                                    hq,
+                                    hk,
+                                    qb as i32,
+                                    plan.key_left as i32,
+                                    plan.real_end as i32,
+                                    plan.workspace,
+                                    st,
+                                )
+                            } else {
+                                (cuda::api().cs1_attention_gated_prefix)(
+                                    p(s.aq),
+                                    p(s.ak),
+                                    p(v),
+                                    w.attn_in as i32,
+                                    p(s.agate),
+                                    p(s.ao),
+                                    t_flash,
+                                    hq,
+                                    hk,
+                                    hd,
+                                    scale,
+                                    q_base,
+                                    st,
+                                )
+                            },
                             "gated attention",
                         )?;
                     }
@@ -3419,6 +3585,7 @@ impl Model {
                     fa_i += 1;
                 }
             }
+
             unsafe {
                 check(
                     (self
@@ -3436,6 +3603,7 @@ impl Model {
                     "post-attention norm",
                 )?;
             }
+
             project(
                 s.x + qb * hb,
                 &layer.gate_up,
@@ -3477,6 +3645,7 @@ impl Model {
                 s.delta + qb * hb,
                 &[rows],
             )?;
+
             let next = self
                 .layers
                 .get(i + 1)
@@ -3499,6 +3668,7 @@ impl Model {
                 )?;
             }
         }
+
         Ok(())
     }
 }

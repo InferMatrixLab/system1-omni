@@ -36,6 +36,7 @@ fn pinned_metadata_and_complete_inventory_are_required() {
         "hidden_size",
         "merged_targets",
         "inputs",
+        "merge_numerics",
     ] {
         let mut bad = good.clone();
         bad[key] = Value::Null;

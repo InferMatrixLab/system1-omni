@@ -28,3 +28,20 @@ The native vision geometry, rotary, block and merger execution in
 2025 The Qwen team, Alibaba Group and the HuggingFace Inc. team, under the
 [Apache License, Version 2.0](licenses/APACHE-2.0). The implementation is
 adapted to Rust/CUDA optional separate FP32 visual LoRA execution and the shared 4B/27B layouts.
+
+## Kev default-service attention
+
+`src/backends/cuda/qwen3_5/service_readout.cu` instantiates the memory-efficient
+attention templates from PyTorch 2.8.0
+`ATen/native/transformers/cuda/mem_eff_attention/kernel_forward.h`, Copyright
+(c) Meta Platforms, Inc. and affiliates, under the retained
+[PyTorch 2.8 license](licenses/PYTORCH-2.8-LICENSE). Its CUTLASS dependency is
+pinned to `ad7b2f5e84fcfa124cb02b91d5bd26d238c0459e`, Copyright (c) 2017–2025
+NVIDIA CORPORATION & AFFILIATES, under the retained
+[CUTLASS license](licenses/CUTLASS-LICENSE).
+
+The templates are compiled into the optional CUDA library; no Python or libtorch
+runtime is linked. `recipe/kev/build_cuda.sh` places both license texts and
+`KEV_CUDA_NOTICES.txt` beside the resulting library. Include these files when
+redistributing that binary. The ordinary shared Qwen build does not instantiate
+this optional attention kernel.

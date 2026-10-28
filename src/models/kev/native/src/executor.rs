@@ -1,4 +1,4 @@
-//! One complete causal row per question, shared Qwen backbone, Kev FP32 head.
+//! State/question eager execution, shared Qwen backbone, Kev FP32 head.
 use crate::{contract, head::PointerHead, processing::Row};
 use anyhow::{Context, Result, ensure};
 use omni_qwen3_5_native::{inputs::MultimodalInput, model::Model};
@@ -48,7 +48,8 @@ impl Executor {
     /// Caller has already verified the export; eager selection is explicit.
     pub(crate) fn load(dir: &Path, library: &Path) -> Result<Self> {
         let head = PointerHead::load(&dir.join("head.safetensors"))?;
-        let model = Model::load_with_graph(dir, library, false)?;
+        let mut model = Model::load_with_graph(dir, library, false)?;
+        model.enable_service_readout_numerics()?;
         Ok(Self { model, head })
     }
 
@@ -64,18 +65,29 @@ impl Executor {
             rows.iter().map(|r| r.ids.len()).sum::<usize>() <= contract::MAX_REQUEST_TOKENS,
             "too many computed tokens"
         );
+        let plans = crate::planning::plan(rows)?;
         let result = rows
             .iter()
-            .map(|row| {
+            .enumerate()
+            .map(|(index, row)| {
                 let input = MultimodalInput {
                     token_ids: &row.ids,
                     image_token_indices: &[],
                     image_embeddings: &[],
                     position_ids: [&row.positions, &row.positions, &row.positions],
                 };
-                let read = self
-                    .model
-                    .forward_multimodal_readout(&input, &row.readouts, &[])?;
+                let plan = plans[index];
+                let read = self.model.forward_segmented_readout(
+                    &input,
+                    plan.split,
+                    plan.state - plan.split,
+                    plan.question - (row.ids.len() - plan.split),
+                    plan.prefix - plan.split,
+                    248044,
+                    plan.count,
+                    plan.index,
+                    &row.readouts,
+                )?;
                 let (decide, options) = read.hidden.split_last().context("empty readout")?;
                 self.head.logits(
                     decide,

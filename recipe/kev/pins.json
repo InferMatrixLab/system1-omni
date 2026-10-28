@@ -281,5 +281,10 @@
       "adapter_model.safetensors": "90e817356246e7f18bfa7ca3d31794cd4fbeb3332a66a84cb51d9ceae925f2b2",
       "head.pt": "dd633435998ecc751ac538717a3742e32149500fabf7d7276287dbf0693f347c"
     }
+  },
+  "merge_numerics": {
+    "device": "cuda",
+    "accumulation": "float32",
+    "torch": "2.8.0+cu128"
   }
 }

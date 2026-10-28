@@ -21,7 +21,8 @@
     "reference_patch.cu",
     "reference_prep.cu",
     "reference_vision.cu",
-    "reference_vision_attention.cu"
+    "reference_vision_attention.cu",
+    "service_readout.cu"
   ],
   "models": [
     "src/models/cua_s1/native/",
@@ -30,7 +31,8 @@
     "src/models/decider/native/",
     "src/models/jemm/native/",
     "src/models/startlux/native/",
-    "src/models/omnijev/native/"
+    "src/models/omnijev/native/",
+    "src/models/kev/native/"
   ],
   "build": {
     "script": "build.sh",

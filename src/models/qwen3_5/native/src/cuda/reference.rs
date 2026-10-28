@@ -109,6 +109,17 @@ pub struct Reference {
     pub patch_destroy: unsafe extern "C" fn(*mut c_void) -> (),
 }
 impl Reference {
+    pub(super) fn resolve_torch28(lib: &libloading::Library) -> Option<Self> {
+        let mut r = Self::resolve(lib)?;
+        // SAFETY: optional signatures match ops.h; the Api retains the library.
+        unsafe {
+            r.rms_norm = *lib.get(b"cs1_torch28_rms_norm\0").ok()?;
+            r.add_rms_norm = *lib.get(b"cs1_torch28_add_rms_norm\0").ok()?;
+            r.attn_prep = *lib.get(b"cs1_torch28_attn_prep\0").ok()?;
+        }
+        Some(r)
+    }
+
     pub(super) fn resolve(lib: &libloading::Library) -> Option<Self> {
         // SAFETY: signatures match the additive cs1_reference_* declarations in ops.h.
         unsafe {

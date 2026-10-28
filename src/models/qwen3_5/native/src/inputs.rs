@@ -181,8 +181,26 @@ pub(crate) fn rotary_tables(
     theta: f64,
     sections: [usize; 3],
 ) -> (Vec<u8>, Vec<u8>) {
+    rotary_tables_with_precision(positions, half, theta, sections, false)
+}
+
+/// Kev casts the entire loaded backbone (including inv_freq buffers) to BF16.
+pub(crate) fn rotary_tables_with_precision(
+    positions: [&[i64]; 3],
+    half: usize,
+    theta: f64,
+    sections: [usize; 3],
+    bf16_inv: bool,
+) -> (Vec<u8>, Vec<u8>) {
     let inv: Vec<f32> = (0..half)
-        .map(|i| 1f32 / (theta as f32).powf((2 * i) as f32 / (2 * half) as f32))
+        .map(|i| {
+            let f = 1f32 / (theta as f32).powf((2 * i) as f32 / (2 * half) as f32);
+            if bf16_inv {
+                bf16::from_f32(f).to_f32()
+            } else {
+                f
+            }
+        })
         .collect();
     let mut cos = Vec::with_capacity(positions[0].len() * half * 2);
     let mut sin = Vec::with_capacity(cos.capacity());

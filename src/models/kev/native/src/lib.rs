@@ -5,6 +5,7 @@ pub mod engine;
 pub mod executor;
 pub mod head;
 pub mod http;
+mod planning;
 pub mod postprocess;
 pub mod processing;
 
