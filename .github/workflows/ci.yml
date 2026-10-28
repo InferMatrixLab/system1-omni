@@ -49,6 +49,10 @@ jobs:
         run: |
           python -m pip install pytest
           PYTHONPATH=src python -m pytest tests/clef -q
+      - name: D3 legacy and turbo reference profile tests
+        run: |
+          python -m pip install pytest pillow
+          PYTHONPATH=src python -m pytest tests/d3 -q
 
   cuda-contract:
     # The CUDA backend contract and its checker. No CUDA toolkit and no GPU: both
