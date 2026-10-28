@@ -25,7 +25,9 @@ to carry exactly the repo id and runtime digests checked in for
 from __future__ import annotations
 
 import hashlib
+from contextlib import contextmanager
 import json
+import re
 import sys
 import threading
 from importlib.machinery import EXTENSION_SUFFIXES, SOURCE_SUFFIXES
@@ -155,6 +157,55 @@ def put_first_on_sys_path(root: Path) -> str:
     return str(resolved)
 
 
+# Flat checkpoint modules overlap across profiles. Bind the process before any
+# import, including Hugging Face's copied transformers_modules namespace. Close
+# releases device state, never the process binding; a failed load also needs a
+# fresh process because imports may already have executed arbitrary package code.
+_RUNTIME_SELECTION = None
+_RUNTIME_IMPORT_LOCK = threading.RLock()
+
+
+@contextmanager
+def runtime_import_guard(root: Path, profile: str, identity: str, files: list[str]):
+    """Permit one verified package/profile for the lifetime of this process."""
+    global _RUNTIME_SELECTION
+    root = Path(root).resolve()
+    stems = {Path(name).stem for name in files if name.endswith(".py")}
+    # Include all names shared by either snapshot, even if this profile does not
+    # ship one of them (for example d3_compose in legacy).
+    stems |= {"d3_runtime", "d3_compose", "d3_fast", "d3_kernels", "d3_format",
+              "d3_server", "d3_engine", "modeling_d3", "pipeline_d3"}
+    def relevant():
+        return {name: module for name, module in list(sys.modules.items())
+                if name in stems
+                or any(re.fullmatch(re.escape(stem) + r"_[0-9a-f]{16}", name) for stem in stems)
+                or (name.startswith("transformers_modules.")
+                    and name.rsplit(".", 1)[-1] in stems)}
+    with _RUNTIME_IMPORT_LOCK:
+        key = (profile, str(root), identity)
+        if _RUNTIME_SELECTION is None:
+            if relevant():
+                raise RuntimeError("D3 package modules are already imported; restart with one selected profile")
+            _RUNTIME_SELECTION = {"key": key, "modules": {}, "failed": False}
+        selected = _RUNTIME_SELECTION
+        if selected["key"] != key or selected["failed"]:
+            raise RuntimeError("one D3 profile/package per process is selected; restart the worker")
+        current = relevant()
+        if any(selected["modules"].get(name) is not module for name, module in current.items()):
+            raise RuntimeError("D3 package modules were preimported outside the selected loader; restart")
+        put_first_on_sys_path(root)
+        saved = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True
+        try:
+            yield
+        except BaseException:
+            selected["failed"] = True
+            raise
+        finally:
+            selected["modules"] = relevant()
+            sys.dont_write_bytecode = saved
+
+
 class D3Executor:
     """Load and drive one immutable pinned d3 runtime instance."""
 
@@ -181,30 +232,22 @@ class D3Executor:
         verify_pinned_package(manifest)
         verify_runtime_files(root, manifest)
 
-        # Import the just-verified runtime the way upstream d3_server.py does:
-        # the package directory goes first on sys.path so the flat runtime
-        # modules (d3_runtime, d3_format, ...) resolve to the checkpoint's own
-        # copies. One worker process serves one package. The import runs with
-        # bytecode writing off: a __pycache__ it left next to the verified
-        # source is what the next gate run refuses.
-        put_first_on_sys_path(root)
-        saved_dont_write_bytecode = sys.dont_write_bytecode
-        sys.dont_write_bytecode = True
-        try:
+        with runtime_import_guard(
+            root, "legacy", _sha256_safe(root / MANIFEST_NAME),
+            list(manifest["runtime"]["files_sha256"]),
+        ):
             import d3_runtime
-        finally:
-            sys.dont_write_bytecode = saved_dont_write_bytecode
 
-        self.model = d3_runtime.D3.from_pretrained(
-            root,
-            device=device,
-            batch_size=batch_size,
-            verify=verify,
-            model_name=model_name,
-            max_length=max_length,
-            readout_dtype=readout_dtype,
-            permutation_average=permutation_average,
-        )
+            self.model = d3_runtime.D3.from_pretrained(
+                root,
+                device=device,
+                batch_size=batch_size,
+                verify=verify,
+                model_name=model_name,
+                max_length=max_length,
+                readout_dtype=readout_dtype,
+                permutation_average=permutation_average,
+            )
         self.model_name = self.model.model_name
         self.max_length = self.model.max_length
         self._image_unavailable = self.model.image_unavailable
