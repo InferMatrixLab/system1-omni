@@ -1,0 +1,18 @@
+
+running 7 tests
+test concurrent_packed_and_prefix_requests_preserve_routing_and_state ... Open-Jev-9B: validated SM90 long-prefill projection tiles enabled
+ok
+test grouped_forward_preserves_original_projection_sizes_and_graph_keys ... ok
+test nine_b_long_candidates_keep_prefix_off_and_independent ... Open-Jev-9B: validated SM90 long-prefill projection tiles enabled
+ok
+test packed_candidates_preserve_isolation_order_and_graph_shapes ... Open-Jev-9B: validated SM90 long-prefill projection tiles enabled
+ok
+test packed_prefix_matches_original_batches_across_budget_boundaries ... Open-Jev-9B: validated SM90 long-prefill projection tiles enabled
+Open-Jev-9B: validated SM90 long-prefill projection tiles enabled
+ok
+test pointwise_prefix_compaction_preserves_full_mixers_and_changed_inputs ... ok
+test text_prefix_buffers_grow_and_shrink_without_reusing_prior_contents ... Open-Jev-9B: validated SM90 long-prefill projection tiles enabled
+ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 48.77s
+

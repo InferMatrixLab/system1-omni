@@ -1,0 +1,16 @@
+{
+  "args": {
+    "candidate": "/home/psv/jev-optimization/experiments/068-vector-residual-norm/bin",
+    "out": "/home/psv/jev-optimization/experiments/085-review-packing/replay-shapes",
+    "manifest": "/home/psv/jev-optimization/experiments/085-review-packing/evidence/workloads/shapes.jsonl",
+    "exact_prefix": "1",
+    "prefix": "0",
+    "candidate_model": "/home/psv/jev-comparison/system1-9b",
+    "candidate_graph": "1"
+  },
+  "manifest_sha256": "fa3f5c3be9339b7ae458c614979a9f6f822d368477823100de51504fbd4bcf50",
+  "precision": "BF16",
+  "decision_flips": 0,
+  "max_probability_or_score_abs_drift": 0.001,
+  "gpu_visible": "2"
+}

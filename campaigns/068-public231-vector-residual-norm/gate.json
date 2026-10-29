@@ -1,0 +1,102 @@
+{
+  "native_graph": {
+    "baseline": "1",
+    "candidate": "1",
+    "change_declared": false
+  },
+  "baseline_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+  "tip_sha": "95c0e70f2cdf2a72df763d0247ba7f20f8a9327d",
+  "device": "NVIDIA L20X",
+  "compute_capability": "sm_90",
+  "clock": "post_to_body_json_and_schema_validation",
+  "baseline": {
+    "p50_ms": 14.323417097330093,
+    "p95_ms": 85.52232384681702,
+    "tail_2048_p95_ms": 115.72467535734177,
+    "QPS": 36.96661820347374,
+    "requests": 693
+  },
+  "tip": {
+    "p50_ms": 13.791825622320175,
+    "p95_ms": 83.55297148227692,
+    "tail_2048_p95_ms": 112.37351596355438,
+    "QPS": 38.232733098051995,
+    "requests": 693
+  },
+  "deltas": {
+    "p50_ms": -0.5315914750099182,
+    "p95_ms": -1.9693523645401,
+    "tail_2048_p95_ms": -3.351159393787384,
+    "QPS": 1.2661148945782514,
+    "requests": 0
+  },
+  "quality": [
+    {
+      "reference": "/home/psv/jev-optimization/runs/052-public231-actual-row-gemm/system1",
+      "round": 1,
+      "passed": true,
+      "compared_decisions": 231,
+      "failed_request_pairs": 0,
+      "decision_flips": 0,
+      "max_probability_drift": 0.0,
+      "max_score_drift": 0.0
+    },
+    {
+      "reference": "/home/psv/jev-optimization/runs/052-public231-actual-row-gemm/system1",
+      "round": 2,
+      "passed": true,
+      "compared_decisions": 231,
+      "failed_request_pairs": 0,
+      "decision_flips": 0,
+      "max_probability_drift": 0.0,
+      "max_score_drift": 0.0
+    },
+    {
+      "reference": "/home/psv/jev-optimization/runs/052-public231-actual-row-gemm/system1",
+      "round": 3,
+      "passed": true,
+      "compared_decisions": 231,
+      "failed_request_pairs": 0,
+      "decision_flips": 0,
+      "max_probability_drift": 0.0,
+      "max_score_drift": 0.0
+    },
+    {
+      "reference": "/home/psv/jev-optimization/runs/005-public231-baseline/system1",
+      "round": 1,
+      "passed": true,
+      "compared_decisions": 231,
+      "failed_request_pairs": 0,
+      "decision_flips": 0,
+      "max_probability_drift": 0.0,
+      "max_score_drift": 0.0
+    },
+    {
+      "reference": "/home/psv/jev-optimization/runs/005-public231-baseline/system1",
+      "round": 2,
+      "passed": true,
+      "compared_decisions": 231,
+      "failed_request_pairs": 0,
+      "decision_flips": 0,
+      "max_probability_drift": 0.0,
+      "max_score_drift": 0.0
+    },
+    {
+      "reference": "/home/psv/jev-optimization/runs/005-public231-baseline/system1",
+      "round": 3,
+      "passed": true,
+      "compared_decisions": 231,
+      "failed_request_pairs": 0,
+      "decision_flips": 0,
+      "max_probability_drift": 0.0,
+      "max_score_drift": 0.0
+    }
+  ],
+  "score_argmax_flips": 0,
+  "saved_prefix_tokens": 941376,
+  "request_local_prefix_is_declared_optimization_variable": true,
+  "RSI_phase": "kernel",
+  "primary_change": "Vectorize aligned4096 residual norm memory operations with shared transpose preserving original FP32 reduction order; retain scalar fallback",
+  "verdict": "KEEP",
+  "scope": "Full Public231 C1 only; overall cross-workload vLLM target is not established"
+}

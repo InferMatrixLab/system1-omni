@@ -1,0 +1,6 @@
+{
+  "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-reversed-c16-r3/responses.jsonl",
+  "sha256": "2b833cf3b52dc4934c7e0d260a23c6fcb880f000bd5301324a96291fd3acc4f6",
+  "records": 231,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}

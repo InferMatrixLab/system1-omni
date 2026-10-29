@@ -1,0 +1,6 @@
+{
+  "source": "runs/083-c16-queue-prefix0/system1/diag-original-c16-r1/responses.jsonl",
+  "sha256": "8cabba54d007425942b5e03d84e200bc617fc1c904da25c4feafd9089b90313a",
+  "records": 231,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}

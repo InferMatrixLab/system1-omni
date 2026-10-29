@@ -1,0 +1,13 @@
+   Compiling omni-runtime v0.1.0 (/home/psv/system1-omni/src/runtime)
+   Compiling omni-qwen3-5-native v0.1.0 (/home/psv/system1-omni/src/models/qwen3_5/native)
+   Compiling omni-laya v0.1.0 (/home/psv/system1-omni/src/models/laya)
+   Compiling omni-jev v0.1.0 (/home/psv/system1-omni/src/frontend)
+   Compiling omni-clef v0.1.0 (/home/psv/system1-omni/src/models/clef/native)
+   Compiling omni-cua-s1-native v0.1.0 (/home/psv/system1-omni/src/models/cua_s1/native)
+   Compiling omni-omnijev-native v0.1.0 (/home/psv/system1-omni/src/models/omnijev/native)
+   Compiling omni-jemm-native v0.1.0 (/home/psv/system1-omni/src/models/jemm/native)
+   Compiling omni-open-jev-native v0.1.0 (/home/psv/system1-omni/src/models/open_jev/native)
+   Compiling omni-decider-native v0.1.0 (/home/psv/system1-omni/src/models/decider/native)
+   Compiling omni-startlux-native v0.1.0 (/home/psv/system1-omni/src/models/startlux/native)
+   Compiling omni-jev-vl-native v0.1.0 (/home/psv/system1-omni/src/models/jev_vl/native)
+    Finished `release` profile [optimized] target(s) in 6.98s

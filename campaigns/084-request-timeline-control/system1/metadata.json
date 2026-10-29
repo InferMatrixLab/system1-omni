@@ -1,0 +1,43 @@
+{
+  "trace": false,
+  "trace_design": "experiments/084-request-timeline/plan.json",
+  "native_graph": "1",
+  "gpu": "NVIDIA L20X",
+  "gpu_ids": "2",
+  "device_evidence": "2, NVIDIA L20X, GPU-e7921766-67c6-bc17-6df1-eca427957832, 570.133.20, 143771 MiB, 8.9",
+  "compute_capability": "sm_90",
+  "driver": "570.133.20",
+  "cuda": "13.0",
+  "precision": "BF16",
+  "model_revision": "ZefanCai/Open-Jev-9B@47e966881e489511c0c7f5633a9e1960a676a551",
+  "runtime_revision": "95c0e70f2cdf2a72df763d0247ba7f20f8a9327d",
+  "exact_request_local_prefix": true,
+  "vllm_engine_prefix": false,
+  "cache_policy": "request-local exact prefix; recomputed every request; no response cache",
+  "cuda_evidence": {
+    "hardware": {
+      "name": "NVIDIA L20X",
+      "sm": 90,
+      "sm_count": 132,
+      "memory": 150121283584,
+      "cuda": "13.0"
+    },
+    "worker_log": "server-0.log"
+  },
+  "reservation": "gpu run, inherited CUDA_VISIBLE_DEVICES=2",
+  "commands": [
+    [
+      "/home/psv/jev-optimization/experiments/068-vector-residual-norm/bin/omni-open-jev-native"
+    ],
+    [
+      "/home/psv/jev-optimization/experiments/068-vector-residual-norm/bin/omni-jev"
+    ]
+  ],
+  "patch": "",
+  "binary_hashes": {
+    "libqwen3_5_cuda.so": "003770ac57133ac6e70a31af35606621c4d6d58ef9ec1ad56ec32b9d7a3d1bed",
+    "omni-open-jev-native": "412e29eaa86f5be501d0f16dad258cba413c24aa98af0532375bb93deccfec7d",
+    "omni-jev": "11eeb8b9e94fee121096a243d510602aff3d4d0902e0c99c8f60ab71a4c4eea8"
+  },
+  "frozen_provenance_source": "/home/psv/jev-optimization/runs/068-public231-vector-residual-norm/system1/metadata.json"
+}

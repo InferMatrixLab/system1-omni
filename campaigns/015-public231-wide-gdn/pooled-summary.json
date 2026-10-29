@@ -1,0 +1,234 @@
+[
+  {
+    "backend": "system1",
+    "concurrency": 1,
+    "requests": 693,
+    "errors": 0,
+    "p50_ms": 17.195280641317368,
+    "p95_ms": 152.69723907113075,
+    "QPS": 24.067803333993552,
+    "rounds": [
+      {
+        "successful_latency_p50_ms": 17.336081713438034,
+        "successful_latency_p95_ms": 151.17431059479713,
+        "requests_per_second": 23.896244269001876
+      },
+      {
+        "successful_latency_p50_ms": 17.253465950489044,
+        "successful_latency_p95_ms": 152.7223251760006,
+        "requests_per_second": 24.096456622430154
+      },
+      {
+        "successful_latency_p50_ms": 16.90848171710968,
+        "successful_latency_p95_ms": 154.23573926091194,
+        "requests_per_second": 24.212843686008572
+      }
+    ],
+    "device": "NVIDIA L20X",
+    "compute_capability": "sm_90",
+    "runtime_revision": "476c8eb5acee26272b690f2166c8e3974767e9ad"
+  },
+  {
+    "backend": "system1",
+    "concurrency": 8,
+    "requests": 693,
+    "errors": 0,
+    "p50_ms": 124.09469857811928,
+    "p95_ms": 817.8118579089642,
+    "QPS": 26.834582965456562,
+    "rounds": [
+      {
+        "successful_latency_p50_ms": 124.21980500221252,
+        "successful_latency_p95_ms": 817.8118579089642,
+        "requests_per_second": 26.741051133223493
+      },
+      {
+        "successful_latency_p50_ms": 123.61537292599678,
+        "successful_latency_p95_ms": 814.6790601313114,
+        "requests_per_second": 26.847065994166652
+      },
+      {
+        "successful_latency_p50_ms": 123.92303720116615,
+        "successful_latency_p95_ms": 819.5956274867058,
+        "requests_per_second": 26.916212277055724
+      }
+    ],
+    "device": "NVIDIA L20X",
+    "compute_capability": "sm_90",
+    "runtime_revision": "476c8eb5acee26272b690f2166c8e3974767e9ad"
+  },
+  {
+    "backend": "system1",
+    "concurrency": 16,
+    "requests": 693,
+    "errors": 0,
+    "p50_ms": 238.7978956103325,
+    "p95_ms": 1565.6379237771034,
+    "QPS": 25.14790548116254,
+    "rounds": [
+      {
+        "successful_latency_p50_ms": 238.07935416698456,
+        "successful_latency_p95_ms": 1397.2452320158482,
+        "requests_per_second": 26.925079730138933
+      },
+      {
+        "successful_latency_p50_ms": 237.5403568148613,
+        "successful_latency_p95_ms": 1395.7135006785393,
+        "requests_per_second": 26.97051669797784
+      },
+      {
+        "successful_latency_p50_ms": 240.45412242412567,
+        "successful_latency_p95_ms": 1690.9639313817024,
+        "requests_per_second": 22.18445434346292
+      }
+    ],
+    "device": "NVIDIA L20X",
+    "compute_capability": "sm_90",
+    "runtime_revision": "476c8eb5acee26272b690f2166c8e3974767e9ad"
+  },
+  {
+    "backend": "system1",
+    "concurrency": 32,
+    "requests": 693,
+    "errors": 0,
+    "p50_ms": 973.8353937864304,
+    "p95_ms": 2703.6664858460426,
+    "QPS": 24.652796098194486,
+    "rounds": [
+      {
+        "successful_latency_p50_ms": 1065.0630295276642,
+        "successful_latency_p95_ms": 2722.39126637578,
+        "requests_per_second": 21.09592082862837
+      },
+      {
+        "successful_latency_p50_ms": 452.57052779197693,
+        "successful_latency_p95_ms": 2669.277396053076,
+        "requests_per_second": 26.93793221957559
+      },
+      {
+        "successful_latency_p50_ms": 453.70054617524147,
+        "successful_latency_p95_ms": 2676.751386374235,
+        "requests_per_second": 26.906929648475796
+      }
+    ],
+    "device": "NVIDIA L20X",
+    "compute_capability": "sm_90",
+    "runtime_revision": "476c8eb5acee26272b690f2166c8e3974767e9ad"
+  },
+  {
+    "backend": "vllm-jev",
+    "concurrency": 1,
+    "requests": 693,
+    "errors": 0,
+    "p50_ms": 61.08900159597397,
+    "p95_ms": 115.37105217576027,
+    "QPS": 15.972889310208119,
+    "rounds": [
+      {
+        "successful_latency_p50_ms": 62.99830600619316,
+        "successful_latency_p95_ms": 127.67159193754196,
+        "requests_per_second": 15.54096673150423
+      },
+      {
+        "successful_latency_p50_ms": 61.439771205186844,
+        "successful_latency_p95_ms": 112.09697276353836,
+        "requests_per_second": 16.031537993649856
+      },
+      {
+        "successful_latency_p50_ms": 60.2494478225708,
+        "successful_latency_p95_ms": 112.44495958089828,
+        "requests_per_second": 16.36791561528904
+      }
+    ],
+    "device": "NVIDIA L20X",
+    "compute_capability": "sm_90",
+    "runtime_revision": "487ff7765a47e48b20fc2d48c14314fb28feaa51"
+  },
+  {
+    "backend": "vllm-jev",
+    "concurrency": 8,
+    "requests": 693,
+    "errors": 0,
+    "p50_ms": 110.9483502805233,
+    "p95_ms": 591.3512855768204,
+    "QPS": 36.61762699102753,
+    "rounds": [
+      {
+        "successful_latency_p50_ms": 118.58973279595375,
+        "successful_latency_p95_ms": 568.293884396553,
+        "requests_per_second": 36.38575780783206
+      },
+      {
+        "successful_latency_p50_ms": 109.23250764608383,
+        "successful_latency_p95_ms": 593.2249538600445,
+        "requests_per_second": 36.75832009923206
+      },
+      {
+        "successful_latency_p50_ms": 110.12382805347443,
+        "successful_latency_p95_ms": 593.1236445903778,
+        "requests_per_second": 36.71105694372789
+      }
+    ],
+    "device": "NVIDIA L20X",
+    "compute_capability": "sm_90",
+    "runtime_revision": "487ff7765a47e48b20fc2d48c14314fb28feaa51"
+  },
+  {
+    "backend": "vllm-jev",
+    "concurrency": 16,
+    "requests": 693,
+    "errors": 0,
+    "p50_ms": 169.21209171414375,
+    "p95_ms": 1011.8734464049339,
+    "QPS": 39.29709890408295,
+    "rounds": [
+      {
+        "successful_latency_p50_ms": 170.7451343536377,
+        "successful_latency_p95_ms": 1017.0407854020596,
+        "requests_per_second": 39.142476777402386
+      },
+      {
+        "successful_latency_p50_ms": 164.6907925605774,
+        "successful_latency_p95_ms": 987.9844821989536,
+        "requests_per_second": 39.32362363452795
+      },
+      {
+        "successful_latency_p50_ms": 162.76870667934418,
+        "successful_latency_p95_ms": 1004.8225261271,
+        "requests_per_second": 39.426248041917894
+      }
+    ],
+    "device": "NVIDIA L20X",
+    "compute_capability": "sm_90",
+    "runtime_revision": "487ff7765a47e48b20fc2d48c14314fb28feaa51"
+  },
+  {
+    "backend": "vllm-jev",
+    "concurrency": 32,
+    "requests": 693,
+    "errors": 0,
+    "p50_ms": 380.59649243950844,
+    "p95_ms": 1837.5300094485283,
+    "QPS": 40.48742780178599,
+    "rounds": [
+      {
+        "successful_latency_p50_ms": 425.4072494804859,
+        "successful_latency_p95_ms": 1835.062075406313,
+        "requests_per_second": 40.563713319622174
+      },
+      {
+        "successful_latency_p50_ms": 387.5415399670601,
+        "successful_latency_p95_ms": 1819.609358906746,
+        "requests_per_second": 40.40272634073944
+      },
+      {
+        "successful_latency_p50_ms": 273.27531576156616,
+        "successful_latency_p95_ms": 1838.3453860878944,
+        "requests_per_second": 40.4961666666019
+      }
+    ],
+    "device": "NVIDIA L20X",
+    "compute_capability": "sm_90",
+    "runtime_revision": "487ff7765a47e48b20fc2d48c14314fb28feaa51"
+  }
+]

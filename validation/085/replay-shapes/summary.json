@@ -1,0 +1,9 @@
+{
+  "requests": 192,
+  "decision_flips": 0,
+  "max_probability_delta": 0.0,
+  "max_score_delta": 0,
+  "GPU_VISIBLE": "2",
+  "failures": [],
+  "note": "Exploratory fresh-process outputs; timing is not acceptance evidence."
+}

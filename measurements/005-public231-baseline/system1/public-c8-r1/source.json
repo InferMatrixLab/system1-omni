@@ -1,0 +1,6 @@
+{
+  "source": "runs/005-public231-baseline/system1/public-c8-r1/responses.jsonl",
+  "sha256": "acca75d3355eef4a765e92484acd7222f0a962094c1796aa8e07c9beb06b7221",
+  "records": 231,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}

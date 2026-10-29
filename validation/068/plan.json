@@ -1,0 +1,21 @@
+{
+  "phase": "kernel",
+  "primary_change": "4096-wide aligned residual RMSNorm: 128-bit global memory operations and BF16 registers; shared transpose preserves original 256-thread strided FP32 accumulation order",
+  "baseline_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+  "evidence": "067 exact variant:33/33 bitwise;11 rowcounts speedups1.818..3.459;054 residual norm 4.913% Public GPUkernel time",
+  "scope": "Only D4096 and every pointer aligned16; generic fallback for any unaligned pointer. Existing cached2560/5120 untouched. Same stream,ABI,allocations,weights,queue and request-local cache policy.",
+  "alternatives": [
+    "010 float register caching rejected; new vector loads/stores and shared transpose are distinct",
+    "056 virtual128thread norm slower",
+    "067 packed sum reassociates FP32 and changed24/33cases; omit",
+    "066 GEMM candidate search no cheap generic selection rule yet; defer"
+  ],
+  "validation": [
+    "Rust reference and exact aligned-vs-each-pointer-unaligned regression; CUDA graph changed inputs,guards,rows1..8192 vs052",
+    "CPU fmt/clippy/workspace andcuda-contract;GPU norm and7OpenJev eager+graph; final production build aftertests",
+    "231+192 outputs vsoriginal and052, zero flips maxabs<=.001",
+    "Freeze SHA and binaries;smoke thenonefixed57screen vs052;3x231 C1/8/16/32 unless screenDROP",
+    "KEEP only P50/P95/tail2048P95strictlylower,QPSstrictlyhigher vs052;no rescue;onlyKEEP fullmatrix2launches x16cells"
+  ],
+  "human_authorization": "Existing active user goal: optimize Open-Jev-9B to beat vllm-jev; choose decisions autonomously; no PR required for local optimization"
+}

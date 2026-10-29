@@ -1,0 +1,51 @@
+{
+  "gpu": "NVIDIA L20X",
+  "gpu_ids": "3",
+  "device_evidence": "3, NVIDIA L20X, GPU-712b0057-e00a-8705-40e1-6ef88f1426c1, 570.133.20, 143771 MiB, 8.9",
+  "compute_capability": "sm_90",
+  "driver": "570.133.20",
+  "cuda": "13.0",
+  "precision": "BF16",
+  "model_revision": "ZefanCai/Open-Jev-9B@47e966881e489511c0c7f5633a9e1960a676a551",
+  "runtime_revision": "487ff7765a47e48b20fc2d48c14314fb28feaa51",
+  "exact_request_local_prefix": false,
+  "vllm_engine_prefix": true,
+  "cache_policy": "per-request prefix reuse configured explicitly; no historical request or answer reuse",
+  "cuda_evidence": {
+    "hardware": {
+      "name": "NVIDIA L20X",
+      "sm": 90,
+      "sm_count": 132,
+      "memory": 150121283584,
+      "cuda": "13.0"
+    },
+    "worker_log": "server-0.log"
+  },
+  "reservation": "gpu run, inherited CUDA_VISIBLE_DEVICES=3",
+  "commands": [
+    [
+      "/home/psv/vllm-jev/.venv/bin/vllm-jev",
+      "serve",
+      "ZefanCai/Open-Jev-9B",
+      "--workspace",
+      "/home/psv/jev-comparison/vllm-workspace",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "21902",
+      "--max-model-len",
+      "8192",
+      "--max-num-seqs",
+      "128",
+      "--max-num-batched-tokens",
+      "8192",
+      "--gpu-memory-utilization",
+      "0.45",
+      "--enable-prefix-caching",
+      "--dtype",
+      "bfloat16"
+    ]
+  ],
+  "patch": "",
+  "binary_hashes": null
+}

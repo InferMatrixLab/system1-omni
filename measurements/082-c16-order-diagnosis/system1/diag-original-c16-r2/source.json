@@ -1,0 +1,6 @@
+{
+  "source": "runs/082-c16-order-diagnosis/system1/diag-original-c16-r2/responses.jsonl",
+  "sha256": "b53384686057dcdc0715b9c8448141a905553ab104638a762323afae58bfa3e4",
+  "records": 231,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}

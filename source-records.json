@@ -1,0 +1,1934 @@
+[
+  {
+    "source": "runs/005-public231-baseline/system1/public-c1-r1/responses.jsonl",
+    "sha256": "88088a90c75d69ef956510b60432e2cf0d06e1b8293063922f2860f826ed6797",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/system1/public-c1-r2/responses.jsonl",
+    "sha256": "9629d68f16eb379c5ab9328845538f78dfa1d8068bb66cfafe2c26f5c3b3750f",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/system1/public-c1-r3/responses.jsonl",
+    "sha256": "92c99f9c1842a448dab5db4c1ed1f1b6c313493432a1947d398c5b0465ce2d79",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/system1/public-c16-r1/responses.jsonl",
+    "sha256": "cd64c2330cf25c52aacc3ec829996c2608c5d084dccad55ef010648866958665",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/system1/public-c16-r2/responses.jsonl",
+    "sha256": "c55f58a4b9a786974e58cd00eec553a221c44d57d025573b3699ead597dca296",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/system1/public-c16-r3/responses.jsonl",
+    "sha256": "faf7a3064e91a61b5d0f252153894a9f627638263d85c2f490ed0936bb885626",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/system1/public-c32-r1/responses.jsonl",
+    "sha256": "75ae494a76049217fafd016cf56466918258dbda36da0682df9579096c4c293f",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/system1/public-c32-r2/responses.jsonl",
+    "sha256": "09a5b2845192ffaef0320c7b68b84dbe2db231a81a11109135f978efd8ba1187",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/system1/public-c32-r3/responses.jsonl",
+    "sha256": "411231dd90e10d41d3412afdec83864af0bec1b5481a9ce2c2f4536ad4351068",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/system1/public-c8-r1/responses.jsonl",
+    "sha256": "acca75d3355eef4a765e92484acd7222f0a962094c1796aa8e07c9beb06b7221",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/system1/public-c8-r2/responses.jsonl",
+    "sha256": "cef7ea982910d3f7805545db8940ae005b10ff4138b97027b95586f55a4eb0a8",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/system1/public-c8-r3/responses.jsonl",
+    "sha256": "a8e764275723ecf8f0f2bcdaf5f9fcbd3416f4556503bfb1d50526c59ecc46b5",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/vllm-jev/public-c1-r1/responses.jsonl",
+    "sha256": "09740794c9b0853f7ce771df77a097be3520125eb26e419d19f425fb5c3c45a1",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/vllm-jev/public-c1-r2/responses.jsonl",
+    "sha256": "c40d16c17a5747710c9414fa432ba6b1a151d1248a80612234d8c3909b1c7be4",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/vllm-jev/public-c1-r3/responses.jsonl",
+    "sha256": "2aa162b8ce7cb80cc199cfb1728255618449ba4d76b5c2dfb8ca433d0ddec0c6",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/vllm-jev/public-c16-r1/responses.jsonl",
+    "sha256": "b8e3e716f1637e5e27f646e28fa8c22a402af888c2da1782c4786cee730c6931",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/vllm-jev/public-c16-r2/responses.jsonl",
+    "sha256": "9af7e33c6ab047b6e29aeb2bab48165072b26192087f024123c401857d9ef1d9",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/vllm-jev/public-c16-r3/responses.jsonl",
+    "sha256": "fdf814dd5e564675c2f959e9a576393084a4195f5dc7737cf7f48c8e1c999953",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/vllm-jev/public-c32-r1/responses.jsonl",
+    "sha256": "8b5d1a71a0d5d2dfc54fdf36637c6d71ba1b61e85b13fcd43fed18692b0ade12",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/vllm-jev/public-c32-r2/responses.jsonl",
+    "sha256": "65edf5bd2a42d7cf10185b77d5dcb90cbe8b9cfd760ff30f8e1124e700957a3d",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/vllm-jev/public-c32-r3/responses.jsonl",
+    "sha256": "6bb78ac0ac5ce86b1f876bd761cab95711279e050106ed608d025086ce4b6808",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/vllm-jev/public-c8-r1/responses.jsonl",
+    "sha256": "a5f38e1578a164f1aca87caa08eb580f524d019df8c175d3ac427d90aea072b8",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/vllm-jev/public-c8-r2/responses.jsonl",
+    "sha256": "e5fb8a98f76d3bb95c6bf6fd8751444224147582cc2823733e3f8909ab32a0a6",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/005-public231-baseline/vllm-jev/public-c8-r3/responses.jsonl",
+    "sha256": "4ab66055ee6706805ca7de19778e1a6c092d00b321ebe9618ceeb425903ae1f5",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/system1/public-c1-r1/responses.jsonl",
+    "sha256": "f433bde43356d53206d83bf0d0e83b74cf277bad5fd542011cd6e89081e9aed5",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/system1/public-c1-r2/responses.jsonl",
+    "sha256": "eff21175d937565197003a7fd82403bb796889c018f0cbfdfd5e9507a3387b47",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/system1/public-c1-r3/responses.jsonl",
+    "sha256": "d660efde9dc57afe6f9959c6c428cfc9eacad80fd6ce814c2d15042b502dc5bb",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/system1/public-c16-r1/responses.jsonl",
+    "sha256": "6654635b0c926abeaa6629792bfeadb4c5f4b4f7efe08ba2899855481f8ba415",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/system1/public-c16-r2/responses.jsonl",
+    "sha256": "feefbccf426e6f27be54f7fb8c6ef9b871280324c40598782b0a276d15623584",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/system1/public-c16-r3/responses.jsonl",
+    "sha256": "5731b7d11ba1b66b1f89fd06afc3ad7c02ca71533aad8d05eabf79fcd45b88bd",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/system1/public-c32-r1/responses.jsonl",
+    "sha256": "2975695cab56d907b05e5f792b1b79bb4edb3bc6e31e08d9ce9b23f4a5ffa05b",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/system1/public-c32-r2/responses.jsonl",
+    "sha256": "9ed5a5e0659d3b0519ddef246ea2a6a551bcbea7785e3e91496bff8543ea6cfc",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/system1/public-c32-r3/responses.jsonl",
+    "sha256": "aa87e43cdb9b98971ca730d018e9391845750581f267932c38f53be10681cd58",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/system1/public-c8-r1/responses.jsonl",
+    "sha256": "6423f27cffdc9848ed66c3038ad366cbc4df5e09cd4b033fec5540ec19c54f8f",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/system1/public-c8-r2/responses.jsonl",
+    "sha256": "794d54794bb214ce328db9081c7993c080356a25f948e1708ce7399f0885bd08",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/system1/public-c8-r3/responses.jsonl",
+    "sha256": "ada0ba590abd8a964af1d94c2a366d1335eb0d25e0a69bdd18b8ad728795721d",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/vllm-jev/public-c1-r1/responses.jsonl",
+    "sha256": "1cb5bfa20e0df7860d12790bc02b8763efc29531e643148c3acf56f4ec4bf227",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/vllm-jev/public-c1-r2/responses.jsonl",
+    "sha256": "7249ee0250d501a9d01ad3bfbdd0d1648351f33fa8f1ecd41e93aee30e679260",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/vllm-jev/public-c1-r3/responses.jsonl",
+    "sha256": "48de0845e9d1b06e85356e09699f66d0838e67c6f2718c721d63a59b862d1922",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/vllm-jev/public-c16-r1/responses.jsonl",
+    "sha256": "cb8e296913c85c182c7bed336af1efff29c2eafde49f30f046e12357dec6a6b8",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/vllm-jev/public-c16-r2/responses.jsonl",
+    "sha256": "715665bcf295727db436d1d96fca44945a6207db92231934aea72c0284922596",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/vllm-jev/public-c16-r3/responses.jsonl",
+    "sha256": "5c182e91e9def7b351ea6b7d930ffa9b44937f854fcc78bfb38117b51a9270ee",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/vllm-jev/public-c32-r1/responses.jsonl",
+    "sha256": "bd9f7ea352b1f6bae1dd87562e17a609d126d7eb9f19a20a95904f47ed935816",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/vllm-jev/public-c32-r2/responses.jsonl",
+    "sha256": "0d8ff321b51dfe4793322756b02098d60d0061b0c025800853a497d655fa96e3",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/vllm-jev/public-c32-r3/responses.jsonl",
+    "sha256": "c53bf6a3f9f74e463ad0aca8d639b80a2f760312065fc5cdc7efc4e5b2060104",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/vllm-jev/public-c8-r1/responses.jsonl",
+    "sha256": "a57b6ebf936a8f8fe370676459bfca67aedda401e499afb97b5297305a08d968",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/vllm-jev/public-c8-r2/responses.jsonl",
+    "sha256": "a9aa6568e01c5bba8c921c4a3e11d1046dea222a8e56bed226ac6cd65564ac53",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/015-public231-wide-gdn/vllm-jev/public-c8-r3/responses.jsonl",
+    "sha256": "332972c175048b064aa3bcc231ec8d9625effc5142b26493501b0502a0f1d517",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t128-c1/responses.jsonl",
+    "sha256": "472d4c785c2f68f097aff720e186d6680f2f78468fc5a625a5565869dbfa531a",
+    "records": 528,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t128-c16/responses.jsonl",
+    "sha256": "caf7b6431adaab7ae18b09175abe2077d573775659e99d3219bae06f6da5f333",
+    "records": 2496,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t128-c32/responses.jsonl",
+    "sha256": "5837bff7fbd9913a6d30b4623b6ca5d9ee97dd80c7b265823251da08b999ac21",
+    "records": 2592,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t128-c8/responses.jsonl",
+    "sha256": "92da6408593c1ed935e6266232fc792ac32ce0357ee7e5ef4b05085000097019",
+    "records": 1968,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t2048-c1/responses.jsonl",
+    "sha256": "1056ef4d72b056e8b0d3c300a769300eb1f8cd39746a410603a8f3b8433a2a40",
+    "records": 336,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t2048-c16/responses.jsonl",
+    "sha256": "bf9f9588fd35a7138a4d8c25e0d1878d359c14aa760ac1e22bf5c7c6ef1d260c",
+    "records": 432,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t2048-c32/responses.jsonl",
+    "sha256": "ef2cece3fc8339aba9bde3a3cd143050cfe214a86faf81ec0b70feed4b0d386a",
+    "records": 432,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t2048-c8/responses.jsonl",
+    "sha256": "0ffd1904fdaf62b3b417a0dae32332a60fcf01a1251ab792a6d8c873a65666f5",
+    "records": 432,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t4096-c1/responses.jsonl",
+    "sha256": "e7afea5ac518b81a32c23e746262cbdfb6cbdce3700d92aa95ebdc64dcb2575a",
+    "records": 240,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t4096-c16/responses.jsonl",
+    "sha256": "14e7913b2d733d6756f41fd045bba76526dd2579df1a5660f1dfc466092bbdbc",
+    "records": 288,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t4096-c32/responses.jsonl",
+    "sha256": "b6fa51038024f95a107da08240a6421c9e0aeb4e23e3551486cacd75bd3ec701",
+    "records": 288,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t4096-c8/responses.jsonl",
+    "sha256": "1180dbe72dd8a2f053ceef700969d76aa86aea0218219653296f6d02f06ad038",
+    "records": 288,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t512-c1/responses.jsonl",
+    "sha256": "638fad8df6ae5d398af73681c5f45e414bfb0566409211126656241e2ab6329a",
+    "records": 384,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t512-c16/responses.jsonl",
+    "sha256": "4ee540f6817a78e5dd405bd4bd4abefeb5a02126ba477cb8454b80d34517aa1b",
+    "records": 720,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t512-c32/responses.jsonl",
+    "sha256": "639c75e2e25408dcafff861e1dffc6fb83c119c3790bbc3c2c6c5904a34c7377",
+    "records": 720,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r1/t512-c8/responses.jsonl",
+    "sha256": "a806e513ce78522e05e5fa683be79a7091a0b838eb2f1b07c482663071161aec",
+    "records": 672,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t128-c1/responses.jsonl",
+    "sha256": "f0514f762e645fc4c5fda70cf107023969863d5bf6351bf20055918ad72a8c0a",
+    "records": 576,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t128-c16/responses.jsonl",
+    "sha256": "16fd905672d8a43bbf9414da6a9298a5dfc02546fec0acae663b64b1beb9b654",
+    "records": 2496,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t128-c32/responses.jsonl",
+    "sha256": "6aabd2dc871eeb6d43aa0481f698709824d73a8b2aabe17adf9be2d3d967f93c",
+    "records": 2592,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t128-c8/responses.jsonl",
+    "sha256": "f3d5188c3a81889a7dc1cfd328f679b0224bf890416c4d47a06f39594e828b88",
+    "records": 2016,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t2048-c1/responses.jsonl",
+    "sha256": "01763eb02bf7740aebacbd943c730fbb2954c5a379049009ec5b5d4aee502c47",
+    "records": 336,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t2048-c16/responses.jsonl",
+    "sha256": "cd36f738c9f9e6e7bb7127159db64e12086a55b79922ad668c3752a48b670d44",
+    "records": 432,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t2048-c32/responses.jsonl",
+    "sha256": "7505459cd9c111b252fe825bcf5e06354479c801921aaafc28c1a963f3a9c034",
+    "records": 432,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t2048-c8/responses.jsonl",
+    "sha256": "d55c27adb06a4c586634fcbba3b8667e4985e2c7795f61d00dcb0a53b6790423",
+    "records": 432,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t4096-c1/responses.jsonl",
+    "sha256": "8a8e9fab1f0915f10dbee6d1f4a37a3470fdda6cbe16e82032a8f14d7c5d76ce",
+    "records": 240,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t4096-c16/responses.jsonl",
+    "sha256": "f271edf28e02e6ff539f45dc26d73b5c555aff2397851059ca1687178d527e86",
+    "records": 288,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t4096-c32/responses.jsonl",
+    "sha256": "17e9e6619d85f18b9e61cdf681d37f433cc720d85f10e9d95244d6e8c111f2c9",
+    "records": 288,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t4096-c8/responses.jsonl",
+    "sha256": "0d7c7636f37cadaf927cef0bdd6b0221ef518576985240ef763c49073b22f059",
+    "records": 288,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t512-c1/responses.jsonl",
+    "sha256": "06ade4ce3b19ac9daccc9c7b20ec7ebf50889d149f1c18dd752a8ff7283d217b",
+    "records": 432,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t512-c16/responses.jsonl",
+    "sha256": "bb6e98e812d709a47c4fba56e37a5e24cb68e935b90af225ae3fe16f890945e0",
+    "records": 720,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t512-c32/responses.jsonl",
+    "sha256": "18ead05a8532a0e519ce35b7e3df713c295e7bf43379e1bb9e23c4e61cc7b61b",
+    "records": 720,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t512-c8/responses.jsonl",
+    "sha256": "5477b183f53fde1fe99184e34a68db4a978e8dfd303f46aa789eaceb161c32ca",
+    "records": 672,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/068-public231-vector-residual-norm/system1/public-c1-r1/responses.jsonl",
+    "sha256": "0065325ac33c2ba5547c3275800c7e02e42447f95bb9cb55f71efb5e79c89b48",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/068-public231-vector-residual-norm/system1/public-c1-r2/responses.jsonl",
+    "sha256": "0cd733ed8a0deff558f37d88d8cebb340e37ecd969f1390516e04a431eb4db76",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/068-public231-vector-residual-norm/system1/public-c1-r3/responses.jsonl",
+    "sha256": "e157fdac6059d05f475d2599f3614fd99b862ecfced0efe3ab17a4678adb049a",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/068-public231-vector-residual-norm/system1/public-c16-r1/responses.jsonl",
+    "sha256": "61cbf6239774b90c76a4438c27bdacf44409754950453281c848f53ae9765da0",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/068-public231-vector-residual-norm/system1/public-c16-r2/responses.jsonl",
+    "sha256": "118c7a7077bb6ac102b3ea267c87b93b6f32aa47c2d6f4cd5a878ab540e85dbe",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/068-public231-vector-residual-norm/system1/public-c16-r3/responses.jsonl",
+    "sha256": "5260468ab6212f5f28ae37a893e2f286aac1053f9c144e3825d36e44c5f06e34",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/068-public231-vector-residual-norm/system1/public-c32-r1/responses.jsonl",
+    "sha256": "1f5cf194ce071eb90971fd2ff63e8040d854b2ecede5a97ced8c714f5ac3c8a1",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/068-public231-vector-residual-norm/system1/public-c32-r2/responses.jsonl",
+    "sha256": "9e70fd8eb2caf6053bbbb7f0a69b8f72f1dfb43c63a8008e80fe984333ffc054",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/068-public231-vector-residual-norm/system1/public-c32-r3/responses.jsonl",
+    "sha256": "db32524c0f4146414de8718b75e6d078c22720939fe55ba59f75cf64cbc27660",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/068-public231-vector-residual-norm/system1/public-c8-r1/responses.jsonl",
+    "sha256": "cbdc89137e3c6d7ea4e373cbdb08d9549db2b8c342d87e4f2b8255d2d827f1f5",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/068-public231-vector-residual-norm/system1/public-c8-r2/responses.jsonl",
+    "sha256": "b9071b8668a893d28120743760009ea83651af02a2bbff57450a65407db28729",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/068-public231-vector-residual-norm/system1/public-c8-r3/responses.jsonl",
+    "sha256": "fd43e34d1cf2dcdcb7691fea9a0da0268787c832372e571b9cc38e9fba341c38",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t128-c1/responses.jsonl",
+    "sha256": "e335e29c51717f9f858101445f245b270906e3bad4306c425f21840f249a16ff",
+    "records": 2304,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t128-c16/responses.jsonl",
+    "sha256": "af5fea976d8ffcba3de0967ea3309b1a83e63ac3e377f49bcf2f08b07fe025a2",
+    "records": 2496,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t128-c32/responses.jsonl",
+    "sha256": "d1198b1fd9f4dec60d55c02c4882b187cd1344af36894386f7ebdede4cb3bc40",
+    "records": 2544,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t128-c8/responses.jsonl",
+    "sha256": "f49e6872b1cbafc509269ddccdee38bcce5b3f5fa290dc0b4c60853d39fe49aa",
+    "records": 2496,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t2048-c1/responses.jsonl",
+    "sha256": "9c54d7396e89f8e3a351c10550d8e4abce0ccb4c5d5022b4d31d709430830a8e",
+    "records": 480,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t2048-c16/responses.jsonl",
+    "sha256": "f0f022adddf39508212f51ac6b24317f3176358fec0c546d67dc2bedd454b037",
+    "records": 528,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t2048-c32/responses.jsonl",
+    "sha256": "32ac3baf3507de4df1c5a7a555ef6b2b936a51d16b7c3e5eabf0e608606c0c10",
+    "records": 576,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t2048-c8/responses.jsonl",
+    "sha256": "9faa3a6c91313fe2f653d0211812d4bb8a79b5f6c1befc140b5781cfb56d2ce6",
+    "records": 528,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t4096-c1/responses.jsonl",
+    "sha256": "7f99407ef00bd3427cfe08d8fd1279c5c3f56928328e838b1b72a79a92db99a6",
+    "records": 288,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t4096-c16/responses.jsonl",
+    "sha256": "cd688c3a29bc0726bf7b992bed588a0dc19e8cce9ad0ab9226d7b973b4cad034",
+    "records": 288,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t4096-c32/responses.jsonl",
+    "sha256": "5b6fda7853627d6364926266be7463402e53a5acdda5c7cba69b1644891b653a",
+    "records": 288,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t4096-c8/responses.jsonl",
+    "sha256": "f0fd94a3d3fe89d10da7dc5d3627b054aab81b61fa5a591ccb1c903f69728a34",
+    "records": 288,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t512-c1/responses.jsonl",
+    "sha256": "f493bad58bc5e56b641874daae9070fdf6bb011ebe5d4b4a4bbe20c671c84fff",
+    "records": 1392,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t512-c16/responses.jsonl",
+    "sha256": "cadab96389722cfddf26ee5c9aa4fd73b5295015a101bc38784783e68b34a689",
+    "records": 1536,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t512-c32/responses.jsonl",
+    "sha256": "259ea74c9f4746cc219905582c901f757a49872758e2715a5ff516f1a42aad26",
+    "records": 1536,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r1/t512-c8/responses.jsonl",
+    "sha256": "fac9fab69997d9881cea95413714aeb0cd88d14ca10d717dce8e686999a538a0",
+    "records": 1488,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t128-c1/responses.jsonl",
+    "sha256": "ac302e452ac850e7a2268f75d626b5c5a996514193d90440a2bfbfc77f14710f",
+    "records": 2304,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t128-c16/responses.jsonl",
+    "sha256": "9810f1acaf334cc378a96ad850905978f4bb4e620b9ae4718e5e91866617658e",
+    "records": 2496,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t128-c32/responses.jsonl",
+    "sha256": "30abf5fa0ced7a894829fbcf6a593c077ebad920d7eadc674893842bced8a4c3",
+    "records": 2544,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t128-c8/responses.jsonl",
+    "sha256": "bf0e7b4bd4808ffc37f5d715485f41cfa1619f97e508f1a22b9c12314c9c4c4b",
+    "records": 2496,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t2048-c1/responses.jsonl",
+    "sha256": "298194a2c1a12cfe900e51ed4ab04b0c8fdbe5b82386ce190786c29e7d781eea",
+    "records": 480,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t2048-c16/responses.jsonl",
+    "sha256": "7e858b443a1e9811d59114297d1d3b2399eae27ff8f7d2c205f93167e26366bf",
+    "records": 528,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t2048-c32/responses.jsonl",
+    "sha256": "a230a211215a810ae8b1a35c1865766813dd339c91a779a4ed02534f9d28e5ab",
+    "records": 576,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t2048-c8/responses.jsonl",
+    "sha256": "2554a55fa6da61f6a2270f27f4cd764d6d9aafa46e4385d0f6c537af7f0cb698",
+    "records": 528,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t4096-c1/responses.jsonl",
+    "sha256": "2995881127195abc1f7730917a5f66152e09b66ca92cfce361afbec689531143",
+    "records": 288,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t4096-c16/responses.jsonl",
+    "sha256": "d491076e5f19715305ae648a60c2d9defb7cc9b0e1f039474b13d29f50c8668a",
+    "records": 288,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t4096-c32/responses.jsonl",
+    "sha256": "68fc355d3dff68314b388777629d48b7c1678344831525b6cc3097234f385b37",
+    "records": 288,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t4096-c8/responses.jsonl",
+    "sha256": "2419b70123afbfde1069cab7f11aecaac96c1460ddcf29cba99fa72facf06122",
+    "records": 288,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t512-c1/responses.jsonl",
+    "sha256": "5d5280c8c507211678e9fd4b9ce4a3c740cfe7ba6c458d5405cf07603727dcdb",
+    "records": 1392,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t512-c16/responses.jsonl",
+    "sha256": "69ec5350b647e644e4abc4040faf514d903b69b0e4212ff759a1696876e82760",
+    "records": 1536,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t512-c32/responses.jsonl",
+    "sha256": "f17d55f66ac59210e52adee815f72330cc3d80069bcd8a864c56709e121c9755",
+    "records": 1536,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/069-shapes-native-vector-norm/system1-r2/t512-c8/responses.jsonl",
+    "sha256": "19ebe73098542ed66ad0a089a9682b45a2bc96bcfb9e44162fcd820bbb8e07f7",
+    "records": 1488,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/system1/public-c1-r1/responses.jsonl",
+    "sha256": "d0312f86111754780a01b4fde59a13dc468fc8417b7155634e44e6cc54bdca72",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/system1/public-c1-r2/responses.jsonl",
+    "sha256": "568e8ea5d3fea245081ea19b197b01852c972e0a832eb2dadea97e18efc3fc18",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/system1/public-c1-r3/responses.jsonl",
+    "sha256": "c030b693c407e163ff2604f8276cf27fef2f0f4a5ba0611a6c96d1cf4bc83b96",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/system1/public-c16-r1/responses.jsonl",
+    "sha256": "4cb88b1aec29ec511eadd61e28fe5ff8f3d393633864da73cbd05d3fbe0c9c1a",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/system1/public-c16-r2/responses.jsonl",
+    "sha256": "609b8d091e9cee742ba348e2114a26d1380989ed2fb8054743babe91b79f6484",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/system1/public-c16-r3/responses.jsonl",
+    "sha256": "85a83ff3a53cf875e0ebaafa3368a5d597b8e847f059fc615c7070d62dfe4d3c",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/system1/public-c32-r1/responses.jsonl",
+    "sha256": "38ade066af2832f1cc8734abb1682884feca6c47ba49e28ff878125818a4a488",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/system1/public-c32-r2/responses.jsonl",
+    "sha256": "8f1a7e77fcd74ec87807a3f216009d26c84ad77b132d96b112bb5f82280fc7e5",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/system1/public-c32-r3/responses.jsonl",
+    "sha256": "7116fec916cf3152ee918cafa3d2f09be07850aa0eb3a0522cf732c42a358b07",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/system1/public-c8-r1/responses.jsonl",
+    "sha256": "2f41f93ba615843ea3c8f61f42a5a57329826326c5b6e40356548978c6727794",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/system1/public-c8-r2/responses.jsonl",
+    "sha256": "096eb0a435cd11cfa4f4d3ecf0e7b03ec62d9b10477c390505bc5bf5b147b5ef",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/system1/public-c8-r3/responses.jsonl",
+    "sha256": "d50b812af8834b5730caaf5d6e6756a52eb1d5519405106eabaf089a0155f8e7",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/vllm-jev/public-c1-r1/responses.jsonl",
+    "sha256": "81dc2aeca3134c2c59704e0ac58f027877ff315a5cdac506d439278b21916a1e",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/vllm-jev/public-c1-r2/responses.jsonl",
+    "sha256": "efaef4bf31af6f5f19920c0d76cde2a1369b240622cf5b0cdc2bab505a8e746e",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/vllm-jev/public-c1-r3/responses.jsonl",
+    "sha256": "481c470e6eac8f98c757a0cb1bbb792de41c57e26785496ccd833cf73e24081b",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/vllm-jev/public-c16-r1/responses.jsonl",
+    "sha256": "fb55bc837905f6d9da6a8a2c8d31ce4aa5a85504daef9307edad1453ddb0b5f1",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/vllm-jev/public-c16-r2/responses.jsonl",
+    "sha256": "425d0a0d52ef5ddae84064aed16f4203bdef31656e7613fe61f6283e5fe3af00",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/vllm-jev/public-c16-r3/responses.jsonl",
+    "sha256": "ed7c3ca33f9a454e446fb0e8e59b713d61b4cffa96d8de0701b69a7d00c9154a",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/vllm-jev/public-c32-r1/responses.jsonl",
+    "sha256": "7f119c5be19ab2ffa5a890530632f6350e3be3e3040337e4e714c1bc6a0de116",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/vllm-jev/public-c32-r2/responses.jsonl",
+    "sha256": "f2453f0a5267205a00669c8139817289ff2f0ce3b0b92de5d7c530ce50cb1588",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/vllm-jev/public-c32-r3/responses.jsonl",
+    "sha256": "ba98b3a4b1c5f01ac1a6b9c1fd00aaf09033e4b7aa0a2ad553d100367401de9f",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/vllm-jev/public-c8-r1/responses.jsonl",
+    "sha256": "40d6091a8d351cc3d9a629ea8f0fb9afb5ecca37b55fe7f711776561257b8f2c",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/vllm-jev/public-c8-r2/responses.jsonl",
+    "sha256": "9381df367e4a6827aeb4cf94981bbd4860ccb158162c34c0ef682d0eed1b5f85",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/081-c16-reproduction/vllm-jev/public-c8-r3/responses.jsonl",
+    "sha256": "b526a73d94c0ad3a1a65359a33a37bdccd346d92693b308dc09c6ba0537dc4da",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-long-only-c16-r1/responses.jsonl",
+    "sha256": "7a33afce1dcee79c972b51810c07e38fad50f69b2fe8db2fb579e0aba0522ebd",
+    "records": 111,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-long-only-c16-r2/responses.jsonl",
+    "sha256": "05914636935e71f096591056fe41266ec6e422469a13c2b16416790ff7c789d4",
+    "records": 111,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-long-only-c16-r3/responses.jsonl",
+    "sha256": "eedcb404cca7174f8837db6994c2b45074cfd55b3fc6e13383e2ac44048ac4cc",
+    "records": 111,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-original-c16-r1/responses.jsonl",
+    "sha256": "f37f86f32d0f2c28243f99ddc9dbb55f8af4d18bc3d51e251ae2e30a8c006ce6",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-original-c16-r2/responses.jsonl",
+    "sha256": "b53384686057dcdc0715b9c8448141a905553ab104638a762323afae58bfa3e4",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-original-c16-r3/responses.jsonl",
+    "sha256": "45865abdf8fa6b18253cede260fc8b46626a1d30700cb5cc3b3d88a099b6eda5",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-reversed-c16-r1/responses.jsonl",
+    "sha256": "fd9db0ff8cbdf15d74989340ad67d22b71a11e4d4d07d55b957c1c7b06934a01",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-reversed-c16-r2/responses.jsonl",
+    "sha256": "dfbab8c6c2909f663963c0fbfc4721f5ca7a5aae7627d83025659679fd15bb09",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-reversed-c16-r3/responses.jsonl",
+    "sha256": "12c291d4abac0014d339603ce37a6a8347583555880108d2b2e19017962b8098",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-short-only-c16-r1/responses.jsonl",
+    "sha256": "eef0cdc7a5209d01d3e200a08b1d5876fec5fee051878f9fc2a88d6b4ca97a51",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-short-only-c16-r2/responses.jsonl",
+    "sha256": "c083d11b4189223c54789245197eec38edaf4e84da408532c373fdac57405c43",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-short-only-c16-r3/responses.jsonl",
+    "sha256": "4805d08abe351bbc4a469f43870989f160278a4beaff4cef43b81526118dfdcb",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-short-only-c32-r1/responses.jsonl",
+    "sha256": "b5420a7b26650d5a2f1a8be576d82a5b2b37316f80a28144ccc8724664c4e640",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-short-only-c32-r2/responses.jsonl",
+    "sha256": "013fadf79da37dfe07d8baae72fd594b6c733d2a5b388cc109a09a54be3d256a",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-short-only-c32-r3/responses.jsonl",
+    "sha256": "9180e2c54b3739e73e6385bff877ace809a0e8a6b6defe74cbd8d63bf7198f49",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-shuffle-11-c16-r1/responses.jsonl",
+    "sha256": "1f4461a87e4bbc850761d80fb65a5ca6e42b9e85f9820962a0eae7335c023850",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-shuffle-11-c16-r2/responses.jsonl",
+    "sha256": "0c31df62863913d8ec7d91ca59a62eb34e7049af66f259f746e96c99af522eba",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-shuffle-11-c16-r3/responses.jsonl",
+    "sha256": "c599752fa6a0a7a0d69cdc4c9fc6e7b7c29dfc8d0376ba563d44f7313ed4fdbb",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-shuffle-29-c16-r1/responses.jsonl",
+    "sha256": "5dca94d823f01755298c7d6c4aa397a19e82606b56ce5f8512997c91c8444dd9",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-shuffle-29-c16-r2/responses.jsonl",
+    "sha256": "fdcb0af514f4fb5b3f42ce5d456db6b283e44958bc0ca103410444a7a8f85c6c",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-shuffle-29-c16-r3/responses.jsonl",
+    "sha256": "db1cfa5ede3d98e7617d09fcff4863ad4ab91708e90cfbd18fd20049fd8d0901",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-shuffle-47-c16-r1/responses.jsonl",
+    "sha256": "756ef1a38cbc87c3072f44f4bbf4c1df3b5bd93f2a8eccbac30dda1edc2dc228",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-shuffle-47-c16-r2/responses.jsonl",
+    "sha256": "357ebdcf7e4324de78d634ea204d6793c9e2432b608b4ddb444b51bf7cb47d44",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/diag-shuffle-47-c16-r3/responses.jsonl",
+    "sha256": "370db4ba88571a645cab4c4f39e1051cd29929d3cb44f5b2dade87cb4b2b2559",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/public-c1-r1/responses.jsonl",
+    "sha256": "a5bc17204e822aad2d06f310271aab01a70c09237002435820475ab8e890dfc2",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/public-c1-r2/responses.jsonl",
+    "sha256": "a82afe7bb5258aa4ef48c95a9b3a1f5347075fd1f7d416fbf4678ed9ae3db527",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/public-c1-r3/responses.jsonl",
+    "sha256": "dc76716512a7f2301f98f65477a5117d25e046c459f838e5dec37e430d1daec2",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/public-c16-r1/responses.jsonl",
+    "sha256": "e6cf0dcbba6d92d54ed5f50f244d72643ed4c4b6e72af2a1481d60420ad0bfd0",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/public-c16-r2/responses.jsonl",
+    "sha256": "6a7fd4b2b48b2626f50cc0e7ce3a53d2b196b9ede10e45258ded2a4c281bde9d",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/public-c16-r3/responses.jsonl",
+    "sha256": "e043bdac386ffadd0ae61a02a4657d29e3cfd618cdaea356f861826b3e59e9b5",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/public-c32-r1/responses.jsonl",
+    "sha256": "13065205797002c1f14bdc4f20248ab0ac9b9a1b316dc3bd72fb98700fd037f0",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/public-c32-r2/responses.jsonl",
+    "sha256": "98624787c8f104da6f247a420188fc293847c1939280beaa9ca85d42d04467b0",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/public-c32-r3/responses.jsonl",
+    "sha256": "e7d47286ece10a3c7fe6e13c166a01815cd27e07b5a9577563863ee093c72069",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/public-c8-r1/responses.jsonl",
+    "sha256": "3c9df51722028a3de24a46418090c8e4765529c61875179a98e5039a616f68ee",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/public-c8-r2/responses.jsonl",
+    "sha256": "f0893776c6e592c57448b748305f85d019b037c7be608afaa641d4bb1cf93664",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/system1/public-c8-r3/responses.jsonl",
+    "sha256": "1d0f7b345bf70570f4453897c27056be4c03ed137f8f6aad7593b497c68373fd",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-long-only-c16-r1/responses.jsonl",
+    "sha256": "88a5eb4953bf05f2a99ea22fefbf67efb28b46c7ad3fa4ea56fe89aa5f0c48a1",
+    "records": 111,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-long-only-c16-r2/responses.jsonl",
+    "sha256": "dbfaccebfac40a7a33a2e1d5a4f33c6a2f63551d0c1c36042b632cec1429c8c4",
+    "records": 111,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-long-only-c16-r3/responses.jsonl",
+    "sha256": "778f15d9e4ebca69c14d4b3f39df3a080127b846939cfa9b99e16492fe9cd079",
+    "records": 111,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-original-c16-r1/responses.jsonl",
+    "sha256": "a15333637394f85ab9fd1fed861b8ae598028ac690d1ed50d673ddd6153340b5",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-original-c16-r2/responses.jsonl",
+    "sha256": "94c500d051bf3436527f57deb2f83d361c40f26bc4fc55c8060fd275d1f4a027",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-original-c16-r3/responses.jsonl",
+    "sha256": "0936421511e8e61f45fbfc95965af51f68f75f2f9bec3666ea2866e58d1f54a1",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-reversed-c16-r1/responses.jsonl",
+    "sha256": "961507165505e7dd64e5bd627556aae7495b05528003f2ed9ac4812dae3c2aca",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-reversed-c16-r2/responses.jsonl",
+    "sha256": "cd4761b3170d5e470aecf1a4a55ab4cae025111e51676f3e3f02314c860e8e53",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-reversed-c16-r3/responses.jsonl",
+    "sha256": "2b833cf3b52dc4934c7e0d260a23c6fcb880f000bd5301324a96291fd3acc4f6",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-short-only-c16-r1/responses.jsonl",
+    "sha256": "2da18bc3d770a2bfb27ec2ee37da94996dc97360540440db7316b4b5edb6e418",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-short-only-c16-r2/responses.jsonl",
+    "sha256": "baa6c9ce28035691721de0c2a1a4b233c40acac7dfe217707f5845602433741e",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-short-only-c16-r3/responses.jsonl",
+    "sha256": "c545e10426ffe60e9234a11c67efc034c29ff016131bc13d1dc1b80c95c7b92a",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-short-only-c32-r1/responses.jsonl",
+    "sha256": "256b2bbca7add04681be5067177b68beb150f35b578b536e141e872d7a58603c",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-short-only-c32-r2/responses.jsonl",
+    "sha256": "4740af045a59ede7546db35c513937e88729013ad70e7f69a4711c4a4a94d55a",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-short-only-c32-r3/responses.jsonl",
+    "sha256": "974052511ef05d88eeb8a668eaff6070e925b31fdc6b9f00bd816812e41906ba",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-shuffle-11-c16-r1/responses.jsonl",
+    "sha256": "a960227fa61b4c76ec643d7c31cf787b0ab87e4defb55334569e627f7ee60c76",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-shuffle-11-c16-r2/responses.jsonl",
+    "sha256": "d9804049bef0444aae1f99c1bf5a79739399d64250a0fd15182d6edd84931e6a",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-shuffle-11-c16-r3/responses.jsonl",
+    "sha256": "90bb03fd40efe0fbe366cf16d744f15036755186f7cef561ab5f69b02d34492e",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-shuffle-29-c16-r1/responses.jsonl",
+    "sha256": "a33b11aa7b9ccaee647628c54377f99a70a93824c81123d2eb9ebef016a777ff",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-shuffle-29-c16-r2/responses.jsonl",
+    "sha256": "1c94cde12cbda2fa07dc502101d3329996da464307c1f48d6fb6e0cf6d063eb7",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-shuffle-29-c16-r3/responses.jsonl",
+    "sha256": "323300a27f2daaa7ef1d6f8e7b135080ed2583a6ecc8d3e4d57d6b96f021ea47",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-shuffle-47-c16-r1/responses.jsonl",
+    "sha256": "bfbee5b5736023a9b1971df39a6876e3b7eec54916f28da3b6dc4e2feb35c34a",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-shuffle-47-c16-r2/responses.jsonl",
+    "sha256": "4ec738aa376769335c94427c1a37da5ac43de5decd897baf8b28bda8ac617e71",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-shuffle-47-c16-r3/responses.jsonl",
+    "sha256": "3215c9996e36e483b0b30a928d31e99593d96c00998b45d033683ca550875b2d",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/public-c1-r1/responses.jsonl",
+    "sha256": "d607004cf622f913c83266d4f8663561964182bb4fc73471ee178a35512bebd8",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/public-c1-r2/responses.jsonl",
+    "sha256": "29b5c4798acdcb68c2945ebe42404a21acbe047c315ddaeda436280570206c32",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/public-c1-r3/responses.jsonl",
+    "sha256": "6a28f8528ff9cb342a71aaab0a73f998ecdf9798431cc9a90069b8fe94890d19",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/public-c16-r1/responses.jsonl",
+    "sha256": "34cd794dbcdb3fdb81a42d2e476f96610c6142d6e90eb49aeaef2010d6e00c49",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/public-c16-r2/responses.jsonl",
+    "sha256": "94562d0a4b41470c86c2df1b573f2cf0efe142260b08e04d3f1906c634cccea1",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/public-c16-r3/responses.jsonl",
+    "sha256": "a9400e6a557ed941481980194ade4bbcb865c9743a9b67b64be6481481138333",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/public-c32-r1/responses.jsonl",
+    "sha256": "f120184c1579e05c77e8405291ef12bdb9ee43cbb7fd6fa1c3d09303f097be82",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/public-c32-r2/responses.jsonl",
+    "sha256": "bfe1e4a11271f4bdaacbbd4fbb8bda3d6d1fec001d511c1641a79fb3641fc032",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/public-c32-r3/responses.jsonl",
+    "sha256": "27077a65fb60a2578f3a1d300da60583671dfd8ec309405a25ce26da19db8ed9",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/public-c8-r1/responses.jsonl",
+    "sha256": "0e6528d07ce069fee4d50ba77cecebe5dae3384f509e45d67bf9a65fe7f55cf5",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/public-c8-r2/responses.jsonl",
+    "sha256": "fe630914f577e0c55d70a827bde6cceddeb6203b499974bfdebea198c126a2a7",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/082-c16-order-diagnosis/vllm-jev/public-c8-r3/responses.jsonl",
+    "sha256": "b72ca336e92c18b6bb7f7c525281cfcd8738addf597bd222079032157e9601ce",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-original-c16-r1/responses.jsonl",
+    "sha256": "8cabba54d007425942b5e03d84e200bc617fc1c904da25c4feafd9089b90313a",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-original-c16-r2/responses.jsonl",
+    "sha256": "d4974f6ae109f646993501ce2a55f219b79e23c3afba9f63894792cbd38796b4",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-original-c16-r3/responses.jsonl",
+    "sha256": "58d918d8e05e13ee454764a54665bfd9c2aaa6aa057822cc82df6745346c384c",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-short-only-c1-r1/responses.jsonl",
+    "sha256": "3a9d3381f81569891b5f4db78ec8364043df4dba6882b0443c50637ee7ad31b5",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-short-only-c1-r2/responses.jsonl",
+    "sha256": "0684ad0c9b8e50c1010e78a3b061bd43c1541a5897f75886f2406d18509f7792",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-short-only-c1-r3/responses.jsonl",
+    "sha256": "2ba92089545fe7823a7ce6e7ac139e9ff3275ef798b6a71c705e8676aab01bdc",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-short-only-c16-r1/responses.jsonl",
+    "sha256": "9c83bfb9dc4f073703b1328addf6aa5ff2a13def367d6acd0ecfd9ce0ea86fe4",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-short-only-c16-r2/responses.jsonl",
+    "sha256": "66c3e2e2413e5d4e88a68e4b91f3089f54c35040c52c7111027299a94f97b95b",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-short-only-c16-r3/responses.jsonl",
+    "sha256": "a756f78210c783addcdfe72ac94cd731d63b2914c98f58fdc7374fbf374f11a9",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-short-only-c32-r1/responses.jsonl",
+    "sha256": "429cda3428005a11af9c0e71b2c482e9e6924b2ae7f979a4fef2e9bddfec075c",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-short-only-c32-r2/responses.jsonl",
+    "sha256": "3aa6ae3c85084c393d209cdfb066f72bd26f89db4b0dfeaed8133a9e2104234f",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-short-only-c32-r3/responses.jsonl",
+    "sha256": "ffedbc73bda5db53f22c16f36d0da309bd8a503733d2505793087b033ef1c950",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-short-only-c8-r1/responses.jsonl",
+    "sha256": "b1aef7c7c97c70da51ff3c07759d07694625a07d5e08ae239e721e4c4dbf0569",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-short-only-c8-r2/responses.jsonl",
+    "sha256": "6fa42c4b814e9a57fa56bd660f1a0165b25eb95d26f30a2fc677a4ce80768160",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-short-only-c8-r3/responses.jsonl",
+    "sha256": "4a2a411b82e13b0d506cc38573882b01e3f9843fc75ff081685ba9483fc5b28a",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-shuffle-11-c16-r1/responses.jsonl",
+    "sha256": "b5da39a39a00952aeccb1bdc6ac5640d3b22dae2f5b0de7deac50afc9a01d4c5",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-shuffle-11-c16-r2/responses.jsonl",
+    "sha256": "c8e87d2d516c5c43eb4f83f33aaaf67da59092bb50cf92ddfeacab64e1ca40b6",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/diag-shuffle-11-c16-r3/responses.jsonl",
+    "sha256": "851e166574f8f6b15226c34408053bc581723767babb117e9c647ffc3524f901",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/public-c1-r1/responses.jsonl",
+    "sha256": "576aaae2df1c761001bc804a8ef04c79e4a8520650a146e1fd88d41f807734aa",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/public-c1-r2/responses.jsonl",
+    "sha256": "37030dcad00b86bebf0241482f3aefeeca1f56d028483716f561c2e4ae4ec786",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix0/system1/public-c1-r3/responses.jsonl",
+    "sha256": "59fb1942e9091cceb20826c12aa5a130d30cb32f1048b0f3b0b6d8d0de43dacf",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-original-c16-r1/responses.jsonl",
+    "sha256": "da5e7925e16c6d97e749ad8541d3c272fa092ecb2192835349063ae7393c259b",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-original-c16-r2/responses.jsonl",
+    "sha256": "4b425744db6020745cc71fcbfb4486553739e72a2da5781b7250c415e7af7766",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-original-c16-r3/responses.jsonl",
+    "sha256": "903ed02d5f5fc94bfad370c78a2c0cfac6a759f2af21d65165fa10b8f2a3ebf2",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-short-only-c1-r1/responses.jsonl",
+    "sha256": "f94e3a773f580e7711285523da6c0f629d712483cad61cff2a992554d7aa9eae",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-short-only-c1-r2/responses.jsonl",
+    "sha256": "0d748b444fe89354e922bbd9b50685c7136b8e64086a33e70e24a2eb64890177",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-short-only-c1-r3/responses.jsonl",
+    "sha256": "155a1d88fdf80a2798f9642acc0584d83ff454fd448ac75136b4ec775cb25578",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-short-only-c16-r1/responses.jsonl",
+    "sha256": "edb19fa6befc62b75c222a5acbe1d56056edd60ed8a978d6abe71746dbd67268",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-short-only-c16-r2/responses.jsonl",
+    "sha256": "9083d4cd4d1867b23fbca75830eed08e3b8b4a32f2945f677404768eecc5b2a3",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-short-only-c16-r3/responses.jsonl",
+    "sha256": "ed0c6f04963945bda69529e88209b4c5557c02a0ec84ab854ae6afb21c99bd36",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-short-only-c32-r1/responses.jsonl",
+    "sha256": "4cd20766d230bd5b3633c69da2a50813824b0cf4ecafc463dd1e4877c2ea55a6",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-short-only-c32-r2/responses.jsonl",
+    "sha256": "9b3de1abd8dad4fe6ee4561fe96610df26e61c45f3d8acabae71ecd91eebeb49",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-short-only-c32-r3/responses.jsonl",
+    "sha256": "d78a5ae3622566dc16754f1b9e3ea7f33f8a5a6fdb84fdec5ce29b98efe86d48",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-short-only-c8-r1/responses.jsonl",
+    "sha256": "8ba751c67645786fbdca05d08250471853e21a3a76f1723c364856265a8b1ff7",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-short-only-c8-r2/responses.jsonl",
+    "sha256": "086a5beff018973da7c0e804d58007b702505c5c9f2ba4f663cf8154da0077df",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-short-only-c8-r3/responses.jsonl",
+    "sha256": "90b4a28ca4a15bcfb54974929e7faa5e4240329eb8074cc91c1d2829fffb482b",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-shuffle-11-c16-r1/responses.jsonl",
+    "sha256": "7a203192d160ba399349a87fe115fe004d8be64e2856c944428f9c089d807fe3",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-shuffle-11-c16-r2/responses.jsonl",
+    "sha256": "01aeadbe6b777bc9356980e9447521a5e5cd2db8b3dc7b93bb43b603fdc191ba",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/diag-shuffle-11-c16-r3/responses.jsonl",
+    "sha256": "586ce1299651cfc9fcdefe5c9d9cffa06d8c0ec98458fd72710042e218a22dba",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/public-c1-r1/responses.jsonl",
+    "sha256": "6c18dad60fc3fd2b4a85494df7dc20e20da30b89b0fac134e27f4be856d25cbb",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/public-c1-r2/responses.jsonl",
+    "sha256": "1a0a24ac42b162aa956c8e0ba58c7165e53f1a3d66417ebb59f7b79af4d6963e",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/083-c16-queue-prefix1/system1/public-c1-r3/responses.jsonl",
+    "sha256": "468a0d72abd59ac735b6ad33a643f782fe5b7f0092610738b3498bed98ae77e3",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/system1/public-c1-r1/responses.jsonl",
+    "sha256": "2eb31aaa6c1a1cafdc1ea870196374c82636038140c3f062f95030cc1e29fb0e",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/system1/public-c1-r2/responses.jsonl",
+    "sha256": "fcdae796cae28008bf0bc79620951034da3a3b76fc1f1a9c656f3a0de6f1bc15",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/system1/public-c1-r3/responses.jsonl",
+    "sha256": "c6c4416015b7a4e2da93fbc7df904d36aec6d2a28fdf50019e318329854ed6f5",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/system1/public-c16-r1/responses.jsonl",
+    "sha256": "c51a67ba1e45363b35e5e8c29779805d24320134bb37446cc661dcdd63871393",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/system1/public-c16-r2/responses.jsonl",
+    "sha256": "ca93ed8a5eb0e70ed0a4bfc133012eac301bd13ad7b1c9c187351f21eee9f937",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/system1/public-c16-r3/responses.jsonl",
+    "sha256": "0e21be0a2040e8276a7cc06ba696e66c3f0535174e6c5307149685ed53098697",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/system1/public-c8-r1/responses.jsonl",
+    "sha256": "4488489146f2e93afc50d309fb1bef4e9b8fcb29acac03727a4d12d1b7eb6e70",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/system1/public-c8-r2/responses.jsonl",
+    "sha256": "42d863de0a0391b7ace5619c92a7f2ede02ecaf20a6254b3e0f15d2c05215c1a",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/system1/public-c8-r3/responses.jsonl",
+    "sha256": "a9edabbddfef9ac56f2ab3ad6e065e2a6b8c1dc46df0030ad9df279f2f25a2da",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/system1/short-c16-r1/responses.jsonl",
+    "sha256": "7826cf7e5b9e89cca73d8f07d5ba87208c7f9afc62dafedb1bab0a3423044f30",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/system1/short-c16-r2/responses.jsonl",
+    "sha256": "ccfee58e31b0faf0c915cebfd819c484cecbfbd691cad9be3fb35ab010d2efa4",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/system1/short-c16-r3/responses.jsonl",
+    "sha256": "1f2a48882e27cab16809cdeaa003dd8e7f72884d511c9d3b1ab71c03263b1696",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/system1/short-c32-r1/responses.jsonl",
+    "sha256": "1ab9fea237c9779a785d63338678b5e24ccb2f167b8f9f4576c749aaeb94f427",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/system1/short-c32-r2/responses.jsonl",
+    "sha256": "7c324a5e6c7224f275c484eb2e222c715a25e085b951755544b4935c195f6cde",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/system1/short-c32-r3/responses.jsonl",
+    "sha256": "eb75bf6905bbc7bff6966bf6590148a3c0c8a06b6b409d263ba7f7f2b9560987",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/vllm-jev/public-c1-r1/responses.jsonl",
+    "sha256": "677659b5130670fa469d076842fab9d3cbfc8b25dcffe942cb01905159b23023",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/vllm-jev/public-c1-r2/responses.jsonl",
+    "sha256": "2d8f6aa81d60fb62930ac9b78a90b310260fee21f7ceeaf87d612a231919893a",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/vllm-jev/public-c1-r3/responses.jsonl",
+    "sha256": "7550fe7e9151b2e98308ab5df74e2cf2973a55f4eda69cd8d23cde72a8363421",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/vllm-jev/public-c16-r1/responses.jsonl",
+    "sha256": "9e38fec68339cd46f345c12b07072953c7e18d82a14150ca40e9b5fbd75f10de",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/vllm-jev/public-c16-r2/responses.jsonl",
+    "sha256": "59eb7451dd033b3b11b11421e7ae735b6d30eb018d368902fac5652f1c55f236",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/vllm-jev/public-c16-r3/responses.jsonl",
+    "sha256": "5018e8fc5a0c767eccb7f7f6ac3e33533e344ada41f308d69354c3fb3ee48b14",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/vllm-jev/public-c8-r1/responses.jsonl",
+    "sha256": "ee6fd5a6090f378cf30044c03affc44f2f6dfc417d69a38fdfe947afa0c44fa7",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/vllm-jev/public-c8-r2/responses.jsonl",
+    "sha256": "004314c502721995546175d6540693e9dea48e4b6c503229d18841ce120a2c34",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/vllm-jev/public-c8-r3/responses.jsonl",
+    "sha256": "5852df159500713443941531b884902eb81d4ff0869242ca2572150ce0745d95",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/vllm-jev/short-c16-r1/responses.jsonl",
+    "sha256": "0068e9a2b3a207de6b86ed526a9e23e14c1c4b4e97ee7a2d80dd5e0d252d3f81",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/vllm-jev/short-c16-r2/responses.jsonl",
+    "sha256": "99fed046d4b3718a77f26b36892768aea24e47b1c2c26240f5b2e43df82684cc",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/vllm-jev/short-c16-r3/responses.jsonl",
+    "sha256": "58e88b91d328c7605c63e1dead14cdcc72a44b164b6749437963cb4a805e957c",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/vllm-jev/short-c32-r1/responses.jsonl",
+    "sha256": "edf02ad6a1cbe672a6abb39bf8d05bd3c34bcc9cd18094ee9d0c308c230a1327",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/vllm-jev/short-c32-r2/responses.jsonl",
+    "sha256": "49ed01b3f99a0e03e495bb607edb0e0eb81b8e9afcefa0a0b7b3ae04116eb5e5",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-control/vllm-jev/short-c32-r3/responses.jsonl",
+    "sha256": "a0e561daa842d67a1f663c89c70875e4b93f240bfca95059f9df3d2962993a1d",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-trace/system1/public-c1-r1/responses.jsonl",
+    "sha256": "04bba6269ba6851e07122672276c92859db4cd2eae1c9fc645c4476e2338a336",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-trace/system1/public-c1-r2/responses.jsonl",
+    "sha256": "2f56b39347b2fbfc7b19a9577d4e40e2f4df05938f1528655b90dbfc6d25e0a8",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-trace/system1/public-c1-r3/responses.jsonl",
+    "sha256": "db69e3eeb795f3277d152acebfdde7538d775954fb41f3b7c0d3bdfe8ee10623",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-trace/system1/public-c16-r1/responses.jsonl",
+    "sha256": "5ea6ea7e446cebda8a52105f27aa8497f8ac6870103f31ba8c8c77a5d76c2d5b",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-trace/system1/public-c16-r2/responses.jsonl",
+    "sha256": "a49054d78761d27c403d54ef47be39e9218b48a415bf89751694bd80ff9cdff5",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-trace/system1/public-c16-r3/responses.jsonl",
+    "sha256": "8ee541459a9cc19b4cc3e6e1d043b8ba239d1de4fc97ddd4dbfb84df2434dafa",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-trace/system1/public-c8-r1/responses.jsonl",
+    "sha256": "661964f508ba902951c9f088b5fc0eed6ca5abf977a6ff94aa3d4fe0b2e68d0d",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-trace/system1/public-c8-r2/responses.jsonl",
+    "sha256": "dca0ff845bb985612de092997ab95f12e2ee9a84d33595c03e3eea1ba8efbb27",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-trace/system1/public-c8-r3/responses.jsonl",
+    "sha256": "d7265305b9409dd8194ea99da67674c681a4f1a2caac2fb84f40ab03f59d429e",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-trace/system1/short-c16-r1/responses.jsonl",
+    "sha256": "cfdeb3a71f9271cb669d949988e6e091b85c85cd43ae0dd5f799379a194a5b34",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-trace/system1/short-c16-r2/responses.jsonl",
+    "sha256": "3c6e1bec1653c5379e03ed535abe8fe2c53abe53307ff44cba991365ea47895d",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-trace/system1/short-c16-r3/responses.jsonl",
+    "sha256": "69b90721ffec0a83830d03b9a535a2f7d015814ec2f1837e858d1d577f831e87",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-trace/system1/short-c32-r1/responses.jsonl",
+    "sha256": "aa528eb483c3ade89d039f05d59d33b0c2c138fcc0c3223ed51b3e296d0bc975",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-trace/system1/short-c32-r2/responses.jsonl",
+    "sha256": "5c58eac9f883c1433c605ae5265aec7a910ea68a330a3e06edd25f5ddf1dc78e",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-trace/system1/short-c32-r3/responses.jsonl",
+    "sha256": "10d98510ec08d7853dbd0c7c54669e2d5b31e7199921fc376b3fb0049365a2de",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-vllm-v2/vllm-jev/public-c1-r1/responses.jsonl",
+    "sha256": "9323a5b14b41a5b9032f49111ffcbe54e5f803d53df6feb805ec2672b20462d0",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-vllm-v2/vllm-jev/public-c1-r2/responses.jsonl",
+    "sha256": "6248bf4c71686b4286afa14785e2b922bde87107da8efda040b499023aacc555",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-vllm-v2/vllm-jev/public-c1-r3/responses.jsonl",
+    "sha256": "402d1f6d37ecf0361df82a2dd5a9f31b54d382bd8c2cfda9cae34099f2be9485",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-vllm-v2/vllm-jev/public-c16-r1/responses.jsonl",
+    "sha256": "b9be096d9d1fd78ab7bb854d49cda146f9fdcc5d783e2176b86db9cb8314b317",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-vllm-v2/vllm-jev/public-c16-r2/responses.jsonl",
+    "sha256": "9c7151eef2520e4ad0a6d0cede28579e8e5ac6734507c1fda79de3c0f6ff60a6",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-vllm-v2/vllm-jev/public-c16-r3/responses.jsonl",
+    "sha256": "0393305b55d88bc0b64be3397929350a0cb9fcb07a708c0eaa33c922e65ce66b",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-vllm-v2/vllm-jev/public-c8-r1/responses.jsonl",
+    "sha256": "801a709108c981c35fdd51c737152d70662750679f9abdb7249827ea2df4e7cd",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-vllm-v2/vllm-jev/public-c8-r2/responses.jsonl",
+    "sha256": "9b8708a6c80b692489cca0f81eb1aa5cb01cf32f719beb9c5037ea1cb820e916",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-vllm-v2/vllm-jev/public-c8-r3/responses.jsonl",
+    "sha256": "9ce91f3b33cdccd175103575fd9d52ab258809bb338356e99eb8534707a0dd83",
+    "records": 231,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-vllm-v2/vllm-jev/short-c16-r1/responses.jsonl",
+    "sha256": "5d348238694bcc88e63ba22987e088204ccb222a1b1b10effce55e5a3661c49c",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-vllm-v2/vllm-jev/short-c16-r2/responses.jsonl",
+    "sha256": "10c510c819dc8841ba010dfbf03939c9a85cf5d6f8948ff4d6f6d920a011c0a9",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-vllm-v2/vllm-jev/short-c16-r3/responses.jsonl",
+    "sha256": "973293452e4a84972c0cfac5ce295e05f06022a58c82b19d4dad79434052bc60",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-vllm-v2/vllm-jev/short-c32-r1/responses.jsonl",
+    "sha256": "28db81edc60a9d82d2cb35bc04698d57c5afdb12341227d16a9100991834adfb",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-vllm-v2/vllm-jev/short-c32-r2/responses.jsonl",
+    "sha256": "f44962fa573fcba686c446bfc0f47916c47fe3a2e9d09ee2b99fada0a97a8f6b",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  },
+  {
+    "source": "runs/084-request-timeline-vllm-v2/vllm-jev/short-c32-r3/responses.jsonl",
+    "sha256": "0fd45e87a4a74aadb3ccfdab1bd70d703986938bb5aa7bc4ffe9371c80ee2f8c",
+    "records": 120,
+    "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+  }
+]

@@ -1,0 +1,42 @@
+Reserved 1 GPU(s): [1] for command execution (timeout: 0h 20m 0s)
+Released automatically if no GPU usage is detected for 30m
+   Compiling omni-qwen3-5-native v0.1.0 (/home/psv/system1-omni/src/models/qwen3_5/native)
+    Finished `release` profile [optimized] target(s) in 10.57s
+     Running ../../../../tests/qwen3_5/kernels.rs (target/release/deps/kernels-ccbcc40424cf9241)
+
+running 2 tests
+test residual_rms_norm_matches_rounded_reference ... ok
+test residual_rms_norm_vector_matches_each_unaligned_fallback ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.93s
+
+   Compiling omni-qwen3-5-native v0.1.0 (/home/psv/system1-omni/src/models/qwen3_5/native)
+   Compiling omni-open-jev-native v0.1.0 (/home/psv/system1-omni/src/models/open_jev/native)
+    Finished `release` profile [optimized] target(s) in 21.93s
+     Running ../../../../tests/open_jev/prefill_batch.rs (target/release/deps/prefill_batch-cd6267a38903c276)
+
+running 7 tests
+test concurrent_packed_and_prefix_requests_preserve_routing_and_state ... ok
+test grouped_forward_preserves_original_projection_sizes_and_graph_keys ... ok
+test nine_b_packing_keeps_prefix_off_and_independent_candidates ... ok
+test packed_candidates_preserve_isolation_order_and_graph_shapes ... ok
+test packed_prefix_matches_original_batches_across_budget_boundaries ... ok
+test pointwise_prefix_compaction_preserves_full_mixers_and_changed_inputs ... ok
+test text_prefix_buffers_grow_and_shrink_without_reusing_prior_contents ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 38.09s
+
+    Finished `release` profile [optimized] target(s) in 0.08s
+     Running ../../../../tests/open_jev/prefill_batch.rs (target/release/deps/prefill_batch-cd6267a38903c276)
+
+running 7 tests
+test concurrent_packed_and_prefix_requests_preserve_routing_and_state ... ok
+test grouped_forward_preserves_original_projection_sizes_and_graph_keys ... ok
+test nine_b_packing_keeps_prefix_off_and_independent_candidates ... ok
+test packed_candidates_preserve_isolation_order_and_graph_shapes ... ok
+test packed_prefix_matches_original_batches_across_budget_boundaries ... ok
+test pointwise_prefix_compaction_preserves_full_mixers_and_changed_inputs ... ok
+test text_prefix_buffers_grow_and_shrink_without_reusing_prior_contents ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 42.73s
+

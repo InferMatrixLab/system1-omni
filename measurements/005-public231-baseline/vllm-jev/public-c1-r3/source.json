@@ -1,0 +1,6 @@
+{
+  "source": "runs/005-public231-baseline/vllm-jev/public-c1-r3/responses.jsonl",
+  "sha256": "2aa162b8ce7cb80cc199cfb1728255618449ba4d76b5c2dfb8ca433d0ddec0c6",
+  "records": 231,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}

@@ -1,0 +1,14 @@
+usage: replay.py [-h] --kind {public,shapes,parity} --s1-repo S1_REPO
+                 --vllm-repo VLLM_REPO --model-root MODEL_ROOT --baseline-bin
+                 BASELINE_BIN
+
+Relocate the archived campaign scripts without changing workload/protocol
+logic.
+
+options:
+  -h, --help            show this help message and exit
+  --kind {public,shapes,parity}
+  --s1-repo S1_REPO
+  --vllm-repo VLLM_REPO
+  --model-root MODEL_ROOT
+  --baseline-bin BASELINE_BIN

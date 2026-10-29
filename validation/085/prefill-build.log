@@ -1,0 +1,3 @@
+   Compiling omni-open-jev-native v0.1.0 (/home/psv/system1-omni/src/models/open_jev/native)
+    Finished `release` profile [optimized] target(s) in 2.98s
+  Executable ../../../../tests/open_jev/prefill_batch.rs (target/release/deps/prefill_batch-cd6267a38903c276)

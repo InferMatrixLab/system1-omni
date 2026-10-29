@@ -1,0 +1,607 @@
+{
+  "device": "NVIDIA L20X",
+  "sm": [
+    9,
+    0
+  ],
+  "binary_hashes": {
+    "/home/psv/jev-optimization/experiments/052-actual-row-reuse-gemm/bin/libqwen3_5_cuda.so": "d9dd07988c0c455b4fb73863e20f777fcd108e7ccd60196acce2d0c9a788cdc5",
+    "/home/psv/jev-optimization/experiments/068-vector-residual-norm/bin/libqwen3_5_cuda.so": "003770ac57133ac6e70a31af35606621c4d6d58ef9ec1ad56ec32b9d7a3d1bed"
+  },
+  "results": [
+    {
+      "rows": 1,
+      "baseline_us": 7.279000012204051,
+      "exact_us": 2.0860000513494015,
+      "exact_speedup": 3.4894534194739726,
+      "checks": [
+        {
+          "case": "initial",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.5",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-32.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        }
+      ],
+      "samples_us": [
+        [
+          7.567999884486198,
+          7.288000080734491,
+          7.269999943673611,
+          7.269999943673611,
+          7.300000172108412,
+          7.236000150442123
+        ],
+        [
+          2.131999935954809,
+          2.090000081807375,
+          2.0860000513494015,
+          2.0580000709742308,
+          2.073999959975481,
+          2.0860000513494015
+        ]
+      ]
+    },
+    {
+      "rows": 16,
+      "baseline_us": 7.538000121712685,
+      "exact_us": 2.189000020734966,
+      "exact_speedup": 3.443581567067217,
+      "checks": [
+        {
+          "case": "initial",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.5",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-32.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        }
+      ],
+      "samples_us": [
+        [
+          7.840000092983246,
+          7.550000213086605,
+          7.513999938964844,
+          7.517999969422817,
+          7.546000182628632,
+          7.530000060796738
+        ],
+        [
+          2.240000059828162,
+          2.193999942392111,
+          2.2060000337660313,
+          2.1780000533908606,
+          2.182000083848834,
+          2.1840000990778208
+        ]
+      ]
+    },
+    {
+      "rows": 32,
+      "baseline_us": 7.735999999567866,
+      "exact_us": 2.2249999456107616,
+      "exact_speedup": 3.4768540173803633,
+      "checks": [
+        {
+          "case": "initial",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.5",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-32.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        }
+      ],
+      "samples_us": [
+        [
+          7.934000343084335,
+          7.741999812424183,
+          7.7599999494850636,
+          7.73000018671155,
+          7.73000018671155,
+          7.722000125795603
+        ],
+        [
+          2.257999964058399,
+          2.2219999227672815,
+          2.2319999989122152,
+          2.1860001143068075,
+          2.2279999684542418,
+          2.2120000794529915
+        ]
+      ]
+    },
+    {
+      "rows": 64,
+      "baseline_us": 7.738000014796853,
+      "exact_us": 2.268000040203333,
+      "exact_speedup": 3.41181652452842,
+      "checks": [
+        {
+          "case": "initial",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.5",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-32.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        }
+      ],
+      "samples_us": [
+        [
+          7.923999801278114,
+          7.73600023239851,
+          7.739999797195196,
+          7.74399982765317,
+          7.728000171482563,
+          7.73000018671155
+        ],
+        [
+          2.2899999748915434,
+          2.266000024974346,
+          2.2499999031424522,
+          2.257999964058399,
+          2.2720000706613064,
+          2.2700000554323196
+        ]
+      ]
+    },
+    {
+      "rows": 128,
+      "baseline_us": 7.836999837309122,
+      "exact_us": 2.4930000072345138,
+      "exact_speedup": 3.1436020114587606,
+      "checks": [
+        {
+          "case": "initial",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.5",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-32.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        }
+      ],
+      "samples_us": [
+        [
+          8.051999844610691,
+          7.826000452041626,
+          7.829999551177025,
+          7.848000153899193,
+          7.844000123441219,
+          7.823999971151352
+        ],
+        [
+          2.5480000767856836,
+          2.529999939724803,
+          2.4880000855773687,
+          2.4679999332875013,
+          2.497999928891659,
+          2.469999948516488
+        ]
+      ]
+    },
+    {
+      "rows": 256,
+      "baseline_us": 8.00199992954731,
+      "exact_us": 2.971000038087368,
+      "exact_speedup": 2.693369177705812,
+      "checks": [
+        {
+          "case": "initial",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.5",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-32.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        }
+      ],
+      "samples_us": [
+        [
+          8.263999596238136,
+          8.023999631404877,
+          7.9739997163414955,
+          8.01400002092123,
+          7.989999838173389,
+          7.977999746799469
+        ],
+        [
+          3.017999930307269,
+          2.974000060930848,
+          2.974000060930848,
+          2.9380000196397305,
+          2.968000015243888,
+          2.951999893411994
+        ]
+      ]
+    },
+    {
+      "rows": 512,
+      "baseline_us": 8.700999896973372,
+      "exact_us": 3.920000046491623,
+      "exact_speedup": 2.2196428045353507,
+      "checks": [
+        {
+          "case": "initial",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.5",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-32.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        }
+      ],
+      "samples_us": [
+        [
+          9.38200019299984,
+          8.666000328958035,
+          8.729999884963036,
+          8.692000061273575,
+          8.709999732673168,
+          8.692000061273575
+        ],
+        [
+          4.004000220447779,
+          3.9220000617206097,
+          3.9160000160336494,
+          3.8999998942017555,
+          3.926000092178583,
+          3.918000031262636
+        ]
+      ]
+    },
+    {
+      "rows": 1024,
+      "baseline_us": 13.094999827444553,
+      "exact_us": 7.266000146046281,
+      "exact_speedup": 1.8022295023720942,
+      "checks": [
+        {
+          "case": "initial",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.5",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-32.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        }
+      ],
+      "samples_us": [
+        [
+          13.68200033903122,
+          13.150000013411045,
+          12.865999713540077,
+          13.2039999589324,
+          12.706000357866287,
+          13.039999641478062
+        ],
+        [
+          7.441999856382608,
+          7.2119999676942825,
+          7.323999889194965,
+          7.201999891549349,
+          7.304000202566385,
+          7.2280000895261765
+        ]
+      ]
+    },
+    {
+      "rows": 2048,
+      "baseline_us": 41.366999968886375,
+      "exact_us": 16.905000433325768,
+      "exact_speedup": 2.447027442089697,
+      "checks": [
+        {
+          "case": "initial",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.5",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-32.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        }
+      ],
+      "samples_us": [
+        [
+          41.62200167775154,
+          41.51599854230881,
+          41.200000792741776,
+          41.56000167131424,
+          41.21800139546394,
+          41.071999818086624
+        ],
+        [
+          17.066000029444695,
+          16.906000673770905,
+          16.88399910926819,
+          16.87600091099739,
+          17.009999603033066,
+          16.90400019288063
+        ]
+      ]
+    },
+    {
+      "rows": 4096,
+      "baseline_us": 84.66599881649017,
+      "exact_us": 36.30300052464008,
+      "exact_speedup": 2.3322038837815753,
+      "checks": [
+        {
+          "case": "initial",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.5",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-32.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        }
+      ],
+      "samples_us": [
+        [
+          84.86799895763397,
+          84.81399714946747,
+          84.61599797010422,
+          84.60800349712372,
+          84.55999940633774,
+          84.71599966287613
+        ],
+        [
+          36.612000316381454,
+          36.48599982261658,
+          36.32200136780739,
+          36.24400123953819,
+          36.28399968147278,
+          36.22400015592575
+        ]
+      ]
+    },
+    {
+      "rows": 8192,
+      "baseline_us": 162.4400019645691,
+      "exact_us": 69.8390007019043,
+      "exact_speedup": 2.3259210517332023,
+      "checks": [
+        {
+          "case": "initial",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.5",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-32.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        },
+        {
+          "case": "changed-0.0",
+          "variant": "exact",
+          "exact_bits": true,
+          "different_elements": 0,
+          "max_abs": 0.0
+        }
+      ],
+      "samples_us": [
+        [
+          162.3300015926361,
+          162.53800690174103,
+          162.44199872016907,
+          162.17400133609772,
+          162.43800520896912,
+          162.51599788665771
+        ],
+        [
+          69.88999992609024,
+          69.83400136232376,
+          69.73599642515182,
+          69.97600197792053,
+          69.84400004148483,
+          69.58399713039398
+        ]
+      ]
+    }
+  ]
+}

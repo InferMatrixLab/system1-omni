@@ -1,0 +1,6 @@
+{
+  "source": "runs/084-request-timeline-trace/system1/public-c8-r2/responses.jsonl",
+  "sha256": "dca0ff845bb985612de092997ab95f12e2ee9a84d33595c03e3eea1ba8efbb27",
+  "records": 231,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}

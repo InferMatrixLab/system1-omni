@@ -1,0 +1,6 @@
+{
+  "source": "runs/069-shapes-native-vector-norm/system1-r1/t128-c16/responses.jsonl",
+  "sha256": "af5fea976d8ffcba3de0967ea3309b1a83e63ac3e377f49bcf2f08b07fe025a2",
+  "records": 2496,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}

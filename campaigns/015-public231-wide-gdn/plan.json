@@ -1,0 +1,28 @@
+{
+  "workload": "/home/psv/jev-optimization/workloads/public231.jsonl",
+  "sha256": "4429eb8850b92e14d1327f126158be97a50cc51eb5ab1db06d4d671bb78b3ab3",
+  "concurrencies": [
+    1,
+    8,
+    16,
+    32
+  ],
+  "rounds": 3,
+  "warmup": 5,
+  "precision": "BF16",
+  "prefix_policy": {
+    "native_exact_request_local": "1",
+    "vllm_engine_prefix": "1",
+    "historical_request_reuse": "none: native recomputes each request, vLLM endpoint generates fresh cache salt"
+  },
+  "graph_policy": "native eager; vLLM default compile/graph",
+  "clock": "post_to_body_json_and_schema_validation",
+  "numerical_acceptance_vs_frozen_native": {
+    "decision_flips": 0,
+    "probability_max_abs": 0.001,
+    "score_max_abs": 0.001
+  },
+  "candidate_must_win": "All predefined cells: lower pooled P50/P95, higher QPS; no failed or skipped requests. Screen cannot accept a change.",
+  "retries": 0,
+  "screen_only": false
+}

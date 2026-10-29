@@ -1,1 +1,0 @@
-"""Valen contract tests."""

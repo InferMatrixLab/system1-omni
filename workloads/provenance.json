@@ -1,0 +1,23 @@
+{
+  "public231": {
+    "path": "/home/psv/jev-optimization/workloads/public231.jsonl",
+    "sha256": "4429eb8850b92e14d1327f126158be97a50cc51eb5ab1db06d4d671bb78b3ab3",
+    "count": 231,
+    "max_candidate_tokens": 3782
+  },
+  "canonical_dataset_sha256": "dc3995d8ae1e2fc8e81ce38431add509eb8bb39b85aadfd0c7c32079382dde51",
+  "unsupported_context": [],
+  "type_counts": {
+    "choice": 139,
+    "noul": 74,
+    "score": 18
+  },
+  "length_buckets": {
+    "128": 120,
+    "4096": 36,
+    "512": 26,
+    "2048": 5,
+    "1024": 19,
+    "256": 25
+  }
+}

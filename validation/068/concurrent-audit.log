@@ -1,0 +1,114 @@
+{
+  "original": "/home/psv/jev-optimization/runs/005-public231-baseline/system1/public-c1-r1",
+  "cells": [
+    {
+      "cell": "public-c1-r1",
+      "requests": 231,
+      "decision_flips": 0,
+      "max_probability_delta": 0,
+      "max_score_delta": 0,
+      "failures": [],
+      "passed": true
+    },
+    {
+      "cell": "public-c1-r2",
+      "requests": 231,
+      "decision_flips": 0,
+      "max_probability_delta": 0,
+      "max_score_delta": 0,
+      "failures": [],
+      "passed": true
+    },
+    {
+      "cell": "public-c1-r3",
+      "requests": 231,
+      "decision_flips": 0,
+      "max_probability_delta": 0,
+      "max_score_delta": 0,
+      "failures": [],
+      "passed": true
+    },
+    {
+      "cell": "public-c16-r1",
+      "requests": 231,
+      "decision_flips": 0,
+      "max_probability_delta": 0,
+      "max_score_delta": 0,
+      "failures": [],
+      "passed": true
+    },
+    {
+      "cell": "public-c16-r2",
+      "requests": 231,
+      "decision_flips": 0,
+      "max_probability_delta": 0,
+      "max_score_delta": 0,
+      "failures": [],
+      "passed": true
+    },
+    {
+      "cell": "public-c16-r3",
+      "requests": 231,
+      "decision_flips": 0,
+      "max_probability_delta": 0,
+      "max_score_delta": 0,
+      "failures": [],
+      "passed": true
+    },
+    {
+      "cell": "public-c32-r1",
+      "requests": 231,
+      "decision_flips": 0,
+      "max_probability_delta": 0,
+      "max_score_delta": 0,
+      "failures": [],
+      "passed": true
+    },
+    {
+      "cell": "public-c32-r2",
+      "requests": 231,
+      "decision_flips": 0,
+      "max_probability_delta": 0,
+      "max_score_delta": 0,
+      "failures": [],
+      "passed": true
+    },
+    {
+      "cell": "public-c32-r3",
+      "requests": 231,
+      "decision_flips": 0,
+      "max_probability_delta": 0,
+      "max_score_delta": 0,
+      "failures": [],
+      "passed": true
+    },
+    {
+      "cell": "public-c8-r1",
+      "requests": 231,
+      "decision_flips": 0,
+      "max_probability_delta": 0,
+      "max_score_delta": 0,
+      "failures": [],
+      "passed": true
+    },
+    {
+      "cell": "public-c8-r2",
+      "requests": 231,
+      "decision_flips": 0,
+      "max_probability_delta": 0,
+      "max_score_delta": 0,
+      "failures": [],
+      "passed": true
+    },
+    {
+      "cell": "public-c8-r3",
+      "requests": 231,
+      "decision_flips": 0,
+      "max_probability_delta": 0,
+      "max_score_delta": 0,
+      "failures": [],
+      "passed": true
+    }
+  ],
+  "passed": true
+}

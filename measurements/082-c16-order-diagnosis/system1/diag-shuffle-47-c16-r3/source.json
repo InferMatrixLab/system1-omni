@@ -1,0 +1,6 @@
+{
+  "source": "runs/082-c16-order-diagnosis/system1/diag-shuffle-47-c16-r3/responses.jsonl",
+  "sha256": "370db4ba88571a645cab4c4f39e1051cd29929d3cb44f5b2dade87cb4b2b2559",
+  "records": 231,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}

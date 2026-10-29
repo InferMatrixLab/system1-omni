@@ -1,0 +1,51 @@
+{
+  "seed": 231,
+  "lengths": [
+    128,
+    512,
+    2048,
+    4096
+  ],
+  "candidate_counts": {
+    "noul": [
+      1
+    ],
+    "choice": [
+      2,
+      4,
+      8
+    ],
+    "score": [
+      3,
+      5
+    ]
+  },
+  "cases_per_kind_count_length": 8,
+  "concurrencies": [
+    1,
+    8,
+    16,
+    32
+  ],
+  "duration_seconds_per_cell": 30,
+  "independent_service_launch_rounds": 2,
+  "arrival_model": "closed-loop with fixed worker count; after 30s stop dispatch at first complete manifest-cycle boundary, then drain",
+  "warmup": "one complete traversal of each slice before its measurement",
+  "request_order": "deterministic seeded shuffle per slice; repeated cyclically",
+  "latency_basis": "post_to_body_json_and_schema_validation",
+  "caches": "No historical request or response caching; native exact request-local reuse and vLLM engine prefix caching explicitly selected in run plan; vLLM endpoint generates a fresh salt per request.",
+  "overflow_cases": "test separately; never truncate or include expected failures in successful throughput",
+  "precision_reference": "Original frozen native baseline, max probability/Score abs drift 0.001 and zero decisions flipped",
+  "balance_rationale": "Declared before first shape performance run: complete cycles keep every case equally represented despite different backend speeds.",
+  "native_graph": "1",
+  "graph_policy": "native optional graphs enabled; vLLM default compile/graph",
+  "workload": "/home/psv/jev-optimization/workloads/shapes.jsonl",
+  "sha256": "fa3f5c3be9339b7ae458c614979a9f6f822d368477823100de51504fbd4bcf50",
+  "rounds": 2,
+  "native_revision": "95c0e70f2cdf2a72df763d0247ba7f20f8a9327d",
+  "exact_request_local_prefix": "1",
+  "vllm_engine_prefix": "1",
+  "max_model_len": 8192,
+  "native_model": "/home/psv/jev-comparison/system1-9b-cap8192",
+  "capacity_protocol": "Both engines reserve 8192 context capacity; unchanged input manifest max4096, no truncation. VJ exact4096 capacity boundary hangs; independent diagnostic020 showed8192 resolves."
+}

@@ -1,0 +1,74 @@
+{
+  "requests": 231,
+  "planned_requests": 231,
+  "attempted_requests": 231,
+  "unattempted_requests": 0,
+  "incomplete_requests": 0,
+  "completed_requests": 231,
+  "successful_requests": 231,
+  "failed_requests": 0,
+  "errors": {},
+  "planned_decisions": 231,
+  "attempted_decisions": 231,
+  "unattempted_decisions": 0,
+  "incomplete_decisions": 0,
+  "failed_decisions": 0,
+  "successful_decisions": 231,
+  "completed_decisions": 231,
+  "wall_seconds": 5.891333982348442,
+  "requests_per_second": 39.210134867946714,
+  "decisions_per_second": 39.210134867946714,
+  "evidence_complete": true,
+  "latency_basis": "post_to_body_json_and_schema_validation",
+  "successful_latency_p50_ms": 201.56949386000633,
+  "successful_latency_p95_ms": 1017.0880630612373,
+  "failed_latency_p50_ms": null,
+  "failed_latency_p95_ms": null,
+  "quality_on_successful_requests": {
+    "choice_accuracy": {
+      "value": 0.762589928057554,
+      "count": 139
+    },
+    "noul_accuracy": {
+      "value": 0.7972972972972973,
+      "count": 74
+    },
+    "score_mae": {
+      "value": 0.23317992656902128,
+      "count": 18
+    }
+  },
+  "latency_by_prompt_bucket": {
+    "0-127": {
+      "samples": 120,
+      "p50_ms": 127.01782211661339,
+      "p95_ms": 201.56949386000633
+    },
+    "128-255": {
+      "samples": 25,
+      "p50_ms": 490.47185480594635,
+      "p95_ms": 1020.4988308250904
+    },
+    "256-511": {
+      "samples": 26,
+      "p50_ms": 621.2262120097876,
+      "p95_ms": 834.8346538841724
+    },
+    "512-1023": {
+      "samples": 19,
+      "p50_ms": 846.5304411947727,
+      "p95_ms": 1135.9289586544037
+    },
+    "1024-2047": {
+      "samples": 5,
+      "p50_ms": 748.4828345477581,
+      "p95_ms": 846.7427492141724
+    },
+    "2048+": {
+      "samples": 36,
+      "p50_ms": 662.8817245364189,
+      "p95_ms": 1107.7561937272549
+    }
+  },
+  "stop_reason": "completed"
+}

@@ -1,0 +1,18 @@
+{
+  "primary": "128-bit memory operations and BF16register retention for4096wide residual norm",
+  "architecture": "Hardware implementation only;existing cs1_add_rms_norm API andsame-stream ordering;model/request state unchanged",
+  "numerics": "Addition rounded BF16 before normalization;perthread indices tid+i*256 and block_sum unchanged;identical scalar output expression;no reassociation permitted",
+  "bounds": "All4pointers checked16-bytealignment;4096BF16row stride8192divisible16;512packs partitioned2perthread;sharedtile indexed exactly0..4095;unalignedfallback unchanged",
+  "ownership": "No allocations,globalstate,asyncCPUwork or newlifetimes;read-onlydelta/weights guarded in tests",
+  "compatibility": "Width2560/5120 paths unchanged;other widths generic;SM90runtime validated only;otherGPUs unmeasured",
+  "tests": "402CPU,26CUDAcontract,44/44 graphprimitiveexact,2normGPU+7eager+7graphpassed",
+  "artifacts": "Only maintained kernel androot integration test inrepo;allmeasurements outside source tree",
+  "risks": "Sharedtranspose overhead andoccupancy/end-to-end timing requirefullC1;micro gain doesnotprove serving gain",
+  "status": "KEEP;fullPublicand069matrixcomplete;overallgoalnotachieved",
+  "formal_public": "693C1and2772allconcurrency exact;all4concurrencyP50/P95/QPS improvedvs052",
+  "precision_prechecks": "231Public+192shape exactvsoriginal and052",
+  "screen_primary": "runs/068-screen-primary/system1/screen",
+  "matrix": "069complete15/16wins;38112outputs exact",
+  "remaining_vs_vllm": "128C32P50/QPS;PublicC16P50",
+  "regression_vs_previous": "4096C1P95 increased about0.42ms, remains lowerthanVJ;allothermatrixmetrics improved"
+}

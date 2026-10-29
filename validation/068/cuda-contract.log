@@ -1,0 +1,52 @@
+test_a_duplicate_name_cannot_be_credited_with_the_other_artifact (test_build_backends.BuildSweepTest.test_a_duplicate_name_cannot_be_credited_with_the_other_artifact) ... == src/backends/cuda/aa: build.sh -> libdup.so (sm_89)
+== src/backends/cuda/zz: build.sh -> libdup.so (sm_89)
+ok
+test_a_failing_script_does_not_stop_the_next_backend (test_build_backends.BuildSweepTest.test_a_failing_script_does_not_stop_the_next_backend) ... == src/backends/cuda/aa: build.sh -> libaa.so (sm_89)
+== src/backends/cuda/zz: build.sh -> libzz.so (sm_89)
+ok
+test_a_malformed_manifest_is_reported_and_the_rest_still_build (test_build_backends.BuildSweepTest.test_a_malformed_manifest_is_reported_and_the_rest_still_build) ... == src/backends/cuda/bar: build.sh -> libbar.so (sm_89)
+ok
+test_a_manifest_that_is_not_an_object_is_reported (test_build_backends.BuildSweepTest.test_a_manifest_that_is_not_an_object_is_reported) ... == src/backends/cuda/bar: build.sh -> libbar.so (sm_89)
+ok
+test_a_missing_build_block_is_reported (test_build_backends.BuildSweepTest.test_a_missing_build_block_is_reported) ... == src/backends/cuda/bar: build.sh -> libbar.so (sm_89)
+ok
+test_a_missing_script_is_reported (test_build_backends.BuildSweepTest.test_a_missing_script_is_reported) ... == src/backends/cuda/bar: build.sh -> libbar.so (sm_89)
+ok
+test_a_non_executable_script_is_reported (test_build_backends.BuildSweepTest.test_a_non_executable_script_is_reported) ... == src/backends/cuda/bar: build.sh -> libbar.so (sm_89)
+ok
+test_a_non_integer_architecture_is_reported (test_build_backends.BuildSweepTest.test_a_non_integer_architecture_is_reported) ... == src/backends/cuda/bar: build.sh -> libbar.so (sm_89)
+ok
+test_a_planned_backend_is_skipped_rather_than_built (test_build_backends.BuildSweepTest.test_a_planned_backend_is_skipped_rather_than_built) ... == src/backends/cuda/bar: build.sh -> libbar.so (sm_89)
+ok
+test_a_script_that_produces_no_library_is_reported (test_build_backends.BuildSweepTest.test_a_script_that_produces_no_library_is_reported) ... == src/backends/cuda/bar: build.sh -> libbar.so (sm_89)
+== src/backends/cuda/hollow: build.sh -> libhollow.so (sm_89)
+ok
+test_a_tree_of_only_planned_backends_is_not_a_failure (test_build_backends.BuildSweepTest.test_a_tree_of_only_planned_backends_is_not_a_failure) ... ok
+test_a_tree_with_no_manifest_fails_rather_than_passing_quietly (test_build_backends.BuildSweepTest.test_a_tree_with_no_manifest_fails_rather_than_passing_quietly) ... ok
+test_duplicate_names_keep_separate_artifacts (test_build_backends.BuildSweepTest.test_duplicate_names_keep_separate_artifacts) ... == src/backends/cuda/aa: build.sh -> libdup.so (sm_89)
+== src/backends/cuda/zz: build.sh -> libdup.so (sm_89)
+ok
+test_each_build_gets_its_own_directory (test_build_backends.BuildSweepTest.test_each_build_gets_its_own_directory) ... == src/backends/cuda/bar: build.sh -> libbar.so (sm_89)
+== src/backends/cuda: build.sh -> libflat.so (sm_89)
+ok
+test_every_declared_backend_builds (test_build_backends.BuildSweepTest.test_every_declared_backend_builds) ... == src/backends/cuda/bar: build.sh -> libbar.so (sm_89)
+== src/backends/cuda: build.sh -> libflat.so (sm_89)
+ok
+test_reusing_the_output_directory_does_not_reuse_a_library (test_build_backends.BuildSweepTest.test_reusing_the_output_directory_does_not_reuse_a_library) ... == src/backends/cuda: build.sh -> libflat.so (sm_89)
+== src/backends/cuda: build.sh -> libflat.so (sm_89)
+ok
+test_the_command_line_fails_once_and_names_every_failure (test_build_backends.BuildSweepTest.test_the_command_line_fails_once_and_names_every_failure) ... ok
+test_the_command_line_reports_counts_and_exits_zero (test_build_backends.BuildSweepTest.test_the_command_line_reports_counts_and_exits_zero) ... ok
+test_automatic_stage_is_removed_on_failure (test_laya_build.BuildEntryTest.test_automatic_stage_is_removed_on_failure) ... ok
+test_custom_stage_is_preserved_on_success_and_failure (test_laya_build.BuildEntryTest.test_custom_stage_is_preserved_on_success_and_failure) ... ok
+test_invalid_architecture_is_rejected_before_staging (test_laya_build.BuildEntryTest.test_invalid_architecture_is_rejected_before_staging) ... ok
+test_keep_stage_preserves_automatic_directory (test_laya_build.BuildEntryTest.test_keep_stage_preserves_automatic_directory) ... ok
+test_missing_library_is_an_error (test_laya_build.BuildEntryTest.test_missing_library_is_an_error) ... ok
+test_missing_python_or_tilelang_is_reported (test_laya_build.BuildEntryTest.test_missing_python_or_tilelang_is_reported) ... ok
+test_output_can_be_the_custom_stage (test_laya_build.BuildEntryTest.test_output_can_be_the_custom_stage) ... ok
+test_success_copies_outputs_and_removes_automatic_stage (test_laya_build.BuildEntryTest.test_success_copies_outputs_and_removes_automatic_stage) ... ok
+
+----------------------------------------------------------------------
+Ran 26 tests in 0.718s
+
+OK

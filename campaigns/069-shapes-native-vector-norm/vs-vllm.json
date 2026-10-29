@@ -1,0 +1,370 @@
+[
+  {
+    "length": 128,
+    "concurrency": 1,
+    "native": {
+      "p50_ms": 13.637786731123924,
+      "p95_ms": 20.382098853588104,
+      "qps": 76.04539686578488
+    },
+    "vllm": {
+      "p50_ms": 60.76453812420368,
+      "p95_ms": 70.1172798871994,
+      "qps": 17.964314164197916
+    },
+    "previous_native": {
+      "p50_ms": 14.193704351782799,
+      "p95_ms": 20.993921905755997,
+      "qps": 72.46886787552465
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": true,
+    "previous_native_all_improved": true
+  },
+  {
+    "length": 128,
+    "concurrency": 8,
+    "native": {
+      "p50_ms": 99.18254613876343,
+      "p95_ms": 113.34086582064629,
+      "qps": 82.71611509233593
+    },
+    "vllm": {
+      "p50_ms": 119.68558840453625,
+      "p95_ms": 149.2738351225853,
+      "qps": 64.79813324347876
+    },
+    "previous_native": {
+      "p50_ms": 103.20983082056046,
+      "p95_ms": 116.93404242396355,
+      "qps": 79.67008084992621
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": true,
+    "previous_native_all_improved": true
+  },
+  {
+    "length": 128,
+    "concurrency": 16,
+    "native": {
+      "p50_ms": 196.41640782356262,
+      "p95_ms": 218.61852705478668,
+      "qps": 82.63964486130956
+    },
+    "vllm": {
+      "p50_ms": 207.02649652957916,
+      "p95_ms": 238.8421930372715,
+      "qps": 82.19922952802791
+    },
+    "previous_native": {
+      "p50_ms": 203.63586209714413,
+      "p95_ms": 225.5501113831997,
+      "qps": 79.73404519824899
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": true,
+    "previous_native_all_improved": true
+  },
+  {
+    "length": 128,
+    "concurrency": 32,
+    "native": {
+      "p50_ms": 383.8546182960272,
+      "p95_ms": 418.01923140883446,
+      "qps": 82.67972799105632
+    },
+    "vllm": {
+      "p50_ms": 378.66715155541897,
+      "p95_ms": 426.74021795392036,
+      "qps": 83.95548959674379
+    },
+    "previous_native": {
+      "p50_ms": 397.87485264241695,
+      "p95_ms": 432.5997792184353,
+      "qps": 79.70933455732559
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": false,
+    "previous_native_all_improved": true
+  },
+  {
+    "length": 512,
+    "concurrency": 1,
+    "native": {
+      "p50_ms": 21.418951451778412,
+      "p95_ms": 28.787635266780853,
+      "qps": 45.760588648923985
+    },
+    "vllm": {
+      "p50_ms": 75.06625726819038,
+      "p95_ms": 120.9287941455841,
+      "qps": 12.806735930799459
+    },
+    "previous_native": {
+      "p50_ms": 21.9690203666687,
+      "p95_ms": 29.37053143978119,
+      "qps": 44.62040493856891
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": true,
+    "previous_native_all_improved": true
+  },
+  {
+    "length": 512,
+    "concurrency": 8,
+    "native": {
+      "p50_ms": 163.70883025228977,
+      "p95_ms": 179.77476119995117,
+      "qps": 49.32085345887348
+    },
+    "vllm": {
+      "p50_ms": 360.49913987517357,
+      "p95_ms": 465.26966989040375,
+      "qps": 21.91216501257704
+    },
+    "previous_native": {
+      "p50_ms": 166.8156273663044,
+      "p95_ms": 182.43003264069557,
+      "qps": 48.35304754571788
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": true,
+    "previous_native_all_improved": true
+  },
+  {
+    "length": 512,
+    "concurrency": 16,
+    "native": {
+      "p50_ms": 326.1666428297758,
+      "p95_ms": 348.1951430439949,
+      "qps": 49.32865594751014
+    },
+    "vllm": {
+      "p50_ms": 747.6313635706902,
+      "p95_ms": 937.9160217940807,
+      "qps": 22.250071919667203
+    },
+    "previous_native": {
+      "p50_ms": 331.83317445218563,
+      "p95_ms": 353.5369038581848,
+      "qps": 48.4300135336138
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": true,
+    "previous_native_all_improved": true
+  },
+  {
+    "length": 512,
+    "concurrency": 32,
+    "native": {
+      "p50_ms": 645.651713013649,
+      "p95_ms": 678.5815693438053,
+      "qps": 49.32340762121359
+    },
+    "vllm": {
+      "p50_ms": 1496.547507122159,
+      "p95_ms": 1686.7466047406197,
+      "qps": 22.207615047874327
+    },
+    "previous_native": {
+      "p50_ms": 658.090565353632,
+      "p95_ms": 690.0530084967613,
+      "qps": 48.410652910353875
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": true,
+    "previous_native_all_improved": true
+  },
+  {
+    "length": 2048,
+    "concurrency": 1,
+    "native": {
+      "p50_ms": 63.010966405272484,
+      "p95_ms": 71.74178585410118,
+      "qps": 15.731429592267377
+    },
+    "vllm": {
+      "p50_ms": 89.07340839505196,
+      "p95_ms": 135.35239174962044,
+      "qps": 10.625069090208653
+    },
+    "previous_native": {
+      "p50_ms": 64.65635262429714,
+      "p95_ms": 74.29574429988861,
+      "qps": 15.336226498566734
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": true,
+    "previous_native_all_improved": true
+  },
+  {
+    "length": 2048,
+    "concurrency": 8,
+    "native": {
+      "p50_ms": 483.1994641572237,
+      "p95_ms": 503.70965898036957,
+      "qps": 16.624129651006314
+    },
+    "vllm": {
+      "p50_ms": 641.263535246253,
+      "p95_ms": 736.2369708716869,
+      "qps": 12.885153888681335
+    },
+    "previous_native": {
+      "p50_ms": 489.94000256061554,
+      "p95_ms": 511.2270414829254,
+      "qps": 16.385602630233656
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": true,
+    "previous_native_all_improved": true
+  },
+  {
+    "length": 2048,
+    "concurrency": 16,
+    "native": {
+      "p50_ms": 965.656878426671,
+      "p95_ms": 990.246843546629,
+      "qps": 16.61912718121745
+    },
+    "vllm": {
+      "p50_ms": 1248.2272405177355,
+      "p95_ms": 1403.931811451912,
+      "qps": 12.90675219630437
+    },
+    "previous_native": {
+      "p50_ms": 981.9010253995657,
+      "p95_ms": 1008.7818950414658,
+      "qps": 16.337436286206277
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": true,
+    "previous_native_all_improved": true
+  },
+  {
+    "length": 2048,
+    "concurrency": 32,
+    "native": {
+      "p50_ms": 1920.8274446427822,
+      "p95_ms": 1964.4452258944511,
+      "qps": 16.61766509664185
+    },
+    "vllm": {
+      "p50_ms": 2446.5529303997755,
+      "p95_ms": 2635.6275118887424,
+      "qps": 12.954678253660125
+    },
+    "previous_native": {
+      "p50_ms": 1954.532016068697,
+      "p95_ms": 1999.9631643295288,
+      "qps": 16.327138207102465
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": true,
+    "previous_native_all_improved": true
+  },
+  {
+    "length": 4096,
+    "concurrency": 1,
+    "native": {
+      "p50_ms": 123.91846254467964,
+      "p95_ms": 139.66773450374603,
+      "qps": 8.045433516981426
+    },
+    "vllm": {
+      "p50_ms": 132.6221078634262,
+      "p95_ms": 176.8261045217514,
+      "qps": 7.315457555279828
+    },
+    "previous_native": {
+      "p50_ms": 126.25601887702942,
+      "p95_ms": 139.24947753548622,
+      "qps": 7.8944357135006955
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": true,
+    "previous_native_all_improved": false
+  },
+  {
+    "length": 4096,
+    "concurrency": 8,
+    "native": {
+      "p50_ms": 943.3339666575193,
+      "p95_ms": 962.2268490493298,
+      "qps": 8.507254137359258
+    },
+    "vllm": {
+      "p50_ms": 999.6021576225758,
+      "p95_ms": 1101.4803908765316,
+      "qps": 8.115876046567081
+    },
+    "previous_native": {
+      "p50_ms": 959.2887405306101,
+      "p95_ms": 980.1229611039162,
+      "qps": 8.36399486862119
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": true,
+    "previous_native_all_improved": true
+  },
+  {
+    "length": 4096,
+    "concurrency": 16,
+    "native": {
+      "p50_ms": 1886.3575961440802,
+      "p95_ms": 1910.8834564685822,
+      "qps": 8.503411843143132
+    },
+    "vllm": {
+      "p50_ms": 1971.739498898387,
+      "p95_ms": 2119.3608678877354,
+      "qps": 8.156813290378377
+    },
+    "previous_native": {
+      "p50_ms": 1916.628386825323,
+      "p95_ms": 1942.1811141073704,
+      "qps": 8.372314152133686
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": true,
+    "previous_native_all_improved": true
+  },
+  {
+    "length": 4096,
+    "concurrency": 32,
+    "native": {
+      "p50_ms": 3755.6947600096464,
+      "p95_ms": 3806.369408965111,
+      "qps": 8.501851281765834
+    },
+    "vllm": {
+      "p50_ms": 3897.580238059163,
+      "p95_ms": 4097.912810742855,
+      "qps": 8.150196225688584
+    },
+    "previous_native": {
+      "p50_ms": 3816.2480033934116,
+      "p95_ms": 3866.598851978779,
+      "qps": 8.369972745655788
+    },
+    "previous_native_campaign": "/home/psv/jev-optimization/runs/053-shapes-native-actual-row-gemm",
+    "previous_native_sha": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+    "wins_all": true,
+    "previous_native_all_improved": true
+  }
+]

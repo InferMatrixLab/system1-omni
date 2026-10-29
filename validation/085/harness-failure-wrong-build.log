@@ -1,0 +1,17 @@
+
+running 1 test
+test mixed_packing_matches_frozen_original_native ... 
+thread 'mixed_packing_matches_frozen_original_native' (2306975) panicked at src/models/open_jev/native/../../../../tests/open_jev/packing_parity.rs:77:5:
+assertion `left == right` failed
+  left: false
+ right: true
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    mixed_packing_matches_frozen_original_native
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 4 filtered out; finished in 4.63s
+

@@ -1,0 +1,8 @@
+Reserved 1 GPU(s): [1] for command execution (timeout: 0h 15m 0s)
+Released automatically if no GPU usage is detected for 30m
+baseline complete 231
+candidate complete 231
+{"requests": 231, "decision_flips": 0, "max_probability_delta": 0.0, "max_score_delta": 0, "GPU_VISIBLE": "1", "failures": [], "note": "Exploratory fresh-process outputs; timing is not acceptance evidence."}
+baseline complete 192
+candidate complete 192
+{"requests": 192, "decision_flips": 0, "max_probability_delta": 0.0, "max_score_delta": 0, "GPU_VISIBLE": "1", "failures": [], "note": "Exploratory fresh-process outputs; timing is not acceptance evidence."}

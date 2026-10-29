@@ -1,0 +1,15 @@
+{
+  "raw_native_blockers": 13,
+  "blocker_overlap_ms": 145.427343,
+  "paired_target_timelines_per_backend": 1413,
+  "matched_manifests_all_arms": true,
+  "native_answers_exact_vs068": 5598,
+  "source_hashes": {
+    "request-decomposition.json": "c4bda06964005358ac68a5bcadc9f2d1b2958642cc674866c7265e35e2fd45b0",
+    "paired-request-deltas.json": "c1b372bf024cd3063aab9a458707b69051bbde1bf7aa7894ef2af6040c0236ee",
+    "median-request-case-study.json": "7a41df1129ad165e62bebb835c00d6d46edc82ccf06b46c2244ac02d6e821894",
+    "vllm-batch-membership.json": "ebf99ea16448cecf2eaa2612850197ba2885fefbc62c09e8de44628064a71b06",
+    "validation.json": "0c4f69ba37d9295d826f3a7bfa957f00f16df9ba3fc3b6dbc0b05e2ad8e1c9ae",
+    "plan-v2.json": "964c27e925bdad380a021d5b80962c031b39dd6979d295e1a2dd2d899b4a5e2d"
+  }
+}

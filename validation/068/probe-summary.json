@@ -1,0 +1,10 @@
+{
+  "cases": 44,
+  "bitwise_equal": 44,
+  "max_abs": 0.0,
+  "speedup_range": [
+    1.8022295023720942,
+    3.4894534194739726
+  ],
+  "scope": "Integrated GPU primitive only; not serving acceptance"
+}

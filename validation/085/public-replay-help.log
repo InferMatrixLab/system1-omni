@@ -1,0 +1,21 @@
+{"archived_script": "public_campaign.py", "s1_repo": "/home/psv/system1-omni", "vllm_repo": "/home/psv/vllm-jev", "model_root": "/home/psv/jev-comparison", "argv": ["--help"]}
+usage: public_campaign.py [-h] --backend {system1,vllm-jev,both}
+                          [--bin-dir BIN_DIR] --out OUT
+                          [--concurrency CONCURRENCY]
+                          [--baseline-screen BASELINE_SCREEN] [--screen-only]
+                          [--exact-prefix {0,1}] [--vllm-prefix {0,1}]
+                          [--frozen-metadata FROZEN_METADATA]
+                          [--native-graph {0,1}]
+
+options:
+  -h, --help            show this help message and exit
+  --backend {system1,vllm-jev,both}
+  --bin-dir BIN_DIR
+  --out OUT
+  --concurrency CONCURRENCY
+  --baseline-screen BASELINE_SCREEN
+  --screen-only
+  --exact-prefix {0,1}
+  --vllm-prefix {0,1}
+  --frozen-metadata FROZEN_METADATA
+  --native-graph {0,1}

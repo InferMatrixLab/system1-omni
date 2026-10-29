@@ -1,0 +1,18 @@
+{
+  "runtime_revision": "bf4c04a1dfc12be035c4dcf70c28d5d5a66adfe1",
+  "metrics": {
+    "p50_ms": 14.323417097330093,
+    "p95_ms": 85.52232384681702,
+    "tail_2048_p95_ms": 115.72467535734177,
+    "QPS": 36.96661820347374,
+    "requests": 693
+  },
+  "successful_requests": 693,
+  "planned_requests": 693,
+  "device": "NVIDIA L20X",
+  "compute_capability": "sm_90",
+  "clock": "post_to_body_json_and_schema_validation",
+  "gate_source": "runs/052-public231-actual-row-gemm/gate.json",
+  "screen_source": "runs/052-screen-primary/system1/screen",
+  "candidate_phase": "kernel"
+}

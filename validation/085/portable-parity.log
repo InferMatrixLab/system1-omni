@@ -1,0 +1,10 @@
+Reserved 1 GPU(s): [2] for command execution (timeout: 0h 20m 0s)
+Released automatically if no GPU usage is detected for 30m
+{"archived_script": "parity_probe.py", "s1_repo": "/home/psv/system1-omni", "vllm_repo": "/home/psv/vllm-jev", "model_root": "/home/psv/jev-comparison", "argv": ["--candidate", "/home/psv/jev-optimization/experiments/068-vector-residual-norm/bin", "--out", "/home/psv/jev-optimization/experiments/085-review-packing/replay-public231", "--manifest", "/home/psv/jev-optimization/experiments/085-review-packing/evidence/workloads/public231.jsonl", "--exact-prefix", "1", "--candidate-graph", "1"]}
+baseline complete 231
+candidate complete 231
+{"requests": 231, "decision_flips": 0, "max_probability_delta": 0.0, "max_score_delta": 0, "GPU_VISIBLE": "2", "failures": [], "note": "Exploratory fresh-process outputs; timing is not acceptance evidence."}
+{"archived_script": "parity_probe.py", "s1_repo": "/home/psv/system1-omni", "vllm_repo": "/home/psv/vllm-jev", "model_root": "/home/psv/jev-comparison", "argv": ["--candidate", "/home/psv/jev-optimization/experiments/068-vector-residual-norm/bin", "--out", "/home/psv/jev-optimization/experiments/085-review-packing/replay-shapes", "--manifest", "/home/psv/jev-optimization/experiments/085-review-packing/evidence/workloads/shapes.jsonl", "--exact-prefix", "1", "--candidate-graph", "1"]}
+baseline complete 192
+candidate complete 192
+{"requests": 192, "decision_flips": 0, "max_probability_delta": 0.0, "max_score_delta": 0, "GPU_VISIBLE": "2", "failures": [], "note": "Exploratory fresh-process outputs; timing is not acceptance evidence."}

@@ -1,5 +1,0 @@
-blank_issues_enabled: false
-contact_links:
-  - name: Project overview and status
-    url: https://github.com/ThinkFlowLab/system1-omni#readme
-    about: Read the architecture and planned model support before opening an issue.

@@ -1,0 +1,72 @@
+{
+  "manifest_sha256": "27352469bc0b1b850f3e41b43f5b939172c5b6ad1469ebeddc0ef75fabcb4318",
+  "runner_sha256": "7312407638e309a3c1e2e1a49ad5a0bbdffd84c128b215779135e4d14ce635b7",
+  "metadata": {
+    "trace": true,
+    "trace_design": "experiments/084-request-timeline/plan.json",
+    "native_graph": null,
+    "gpu": "NVIDIA L20X",
+    "gpu_ids": "2",
+    "device_evidence": "2, NVIDIA L20X, GPU-e7921766-67c6-bc17-6df1-eca427957832, 570.133.20, 143771 MiB, 8.9",
+    "compute_capability": "sm_90",
+    "driver": "570.133.20",
+    "cuda": "13.0",
+    "precision": "BF16",
+    "model_revision": "ZefanCai/Open-Jev-9B@47e966881e489511c0c7f5633a9e1960a676a551",
+    "runtime_revision": "487ff7765a47e48b20fc2d48c14314fb28feaa51",
+    "exact_request_local_prefix": false,
+    "vllm_engine_prefix": true,
+    "cache_policy": "engine prefix enabled; fresh per-request salt; no response cache",
+    "cuda_evidence": {
+      "hardware": {
+        "name": "NVIDIA L20X",
+        "sm": 90,
+        "sm_count": 132,
+        "memory": 150121283584,
+        "cuda": "13.0"
+      },
+      "worker_log": "server-0.log"
+    },
+    "reservation": "gpu run, inherited CUDA_VISIBLE_DEVICES=2",
+    "commands": [
+      [
+        "/home/psv/vllm-jev/.venv/bin/vllm-jev",
+        "serve",
+        "ZefanCai/Open-Jev-9B",
+        "--workspace",
+        "/home/psv/jev-comparison/vllm-workspace",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "19902",
+        "--max-model-len",
+        "4096",
+        "--max-num-seqs",
+        "128",
+        "--max-num-batched-tokens",
+        "8192",
+        "--gpu-memory-utilization",
+        "0.45",
+        "--enable-prefix-caching",
+        "--dtype",
+        "bfloat16"
+      ]
+    ],
+    "patch": "",
+    "binary_hashes": null
+  },
+  "validation_protocol": "probabilities-4dp-model-score-v1",
+  "score_decimals": 4,
+  "protocol": "systemone",
+  "response_format": "httpx-content-base64-utf8-v1",
+  "endpoint": "http://127.0.0.1:19902/v1/systemone",
+  "model": "ZefanCai/Open-Jev-9B",
+  "phase": "measured",
+  "concurrency": 16,
+  "warmup": 5,
+  "warmup_manifest_sha256": null,
+  "timeout_seconds": 60,
+  "latency_basis": "post_to_body_json_and_schema_validation",
+  "python": "3.12.13",
+  "httpx": "0.28.1"
+}

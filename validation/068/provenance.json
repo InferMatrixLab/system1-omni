@@ -1,0 +1,17 @@
+{
+  "sha": "95c0e70f2cdf2a72df763d0247ba7f20f8a9327d",
+  "binary_sha256": {
+    "libqwen3_5_cuda.so": "003770ac57133ac6e70a31af35606621c4d6d58ef9ec1ad56ec32b9d7a3d1bed",
+    "omni-open-jev-native": "412e29eaa86f5be501d0f16dad258cba413c24aa98af0532375bb93deccfec7d",
+    "omni-jev": "11eeb8b9e94fee121096a243d510602aff3d4d0902e0c99c8f60ab71a4c4eea8"
+  },
+  "native_graph": "1",
+  "checks": "402CPU+clippy+fmt,26CUDAcontract,2normGPU+7OpenJev eager+7graph,44primitivecasesexact;finalproductionbuildaftertests",
+  "status": "KEEP;fullPublicand069matrixcomplete;overallgoalnotachieved",
+  "gate": "runs/068-public231-vector-residual-norm/gate.json",
+  "precision": "423prechecksand2772concurrent exactvsoriginal;prechecksandC1exactvs052",
+  "screen_primary": "runs/068-screen-primary/system1/screen",
+  "matrix": "069complete15/16wins;38112outputs exact",
+  "remaining_vs_vllm": "128C32P50/QPS;PublicC16P50",
+  "regression_vs_previous": "4096C1P95 increased about0.42ms, remains lowerthanVJ;allothermatrixmetrics improved"
+}

@@ -1,0 +1,68 @@
+{
+  "original_revision": "22b7717c9710de5ac5c6ccba51a6d6686dae90d9",
+  "candidate_production_revision": "95c0e70f2cdf2a72df763d0247ba7f20f8a9327d",
+  "gpu": "NVIDIA L20X, GPU-e7921766-67c6-bc17-6df1-eca427957832, 570.133.20, 143771 MiB",
+  "scope": "NVIDIA L20X / CUDA-measured SM90; BF16 pinned 9B; prefix off, original eager, candidate eager and graph",
+  "cases": 18,
+  "logits_per_mode": 94,
+  "candidate_modes": [
+    0,
+    1
+  ],
+  "max_abs_logit_error": 0,
+  "logit_bit_mismatches": 0,
+  "prefill_tests_per_mode": 7,
+  "notes": [
+    "Production source was not changed.",
+    "Original checkout has only test harness, fixtures and Cargo test registration overlaid.",
+    "First candidate attempt accidentally reused original Cargo binary, failed packing-enabled assertion before comparisons; failure log preserved. Corrected by cleaning affected crates, rebuilding, and freezing distinct binary copies. Replay instructions use separate targets."
+  ],
+  "hashes": {
+    "/home/psv/jev-optimization/experiments/085-review-packing/original-probe": "4ce9a183b90d6bc58de1d2505242a1638b1267aa61ecc3b50bc65d9e2085ecc2",
+    "/home/psv/jev-optimization/experiments/085-review-packing/candidate-probe": "16cbc4c853f016c4daf4e10db618086a694cb9aeedd5d5f50360a2cc5c653bc9",
+    "/home/psv/jev-optimization/experiments/085-review-packing/prefill-probe": "0281b1eb3abba7dedd51580d89713169e0b7a2772276760015c04591e0f492ac",
+    "/home/psv/jev-optimization/baseline/bin/libqwen3_5_cuda.so": "62a91b19f6a13f9e9dee6461551c0720ada29fc4c7088eca30df4c3765f29d3e",
+    "/home/psv/jev-optimization/experiments/068-vector-residual-norm/bin/libqwen3_5_cuda.so": "003770ac57133ac6e70a31af35606621c4d6d58ef9ec1ad56ec32b9d7a3d1bed"
+  },
+  "export_files": {
+    "chat_template.jinja": "a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715",
+    "config.json": "e974ef11a77d93e8c258325c9a4a760a476ddb0f6763b021094730885f956092",
+    "model-00001-of-00004.safetensors": "1cc5d4745ca799272e6347008dbc63b0939b904039b9f6937d35f29467d445c0",
+    "model-00002-of-00004.safetensors": "1dbe4a415ea12aef9677a1cfeeb6d963680319b89e17b813d0f6e3a666741b65",
+    "model-00003-of-00004.safetensors": "db4548fc55cd4782b2aa1962de397b3e1ef3af1384622117fa22b7af613dd4be",
+    "model-00004-of-00004.safetensors": "7987af2d4c93cf0fc4292954a002cd3ee2628ecc9d7f8656a0e24851df364d91",
+    "model.safetensors.index.json": "47f70bbb8249e76105044d45dab881ef8c0cbbeb07c557b1237ce1c0da17d2c1",
+    "open_jev_export.json": "67ae91ecce525d370c8890c0dd8401224cd25d8b477925cc470a6c5aac2f51f6",
+    "tokenizer.json": "06b9509352d2af50381ab2247e083b80d32d5c0aba91c272ca9ff729b6a0e523",
+    "tokenizer_config.json": "bee8eba30f0eb4af73c0fe2cd06d0f89b657d7819941c438157ec42f7c80ea87"
+  },
+  "test_local_commit": "281680dc6caee9b37f7c997f820765668c5d9cb9",
+  "test_published_commit": "ecea1a31e287890fee5a595504203b53734ffe2a",
+  "test_tree": "f36ac83d2bc6bf217be4dd8a24c1a5973a0d60ca",
+  "cpu_passed": 407,
+  "cpu_ignored": 106,
+  "clippy": "pass",
+  "fmt": "pass",
+  "release_build": "pass",
+  "docs_strict": "pass",
+  "fresh_http_parity": {
+    "public231": {
+      "requests": 231,
+      "decision_flips": 0,
+      "max_probability_delta": 0.0,
+      "max_score_delta": 0,
+      "GPU_VISIBLE": "2",
+      "failures": [],
+      "note": "Exploratory fresh-process outputs; timing is not acceptance evidence."
+    },
+    "shapes": {
+      "requests": 192,
+      "decision_flips": 0,
+      "max_probability_delta": 0.0,
+      "max_score_delta": 0,
+      "GPU_VISIBLE": "2",
+      "failures": [],
+      "note": "Exploratory fresh-process outputs; timing is not acceptance evidence."
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "source": "runs/081-c16-reproduction/vllm-jev/public-c1-r3/responses.jsonl",
+  "sha256": "481c470e6eac8f98c757a0cb1bbb792de41c57e26785496ccd833cf73e24081b",
+  "records": 231,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}

@@ -1,0 +1,6 @@
+{
+  "source": "runs/015-public231-wide-gdn/system1/public-c32-r3/responses.jsonl",
+  "sha256": "aa87e43cdb9b98971ca730d018e9391845750581f267932c38f53be10681cd58",
+  "records": 231,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}

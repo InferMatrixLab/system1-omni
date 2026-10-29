@@ -1,0 +1,6 @@
+{
+  "source": "runs/068-public231-vector-residual-norm/system1/public-c16-r2/responses.jsonl",
+  "sha256": "118c7a7077bb6ac102b3ea267c87b93b6f32aa47c2d6f4cd5a878ab540e85dbe",
+  "records": 231,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}

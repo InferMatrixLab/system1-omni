@@ -1,0 +1,97 @@
+{
+  "baseline_sha": "86b3100ed86b94b8e54fda9e1b5e697e249bb0cb",
+  "tip_sha": "476c8eb5acee26272b690f2166c8e3974767e9ad",
+  "device": "NVIDIA L20X",
+  "compute_capability": "sm_90",
+  "clock": "post_to_body_json_and_schema_validation",
+  "baseline": {
+    "p50_ms": 17.1293206512928,
+    "p95_ms": 153.41851487755775,
+    "tail_2048_p95_ms": 253.62392514944077,
+    "QPS": 23.86697008844614,
+    "requests": 693
+  },
+  "tip": {
+    "p50_ms": 17.195280641317368,
+    "p95_ms": 152.69723907113075,
+    "tail_2048_p95_ms": 251.8315427005291,
+    "QPS": 24.067803333993552,
+    "requests": 693
+  },
+  "deltas": {
+    "p50_ms": 0.06595999002456665,
+    "p95_ms": -0.721275806427002,
+    "tail_2048_p95_ms": -1.7923824489116669,
+    "QPS": 0.2008332455474111,
+    "requests": 0
+  },
+  "quality": [
+    {
+      "reference": "/home/psv/jev-optimization/runs/015-relocated-baseline/system1",
+      "round": 1,
+      "passed": true,
+      "compared_decisions": 231,
+      "failed_request_pairs": 0,
+      "decision_flips": 0,
+      "max_probability_drift": 0.0,
+      "max_score_drift": 0.0
+    },
+    {
+      "reference": "/home/psv/jev-optimization/runs/015-relocated-baseline/system1",
+      "round": 2,
+      "passed": true,
+      "compared_decisions": 231,
+      "failed_request_pairs": 0,
+      "decision_flips": 0,
+      "max_probability_drift": 0.0,
+      "max_score_drift": 0.0
+    },
+    {
+      "reference": "/home/psv/jev-optimization/runs/015-relocated-baseline/system1",
+      "round": 3,
+      "passed": true,
+      "compared_decisions": 231,
+      "failed_request_pairs": 0,
+      "decision_flips": 0,
+      "max_probability_drift": 0.0,
+      "max_score_drift": 0.0
+    },
+    {
+      "reference": "/home/psv/jev-optimization/runs/005-public231-baseline/system1",
+      "round": 1,
+      "passed": true,
+      "compared_decisions": 231,
+      "failed_request_pairs": 0,
+      "decision_flips": 0,
+      "max_probability_drift": 0.0,
+      "max_score_drift": 0.0
+    },
+    {
+      "reference": "/home/psv/jev-optimization/runs/005-public231-baseline/system1",
+      "round": 2,
+      "passed": true,
+      "compared_decisions": 231,
+      "failed_request_pairs": 0,
+      "decision_flips": 0,
+      "max_probability_drift": 0.0,
+      "max_score_drift": 0.0
+    },
+    {
+      "reference": "/home/psv/jev-optimization/runs/005-public231-baseline/system1",
+      "round": 3,
+      "passed": true,
+      "compared_decisions": 231,
+      "failed_request_pairs": 0,
+      "decision_flips": 0,
+      "max_probability_drift": 0.0,
+      "max_score_drift": 0.0
+    }
+  ],
+  "score_argmax_flips": 0,
+  "saved_prefix_tokens": 696960,
+  "request_local_prefix_is_declared_optimization_variable": true,
+  "RSI_phase": "05 Targeted Optimization: 9B GDN warp cooperation",
+  "primary_change": "Use existing exact wide preparation/output arithmetic on the 32-head layout across standalone, batched and prefix paths; baseline and candidate relocated together because GPU1 was reserved by another user",
+  "verdict": "REJECT",
+  "scope": "Full Public231 C1 only; overall cross-workload vLLM target is not established"
+}

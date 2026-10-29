@@ -1,0 +1,14 @@
+[
+  {
+    "workload": "public",
+    "requests": 231,
+    "all_answers_exact": true,
+    "reference": "052-public-parity"
+  },
+  {
+    "workload": "shapes",
+    "requests": 192,
+    "all_answers_exact": true,
+    "reference": "052-shapes-parity"
+  }
+]

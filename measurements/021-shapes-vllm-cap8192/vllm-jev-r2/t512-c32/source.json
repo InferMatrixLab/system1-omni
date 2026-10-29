@@ -1,0 +1,6 @@
+{
+  "source": "runs/021-shapes-vllm-cap8192/vllm-jev-r2/t512-c32/responses.jsonl",
+  "sha256": "18ead05a8532a0e519ce35b7e3df713c295e7bf43379e1bb9e23c4e61cc7b61b",
+  "records": 720,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}

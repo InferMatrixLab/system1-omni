@@ -1,0 +1,6 @@
+    Blocking waiting for file lock on build directory
+   Compiling omni-qwen3-5-native v0.1.0 (/home/psv/jev-optimization/experiments/085-review-packing/original/src/models/qwen3_5/native)
+   Compiling omni-runtime v0.1.0 (/home/psv/jev-optimization/experiments/085-review-packing/original/src/runtime)
+   Compiling omni-open-jev-native v0.1.0 (/home/psv/jev-optimization/experiments/085-review-packing/original/src/models/open_jev/native)
+    Finished `release` profile [optimized] target(s) in 19.83s
+  Executable ../../../../tests/open_jev/packing_parity.rs (/home/psv/system1-omni/target/release/deps/packing_parity-c7c5d5f84cf683c5)

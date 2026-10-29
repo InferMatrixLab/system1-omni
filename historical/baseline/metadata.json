@@ -1,0 +1,11 @@
+{
+  "created_utc": "2026-10-27T11:28:58Z",
+  "gpu_visible": "0",
+  "gpu": "index, name, uuid, driver_version, memory.total [MiB], compute_cap\n0, NVIDIA L20X, GPU-15bcd737-c479-4024-0cba-1fb1e633bb74, 570.133.20, 143771 MiB, 8.9\n1, NVIDIA L20X, GPU-8adca4c3-0cee-c825-e344-70b082f0aa56, 570.133.20, 143771 MiB, 8.9\n2, NVIDIA L20X, GPU-e7921766-67c6-bc17-6df1-eca427957832, 570.133.20, 143771 MiB, 8.9\n3, NVIDIA L20X, GPU-712b0057-e00a-8705-40e1-6ef88f1426c1, 570.133.20, 143771 MiB, 8.9\n",
+  "request_sha256": "b2ab39db4bb7588c050d99cff91474315a6efa5439bf5f193fe7a9d3fe0ff340",
+  "commits": {
+    "/home/psv/system1-omni": "22b7717c9710de5ac5c6ccba51a6d6686dae90d9",
+    "/home/psv/vllm-jev": "487ff7765a47e48b20fc2d48c14314fb28feaa51"
+  },
+  "notes": "Synthetic ticket routing; BF16 identical merged backbone; no cross-request or candidate prefix reuse; system1 default eager, vLLM default graph/async scheduling; RadixFlow disabled; full HTTP response latency including JSON decode; three repeats per workload/round, two service starts per backend."
+}

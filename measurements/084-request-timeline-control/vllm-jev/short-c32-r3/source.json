@@ -1,0 +1,6 @@
+{
+  "source": "runs/084-request-timeline-control/vllm-jev/short-c32-r3/responses.jsonl",
+  "sha256": "a0e561daa842d67a1f663c89c70875e4b93f240bfca95059f9df3d2962993a1d",
+  "records": 120,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}

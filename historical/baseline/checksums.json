@@ -1,0 +1,12 @@
+{
+  "bench.py": "4fbf5f8dcdbc2c9e8d51d988e6877cb9b49a331630c7190817a74a975deeb2ef",
+  "analyze.py": "50edce20584559b0808dec8332e8d3c9fcc3824b25f31db8ae195ffd1e645a50",
+  "report.py": "7659e5ce9074a7bbc3fbf1bab177149b14bc0421306daa637da4b95ba41963c9",
+  "requests.json": "b2ab39db4bb7588c050d99cff91474315a6efa5439bf5f193fe7a9d3fe0ff340",
+  "results.json": "1bb9577f4ae6af2b217ce5275efaf89beafd6334d8d7cba9b30fd8ef4665fd8f",
+  "summary.json": "ffdd1b9ac49056aaccfe479e496b70e06d0db6977351306a3f9c8f875a3f5b07",
+  "software.json": "768b1c1ed22ba2bd92b7e742175c6e548285b228218e085e52abd9fa068a7aa0",
+  "metadata.json": "bd86b14e471de5230aa4df43eeff3b6db4c864c2ca84b1f940c5c620485c0eab",
+  "weight-alignment.json": "c2942cd1ca3562975fd6fb0f84f97feda9d51e67597a4e6e5f76d979f66f43c8",
+  "system1_cuda_library": "62a91b19f6a13f9e9dee6461551c0720ada29fc4c7088eca30df4c3765f29d3e"
+}

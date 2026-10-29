@@ -1,0 +1,1151 @@
+{
+  "runs": 322,
+  "samples": 116106,
+  "formal_native_answers_exact_to_original": 40884,
+  "manifest_sha256": {
+    "public231.jsonl": "4429eb8850b92e14d1327f126158be97a50cc51eb5ab1db06d4d671bb78b3ab3",
+    "shapes.jsonl": "fa3f5c3be9339b7ae458c614979a9f6f822d368477823100de51504fbd4bcf50"
+  },
+  "pooled": {
+    "005-public231-baseline/system1/public-c1": {
+      "requests": 693,
+      "p50_ms": 36.68847680091858,
+      "p95_ms": 335.49080044031143,
+      "qps": 13.171654008781104
+    },
+    "005-public231-baseline/system1/public-c16": {
+      "requests": 693,
+      "p50_ms": 518.6942890286446,
+      "p95_ms": 2726.1473536491394,
+      "qps": 13.866593491887043
+    },
+    "005-public231-baseline/system1/public-c32": {
+      "requests": 693,
+      "p50_ms": 968.0648930370808,
+      "p95_ms": 5307.215642184019,
+      "qps": 13.86016947756962
+    },
+    "005-public231-baseline/system1/public-c8": {
+      "requests": 693,
+      "p50_ms": 274.56939220428467,
+      "p95_ms": 1832.899123430252,
+      "qps": 13.877947941893952
+    },
+    "005-public231-baseline/vllm-jev/public-c1": {
+      "requests": 693,
+      "p50_ms": 58.05066227912903,
+      "p95_ms": 282.0277623832226,
+      "qps": 11.871407497753065
+    },
+    "005-public231-baseline/vllm-jev/public-c16": {
+      "requests": 693,
+      "p50_ms": 169.59835216403008,
+      "p95_ms": 2358.303412795067,
+      "qps": 19.025331309197973
+    },
+    "005-public231-baseline/vllm-jev/public-c32": {
+      "requests": 693,
+      "p50_ms": 673.0242930352688,
+      "p95_ms": 4326.16226002574,
+      "qps": 19.23047390619427
+    },
+    "005-public231-baseline/vllm-jev/public-c8": {
+      "requests": 693,
+      "p50_ms": 111.05645820498466,
+      "p95_ms": 1558.669276535511,
+      "qps": 18.269051523172678
+    },
+    "015-public231-wide-gdn/system1/public-c1": {
+      "requests": 693,
+      "p50_ms": 17.195280641317368,
+      "p95_ms": 152.69723907113075,
+      "qps": 24.067803333993552
+    },
+    "015-public231-wide-gdn/system1/public-c16": {
+      "requests": 693,
+      "p50_ms": 238.7978956103325,
+      "p95_ms": 1565.6379237771034,
+      "qps": 25.14790548116254
+    },
+    "015-public231-wide-gdn/system1/public-c32": {
+      "requests": 693,
+      "p50_ms": 973.8353937864304,
+      "p95_ms": 2703.6664858460426,
+      "qps": 24.652796098194486
+    },
+    "015-public231-wide-gdn/system1/public-c8": {
+      "requests": 693,
+      "p50_ms": 124.09469857811928,
+      "p95_ms": 817.8118579089642,
+      "qps": 26.834582965456562
+    },
+    "015-public231-wide-gdn/vllm-jev/public-c1": {
+      "requests": 693,
+      "p50_ms": 61.08900159597397,
+      "p95_ms": 115.37105217576027,
+      "qps": 15.972889310208119
+    },
+    "015-public231-wide-gdn/vllm-jev/public-c16": {
+      "requests": 693,
+      "p50_ms": 169.21209171414375,
+      "p95_ms": 1011.8734464049339,
+      "qps": 39.29709890408295
+    },
+    "015-public231-wide-gdn/vllm-jev/public-c32": {
+      "requests": 693,
+      "p50_ms": 380.59649243950844,
+      "p95_ms": 1837.5300094485283,
+      "qps": 40.48742780178599
+    },
+    "015-public231-wide-gdn/vllm-jev/public-c8": {
+      "requests": 693,
+      "p50_ms": 110.9483502805233,
+      "p95_ms": 591.3512855768204,
+      "qps": 36.61762699102753
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t128-c1": {
+      "requests": 1104,
+      "p50_ms": 60.76453812420368,
+      "p95_ms": 70.1172798871994,
+      "qps": 17.964314164197916
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t128-c16": {
+      "requests": 4992,
+      "p50_ms": 207.02649652957916,
+      "p95_ms": 238.8421930372715,
+      "qps": 82.19922952802791
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t128-c32": {
+      "requests": 5184,
+      "p50_ms": 378.66715155541897,
+      "p95_ms": 426.74021795392036,
+      "qps": 83.95548959674379
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t128-c8": {
+      "requests": 3984,
+      "p50_ms": 119.68558840453625,
+      "p95_ms": 149.2738351225853,
+      "qps": 64.79813324347876
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t2048-c1": {
+      "requests": 672,
+      "p50_ms": 89.07340839505196,
+      "p95_ms": 135.35239174962044,
+      "qps": 10.625069090208653
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t2048-c16": {
+      "requests": 864,
+      "p50_ms": 1248.2272405177355,
+      "p95_ms": 1403.931811451912,
+      "qps": 12.90675219630437
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t2048-c32": {
+      "requests": 864,
+      "p50_ms": 2446.5529303997755,
+      "p95_ms": 2635.6275118887424,
+      "qps": 12.954678253660125
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t2048-c8": {
+      "requests": 864,
+      "p50_ms": 641.263535246253,
+      "p95_ms": 736.2369708716869,
+      "qps": 12.885153888681335
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t4096-c1": {
+      "requests": 480,
+      "p50_ms": 132.6221078634262,
+      "p95_ms": 176.8261045217514,
+      "qps": 7.315457555279828
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t4096-c16": {
+      "requests": 576,
+      "p50_ms": 1971.739498898387,
+      "p95_ms": 2119.3608678877354,
+      "qps": 8.156813290378377
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t4096-c32": {
+      "requests": 576,
+      "p50_ms": 3897.580238059163,
+      "p95_ms": 4097.912810742855,
+      "qps": 8.150196225688584
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t4096-c8": {
+      "requests": 576,
+      "p50_ms": 999.6021576225758,
+      "p95_ms": 1101.4803908765316,
+      "qps": 8.115876046567081
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t512-c1": {
+      "requests": 816,
+      "p50_ms": 75.06625726819038,
+      "p95_ms": 120.9287941455841,
+      "qps": 12.806735930799459
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t512-c16": {
+      "requests": 1440,
+      "p50_ms": 747.6313635706902,
+      "p95_ms": 937.9160217940807,
+      "qps": 22.250071919667203
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t512-c32": {
+      "requests": 1440,
+      "p50_ms": 1496.547507122159,
+      "p95_ms": 1686.7466047406197,
+      "qps": 22.207615047874327
+    },
+    "021-shapes-vllm-cap8192/vllm-jev/t512-c8": {
+      "requests": 1344,
+      "p50_ms": 360.49913987517357,
+      "p95_ms": 465.26966989040375,
+      "qps": 21.91216501257704
+    },
+    "068-public231-vector-residual-norm/system1/public-c1": {
+      "requests": 693,
+      "p50_ms": 13.791825622320175,
+      "p95_ms": 83.55297148227692,
+      "qps": 38.232733098051995
+    },
+    "068-public231-vector-residual-norm/system1/public-c16": {
+      "requests": 693,
+      "p50_ms": 206.2060348689556,
+      "p95_ms": 830.0172984600067,
+      "qps": 42.51111108333799
+    },
+    "068-public231-vector-residual-norm/system1/public-c32": {
+      "requests": 693,
+      "p50_ms": 345.97934037446976,
+      "p95_ms": 1615.5607588589191,
+      "qps": 42.408080149260975
+    },
+    "068-public231-vector-residual-norm/system1/public-c8": {
+      "requests": 693,
+      "p50_ms": 98.03824499249458,
+      "p95_ms": 517.2498524188995,
+      "qps": 41.627776746346335
+    },
+    "069-shapes-native-vector-norm/system1/t128-c1": {
+      "requests": 4608,
+      "p50_ms": 13.637786731123924,
+      "p95_ms": 20.382098853588104,
+      "qps": 76.04539686578488
+    },
+    "069-shapes-native-vector-norm/system1/t128-c16": {
+      "requests": 4992,
+      "p50_ms": 196.41640782356262,
+      "p95_ms": 218.61852705478668,
+      "qps": 82.63964486130956
+    },
+    "069-shapes-native-vector-norm/system1/t128-c32": {
+      "requests": 5088,
+      "p50_ms": 383.8546182960272,
+      "p95_ms": 418.01923140883446,
+      "qps": 82.67972799105632
+    },
+    "069-shapes-native-vector-norm/system1/t128-c8": {
+      "requests": 4992,
+      "p50_ms": 99.18254613876343,
+      "p95_ms": 113.34086582064629,
+      "qps": 82.71611509233593
+    },
+    "069-shapes-native-vector-norm/system1/t2048-c1": {
+      "requests": 960,
+      "p50_ms": 63.010966405272484,
+      "p95_ms": 71.74178585410118,
+      "qps": 15.731429592267377
+    },
+    "069-shapes-native-vector-norm/system1/t2048-c16": {
+      "requests": 1056,
+      "p50_ms": 965.656878426671,
+      "p95_ms": 990.246843546629,
+      "qps": 16.61912718121745
+    },
+    "069-shapes-native-vector-norm/system1/t2048-c32": {
+      "requests": 1152,
+      "p50_ms": 1920.8274446427822,
+      "p95_ms": 1964.4452258944511,
+      "qps": 16.61766509664185
+    },
+    "069-shapes-native-vector-norm/system1/t2048-c8": {
+      "requests": 1056,
+      "p50_ms": 483.1994641572237,
+      "p95_ms": 503.70965898036957,
+      "qps": 16.624129651006314
+    },
+    "069-shapes-native-vector-norm/system1/t4096-c1": {
+      "requests": 576,
+      "p50_ms": 123.91846254467964,
+      "p95_ms": 139.66773450374603,
+      "qps": 8.045433516981426
+    },
+    "069-shapes-native-vector-norm/system1/t4096-c16": {
+      "requests": 576,
+      "p50_ms": 1886.3575961440802,
+      "p95_ms": 1910.8834564685822,
+      "qps": 8.503411843143132
+    },
+    "069-shapes-native-vector-norm/system1/t4096-c32": {
+      "requests": 576,
+      "p50_ms": 3755.6947600096464,
+      "p95_ms": 3806.369408965111,
+      "qps": 8.501851281765834
+    },
+    "069-shapes-native-vector-norm/system1/t4096-c8": {
+      "requests": 576,
+      "p50_ms": 943.3339666575193,
+      "p95_ms": 962.2268490493298,
+      "qps": 8.507254137359258
+    },
+    "069-shapes-native-vector-norm/system1/t512-c1": {
+      "requests": 2784,
+      "p50_ms": 21.418951451778412,
+      "p95_ms": 28.787635266780853,
+      "qps": 45.760588648923985
+    },
+    "069-shapes-native-vector-norm/system1/t512-c16": {
+      "requests": 3072,
+      "p50_ms": 326.1666428297758,
+      "p95_ms": 348.1951430439949,
+      "qps": 49.32865594751014
+    },
+    "069-shapes-native-vector-norm/system1/t512-c32": {
+      "requests": 3072,
+      "p50_ms": 645.651713013649,
+      "p95_ms": 678.5815693438053,
+      "qps": 49.32340762121359
+    },
+    "069-shapes-native-vector-norm/system1/t512-c8": {
+      "requests": 2976,
+      "p50_ms": 163.70883025228977,
+      "p95_ms": 179.77476119995117,
+      "qps": 49.32085345887348
+    },
+    "081-c16-reproduction/system1/public-c1": {
+      "requests": 693,
+      "p50_ms": 13.673994690179825,
+      "p95_ms": 84.12281423807144,
+      "qps": 38.027885574180814
+    },
+    "081-c16-reproduction/system1/public-c16": {
+      "requests": 693,
+      "p50_ms": 199.89033043384552,
+      "p95_ms": 835.5771377682686,
+      "qps": 42.45870444047231
+    },
+    "081-c16-reproduction/system1/public-c32": {
+      "requests": 693,
+      "p50_ms": 345.444206148386,
+      "p95_ms": 1616.6397221386433,
+      "qps": 42.43585915604181
+    },
+    "081-c16-reproduction/system1/public-c8": {
+      "requests": 693,
+      "p50_ms": 98.02465885877609,
+      "p95_ms": 515.9870460629463,
+      "qps": 41.79990660008276
+    },
+    "081-c16-reproduction/vllm-jev/public-c1": {
+      "requests": 693,
+      "p50_ms": 60.053955763578415,
+      "p95_ms": 108.06981846690178,
+      "qps": 16.8231664232237
+    },
+    "081-c16-reproduction/vllm-jev/public-c16": {
+      "requests": 693,
+      "p50_ms": 180.64769357442856,
+      "p95_ms": 1018.3083564043045,
+      "qps": 39.361548267368406
+    },
+    "081-c16-reproduction/vllm-jev/public-c32": {
+      "requests": 693,
+      "p50_ms": 283.6142107844353,
+      "p95_ms": 1840.508658438921,
+      "qps": 40.5714716559766
+    },
+    "081-c16-reproduction/vllm-jev/public-c8": {
+      "requests": 693,
+      "p50_ms": 108.71446877717972,
+      "p95_ms": 566.376555711031,
+      "qps": 36.84554572100392
+    },
+    "082-c16-order-diagnosis/system1/diag-long-only-c16-r1": {
+      "requests": 111,
+      "p50_ms": 671.1943224072456,
+      "p95_ms": 944.4103240966797,
+      "qps": 23.673488964224017
+    },
+    "082-c16-order-diagnosis/system1/diag-long-only-c16-r2": {
+      "requests": 111,
+      "p50_ms": 606.3279882073402,
+      "p95_ms": 916.7268685996532,
+      "qps": 25.672897928479387
+    },
+    "082-c16-order-diagnosis/system1/diag-long-only-c16-r3": {
+      "requests": 111,
+      "p50_ms": 615.5151911079884,
+      "p95_ms": 915.3179228305817,
+      "qps": 25.61873026212388
+    },
+    "082-c16-order-diagnosis/system1/diag-original-c16-r1": {
+      "requests": 231,
+      "p50_ms": 199.53563436865807,
+      "p95_ms": 835.5311267077923,
+      "qps": 42.58628609071831
+    },
+    "082-c16-order-diagnosis/system1/diag-original-c16-r2": {
+      "requests": 231,
+      "p50_ms": 210.7388749718666,
+      "p95_ms": 830.6689262390137,
+      "qps": 42.5615491011011
+    },
+    "082-c16-order-diagnosis/system1/diag-original-c16-r3": {
+      "requests": 231,
+      "p50_ms": 199.1194486618042,
+      "p95_ms": 829.7180607914925,
+      "qps": 42.59391460117101
+    },
+    "082-c16-order-diagnosis/system1/diag-reversed-c16-r1": {
+      "requests": 231,
+      "p50_ms": 320.9342882037163,
+      "p95_ms": 831.7813351750374,
+      "qps": 42.40665230394127
+    },
+    "082-c16-order-diagnosis/system1/diag-reversed-c16-r2": {
+      "requests": 231,
+      "p50_ms": 319.39609721302986,
+      "p95_ms": 827.9966898262501,
+      "qps": 42.52314973089692
+    },
+    "082-c16-order-diagnosis/system1/diag-reversed-c16-r3": {
+      "requests": 231,
+      "p50_ms": 208.9390903711319,
+      "p95_ms": 847.648236900568,
+      "qps": 42.62464459674529
+    },
+    "082-c16-order-diagnosis/system1/diag-short-only-c16-r1": {
+      "requests": 120,
+      "p50_ms": 137.9909198731184,
+      "p95_ms": 194.46595758199692,
+      "qps": 108.80129489405289
+    },
+    "082-c16-order-diagnosis/system1/diag-short-only-c16-r2": {
+      "requests": 120,
+      "p50_ms": 138.35874013602734,
+      "p95_ms": 192.63899698853493,
+      "qps": 108.79994107313169
+    },
+    "082-c16-order-diagnosis/system1/diag-short-only-c16-r3": {
+      "requests": 120,
+      "p50_ms": 136.59692741930485,
+      "p95_ms": 191.88030064105988,
+      "qps": 108.89561310263899
+    },
+    "082-c16-order-diagnosis/system1/diag-short-only-c32-r1": {
+      "requests": 120,
+      "p50_ms": 290.6501367688179,
+      "p95_ms": 361.16746440529823,
+      "qps": 96.79216446400778
+    },
+    "082-c16-order-diagnosis/system1/diag-short-only-c32-r2": {
+      "requests": 120,
+      "p50_ms": 274.47423711419106,
+      "p95_ms": 347.940344363451,
+      "qps": 107.10792886907367
+    },
+    "082-c16-order-diagnosis/system1/diag-short-only-c32-r3": {
+      "requests": 120,
+      "p50_ms": 274.3585370481014,
+      "p95_ms": 407.5236842036247,
+      "qps": 102.41205610676367
+    },
+    "082-c16-order-diagnosis/system1/diag-shuffle-11-c16-r1": {
+      "requests": 231,
+      "p50_ms": 357.78819024562836,
+      "p95_ms": 562.8702230751514,
+      "qps": 41.97724679957477
+    },
+    "082-c16-order-diagnosis/system1/diag-shuffle-11-c16-r2": {
+      "requests": 231,
+      "p50_ms": 345.7280434668064,
+      "p95_ms": 578.5701386630535,
+      "qps": 42.21919686903434
+    },
+    "082-c16-order-diagnosis/system1/diag-shuffle-11-c16-r3": {
+      "requests": 231,
+      "p50_ms": 346.2178483605385,
+      "p95_ms": 580.5878676474094,
+      "qps": 42.271776690544534
+    },
+    "082-c16-order-diagnosis/system1/diag-shuffle-29-c16-r1": {
+      "requests": 231,
+      "p50_ms": 369.0260015428066,
+      "p95_ms": 529.682956635952,
+      "qps": 42.07670877271626
+    },
+    "082-c16-order-diagnosis/system1/diag-shuffle-29-c16-r2": {
+      "requests": 231,
+      "p50_ms": 371.00445106625557,
+      "p95_ms": 525.2716839313507,
+      "qps": 42.07645694840686
+    },
+    "082-c16-order-diagnosis/system1/diag-shuffle-29-c16-r3": {
+      "requests": 231,
+      "p50_ms": 375.43484568595886,
+      "p95_ms": 534.9090062081814,
+      "qps": 42.02798331882333
+    },
+    "082-c16-order-diagnosis/system1/diag-shuffle-47-c16-r1": {
+      "requests": 231,
+      "p50_ms": 382.17511400580406,
+      "p95_ms": 530.7293720543385,
+      "qps": 41.608839065499815
+    },
+    "082-c16-order-diagnosis/system1/diag-shuffle-47-c16-r2": {
+      "requests": 231,
+      "p50_ms": 371.0143268108368,
+      "p95_ms": 531.8435579538345,
+      "qps": 42.38914923853504
+    },
+    "082-c16-order-diagnosis/system1/diag-shuffle-47-c16-r3": {
+      "requests": 231,
+      "p50_ms": 373.29475209116936,
+      "p95_ms": 536.0952131450176,
+      "qps": 42.34014962079007
+    },
+    "082-c16-order-diagnosis/system1/public-c1": {
+      "requests": 693,
+      "p50_ms": 13.72939720749855,
+      "p95_ms": 83.61618965864182,
+      "qps": 37.778622140546574
+    },
+    "082-c16-order-diagnosis/system1/public-c16": {
+      "requests": 693,
+      "p50_ms": 206.2675654888153,
+      "p95_ms": 836.9625434279442,
+      "qps": 42.435157445804386
+    },
+    "082-c16-order-diagnosis/system1/public-c32": {
+      "requests": 693,
+      "p50_ms": 344.82456743717194,
+      "p95_ms": 1612.5937104225159,
+      "qps": 42.48041779271268
+    },
+    "082-c16-order-diagnosis/system1/public-c8": {
+      "requests": 693,
+      "p50_ms": 99.15796294808388,
+      "p95_ms": 515.1254013180733,
+      "qps": 41.7693596742611
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-long-only-c16-r1": {
+      "requests": 111,
+      "p50_ms": 656.4726009964943,
+      "p95_ms": 1088.1530232727528,
+      "qps": 22.73876871860899
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-long-only-c16-r2": {
+      "requests": 111,
+      "p50_ms": 652.4099223315716,
+      "p95_ms": 1079.7810144722462,
+      "qps": 22.7707360198025
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-long-only-c16-r3": {
+      "requests": 111,
+      "p50_ms": 666.1077998578548,
+      "p95_ms": 1082.1122117340565,
+      "qps": 22.82595559264649
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-original-c16-r1": {
+      "requests": 231,
+      "p50_ms": 166.342593729496,
+      "p95_ms": 1015.063926577568,
+      "qps": 39.397488407721205
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-original-c16-r2": {
+      "requests": 231,
+      "p50_ms": 164.47143629193306,
+      "p95_ms": 1017.0245170593262,
+      "qps": 39.400978169660235
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-original-c16-r3": {
+      "requests": 231,
+      "p50_ms": 167.43671894073486,
+      "p95_ms": 1016.0739570856094,
+      "qps": 39.1957116886294
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-reversed-c16-r1": {
+      "requests": 231,
+      "p50_ms": 295.5891042947769,
+      "p95_ms": 1029.878057539463,
+      "qps": 39.49549672153397
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-reversed-c16-r2": {
+      "requests": 231,
+      "p50_ms": 289.3612012267113,
+      "p95_ms": 975.6093248724937,
+      "qps": 39.47046082462423
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-reversed-c16-r3": {
+      "requests": 231,
+      "p50_ms": 271.3809907436371,
+      "p95_ms": 988.058228045702,
+      "qps": 39.51150308877349
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-short-only-c16-r1": {
+      "requests": 120,
+      "p50_ms": 130.3783878684044,
+      "p95_ms": 176.74528434872627,
+      "qps": 113.82740959734441
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-short-only-c16-r2": {
+      "requests": 120,
+      "p50_ms": 131.79163448512554,
+      "p95_ms": 183.4176369011402,
+      "qps": 112.73080689023217
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-short-only-c16-r3": {
+      "requests": 120,
+      "p50_ms": 126.54139660298824,
+      "p95_ms": 174.45216327905655,
+      "qps": 113.69679122604862
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-short-only-c32-r1": {
+      "requests": 120,
+      "p50_ms": 204.25510965287685,
+      "p95_ms": 234.6065677702427,
+      "qps": 142.25606208427294
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-short-only-c32-r2": {
+      "requests": 120,
+      "p50_ms": 212.6941755414009,
+      "p95_ms": 247.17018753290176,
+      "qps": 132.6871447435552
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-short-only-c32-r3": {
+      "requests": 120,
+      "p50_ms": 203.32934521138668,
+      "p95_ms": 236.87336593866348,
+      "qps": 140.57924825802164
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-shuffle-11-c16-r1": {
+      "requests": 231,
+      "p50_ms": 356.5414063632488,
+      "p95_ms": 643.3957256376743,
+      "qps": 40.68073314055262
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-shuffle-11-c16-r2": {
+      "requests": 231,
+      "p50_ms": 360.326312482357,
+      "p95_ms": 651.979174464941,
+      "qps": 40.711490213944614
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-shuffle-11-c16-r3": {
+      "requests": 231,
+      "p50_ms": 366.2956990301609,
+      "p95_ms": 634.8104476928711,
+      "qps": 40.69796966235069
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-shuffle-29-c16-r1": {
+      "requests": 231,
+      "p50_ms": 368.58801543712616,
+      "p95_ms": 622.169267386198,
+      "qps": 40.48079528123502
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-shuffle-29-c16-r2": {
+      "requests": 231,
+      "p50_ms": 372.34237790107727,
+      "p95_ms": 618.0730424821377,
+      "qps": 40.48176112817599
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-shuffle-29-c16-r3": {
+      "requests": 231,
+      "p50_ms": 375.8220300078392,
+      "p95_ms": 635.4667544364929,
+      "qps": 40.556674680333686
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-shuffle-47-c16-r1": {
+      "requests": 231,
+      "p50_ms": 350.58122873306274,
+      "p95_ms": 613.6092059314251,
+      "qps": 40.41694922494475
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-shuffle-47-c16-r2": {
+      "requests": 231,
+      "p50_ms": 371.2469972670078,
+      "p95_ms": 607.5595282018185,
+      "qps": 40.57312618468443
+    },
+    "082-c16-order-diagnosis/vllm-jev/diag-shuffle-47-c16-r3": {
+      "requests": 231,
+      "p50_ms": 345.5602489411831,
+      "p95_ms": 608.1095598638058,
+      "qps": 40.60771298496523
+    },
+    "082-c16-order-diagnosis/vllm-jev/public-c1": {
+      "requests": 693,
+      "p50_ms": 59.134576469659805,
+      "p95_ms": 107.50343278050423,
+      "qps": 17.108038220760747
+    },
+    "082-c16-order-diagnosis/vllm-jev/public-c16": {
+      "requests": 693,
+      "p50_ms": 162.6499705016613,
+      "p95_ms": 1019.8215022683144,
+      "qps": 39.37429693780139
+    },
+    "082-c16-order-diagnosis/vllm-jev/public-c32": {
+      "requests": 693,
+      "p50_ms": 281.77735954523087,
+      "p95_ms": 1830.836459994316,
+      "qps": 40.37878014145879
+    },
+    "082-c16-order-diagnosis/vllm-jev/public-c8": {
+      "requests": 693,
+      "p50_ms": 107.71527886390686,
+      "p95_ms": 631.5069608390331,
+      "qps": 36.89074794008009
+    },
+    "083-c16-queue-prefix0/system1/diag-original-c16-r1": {
+      "requests": 231,
+      "p50_ms": 224.44302216172218,
+      "p95_ms": 2701.255600899458,
+      "qps": 16.697250041499707
+    },
+    "083-c16-queue-prefix0/system1/diag-original-c16-r2": {
+      "requests": 231,
+      "p50_ms": 243.88983845710754,
+      "p95_ms": 2614.833742380142,
+      "qps": 16.68699662403216
+    },
+    "083-c16-queue-prefix0/system1/diag-original-c16-r3": {
+      "requests": 231,
+      "p50_ms": 232.95987024903297,
+      "p95_ms": 2553.0839189887047,
+      "qps": 16.685115390950877
+    },
+    "083-c16-queue-prefix0/system1/diag-short-only-c1-r1": {
+      "requests": 120,
+      "p50_ms": 12.709300965070724,
+      "p95_ms": 17.190057784318924,
+      "qps": 80.24688082016188
+    },
+    "083-c16-queue-prefix0/system1/diag-short-only-c1-r2": {
+      "requests": 120,
+      "p50_ms": 12.687783688306808,
+      "p95_ms": 17.31240749359131,
+      "qps": 80.51729548672432
+    },
+    "083-c16-queue-prefix0/system1/diag-short-only-c1-r3": {
+      "requests": 120,
+      "p50_ms": 12.84615509212017,
+      "p95_ms": 17.324935644865036,
+      "qps": 80.58202153767392
+    },
+    "083-c16-queue-prefix0/system1/diag-short-only-c16-r1": {
+      "requests": 120,
+      "p50_ms": 158.854141831398,
+      "p95_ms": 224.5803065598011,
+      "qps": 91.74608305112636
+    },
+    "083-c16-queue-prefix0/system1/diag-short-only-c16-r2": {
+      "requests": 120,
+      "p50_ms": 156.27743490040302,
+      "p95_ms": 224.96329247951508,
+      "qps": 93.60508228686753
+    },
+    "083-c16-queue-prefix0/system1/diag-short-only-c16-r3": {
+      "requests": 120,
+      "p50_ms": 157.37662836909294,
+      "p95_ms": 227.65108197927475,
+      "qps": 94.4208976498431
+    },
+    "083-c16-queue-prefix0/system1/diag-short-only-c32-r1": {
+      "requests": 120,
+      "p50_ms": 306.185694411397,
+      "p95_ms": 388.35469260811806,
+      "qps": 94.56488571812962
+    },
+    "083-c16-queue-prefix0/system1/diag-short-only-c32-r2": {
+      "requests": 120,
+      "p50_ms": 301.30762979388237,
+      "p95_ms": 387.1535658836365,
+      "qps": 95.26327972246276
+    },
+    "083-c16-queue-prefix0/system1/diag-short-only-c32-r3": {
+      "requests": 120,
+      "p50_ms": 300.80399848520756,
+      "p95_ms": 394.10755783319473,
+      "qps": 95.49799252278451
+    },
+    "083-c16-queue-prefix0/system1/diag-short-only-c8-r1": {
+      "requests": 120,
+      "p50_ms": 80.32814785838127,
+      "p95_ms": 125.79929456114769,
+      "qps": 93.36309199907845
+    },
+    "083-c16-queue-prefix0/system1/diag-short-only-c8-r2": {
+      "requests": 120,
+      "p50_ms": 81.00815489888191,
+      "p95_ms": 134.575754404068,
+      "qps": 93.93784093681218
+    },
+    "083-c16-queue-prefix0/system1/diag-short-only-c8-r3": {
+      "requests": 120,
+      "p50_ms": 80.05968108773232,
+      "p95_ms": 122.64798581600189,
+      "qps": 96.24135836773198
+    },
+    "083-c16-queue-prefix0/system1/diag-shuffle-11-c16-r1": {
+      "requests": 231,
+      "p50_ms": 863.2589988410473,
+      "p95_ms": 1975.6948091089725,
+      "qps": 16.59221284917784
+    },
+    "083-c16-queue-prefix0/system1/diag-shuffle-11-c16-r2": {
+      "requests": 231,
+      "p50_ms": 835.0154869258404,
+      "p95_ms": 1989.4166588783264,
+      "qps": 16.719322653753753
+    },
+    "083-c16-queue-prefix0/system1/diag-shuffle-11-c16-r3": {
+      "requests": 231,
+      "p50_ms": 875.9097531437874,
+      "p95_ms": 1922.2991056740284,
+      "qps": 16.69306721470648
+    },
+    "083-c16-queue-prefix0/system1/public-c1": {
+      "requests": 693,
+      "p50_ms": 15.108250081539154,
+      "p95_ms": 314.3261969089508,
+      "qps": 15.982790209049025
+    },
+    "083-c16-queue-prefix1/system1/diag-original-c16-r1": {
+      "requests": 231,
+      "p50_ms": 209.08638834953308,
+      "p95_ms": 836.4723846316338,
+      "qps": 42.33020397382038
+    },
+    "083-c16-queue-prefix1/system1/diag-original-c16-r2": {
+      "requests": 231,
+      "p50_ms": 211.82123571634293,
+      "p95_ms": 917.8232811391354,
+      "qps": 40.793548577237985
+    },
+    "083-c16-queue-prefix1/system1/diag-original-c16-r3": {
+      "requests": 231,
+      "p50_ms": 213.04884925484657,
+      "p95_ms": 839.2075374722481,
+      "qps": 41.98676903250642
+    },
+    "083-c16-queue-prefix1/system1/diag-short-only-c1-r1": {
+      "requests": 120,
+      "p50_ms": 10.930506512522697,
+      "p95_ms": 15.750177204608917,
+      "qps": 89.65128419912563
+    },
+    "083-c16-queue-prefix1/system1/diag-short-only-c1-r2": {
+      "requests": 120,
+      "p50_ms": 11.014752089977264,
+      "p95_ms": 15.926878899335861,
+      "qps": 89.72198531847746
+    },
+    "083-c16-queue-prefix1/system1/diag-short-only-c1-r3": {
+      "requests": 120,
+      "p50_ms": 10.998619720339775,
+      "p95_ms": 15.847396105527878,
+      "qps": 90.00845587157563
+    },
+    "083-c16-queue-prefix1/system1/diag-short-only-c16-r1": {
+      "requests": 120,
+      "p50_ms": 139.10904712975025,
+      "p95_ms": 198.7633965909481,
+      "qps": 107.48789025617234
+    },
+    "083-c16-queue-prefix1/system1/diag-short-only-c16-r2": {
+      "requests": 120,
+      "p50_ms": 137.07230240106583,
+      "p95_ms": 197.7413408458233,
+      "qps": 108.24975913342055
+    },
+    "083-c16-queue-prefix1/system1/diag-short-only-c16-r3": {
+      "requests": 120,
+      "p50_ms": 137.54374347627163,
+      "p95_ms": 193.61571595072746,
+      "qps": 108.23272405251672
+    },
+    "083-c16-queue-prefix1/system1/diag-short-only-c32-r1": {
+      "requests": 120,
+      "p50_ms": 278.7097543478012,
+      "p95_ms": 344.81756016612053,
+      "qps": 106.8685895962207
+    },
+    "083-c16-queue-prefix1/system1/diag-short-only-c32-r2": {
+      "requests": 120,
+      "p50_ms": 274.1490416228771,
+      "p95_ms": 347.9371555149555,
+      "qps": 107.65516597169164
+    },
+    "083-c16-queue-prefix1/system1/diag-short-only-c32-r3": {
+      "requests": 120,
+      "p50_ms": 274.35616590082645,
+      "p95_ms": 345.5047346651554,
+      "qps": 107.09440540550514
+    },
+    "083-c16-queue-prefix1/system1/diag-short-only-c8-r1": {
+      "requests": 120,
+      "p50_ms": 79.80063930153847,
+      "p95_ms": 98.77513349056244,
+      "qps": 105.80588350884707
+    },
+    "083-c16-queue-prefix1/system1/diag-short-only-c8-r2": {
+      "requests": 120,
+      "p50_ms": 76.82959549129009,
+      "p95_ms": 106.84170201420784,
+      "qps": 105.97581980039362
+    },
+    "083-c16-queue-prefix1/system1/diag-short-only-c8-r3": {
+      "requests": 120,
+      "p50_ms": 76.74228772521019,
+      "p95_ms": 105.37057369947433,
+      "qps": 105.88326276542938
+    },
+    "083-c16-queue-prefix1/system1/diag-shuffle-11-c16-r1": {
+      "requests": 231,
+      "p50_ms": 355.08323833346367,
+      "p95_ms": 571.822565048933,
+      "qps": 41.8435711743867
+    },
+    "083-c16-queue-prefix1/system1/diag-shuffle-11-c16-r2": {
+      "requests": 231,
+      "p50_ms": 347.98539057374,
+      "p95_ms": 580.1619440317154,
+      "qps": 42.035821052512624
+    },
+    "083-c16-queue-prefix1/system1/diag-shuffle-11-c16-r3": {
+      "requests": 231,
+      "p50_ms": 348.7790897488594,
+      "p95_ms": 586.5695588290691,
+      "qps": 42.07177256655935
+    },
+    "083-c16-queue-prefix1/system1/public-c1": {
+      "requests": 693,
+      "p50_ms": 13.69037851691246,
+      "p95_ms": 84.6751369535923,
+      "qps": 37.92491349982847
+    },
+    "084-request-timeline-control/system1/public-c1": {
+      "requests": 693,
+      "p50_ms": 13.793550431728363,
+      "p95_ms": 84.4232551753521,
+      "qps": 37.51519351386855
+    },
+    "084-request-timeline-control/system1/public-c16": {
+      "requests": 693,
+      "p50_ms": 200.73483884334564,
+      "p95_ms": 833.9011631906033,
+      "qps": 42.49004380640606
+    },
+    "084-request-timeline-control/system1/public-c8": {
+      "requests": 693,
+      "p50_ms": 99.04351457953453,
+      "p95_ms": 513.566680252552,
+      "qps": 41.70737573275119
+    },
+    "084-request-timeline-control/system1/short-c16-r1": {
+      "requests": 120,
+      "p50_ms": 137.89187371730804,
+      "p95_ms": 193.16833838820457,
+      "qps": 108.6091806514632
+    },
+    "084-request-timeline-control/system1/short-c16-r2": {
+      "requests": 120,
+      "p50_ms": 134.79322008788586,
+      "p95_ms": 192.02418252825737,
+      "qps": 108.6987821358143
+    },
+    "084-request-timeline-control/system1/short-c16-r3": {
+      "requests": 120,
+      "p50_ms": 136.7178875952959,
+      "p95_ms": 192.40450486540794,
+      "qps": 108.88660463494215
+    },
+    "084-request-timeline-control/system1/short-c32-r1": {
+      "requests": 120,
+      "p50_ms": 272.4922653287649,
+      "p95_ms": 342.0013338327408,
+      "qps": 108.1540578779789
+    },
+    "084-request-timeline-control/system1/short-c32-r2": {
+      "requests": 120,
+      "p50_ms": 271.6924734413624,
+      "p95_ms": 343.73166412115097,
+      "qps": 108.10523722003546
+    },
+    "084-request-timeline-control/system1/short-c32-r3": {
+      "requests": 120,
+      "p50_ms": 274.3748128414154,
+      "p95_ms": 343.29285100102425,
+      "qps": 107.27606663669341
+    },
+    "084-request-timeline-control/vllm-jev/public-c1": {
+      "requests": 693,
+      "p50_ms": 58.288104832172394,
+      "p95_ms": 105.75056448578835,
+      "qps": 17.362615969052648
+    },
+    "084-request-timeline-control/vllm-jev/public-c16": {
+      "requests": 693,
+      "p50_ms": 160.7964001595974,
+      "p95_ms": 1016.0131677985191,
+      "qps": 39.40042441806661
+    },
+    "084-request-timeline-control/vllm-jev/public-c8": {
+      "requests": 693,
+      "p50_ms": 107.84593597054482,
+      "p95_ms": 566.1399811506271,
+      "qps": 36.99455912231853
+    },
+    "084-request-timeline-control/vllm-jev/short-c16-r1": {
+      "requests": 120,
+      "p50_ms": 122.03499674797058,
+      "p95_ms": 171.54590412974358,
+      "qps": 120.32013703567853
+    },
+    "084-request-timeline-control/vllm-jev/short-c16-r2": {
+      "requests": 120,
+      "p50_ms": 122.67957627773285,
+      "p95_ms": 159.1191031038761,
+      "qps": 121.47360237187966
+    },
+    "084-request-timeline-control/vllm-jev/short-c16-r3": {
+      "requests": 120,
+      "p50_ms": 123.91474843025208,
+      "p95_ms": 158.08863192796707,
+      "qps": 120.30640962137413
+    },
+    "084-request-timeline-control/vllm-jev/short-c32-r1": {
+      "requests": 120,
+      "p50_ms": 208.9207675307989,
+      "p95_ms": 256.40077888965607,
+      "qps": 137.2233867288773
+    },
+    "084-request-timeline-control/vllm-jev/short-c32-r2": {
+      "requests": 120,
+      "p50_ms": 206.42459578812122,
+      "p95_ms": 235.2490797638893,
+      "qps": 140.96594085958392
+    },
+    "084-request-timeline-control/vllm-jev/short-c32-r3": {
+      "requests": 120,
+      "p50_ms": 203.52987200021744,
+      "p95_ms": 265.5790373682976,
+      "qps": 140.41990555428
+    },
+    "084-request-timeline-trace/system1/public-c1": {
+      "requests": 693,
+      "p50_ms": 14.094386249780655,
+      "p95_ms": 85.24759113788605,
+      "qps": 37.487159455832945
+    },
+    "084-request-timeline-trace/system1/public-c16": {
+      "requests": 693,
+      "p50_ms": 202.0673081278801,
+      "p95_ms": 840.0306701660156,
+      "qps": 42.41990994243356
+    },
+    "084-request-timeline-trace/system1/public-c8": {
+      "requests": 693,
+      "p50_ms": 98.67298230528831,
+      "p95_ms": 513.4132839739323,
+      "qps": 41.681826061514975
+    },
+    "084-request-timeline-trace/system1/short-c16-r1": {
+      "requests": 120,
+      "p50_ms": 136.6225052624941,
+      "p95_ms": 195.93029469251633,
+      "qps": 108.29669297859007
+    },
+    "084-request-timeline-trace/system1/short-c16-r2": {
+      "requests": 120,
+      "p50_ms": 138.63172009587288,
+      "p95_ms": 199.8164840042591,
+      "qps": 107.75189841892868
+    },
+    "084-request-timeline-trace/system1/short-c16-r3": {
+      "requests": 120,
+      "p50_ms": 139.58498276770115,
+      "p95_ms": 196.27324119210243,
+      "qps": 108.18046583593735
+    },
+    "084-request-timeline-trace/system1/short-c32-r1": {
+      "requests": 120,
+      "p50_ms": 277.547737583518,
+      "p95_ms": 344.7829782962799,
+      "qps": 107.7318463842974
+    },
+    "084-request-timeline-trace/system1/short-c32-r2": {
+      "requests": 120,
+      "p50_ms": 277.21482887864113,
+      "p95_ms": 342.37243980169296,
+      "qps": 107.1832072912993
+    },
+    "084-request-timeline-trace/system1/short-c32-r3": {
+      "requests": 120,
+      "p50_ms": 273.9879135042429,
+      "p95_ms": 343.6778225004673,
+      "qps": 108.12844026448386
+    },
+    "084-request-timeline-vllm-v2/vllm-jev/public-c1": {
+      "requests": 693,
+      "p50_ms": 59.9343366920948,
+      "p95_ms": 106.4482145011425,
+      "qps": 16.967570309654402
+    },
+    "084-request-timeline-vllm-v2/vllm-jev/public-c16": {
+      "requests": 693,
+      "p50_ms": 168.51909086108208,
+      "p95_ms": 1017.0880630612373,
+      "qps": 39.24471410453126
+    },
+    "084-request-timeline-vllm-v2/vllm-jev/public-c8": {
+      "requests": 693,
+      "p50_ms": 109.02118682861328,
+      "p95_ms": 569.6670487523079,
+      "qps": 36.78578280665052
+    },
+    "084-request-timeline-vllm-v2/vllm-jev/short-c16-r1": {
+      "requests": 120,
+      "p50_ms": 123.766228556633,
+      "p95_ms": 154.46661412715912,
+      "qps": 120.25647847441924
+    },
+    "084-request-timeline-vllm-v2/vllm-jev/short-c16-r2": {
+      "requests": 120,
+      "p50_ms": 125.15733949840069,
+      "p95_ms": 165.65809771418571,
+      "qps": 118.30619757496616
+    },
+    "084-request-timeline-vllm-v2/vllm-jev/short-c16-r3": {
+      "requests": 120,
+      "p50_ms": 125.37305243313313,
+      "p95_ms": 166.76943004131317,
+      "qps": 120.68732695075816
+    },
+    "084-request-timeline-vllm-v2/vllm-jev/short-c32-r1": {
+      "requests": 120,
+      "p50_ms": 201.33791863918304,
+      "p95_ms": 240.35396799445152,
+      "qps": 139.86076122920156
+    },
+    "084-request-timeline-vllm-v2/vllm-jev/short-c32-r2": {
+      "requests": 120,
+      "p50_ms": 219.26034428179264,
+      "p95_ms": 271.63197472691536,
+      "qps": 131.19645726424463
+    },
+    "084-request-timeline-vllm-v2/vllm-jev/short-c32-r3": {
+      "requests": 120,
+      "p50_ms": 204.91868071258068,
+      "p95_ms": 239.58658427000046,
+      "qps": 139.02174127989227
+    }
+  }
+}

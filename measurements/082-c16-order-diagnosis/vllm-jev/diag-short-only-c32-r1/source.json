@@ -1,0 +1,6 @@
+{
+  "source": "runs/082-c16-order-diagnosis/vllm-jev/diag-short-only-c32-r1/responses.jsonl",
+  "sha256": "256b2bbca7add04681be5067177b68beb150f35b578b536e141e872d7a58603c",
+  "records": 120,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}

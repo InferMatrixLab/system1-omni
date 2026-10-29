@@ -1,0 +1,50 @@
+{
+  "workload": "/home/psv/jev-optimization/workloads/public231.jsonl",
+  "sha256": "4429eb8850b92e14d1327f126158be97a50cc51eb5ab1db06d4d671bb78b3ab3",
+  "concurrencies": [
+    1,
+    8,
+    16
+  ],
+  "rounds": 3,
+  "warmup": 5,
+  "precision": "BF16",
+  "prefix_policy": {
+    "native_exact_request_local": "1",
+    "vllm_engine_prefix": "1",
+    "historical_request_reuse": "none: native recomputes each request, vLLM endpoint generates fresh cache salt"
+  },
+  "graph_policy": "native optional graphs enabled; vLLM default compile/graph",
+  "clock": "post_to_body_json_and_schema_validation",
+  "numerical_acceptance_vs_frozen_native": {
+    "decision_flips": 0,
+    "probability_max_abs": 0.001,
+    "score_max_abs": 0.001
+  },
+  "candidate_must_win": "All predefined cells: lower pooled P50/P95, higher QPS; no failed or skipped requests. Screen cannot accept a change.",
+  "retries": 0,
+  "screen_only": false,
+  "diagnostic_trace": true,
+  "trace_design": {
+    "scope": "Diagnostic timing only, not a production fix",
+    "native_sha": "95c0e70f2cdf2a72df763d0247ba7f20f8a9327d",
+    "boundaries": [
+      "HTTP client start/end",
+      "native prepare/enqueue/batch start/end/response ready",
+      "vllm API prepare/candidate semaphore/frontend/core queue/schedule/worker/model-result/frontend-return/API ready"
+    ],
+    "clock": "same-host time.time_ns / Rust SystemTime UNIX ns; GPU completion boundary is scheduler update_from_output (pooling result ready), not worker enqueue return",
+    "request_identity": "x-jev-trace-id header; model input unchanged; candidate IDs mapped to outer request; batch membership retained",
+    "control": "same bench.py plus headers and timestamps; frozen binaries vs traced binaries; same GPU sequential; schema validated responses",
+    "gpu_kernel_caveat": "Worker callback and result-ready intervals include CPU/runtime and device work; not labelled pure kernel time",
+    "files": {
+      "bench_trace.py": "7312407638e309a3c1e2e1a49ad5a0bbdffd84c128b215779135e4d14ce635b7",
+      "sitecustomize.py": "62e0fd167148e2eed733789a201940b07b36764ddf91e55dd010dbca84f08af1",
+      "jev_trace.py": "fa167a42d68105ddb6619f2e4a8879163461381c321965017bfac57cddb2d141",
+      "vllm_jev_endpoint.py": "a4528bb428f904d9e8e73c52577b74c502216c01832d3c0fa00a9f92d5d8cf1f",
+      "vllm_v1_engine_output_processor.py": "28569292b7c98d8b453739fc7e775fa64a9998d4818e227844e6dbbb90333332",
+      "vllm_v1_core_sched_scheduler.py": "bb52cc6ad1fe1b9a3d1285a6cff2d10c9dbcaf6194874b2fd48af93ae9a0a33d",
+      "vllm_v1_worker_gpu_model_runner.py": "033d9891fdba259da87d47ac735baef1661268ffadef868103489cef4d6d4b4a"
+    }
+  }
+}

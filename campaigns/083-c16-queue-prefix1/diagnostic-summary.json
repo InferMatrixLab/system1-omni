@@ -1,0 +1,471 @@
+{
+  "system1": {
+    "diag-original-c16": {
+      "rounds": 3,
+      "latency": {
+        "n": 693,
+        "p50": 211.82123571634293,
+        "p95": 909.227516502142
+      },
+      "qps": 41.6930141142811,
+      "round_p50": [
+        209.08638834953308,
+        211.82123571634293,
+        213.04884925484657
+      ],
+      "errors": 0,
+      "short_latency": {
+        "n": 360,
+        "p50": 145.28941363096237,
+        "p95": 211.82123571634293
+      },
+      "longer_latency": {
+        "n": 333,
+        "p50": 615.3868697583675,
+        "p95": 929.2182922363281
+      },
+      "precision_vs_accepted068": {
+        "responses": 693,
+        "exact": 693,
+        "flips": 0,
+        "max_probability_delta": 0.0,
+        "max_score_delta": 0.0
+      },
+      "trace": {
+        "dispatches": 535,
+        "combined_dispatches": 26,
+        "work_items": 693,
+        "exclusive_work_items": 471,
+        "unique_requests": 693,
+        "all": {
+          "queue_ms": {
+            "n": 693,
+            "p50": 173.847,
+            "p95": 827.527
+          },
+          "callback_ms": {
+            "n": 693,
+            "p50": 25.833,
+            "p95": 81.216
+          },
+          "median_queue_fraction": 0.8916039023992594,
+          "exclusive": 471,
+          "in_combined_dispatch": 184
+        },
+        "short": {
+          "queue_ms": {
+            "n": 360,
+            "p50": 105.279,
+            "p95": 178.01
+          },
+          "callback_ms": {
+            "n": 360,
+            "p50": 12.2675,
+            "p95": 54.386
+          },
+          "median_queue_fraction": 0.8765691389270311,
+          "exclusive": 252,
+          "in_combined_dispatch": 108
+        }
+      }
+    },
+    "diag-short-only-c1": {
+      "rounds": 3,
+      "latency": {
+        "n": 360,
+        "p50": 10.98671369254589,
+        "p95": 15.854284167289734
+      },
+      "qps": 89.79364314518656,
+      "round_p50": [
+        10.930506512522697,
+        11.014752089977264,
+        10.998619720339775
+      ],
+      "errors": 0,
+      "short_latency": {
+        "n": 360,
+        "p50": 10.98671369254589,
+        "p95": 15.854284167289734
+      },
+      "longer_latency": null,
+      "precision_vs_accepted068": {
+        "responses": 360,
+        "exact": 360,
+        "flips": 0,
+        "max_probability_delta": 0.0,
+        "max_score_delta": 0.0
+      },
+      "trace": {
+        "dispatches": 360,
+        "combined_dispatches": 0,
+        "work_items": 360,
+        "exclusive_work_items": 252,
+        "unique_requests": 360,
+        "all": {
+          "queue_ms": {
+            "n": 360,
+            "p50": 0.007,
+            "p95": 0.01
+          },
+          "callback_ms": {
+            "n": 360,
+            "p50": 9.748,
+            "p95": 14.5
+          },
+          "median_queue_fraction": 0.0007960204048939967,
+          "exclusive": 252,
+          "in_combined_dispatch": 0
+        },
+        "short": {
+          "queue_ms": {
+            "n": 360,
+            "p50": 0.007,
+            "p95": 0.01
+          },
+          "callback_ms": {
+            "n": 360,
+            "p50": 9.748,
+            "p95": 14.5
+          },
+          "median_queue_fraction": 0.0007960204048939967,
+          "exclusive": 252,
+          "in_combined_dispatch": 0
+        }
+      }
+    },
+    "diag-short-only-c16": {
+      "rounds": 3,
+      "latency": {
+        "n": 360,
+        "p50": 139.10904712975025,
+        "p95": 197.7413408458233
+      },
+      "qps": 107.98895343292465,
+      "round_p50": [
+        139.10904712975025,
+        137.07230240106583,
+        137.54374347627163
+      ],
+      "errors": 0,
+      "short_latency": {
+        "n": 360,
+        "p50": 139.10904712975025,
+        "p95": 197.7413408458233
+      },
+      "longer_latency": null,
+      "precision_vs_accepted068": {
+        "responses": 360,
+        "exact": 360,
+        "flips": 0,
+        "max_probability_delta": 0.0,
+        "max_score_delta": 0.0
+      },
+      "trace": {
+        "dispatches": 261,
+        "combined_dispatches": 9,
+        "work_items": 360,
+        "exclusive_work_items": 252,
+        "unique_requests": 360,
+        "all": {
+          "queue_ms": {
+            "n": 360,
+            "p50": 101.866,
+            "p95": 170.13
+          },
+          "callback_ms": {
+            "n": 360,
+            "p50": 12.076,
+            "p95": 54.655
+          },
+          "median_queue_fraction": 0.8784923454047473,
+          "exclusive": 252,
+          "in_combined_dispatch": 108
+        },
+        "short": {
+          "queue_ms": {
+            "n": 360,
+            "p50": 101.866,
+            "p95": 170.13
+          },
+          "callback_ms": {
+            "n": 360,
+            "p50": 12.076,
+            "p95": 54.655
+          },
+          "median_queue_fraction": 0.8784923454047473,
+          "exclusive": 252,
+          "in_combined_dispatch": 108
+        }
+      }
+    },
+    "diag-short-only-c32": {
+      "rounds": 3,
+      "latency": {
+        "n": 360,
+        "p50": 274.890149012208,
+        "p95": 345.97373753786087
+      },
+      "qps": 107.20503512938978,
+      "round_p50": [
+        278.7097543478012,
+        274.1490416228771,
+        274.35616590082645
+      ],
+      "errors": 0,
+      "short_latency": {
+        "n": 360,
+        "p50": 274.890149012208,
+        "p95": 345.97373753786087
+      },
+      "longer_latency": null,
+      "precision_vs_accepted068": {
+        "responses": 360,
+        "exact": 360,
+        "flips": 0,
+        "max_probability_delta": 0.0,
+        "max_score_delta": 0.0
+      },
+      "trace": {
+        "dispatches": 265,
+        "combined_dispatches": 13,
+        "work_items": 360,
+        "exclusive_work_items": 252,
+        "unique_requests": 360,
+        "all": {
+          "queue_ms": {
+            "n": 360,
+            "p50": 252.208,
+            "p95": 326.602
+          },
+          "callback_ms": {
+            "n": 360,
+            "p50": 12.132000000000001,
+            "p95": 51.472
+          },
+          "median_queue_fraction": 0.9491781391532903,
+          "exclusive": 252,
+          "in_combined_dispatch": 108
+        },
+        "short": {
+          "queue_ms": {
+            "n": 360,
+            "p50": 252.208,
+            "p95": 326.602
+          },
+          "callback_ms": {
+            "n": 360,
+            "p50": 12.132000000000001,
+            "p95": 51.472
+          },
+          "median_queue_fraction": 0.9491781391532903,
+          "exclusive": 252,
+          "in_combined_dispatch": 108
+        }
+      }
+    },
+    "diag-short-only-c8": {
+      "rounds": 3,
+      "latency": {
+        "n": 360,
+        "p50": 77.04693265259266,
+        "p95": 104.24379259347916
+      },
+      "qps": 105.88827645318243,
+      "round_p50": [
+        79.80063930153847,
+        76.82959549129009,
+        76.74228772521019
+      ],
+      "errors": 0,
+      "short_latency": {
+        "n": 360,
+        "p50": 77.04693265259266,
+        "p95": 104.24379259347916
+      },
+      "longer_latency": null,
+      "precision_vs_accepted068": {
+        "responses": 360,
+        "exact": 360,
+        "flips": 0,
+        "max_probability_delta": 0.0,
+        "max_score_delta": 0.0
+      },
+      "trace": {
+        "dispatches": 298,
+        "combined_dispatches": 15,
+        "work_items": 360,
+        "exclusive_work_items": 252,
+        "unique_requests": 360,
+        "all": {
+          "queue_ms": {
+            "n": 360,
+            "p50": 63.337,
+            "p95": 86.493
+          },
+          "callback_ms": {
+            "n": 360,
+            "p50": 11.033999999999999,
+            "p95": 33.97
+          },
+          "median_queue_fraction": 0.8468905282898647,
+          "exclusive": 252,
+          "in_combined_dispatch": 77
+        },
+        "short": {
+          "queue_ms": {
+            "n": 360,
+            "p50": 63.337,
+            "p95": 86.493
+          },
+          "callback_ms": {
+            "n": 360,
+            "p50": 11.033999999999999,
+            "p95": 33.97
+          },
+          "median_queue_fraction": 0.8468905282898647,
+          "exclusive": 252,
+          "in_combined_dispatch": 77
+        }
+      }
+    },
+    "diag-shuffle-11-c16": {
+      "rounds": 3,
+      "latency": {
+        "n": 693,
+        "p50": 350.62047466635704,
+        "p95": 574.5115093886852
+      },
+      "qps": 41.983482175702775,
+      "round_p50": [
+        355.08323833346367,
+        347.98539057374,
+        348.7790897488594
+      ],
+      "errors": 0,
+      "short_latency": {
+        "n": 360,
+        "p50": 325.9130045771599,
+        "p95": 569.4825313985348
+      },
+      "longer_latency": {
+        "n": 333,
+        "p50": 379.3666288256645,
+        "p95": 626.5215687453747
+      },
+      "precision_vs_accepted068": {
+        "responses": 693,
+        "exact": 693,
+        "flips": 0,
+        "max_probability_delta": 0.0,
+        "max_score_delta": 0.0
+      },
+      "trace": {
+        "dispatches": 620,
+        "combined_dispatches": 55,
+        "work_items": 693,
+        "exclusive_work_items": 471,
+        "unique_requests": 693,
+        "all": {
+          "queue_ms": {
+            "n": 693,
+            "p50": 321.692,
+            "p95": 557.212
+          },
+          "callback_ms": {
+            "n": 693,
+            "p50": 14.921,
+            "p95": 84.878
+          },
+          "median_queue_fraction": 0.9524851769501574,
+          "exclusive": 471,
+          "in_combined_dispatch": 128
+        },
+        "short": {
+          "queue_ms": {
+            "n": 360,
+            "p50": 311.868,
+            "p95": 557.212
+          },
+          "callback_ms": {
+            "n": 360,
+            "p50": 11.198,
+            "p95": 24.819
+          },
+          "median_queue_fraction": 0.9664292046244586,
+          "exclusive": 252,
+          "in_combined_dispatch": 62
+        }
+      }
+    },
+    "public-c1": {
+      "rounds": 3,
+      "latency": {
+        "n": 693,
+        "p50": 13.69037851691246,
+        "p95": 84.6751369535923
+      },
+      "qps": 37.92491349982847,
+      "round_p50": [
+        14.946091920137405,
+        13.055708259344101,
+        12.860890477895737
+      ],
+      "errors": 0,
+      "short_latency": {
+        "n": 360,
+        "p50": 11.187627911567688,
+        "p95": 16.900017857551575
+      },
+      "longer_latency": {
+        "n": 333,
+        "p50": 28.564713895320892,
+        "p95": 98.8416075706482
+      },
+      "precision_vs_accepted068": {
+        "responses": 693,
+        "exact": 693,
+        "flips": 0,
+        "max_probability_delta": 0.0,
+        "max_score_delta": 0.0
+      },
+      "trace": {
+        "dispatches": 693,
+        "combined_dispatches": 0,
+        "work_items": 693,
+        "exclusive_work_items": 471,
+        "unique_requests": 693,
+        "all": {
+          "queue_ms": {
+            "n": 693,
+            "p50": 0.009,
+            "p95": 0.014
+          },
+          "callback_ms": {
+            "n": 693,
+            "p50": 12.26,
+            "p95": 76.939
+          },
+          "median_queue_fraction": 0.0006402048655569782,
+          "exclusive": 471,
+          "in_combined_dispatch": 0
+        },
+        "short": {
+          "queue_ms": {
+            "n": 360,
+            "p50": 0.008,
+            "p95": 0.013
+          },
+          "callback_ms": {
+            "n": 360,
+            "p50": 10.0485,
+            "p95": 15.64
+          },
+          "median_queue_fraction": 0.0008401970663794438,
+          "exclusive": 252,
+          "in_combined_dispatch": 0
+        }
+      }
+    }
+  }
+}

@@ -1,248 +1,96 @@
-<h1 align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logos/system1-omni-dark.png">
-    <img src="docs/assets/logos/system1-omni.png" alt="System1-Omni" width="760">
-  </picture>
-</h1>
+# PR #196: independently inspectable experiment evidence
 
-<p align="center">
-  <a href="https://thinkflowlab.github.io/system1-omni/"><img src="https://img.shields.io/badge/Docs-site-2563eb?style=flat-square&amp;logo=github&amp;logoColor=white" alt="Documentation site"></a>
-  <a href="https://github.com/ThinkFlowLab/system1-omni/blob/main/Cargo.toml"><img src="https://img.shields.io/badge/Rust-stable-ce6229?style=flat-square&amp;logo=rust&amp;logoColor=white" alt="Rust stable toolchain"></a>
-  <a href="https://github.com/ThinkFlowLab/system1-omni/blob/main/recipe/cua_s1/native.md"><img src="https://img.shields.io/badge/CUDA-sm__80%2B-76b900?style=flat-square&amp;logo=nvidia&amp;logoColor=white" alt="CUDA compute capability 8.0 or newer"></a>
-  <a href="#contributing"><img src="https://img.shields.io/badge/Contributions-welcome-0d9488?style=flat-square" alt="Contributions welcome"></a>
-</p>
+This is an **evidence-only archive branch**, not a proposed source-code landing.
+It records original-native vs optimized Open-Jev-9B correctness and historical
+performance measurements for https://github.com/InferMatrixLab/system1-omni/pull/196.
+The follow-up PR source is `ecea1a31e287890fee5a595504203b53734ffe2a`
+(tree `f36ac83d2bc6bf217be4dd8a24c1a5973a0d60ca`).
+Production code was unchanged by the 085 follow-up. The PR remains a draft.
 
-<p align="center">
-  <strong>Fast decision-model serving for agents.</strong>
-</p>
+## Start here
 
-<p align="center">
-  <a href="#how-it-works">How It Works</a> ·
-  <a href="https://thinkflowlab.github.io/system1-omni/docs/getting-started/">First Decision</a> ·
-  <a href="https://thinkflowlab.github.io/system1-omni/recipe/laya/validation/#decision-demo">Demo</a> ·
-  <a href="https://thinkflowlab.github.io/system1-omni/docs/supported-models/">Supported Models</a> ·
-  <a href="https://thinkflowlab.github.io/system1-omni/docs/getting-started.zh/">中文</a> ·
-  <a href="https://thinkflowlab.github.io/system1-omni/">Documentation</a> ·
-  <a href="#benchmarks">Benchmarks</a> ·
-  <a href="#roadmap">Roadmap</a> ·
-  <a href="#contributing">Contributing</a>
-</p>
+- [New mixed-packing protocol and replay commands](packing/packing_parity.md)
+- [085 GPU results and model/binary hashes](validation/085/validation.json)
+- [Original GPU output](validation/085/original-gpu.log),
+  [optimized eager](validation/085/candidate-graph-0.log),
+  [optimized graph](validation/085/candidate-graph-1.log)
+- [Existing eager regressions](validation/085/prefill-graph-0.log),
+  [existing graph regressions](validation/085/prefill-graph-1.log)
+- [Detected build-cache harness failure](validation/085/harness-failure-wrong-build.log)
+- [Historical 068 GPU validation](validation/068/gpu-tests.log)
+- [Public231 frozen manifest](workloads/public231.jsonl),
+  [shape frozen manifest](workloads/shapes.jsonl)
+- [Full replay instructions](REPLAY.md), [CPU audit program](audit.py)
 
-## About
+085 uses 18 fixed token cases, 94 candidate logits per mode; all 188 optimized
+logits match the original native FP32 bits. The published portable replay tool
+was also executed on 231 public + 192 synthetic HTTP cases: zero decision flips
+and zero returned probability/Score drift against freshly launched original
+native. These parity runs are not new performance measurements. Mixed lengths and permutations,
+changed-token replay, 4096-token and 16-candidate boundaries, question routing,
+and a long control are covered. Seven existing GPU regressions also pass in each
+mode, including a direct graph replay-count assertion. The synthetic-token test
+checks execution numerics, not semantic task accuracy. Reference scope: pinned
+BF16 9B export, NVIDIA L20X / measured SM90, CUDA 13.0. Other architectures are
+not established by this oracle.
 
-**System1-Omni** serves decision models for agents: route a support ticket to
-billing, score its urgency, or decide whether it asks for a refund. Models return
-structured decisions from a prefill pass. Start with the
-[complete CPU walkthrough](docs/getting-started.md), inspect the
-[real request and response](recipe/laya/validation.md#decision-demo), and check
-the [model and hardware matrix](docs/supported-models.md).
+The first candidate probe accidentally reused an original-checkout Cargo test
+binary. It failed the packing-enabled assertion before comparison. That attempt
+is retained; corrected probes were rebuilt, copied separately, hashed, and run
+successfully. Replay instructions require distinct Cargo target directories.
 
-The community-maintained engine combines a Rust frontend with model-owned
-execution and CUDA backends. The target architecture separates processing and
-scheduling from model execution; a native Metal backend is planned, while LAYA
-already has a Python worker for Apple GPUs through PyTorch MPS.
+## Data layout and integrity
 
-The Rust frontend forwards requests to a separately running model worker. The
-Cua-S1 4B 0.2 `text` adapter, Open-Jev-27B-v1.1 and Open-Jev-9B have native
-workers using shared CUDA kernels in this repository.
-The LFM2.5-350M Transformers worker owns candidate scoring and hybrid cache branching.
+`SHA256.json` hashes every published file except itself. `runs.json` lists 322
+completed historical measurement cells/rounds, totaling 116,106 requests,
+including campaigns 005, 015, 021, 068, 069 and repeatability diagnostics 081–084.
+The archive does not imply that these campaigns share identical protocols.
 
-## News
+Each `measurements/<run>/samples.jsonl` retains every request's original ID,
+latency, HTTP status, error, completion state and dispatch ordinal (where present).
+`answers_ref` resolves through `answers.json` to the complete original parsed
+answer object, without rounding. This dictionary removes repeated identical
+answers; no requests or latency samples are sampled out. `summary.json` retains
+measurement wall time, so throughput can be recalculated independently.
+`config.json`, campaign plans and metadata record runtime revisions, device,
+launch commands, binary hashes and settings. Source response-file hashes and
+projection details are in `source.json` and `source-records.json`.
 
-- **2026-10-03:** Added [Open-Jev-27B-v1.1](recipe/open_jev/native.md)
-  support through a native Rust/CUDA worker: **7.47× faster than raw HF Transformers**
-  by mean warm HTTP latency, **362.21→48.50 ms** on one H200. Measured over
-  74 single-candidate JevBench `noul` requests per pass, with two measured passes
-  per backend (BF16, concurrency 1). See the
-  [HF Transformers baseline, results and OpenJev-Fast comparison](recipe/open_jev/validation.md).
+These are **lossless projections of the timing/status/parsed-answer fields**,
+not full HTTP wire dumps. Redundant base64 bodies, per-response server metadata
+and raw profiler traces remain in the local archive. Independent performance
+and parsed-answer parity checks need only the published fields. Full original
+and optimized response bodies from the two 068 parity prechecks are included
+under `parity/`. GPU validation stdout/stderr is included unchanged. No model
+weights or executable binaries are included.
 
-## Features
+`tools/original/` contains retained campaign programs; `tools/replay.py` changes
+only their machine-specific path prefixes. `tools/bench.py` preserves the actual
+HTTP runner (`f567448c...`), also present in the measured source tree.
+Historical absolute paths in logs are provenance, not required install paths.
+The archive includes metadata/summaries for 084; it does **not** claim that full
+profiler traces or every diagnostic overlay are published or independently
+replayable from this bundle. The main correctness/performance campaigns and
+085 have the replay commands below.
 
-- **Rust serving frontend.** API, request lifecycle, and response delivery
-  through a small engine interface, forwarding requests to separately running
-  model workers.
-- **Model-owned execution.** Model executors own weights, forward passes,
-  learned heads, device state, and kernel selection. Native workers have separate
-  processing and executor modules, with shared FIFO admission and blocking
-  dispatch in the [native runtime](src/runtime/README.md).
-- **Native CUDA workers.** The Cua-S1 4B 0.2 `text` adapter,
-  Open-Jev-27B-v1.1, Open-Jev-9B, and StartLux-Decision v1.1 4B Instant run
-  as native workers with shared CUDA kernels. Cua-S1 also has a Python
-  worker that serves as the correctness reference. The StartLux worker is
-  text-only Instant; its weights are CC BY-NC 4.0 and its GPU parity is
-  unverified. AutoThink is not served.
-- **LAYA text serving.** LAYA runs as an external CPU Python worker, the
-  in-repository Python MPS/CPU worker, or a native Rust/CUDA worker on Hopper.
-- **CUDA backend and planned Metal backend.** High-performance GPU operations
-  for NVIDIA GPUs, with a native Apple-GPU backend planned alongside it.
-- **Benchmark harness.** Request replay, output-fidelity checks, and a CUDA
-  comparison protocol across serving backends.
+## Audit without a GPU
 
-## How It Works
+```bash
+python3 audit.py > audit-result.json
+```
 
-Share processing and scheduling; let each model own its execution.
+This checks every published checksum, recounts every request, recomputes each
+cell's P50/P95/QPS, pools rounds from raw samples, and compares all **40,884**
+formal optimized-native answers (068 + 069) with original-native references.
+It does not assert numerical equality with vllm-jev. The original backends
+already differed on some decisions.
 
-![System1-Omni target architecture: Rust frontend, independent processing and batching layers, model executors, and CUDA and Metal backends](docs/assets/architecture.svg)
+## Interpretation limits
 
-The diagram shows the **target architecture**. Today the frontend forwards HTTP
-requests to separately running workers, whose handlers coordinate independent
-processors and executors. Native workers use shared FIFO admission and
-blocking dispatch per loaded executor. Processing orchestration, batch budgets,
-compatibility grouping and dynamic batching remain planned.
-
-Open-Jev-27B packs candidates within one request for compatible prefill GEMMs
-and GDN launches, and can share a long prefix within one question. Each sequence
-retains independent state. See the
-[native recipe](recipe/open_jev/native.md) and
-[matched H200 measurements](benchmarks/prefill_batching/README.md).
-
-| Layer | Responsibility | Native target implementation |
-| --- | --- | --- |
-| Rust frontend | API transport, request forwarding, and response delivery. | Rust. |
-| Processing layer | Independent pre/postprocessing modules with model-specific processors for input preparation and output interpretation. | Rust CPU processing; GPU transforms use backends. |
-| Scheduler / batcher | Queue admission, batch budgets, compatibility grouping, batch assembly, request bookkeeping, and result routing. | Rust host policy; GPU packing uses backends. |
-| Model executors | Weights, forward passes, learned heads, device state, and kernel selection. | Rust orchestration calling backend operations. |
-| CUDA backend | High-performance GPU operations for NVIDIA GPUs. | Rust bindings/dispatch and CUDA C++ kernels. |
-| Metal backend (planned) | High-performance GPU operations for Apple GPUs. | Rust bindings/dispatch and Metal shaders. |
-
-In the target design, the shared worker runtime invokes processors, schedules
-compatible work, calls the model executor, and routes each output back to its
-request. Tokenization, modality transforms, and response interpretation remain
-model-specific plugins, separate from the forward implementation. Models
-declare batch constraints; batch adapters pack inputs and unpack outputs using
-the executor's supported layout. A shared scheduler must not batch incompatible
-models or inputs, and dynamic batching requires executor support for real batches.
-
-These are logical layers: the runtime and executor can share a worker process.
-Request bookkeeping belongs to the runtime; model device state belongs to the
-executor. Backends can optimize for their hardware without requiring identical
-internal implementations.
-
-The [architecture and integration contracts](docs/architecture.md) define
-processor/executor boundaries, compatibility grouping, state and buffer
-lifetimes, and result reconstruction. They also distinguish the native target
-from current single-prompt execution and CPU decision heads.
-
-## Repository Layout
-
-Implementation code lives under `src/`; recipes and documentation stay at the
-repository root.
-
-| Directory | Responsibility |
-| --- | --- |
-| [`src/frontend/`](src/frontend/) | Rust serving code, Python worker adapters, and the small engine interface. |
-| [`src/runtime/`](src/runtime/README.md) | Shared native execution admission and blocking dispatch. |
-| [`src/models/`](src/models/) | Model contracts, existing worker pipelines, and model executors, including the shared Qwen3.5/3.8 prefill implementation. |
-| [`src/backends/cuda/`](src/backends/cuda/) | NVIDIA GPU operations and kernel integration. |
-| [`src/backends/metal/`](src/backends/metal/) | Apple GPU operations and kernel integration. |
-| [`recipe/`](recipe/) | Model setup instructions, launch commands, configuration examples, and example requests. |
-| [`docs/`](docs/) | Project documentation and architecture assets. |
-
-The frontend, native runtime, the native workers, their shared Qwen3.5/3.8
-prefill implementation and the Laya CUDA backend are Cargo workspace members.
-Each model and backend documents its implementation and process boundary.
-
-## Getting Started
-
-Follow [Your first decision on CPU](docs/getting-started.md)
-([中文入口](docs/getting-started.zh.md)) for prerequisites, pinned dependencies,
-worker and frontend startup, readiness checks, a refund request and expected output.
-The recommended path uses the upstream LAYA English worker on Linux x86_64 with
-Python 3.12 and stable Rust; it needs no GPU or weight export.
-
-The [recorded CPU demo](recipe/laya/validation.md#decision-demo) includes the
-actual JSON and checks for `choice`, `score` and `noul`. Download/build/loading
-time is separate from inference; no setup-duration or CPU speed claim is made.
-For other hardware, see the [LAYA MPS recipe](recipe/laya/apple-silicon.md) or
-the accelerated [native Open-Jev recipe](recipe/open_jev/native.md).
-The [frontend documentation](src/frontend/README.md) describes transport and configuration.
-The [LFM2.5 recipe](recipe/lfm2/README.md) covers choice scoring with configurable candidate batches.
-
-## Supported Models
-
-LAYA text serving uses the upstream CPU worker, the in-repository Python MPS/CPU
-worker, or a native Rust/CUDA worker on Hopper. The Cua-S1 4B 0.2 `text` adapter
-runs as a Python worker or as a native worker on CUDA. Open-Jev-27B-v1.1
-and Open-Jev-9B run on the same native Rust/CUDA worker. Cua-S1 also has a
-Python screenshot worker, Valen-Preview-0923 has a Python reference worker for
-text and one-image state, CLM has a stub-encoder contract recipe, and OmniJev-4B
-v1.1 runs on a native Rust/CUDA worker. D3
-(Decision 3.0) has a Python reference worker that runs the checkpoint's own
-pinned runtime for text, image and video state, and the Vela 2.0 members (0.3B and the 0.8B
-hybrid) have one that serves all five
-SystemOne question kinds (`choice`/`noul`/`score` plus the `span`/`set`
-extensions) on each checkpoint's own pinned runtime.
-pplx-decider-v1.1-27b has a Python reference worker for the pinned Perplexity
-checkpoint. Public231 concurrency-1 latency for heads `1ba07d1`, `f968e576`,
-`ffae182`, `4b99b73`, and `fcf5e2b` is recorded in the recipe:
-
-| Model | Status |
-| --- | --- |
-| LAYA | [External worker](recipe/laya/README.md); [Python worker on Apple Silicon (MPS) and CPU](recipe/laya/apple-silicon.md); [CPU checkpoint reader](src/models/laya/README.md); [native Rust/CUDA worker on Hopper](recipe/laya/native/README.md) |
-| Decider-2B v11 | [Native Rust/CUDA text worker](recipe/decider/README.md); Choice/Noul/isolated Score; opt-in batching, Graph and request-local prefixes; [validation scope](recipe/decider/validation.md) |
-| Cua-S1 4B 0.2 (`text` adapter) | [Python worker](recipe/cua_s1/text.md); [native worker](recipe/cua_s1/native.md), CUDA; unmerged profile validated on the cumulative A800 sm_80 build, earlier merged path on sm_89 |
-| Cua-S1 4B 0.2 (`multimodal` adapter) | [Python CUDA reference](src/frontend/cua_s1.py) and [native Rust/CUDA screenshot worker](recipe/cua_s1/native_screenshot.md); one PNG/JPEG image, `choice`; scoped RTX 4090 validation |
-| JEMM (Qwen3.8-27B) | [Native Rust/CUDA worker](recipe/jemm/README.md); [text and 1–4-image frozen-corpus parity on A800](src/models/jemm/README.md#validation) |
-| Valen-Preview-0923 | [Python reference worker](recipe/valen/reference.md); text state or one inline PNG/JPEG image, `choice`/`noul`/`score`; author-run on RTX 5060 Laptop GPU (sm_120, WSL2), owner: community |
-| Open-Jev-27B-v1.1 | [Native Rust/CUDA worker](recipe/open_jev/native.md); eager text decisions with within-request candidate optimizations; [historical H200 validation](recipe/open_jev/validation.md) |
-| Open-Jev-9B | The same [native Rust/CUDA worker](recipe/open_jev/native.md); eager independent text candidates; [reference comparison on sm_89](recipe/open_jev/validation-9b.md) |
-| StartLux-Decision v1.1 4B Instant | [Native Rust/CUDA text worker](recipe/startlux/README.md); `choice` / `noul` / `score`; weights CC BY-NC 4.0; Instant only (no AutoThink, no 27B); GPU parity unverified; [L20X latency recipe](recipe/startlux/latency.md) |
-| autotrust/JEV-27B-VL | [Experimental Rust/CUDA worker](recipe/jev_vl/README.md); single-question text, online inline PNG/JPEG and offline-preencoded image inputs; [validation scope and limits](recipe/jev_vl/validation.md) |
-| CLM-v0.1-8B | [External worker with a CPU stub encoder](recipe/clm/README.md); contract checks only, real Qwen3-8B decisions unverified by this recipe |
-| LFM2.5-350M | [Transformers worker](recipe/lfm2/README.md); text state and independent choice questions |
-| OmniJev-4B v1.1 | [Native Rust/CUDA worker](recipe/omnijev/native.md), eager: one image, Choice, Noul and Score; [reference comparison on sm_89](recipe/omnijev/native.md#comparison-with-the-reference) |
-| D3 (Decision 3.0) | [Python reference worker](recipe/d3/reference.md) on the checkpoint's pinned runtime; `choice`/`noul`/`score` over text, image and video state; author-run on A100 for text and media serving (see the integration and media PRs) |
-| Vela 2.0 0.3B | [Python reference worker](recipe/vela/reference.md) on the checkpoint's pinned runtime; all five kinds (`choice`/`noul`/`score`/`span`/`set`) for text state; CPU FP32 validated (author-run, evidence in the integration PR) |
-| Vela 2.0 0.8B hybrid | [Python reference worker](recipe/vela/reference.md) on the checkpoint's pinned runtime; same surface plus `span_heads`; CPU FP32 parity recorded in the integration PR |
-| Clef-flash (9B) and Clef (27B) | [Rust `omni-clef` server](recipe/clef/reference.md) plus the pinned Python joint-schema executor on one persistent thread; text `choice`/`noul`/`score`; flash is the bring-up variant. Image, video, and a native joint head are not served. The L20X-labeled lab Public231 C1 primary is the previous Python HTTP worker, tip `594528a9`: p50 164.969 ms, p95 216.755 ms, `/health` `fla+causal_conv1d`, versus `9030065` run1 p50 247.518 ms, p95 413.025 ms (Δp50 −82.549 ms, Δp95 −196.270 ms). Operator-reported `omni-clef` tip `f9127a0` on that host is a serve-path paste, not a latency KEEP: R1 p50 169.605 ms, p95 220.003 ms (231/231) does not pass the dual gate versus 164.969/216.755; R2 53.580/97.031 and R3 52.950/97.608 are not a new primary. Smoke 4/4, `/health` `fla+causal_conv1d`, quality matches the baseline (`choice_acc=0.8417`, `noul_acc=0.7973`, `score_mae=0.2488`) |
-| pplx-decider-v1.1-27b | [Python reference worker](recipe/pplx_decider/README.md) on the pinned checkpoint; `choice`/`noul`/`score` text plus up to four images. Lab L20X-labeled GPUs are the H200 target. Kept Public231 primary is `fcf5e2b`: 231/231, p50 87.782 ms, p95 291.183 ms, grouped-value FlashInfer with q and k packed before the L2 view (p50 −1.30%, p95 −1.56% versus `4b99b73` 88.942 / 295.797). `4b99b73` was p50 −4.20%, p95 −0.22% versus `ffae182` 92.844 / 296.458. Uncached all-sequence FlashInfer `3c72f02` is not the primary (p50 88.808 ms, p95 300.751 ms). Short-sequence FlashInfer `a50b9aa` missed its gate (p50 95.446 ms, p95 300.871 ms). cuDNN-first SDPA `0dcaa0ac` missed its gate (p50 138.501 ms, p95 332.859 ms). Fused gate-up `8b4ee326` missed its gate (p50 102.437 ms, p95 304.970 ms). Always-on dynamic compile `e36b32ed` missed the both-percentiles gate (p50 97.751 ms, p95 263.124 ms; p95 improved). The 512-token split `7e3b1be` missed its gate (p50 100.037 ms, p95 257.084 ms). Isolated-median compile `34ba5de` missed its gate (p50 97.084 ms, p95 256.679 ms; the 136-token probe was eager). The FlashInfer state-workspace ring `17a7b120` missed its gate (p50 89.165 ms, p95 295.723 ms). Always-on FLA residual RMSNorm `3afb472` missed its gate (p50 93.935 ms, p95 274.902 ms). Length-gated FLA residual RMSNorm `705ae089` missed its gate (p50 94.604 ms, p95 274.835 ms). `use_cp=auto` `a6f4d9a` missed its gate (p50 112.294 ms, p95 299.419 ms). Grouped-value `3ecdf5a` crashed in warmup (0/231, no p50 or p95). FLA fused gated RMSNorm `801ef7b` missed its gate (p50 89.172 ms, p95 274.790 ms). FLA `swiglu_fwd` `2bbbe4e` missed its gate (owner closeout p50 97.613 ms, p95 292.795 ms) and is not installed |
-
-[Supported models and hardware](docs/supported-models.md) lists the devices
-and where each worker has been run.
-
-## Benchmarks
-
-See the [GPU serving benchmark](benchmarks/README.md) for request replay,
-output-fidelity checks, and the CUDA comparison protocol. The
-[Open-Jev H200 results](recipe/open_jev/validation.md) cover 74 single-candidate
-requests and a matched comparison with raw HF Transformers and OpenJev-Fast.
-The [Open-Jev optimization notes](docs/blog/2026-10-05-open-jev-optimization.md)
-record PR-by-PR Rust/CUDA changes and isolated A/B measurements, with figures,
-numerical checks and links to the separate experiments.
-
-## Roadmap
-
-The current focus is the native Cua-S1 and Open-Jev CUDA workers and the serving
-benchmark harness. Planned work extends the shared runtime with processing
-orchestration, admission budgets, compatibility grouping and bounded dynamic
-batching with batch-capable executors,
-additional model engines and GPU backends
-including Metal, and per-model
-performance measurements as implementations are added and validated.
-
-<a id="contributing"></a>
-
-## 🤝 Contributing
-
-System1-Omni is open to contributions across serving, models, backends,
-benchmarks, and documentation. A reproducible bug report, a carefully measured
-benchmark, or a clearer recipe can be just as useful as a kernel optimization.
-
-Review the [contributing guide](CONTRIBUTING.md) before opening a pull
-request: self-review the full diff, keep serving, processing, scheduling, and
-model execution separate according to the [architecture contracts](docs/architecture.md),
-and run the checks appropriate to your changes.
-
-**Have an idea or found a problem?** [Open an
-issue](https://github.com/ThinkFlowLab/system1-omni/issues/new) with the
-details, or [send a pull
-request](https://github.com/ThinkFlowLab/system1-omni/compare). For larger
-changes, start a discussion in an issue so we can work through the design
-together.
-
-## Stay Tuned with Us
-
-If you find system1-omni useful, [give us a star on GitHub](https://github.com/ThinkFlowLab/system1-omni)
-to support the project and help others discover it!
-
-[![GitHub repository screenshot demonstrating a click on Star, turning the star yellow and showing Starred](docs/assets/stay-tuned.gif)](https://github.com/ThinkFlowLab/system1-omni)
+005→068 is a historical comparison across different physical GPUs of the same
+reported type, not a controlled code-only speedup estimate. 068 vs 015 and
+069 vs 021 retain their recorded paired-device setup and workload definitions.
+Historical Public C32 ranking did not repeat in 081/082. This evidence does not
+establish universal wins, statistical significance, or unchanged behavior on
+unmeasured models/hardware. 085 supplies missing correctness-path coverage;
+it introduces no new performance-speedup claim.

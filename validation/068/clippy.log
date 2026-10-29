@@ -1,0 +1,9 @@
+    Checking omni-qwen3-5-native v0.1.0 (/home/psv/system1-omni/src/models/qwen3_5/native)
+    Checking omni-decider-native v0.1.0 (/home/psv/system1-omni/src/models/decider/native)
+    Checking omni-omnijev-native v0.1.0 (/home/psv/system1-omni/src/models/omnijev/native)
+    Checking omni-jemm-native v0.1.0 (/home/psv/system1-omni/src/models/jemm/native)
+    Checking omni-jev-vl-native v0.1.0 (/home/psv/system1-omni/src/models/jev_vl/native)
+    Checking omni-cua-s1-native v0.1.0 (/home/psv/system1-omni/src/models/cua_s1/native)
+    Checking omni-open-jev-native v0.1.0 (/home/psv/system1-omni/src/models/open_jev/native)
+    Checking omni-startlux-native v0.1.0 (/home/psv/system1-omni/src/models/startlux/native)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.86s

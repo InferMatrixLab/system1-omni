@@ -1,0 +1,6 @@
+{
+  "source": "runs/081-c16-reproduction/system1/public-c1-r3/responses.jsonl",
+  "sha256": "c030b693c407e163ff2604f8276cf27fef2f0f4a5ba0611a6c96d1cf4bc83b96",
+  "records": 231,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}

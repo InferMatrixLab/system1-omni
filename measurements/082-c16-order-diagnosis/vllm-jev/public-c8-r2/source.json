@@ -1,0 +1,6 @@
+{
+  "source": "runs/082-c16-order-diagnosis/vllm-jev/public-c8-r2/responses.jsonl",
+  "sha256": "fe630914f577e0c55d70a827bde6cceddeb6203b499974bfdebea198c126a2a7",
+  "records": 231,
+  "projection": "id, latency_ms, status, error, state, dispatch_index where present; answers preserved losslessly by answers_ref"
+}
