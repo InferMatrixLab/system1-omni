@@ -145,7 +145,7 @@ async fn text_prefix_buffers_grow_and_shrink_without_reusing_prior_contents() {
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "needs the pinned Open-Jev-9B export, CUDA library and a GPU reservation"]
-async fn nine_b_packing_keeps_prefix_off_and_independent_candidates() {
+async fn nine_b_long_candidates_keep_prefix_off_and_independent() {
     use omni_qwen3_5_native::prefix::PrefixMode;
 
     let model = PathBuf::from(std::env::var_os("OPEN_JEV_MODEL").unwrap());
