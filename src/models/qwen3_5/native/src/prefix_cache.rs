@@ -18,7 +18,8 @@ pub struct PrefixCacheStats {
     pub hits: u64,
     pub misses: u64,
     /// Prompts run uncached because their block alone was over the budget, or the
-    /// device had no memory for it.
+    /// device had no memory for its state. Prompts with no block to cache (under 64
+    /// tokens, or not ending before the prompt does) also run uncached but are not counted.
     pub uncached: u64,
     pub evictions: u64,
     /// Prompt tokens not recomputed on hits.

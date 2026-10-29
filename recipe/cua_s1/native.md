@@ -129,16 +129,19 @@ by their token IDs and evicted least recently used. Each takes about 50 MiB plus
 With the cache on, every prompt runs with the fixed GEMM algorithms of the shared
 executor's `forward_fixed`, whether its block is cached or not, so an answer does not
 depend on what the cache holds; it differs from the default path by rounding. A block
-over the whole budget, or one the device has no memory for, runs as one uncached
-`forward_fixed` pass, which gives the same answer on GPUs where the fixed GEMMs keep
-rows independent of the row count (checked by `fixed_gemm_rows_do_not_depend_on_m`,
-so far on sm_89). The budget counts only cached states, not the worker's scratch
-buffers or the 32 MiB GEMM workspace. The cache needs an export whose adapter is merged
-into the weights (`cua-s1-text-merged/1`, from `export_text_merged.py`) and
-`CUA_S1_GRAPH` off: the unmerged profile rejects prefix continuation. `/health` adds
-`prefix_cache` with the budget, the bytes and entries held, hits, misses, prompts run
-uncached, evictions and the tokens not recomputed; the warmup request counts as the
-first miss.
+over the whole budget, or one whose state the device cannot allocate, runs as one
+uncached `forward_fixed` pass; any other error while saving a state fails the request
+and the block is not kept. Cached and uncached prompts give the same answer on GPUs
+where the fixed GEMMs keep rows independent of the row count, so with the cache on the
+worker runs Open-Jev's startup check for prefix sharing
+([Open-Jev recipe](../open_jev/native.md)) and refuses to start if it fails. The budget
+counts only cached states, not the worker's scratch buffers or the 32 MiB GEMM
+workspace. The cache needs an export whose adapter is merged into the weights
+(`cua-s1-text-merged/1`, from `export_text_merged.py`) and `CUA_S1_GRAPH` off: the
+unmerged profile rejects prefix continuation. `/health` adds `prefix_cache` with the
+budget, the bytes and entries held, hits, misses, prompts whose block could not be
+kept, evictions and the tokens not recomputed; the warmup request counts as the first
+miss.
 
 ```sh
 PYTHONPATH=src .venv/bin/python recipe/cua_s1/export_text_merged.py \

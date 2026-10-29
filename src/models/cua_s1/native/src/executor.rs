@@ -67,8 +67,18 @@ impl Executor {
         cache_bytes: Option<usize>,
     ) -> Result<Self> {
         let (d, lib) = (dir.to_path_buf(), library.to_path_buf());
+        let cached = cache_bytes.is_some();
         let model = tokio::task::spawn_blocking(move || match export {
-            TextExport::Merged => Model::load(&d, &lib),
+            TextExport::Merged => {
+                let mut model = Model::load(&d, &lib)?;
+                // A hit equals one `forward_fixed` pass only where rows do not depend on M.
+                if cached {
+                    model
+                        .check_fixed_rows()
+                        .context("CUA_S1_PREFIX_CACHE_BYTES startup check failed")?;
+                }
+                Ok::<_, anyhow::Error>(model)
+            }
             TextExport::Unmerged => {
                 let mut model =
                     Model::load_with_lora(&d, &lib, &d.join("adapter.safetensors"), 2.0)?;
