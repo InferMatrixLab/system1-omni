@@ -58,13 +58,9 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   extensions) through the Python worker and the Rust frontend on CPU FP32;
   or a decoder member (0.8B `326b01d8`, 4B `d6923941`, 9B `068425bb`) behind its own 10-file gate.
 - [Vela 2.0 decoder native library](vela/native.md): export the pinned-bundle
-  manifest gate, wire contract and token-level processing for the 0.8B hybrid,
-  checked against frozen fixtures; serving stays with the reference Python worker.
-- [Clef reference worker](clef/reference.md): load pinned Clef-flash (9B) or
-  Clef (27B) and serve text `choice`/`noul`/`score`. Image, video and native
-  CUDA are not served. Operator-reported flash Public231 concurrency-1
-  timing on the L20X-labeled lab host is in the recipe. The primary is
-  tip `594528a9`: p50 164.969 ms, p95 216.755 ms, `/health`
+  manifest gate, wire contract and token-level processing for the decoder
+  members (0.8B, 4B and 9B), checked against frozen fixtures; serving stays
+  with the reference Python worker.
 - [Clef reference worker](clef/reference.md): build `omni-clef`, load pinned
   Clef-flash (9B) or Clef (27B), and serve text `choice`/`noul`/`score`.
   The joint head stays in the checkpoint's Python module, on one persistent
