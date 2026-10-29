@@ -28,10 +28,11 @@ cutoff). The 9B ran the same commands on the same host (hidden 4096
 through the shared qwen3_5 config): head-logit drift ≤ 4.20e-5 with
 answer drift ≤ 6.80e-4, response drift ≤ 5.92e-3, and the recorded
 divergences noted above — all inside the member-calibrated gates. Its
-executor replay recorded two of the four small cases before the rented
-session ended — worst logit drift 0.1899 (example-request) and 0.0403
-(set-threshold), both inside the 0.35 bf16 gate — the cjk and score
-cases are not recorded and remain to be run.
+executor replay records all four small cases on the same host — worst
+logit drift 0.2281 (cjk), 0.1899 (example-request), 0.0403
+(set-threshold), 0.0199 (score) — all inside the 0.35 bf16 gate; the
+40-minute wall time is this 2-vCPU host's CPU-bound replay, not the
+GPU.
 
 Run the commands from the repository root with the same `.venv` and
 pinned package as the reference recipe. The export needs about 6 GB of
