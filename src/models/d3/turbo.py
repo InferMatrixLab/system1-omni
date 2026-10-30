@@ -2,7 +2,8 @@
 
 All executable and non-weight load artifacts hash before importing any package
 code. Fast mode checks shard sizes and hashes shards up to 64 MiB; full mode
-also hashes every large shard. Neither mode permits skipping artifact identity.
+also hashes every large shard. Use full for first-time package admission:
+fast cannot detect same-size corruption in large weight shards.
 """
 from __future__ import annotations
 
@@ -26,7 +27,7 @@ _NOT_LOADED = {'LICENSE', 'NOTICE', 'requirements.txt', '.gitattributes'}
 
 
 def verify_package(root: Path, verify: str = 'fast') -> dict[str, Any]:
-    """Authenticate the exact manifest and all files loaded before AutoModel."""
+    """Authenticate manifest/load inputs; large weight hashes require full mode."""
     if verify not in VERIFY_MODES:
         raise ValueError('turbo verify must be fast or full')
     root = Path(root)

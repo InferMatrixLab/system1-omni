@@ -62,7 +62,11 @@ Before importing package code, both verification modes authenticate the exact
 manifest, hash the runtime/wrapper/compose closure, and hash every non-weight
 load input, including configuration, tokenizer, processor and readout. `fast`
 also checks all shard sizes and hashes shards up to 64 MiB; `full` hashes all
-shards. Turbo refuses `--verify none`. Unlisted importable code and package
+shards. Use `full` for first-time package admission, as in the setup command
+above, and after replacing or modifying weights. Use `fast` only for subsequent
+starts of that fully verified, unchanged package: it cannot detect same-size
+corruption in large shards and does not re-establish their SHA-256 identity.
+Turbo refuses `--verify none`. Unlisted importable code and package
 bytecode caches are rejected. The worker isolates copied Transformers modules
 from stale dynamic-module caches and refuses old/new package mixing.
 
