@@ -12,27 +12,8 @@ use omni_vela_native::heads::Heads;
 use omni_vela_native::scoring::{Calibration, SpanOut, aggregate_windows, row_answers};
 use serde_json::Value;
 
-/// Structural (order- and float-insensitive) view of a spans array:
-/// the (label, start, end) triples, sorted.
-fn json_of_spans(value: &Value) -> Vec<(String, i64, i64)> {
-    value
-        .as_array()
-        .map(|spans| {
-            let mut triples: Vec<(String, i64, i64)> = spans
-                .iter()
-                .map(|s| {
-                    (
-                        s["label"].as_str().unwrap_or("").to_string(),
-                        s["start"].as_i64().unwrap_or(-1),
-                        s["end"].as_i64().unwrap_or(-1),
-                    )
-                })
-                .collect();
-            triples.sort();
-            triples
-        })
-        .unwrap_or_default()
-}
+mod native_parity;
+use native_parity::max_logit_drift;
 
 /// The member whose fixtures this run replays: the bundle's manifest
 /// member when VELA_NATIVE_BUNDLE selects one, else the 0.8B baseline
@@ -216,15 +197,19 @@ fn the_heads_reproduce_the_reference_logits_and_the_scoring_the_answers() {
                     let queries = f32_matrix(&raw, call["query"].as_str().expect("query"));
                     let want = call["logits"].as_array().expect("logits");
                     assert_eq!(cands.len(), want.len(), "{case}: block count");
+                    assert_eq!(queries.len(), cands.len(), "{case}: query count");
                     let mut got = Vec::new();
                     for (cand, query) in cands.iter().zip(&queries) {
                         got.push(heads.forward_candidate(cand, query));
                     }
                     for (g, w) in got.iter().zip(want) {
-                        for (a, b) in g.iter().zip(w.as_array().unwrap()) {
-                            worst_logit = worst_logit
-                                .max((a - b.as_f64().unwrap_or(0.0) as f32).abs() as f64);
-                        }
+                        let w: Vec<f64> = w
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|v| v.as_f64().unwrap())
+                            .collect();
+                        worst_logit = worst_logit.max(max_logit_drift(g, &w));
                     }
                     q_calls_by_row.entry(row).or_default().push(call.clone());
                 }
@@ -247,9 +232,7 @@ fn the_heads_reproduce_the_reference_logits_and_the_scoring_the_answers() {
                             .iter()
                             .map(|v| v.as_f64().unwrap())
                             .collect();
-                        for (a, b) in g.iter().zip(&w) {
-                            worst_logit = worst_logit.max((a - *b as f32).abs() as f64);
-                        }
+                        worst_logit = worst_logit.max(max_logit_drift(g, &w));
                     }
                     span_calls_by_row
                         .entry(row)
@@ -419,80 +402,7 @@ fn the_heads_reproduce_the_reference_logits_and_the_scoring_the_answers() {
         });
 
         let want = fixture["predict"]["answers"].as_array().expect("answers");
-        // On the GPU-recorded members (4B/9B) the ~1e-3-scale replay
-        // drift legitimately flips borderline discrete span decisions —
-        // picks within a few 1e-3 of the threshold (the synthetic
-        // long-span-windowed case) or word-boundary merges the
-        // reference itself left near its fill cutoff (9B cjk street
-        // address). Where the replay's span structure matches the
-        // recording, every structural assertion still runs; where it
-        // diverges, that one answer degrades to the probability-level
-        // comparison (the drift check below, spans stripped) and the
-        // divergence is printed into the run record. The 0.8B's
-        // CPU-recorded fixtures keep the full structural assertion.
-        let gpu_recorded = m != "Vela-2.0-0.8B";
-        let spans_diverge = |got: &Value, want: &Value| -> bool {
-            gpu_recorded
-                && got["type"] == "span"
-                && json_of_spans(&got["spans"]) != json_of_spans(&want["spans"])
-        };
-        let strip_divergent = |list: &Vec<Value>, other: &Vec<Value>| -> Vec<Value> {
-            list.iter()
-                .zip(other)
-                .map(|(a, b)| {
-                    let mut a = a.clone();
-                    if spans_diverge(&a, b) {
-                        a.as_object_mut().unwrap().remove("spans");
-                    }
-                    a
-                })
-                .collect()
-        };
-        let got_cmp = strip_divergent(&answers, want);
-        let want_cmp = strip_divergent(want, &answers);
-        let drift = max_drift(
-            &Value::Array(got_cmp.clone()),
-            &Value::Array(want_cmp.clone()),
-        );
-        assert!(
-            drift <= answers_gate,
-            "{case}: answer drift {drift} > {answers_gate}\ngot:  {}\nwant: {}",
-            serde_json::to_string_pretty(&got_cmp).unwrap(),
-            serde_json::to_string_pretty(&want_cmp).unwrap(),
-        );
-        // Structure: same answer count, same ids and discrete picks.
-        assert_eq!(answers.len(), want.len(), "{case}: answer count");
-        for (got, expected) in answers.iter().zip(want) {
-            assert_eq!(got["id"], expected["id"], "{case}: answer order");
-            if got["type"] != "span" {
-                assert_eq!(got["answer"], expected["answer"], "{case}: discrete pick");
-            } else if spans_diverge(got, expected) {
-                println!(
-                    "{case}/{}: span-structure divergence on GPU-recorded {m} \
-(probabilities asserted above); recorded as replay-drift limit",
-                    got["id"].as_str().unwrap_or("?")
-                );
-                assert_eq!(
-                    got["threshold_rule"], expected["threshold_rule"],
-                    "{case}: rule"
-                );
-                continue;
-            } else {
-                assert_eq!(
-                    got["threshold_rule"], expected["threshold_rule"],
-                    "{case}: rule"
-                );
-                let got_spans = got["spans"].as_array().cloned().unwrap_or_default();
-                let want_spans = expected["spans"].as_array().cloned().unwrap_or_default();
-                assert_eq!(got_spans.len(), want_spans.len(), "{case}: span count");
-                for (g, w) in got_spans.iter().zip(&want_spans) {
-                    assert_eq!(g["label"], w["label"], "{case}: span label");
-                    assert_eq!(g["text"], w["text"], "{case}: span text");
-                    assert_eq!(g["start"], w["start"], "{case}: span start");
-                    assert_eq!(g["end"], w["end"], "{case}: span end");
-                }
-            }
-        }
+        let drift = assert_answers_parity(case, &answers, want, answers_gate);
         println!("{case}: logit drift {worst_logit:.3e}, answer drift {drift:.3e}");
     }
 }
@@ -516,4 +426,61 @@ fn span_qid(plan: &Value, row_index: usize) -> String {
     picked
         .map(|p| p["qid"].as_str().unwrap().to_string())
         .unwrap_or_else(|| format!("row{row_index}"))
+}
+
+fn assert_answers_parity(case: &str, answers: &[Value], want: &[Value], gate: f64) -> f64 {
+    assert_eq!(answers.len(), want.len(), "{case}: answer count");
+    let drift = answers
+        .iter()
+        .zip(want)
+        .map(|(a, b)| max_drift(a, b))
+        .fold(0.0, f64::max);
+    assert!(
+        drift <= gate,
+        "{case}: answer drift {drift} > {gate}\ngot:  {}\nwant: {}",
+        serde_json::to_string_pretty(answers).unwrap(),
+        serde_json::to_string_pretty(want).unwrap(),
+    );
+    for (got, expected) in answers.iter().zip(want) {
+        assert_eq!(got["id"], expected["id"], "{case}: answer order");
+        if got["type"] != "span" {
+            assert_eq!(got["answer"], expected["answer"], "{case}: discrete pick");
+        } else {
+            assert_eq!(
+                got["threshold_rule"], expected["threshold_rule"],
+                "{case}: rule"
+            );
+            let got_spans = got["spans"].as_array().expect("spans");
+            let want_spans = expected["spans"].as_array().expect("spans");
+            assert_eq!(got_spans.len(), want_spans.len(), "{case}: span count");
+            for (g, w) in got_spans.iter().zip(want_spans) {
+                for key in ["label", "text", "start", "end"] {
+                    assert_eq!(g[key], w[key], "{case}: span {key}");
+                }
+            }
+        }
+    }
+    drift
+}
+
+#[test]
+fn answer_parity_rejects_missing_spans() {
+    for m in ["Vela-2.0-4B", "Vela-2.0-9B"] {
+        let fixture = load_json(&format!("head-input-{m}-example-request.json"));
+        let want = fixture["predict"]["answers"].as_array().unwrap();
+        let mut got = want.clone();
+        for answer in &mut got {
+            if answer["type"] == "span" {
+                assert!(!answer["spans"].as_array().unwrap().is_empty());
+                answer["spans"] = serde_json::json!([]);
+            }
+        }
+        assert!(
+            std::panic::catch_unwind(|| {
+                assert_answers_parity("missing-spans", &got, want, 0.012);
+            })
+            .is_err(),
+            "{m}: missing spans passed parity"
+        );
+    }
 }

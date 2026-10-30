@@ -16,19 +16,22 @@ answer drift ≤ 5.56e-3 (the calibration amplifies the ~1e-4 logit
 replay drift unevenly — see the per-member gates in the tests); the
 finished responses match the frozen 4B oracles within 5.56e-3; and the
 executor replays the GPU-recorded reference logits with a worst drift
-of 0.2271 across the four small cases (gate 0.35, the bf16 scale). One
-recorded divergence, kept deliberately: the synthetic long-span
-windowed case parks its recorded picks within a few 1e-3 of the 0.55
-threshold, so on the GPU-recorded member the replay's discrete span
-set flips there while its probabilities still match — the tests assert
-probabilities for that case and keep full structural assertion on the
-0.8B's CPU-recorded fixture (the 9B shows the same class on its cjk
-case: a street-address merge the reference itself left near its fill
-cutoff). The 9B ran the same commands on the same host (hidden 4096
-through the shared qwen3_5 config): head-logit drift ≤ 4.20e-5 with
-answer drift ≤ 6.80e-4, response drift ≤ 5.92e-3, and the recorded
-divergences noted above — all inside the member-calibrated gates. Its
-executor replay records all four small cases on the same host — worst
+of 0.2271 across the four small cases (gate 0.35, the bf16 scale).
+The 9B ran the same commands on the same host (hidden 4096 through the
+shared qwen3_5 config): head-logit drift ≤ 4.20e-5 with answer drift
+≤ 6.80e-4 and response drift ≤ 5.92e-3.
+
+Those 4B/9B head/response measurements used the former exemption for
+mismatching span structures and do not establish full parity. The
+9B CJK address merge reported in [PR #195](https://github.com/InferMatrixLab/system1-omni/pull/195#issuecomment-6516691352)
+was a decoding error: a rejected valid word must end the current span.
+The tests now retain all spans and require their counts, labels and
+offsets to match; logit comparisons also reject non-finite values and
+dimension mismatches. The numeric ceilings are unchanged. Full 4B/9B
+head/response replay under these assertions remains unverified until
+rerun with the corresponding exported bundles.
+
+The 9B executor replay records all four small cases on the same host — worst
 logit drift 0.2281 (cjk), 0.1899 (example-request), 0.0403
 (set-threshold), 0.0199 (score) — all inside the 0.35 bf16 gate; the
 40-minute wall time is this 2-vCPU host's CPU-bound replay, not the

@@ -134,9 +134,16 @@ def main(argv=None) -> int:
     model_name = member.model_name
     label = model_name.rsplit("/", 1)[-1]
     sys.path.insert(0, str(package.resolve()))
-    from vela2_inference import Vela2
+    # The package gate rejects bytecode caches. Cover initialization too:
+    # from_pretrained can import package modules lazily.
+    previous_dont_write_bytecode = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        from vela2_inference import Vela2
 
-    engine = Vela2.from_pretrained(args.model, backend="torch", device=args.device)
+        engine = Vela2.from_pretrained(args.model, backend="torch", device=args.device)
+    finally:
+        sys.dont_write_bytecode = previous_dont_write_bytecode
     out = Path(args.out) if args.out else HERE.parents[1] / "tests" / "vela" / "fixtures"
     out.mkdir(parents=True, exist_ok=True)
     for name, body in cases(model_name):

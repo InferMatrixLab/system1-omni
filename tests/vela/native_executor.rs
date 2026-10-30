@@ -15,7 +15,11 @@
 use std::path::PathBuf;
 
 use omni_vela_native::executor::Executor;
+use omni_vela_native::render::Block;
 use serde_json::Value;
+
+mod native_parity;
+use native_parity::max_logit_drift;
 
 /// The member whose fixtures this run replays: the bundle's manifest
 /// member when VELA_NATIVE_BUNDLE selects one, else the 0.8B baseline
@@ -123,18 +127,39 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
                             .collect()
                     })
                     .collect();
+                assert_eq!(
+                    readouts.questions.len(),
+                    want.len(),
+                    "{case}: question count"
+                );
+                let padded_width = readouts
+                    .questions
+                    .iter()
+                    .map(|q| q.candidates.len())
+                    .max()
+                    .unwrap();
                 // The stacked call's rows are in block order, padded to
                 // the widest block; compare each block's prefix.
                 for (question, ours) in readouts.questions.iter().zip(&want) {
-                    let Some(query) = &question.query else {
-                        continue;
+                    assert_eq!(ours.len(), padded_width, "{case}: padded candidate count");
+                    let Block::Question { ends, .. } = &row.blocks[question.block_index] else {
+                        panic!("expected question block");
                     };
+                    assert_eq!(
+                        question.candidates.len(),
+                        ends.len(),
+                        "{case}: candidate readouts"
+                    );
+                    let query = question.query.as_ref().expect("question query");
                     let got = executor
                         .heads
                         .forward_candidate(&question.candidates, query);
-                    for (a, b) in got.iter().zip(ours.iter()) {
-                        worst_logit = worst_logit.max((a - *b as f32).abs());
-                    }
+                    assert_eq!(
+                        got.len(),
+                        question.candidates.len(),
+                        "{case}: candidate count"
+                    );
+                    worst_logit = worst_logit.max(max_logit_drift(&got, &ours[..got.len()]) as f32);
                 }
             }
             if let Some(span) = &readouts.span {
@@ -158,16 +183,25 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
                             .collect()
                     })
                     .collect();
+                assert_eq!(got.len(), want.len(), "{case}: span word count");
                 let mut worst_row = 0.0f32;
                 for (g, w) in got.iter().zip(&want) {
-                    for (a, b) in g.iter().zip(w) {
-                        worst_row = worst_row.max((a - *b as f32).abs());
-                    }
+                    worst_row = worst_row.max(max_logit_drift(g, w) as f32);
                 }
                 println!("{case}: span logits drift {worst_row:.4}");
                 worst_logit = worst_logit.max(worst_row);
             }
         }
+        assert_eq!(
+            q_call_index,
+            calls.iter().filter(|c| c["kind"] == "q").count(),
+            "{case}: question calls"
+        );
+        assert_eq!(
+            span_call_index,
+            calls.iter().filter(|c| c["kind"] == "span").count(),
+            "{case}: span calls"
+        );
         println!("{case}: worst logit drift {worst_logit:.4}");
         assert!(
             worst_logit <= logit_gate,

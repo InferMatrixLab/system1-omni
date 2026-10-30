@@ -348,21 +348,24 @@ pub fn decode_spans(
     }
     // Merge consecutive same-label words into spans, trim, mean prob.
     let mut spans: Vec<(i64, usize, usize, Vec<usize>)> = Vec::new();
+    let mut current_label = None;
     for t in 0..t_count {
         if !valid[t] {
             continue;
         }
         let c = lab[t];
-        if let Some(last) = spans.last_mut()
-            && c == last.0
-        {
-            last.2 = offs[t].1;
-            last.3.push(t);
+        if c < 0 {
+            current_label = None;
             continue;
         }
-        if c >= 0 {
+        if current_label == Some(c) {
+            let last = spans.last_mut().expect("current span");
+            last.2 = offs[t].1;
+            last.3.push(t);
+        } else {
             spans.push((c, offs[t].0, offs[t].1, vec![t]));
         }
+        current_label = Some(c);
     }
     let mut out = Vec::new();
     for (c, s, e, ts) in spans {

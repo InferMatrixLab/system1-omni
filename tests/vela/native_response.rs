@@ -337,54 +337,7 @@ fn the_systemone_finishing_matches_the_frozen_oracles() {
             input_tokens,
         );
         let want = &oracle["system_one"];
-        // Same rule as native_heads.rs: on the GPU-recorded members the
-        // ~1e-3-scale replay drift can flip borderline discrete span
-        // structure (a merge the reference left near its fill cutoff).
-        // Where a question's span structure diverges, that question's
-        // spans array drops out of the drift comparison and the
-        // divergence is recorded; everything else — probabilities,
-        // answers, sets, thresholds, span_heads — still compares.
-        let mut response_cmp = response.clone();
-        let mut want_cmp = want.clone();
-        if m != "Vela-2.0-0.8B"
-            && let (Some(got_spans), Some(want_spans)) = (
-                response_cmp["spans"].as_object_mut(),
-                want_cmp["spans"].as_object_mut(),
-            )
-        {
-            for qid in got_spans.keys().cloned().collect::<Vec<_>>() {
-                let same = json_of_spans(got_spans.get(&qid).unwrap_or(&Value::Null))
-                    == json_of_spans(want_spans.get(&qid).unwrap_or(&Value::Null));
-                if !same {
-                    println!(
-                        "{case}/{qid}: span-structure divergence on GPU-recorded {m} \
-(probabilities elsewhere in the envelope asserted); recorded as replay-drift limit"
-                    );
-                    got_spans.remove(&qid);
-                    want_spans.remove(&qid);
-                }
-            }
-        }
-        let drift = max_drift(&response_cmp, &want_cmp);
-        assert!(
-            drift <= gate,
-            "{case}: response drift {drift} > {gate}\ngot:  {}\nwant: {}",
-            serde_json::to_string_pretty(&response_cmp).unwrap(),
-            serde_json::to_string_pretty(&want_cmp).unwrap(),
-        );
-        // Structure: same key sets and discrete fields.
-        for key in ["answers", "spans", "sets", "thresholds", "span_heads"] {
-            assert_eq!(
-                response
-                    .get(key)
-                    .and_then(Value::as_object)
-                    .map(serde_json::Map::len),
-                want.get(key)
-                    .and_then(Value::as_object)
-                    .map(serde_json::Map::len),
-                "{case}: {key} key set"
-            );
-        }
+        let drift = assert_response_parity(case, &response, want, gate);
         println!("{case}: response drift {drift:.3e}");
     }
 }
@@ -437,5 +390,45 @@ fn max_drift(a: &Value, b: &Value) -> f64 {
             .fold(0.0, f64::max),
         (_, _) if a == b => 0.0,
         _ => 1.0,
+    }
+}
+
+fn assert_response_parity(case: &str, response: &Value, want: &Value, gate: f64) -> f64 {
+    let drift = max_drift(response, want);
+    assert!(
+        drift <= gate,
+        "{case}: response drift {drift} > {gate}\ngot:  {}\nwant: {}",
+        serde_json::to_string_pretty(response).unwrap(),
+        serde_json::to_string_pretty(want).unwrap(),
+    );
+    if let Some(spans) = want["spans"].as_object() {
+        for (qid, expected) in spans {
+            assert_eq!(
+                json_of_spans(&response["spans"][qid]),
+                json_of_spans(expected),
+                "{case}/{qid}: span structure"
+            );
+        }
+    }
+    drift
+}
+
+#[test]
+fn response_parity_rejects_missing_spans() {
+    for m in ["Vela-2.0-4B", "Vela-2.0-9B"] {
+        let oracle = load(&format!("oracle-hybrid-{m}-example-request.json"));
+        let want = &oracle["system_one"];
+        let mut got = want.clone();
+        for spans in got["spans"].as_object_mut().unwrap().values_mut() {
+            assert!(!spans.as_array().unwrap().is_empty());
+            *spans = serde_json::json!([]);
+        }
+        assert!(
+            std::panic::catch_unwind(|| {
+                assert_response_parity("missing-spans", &got, want, 0.015);
+            })
+            .is_err(),
+            "{m}: missing spans passed parity"
+        );
     }
 }
