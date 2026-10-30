@@ -1,0 +1,257 @@
+{
+  "schema": "d3-turbo-oracle/2",
+  "metadata": {
+    "package": "vllm-sr/d3-turbo",
+    "revision": "a0f3e9e59ebd1202fe1d4de1c4c0f9a986758cbb",
+    "manifest_sha256": "54a65af0871c21b3440cbdadaccfd752a8e2173b86334d1b3290f005e49699fe",
+    "attention_mode": "prefix_bidir",
+    "state_once": true,
+    "readout_dtype": "float32",
+    "max_input_tokens": 32768,
+    "tolerance": 1e-06,
+    "device": "NVIDIA A800 80GB PCIe",
+    "compute_capability": [8, 0],
+    "dependencies": {
+      "torch": "2.12.1+cu130",
+      "torchvision": "0.27.1+cu130",
+      "transformers": "5.17.0",
+      "flash-linear-attention": "0.5.2",
+      "numpy": "2.4.6",
+      "pillow": "12.2.0"
+    },
+    "kernels": {
+      "torch_chunk_gated_delta_rule": "fla.ops.gated_delta_rule.chunk.chunk_gated_delta_rule",
+      "causal_conv1d_fn": "torch-reference",
+      "fla": "0.5.2"
+    }
+  },
+  "cases": {
+    "text": {
+      "probabilities": {
+        "z-route": [0.9999790191650391, 2.0987699826946482e-05],
+        "a-urgent": [0.008170866407454014, 0.9918290972709656],
+        "m-severity": [0.8330713510513306, 0.16421914100646973, 0.0027094618417322636]
+      },
+      "response": {
+        "model": "d3-turbo",
+        "answers": {
+          "z-route": {
+            "type": "choice",
+            "choice": "billing",
+            "probabilities": {
+              "billing": 0.9999790123003172,
+              "technical": 2.0987699682868736e-05
+            },
+            "confidence": 0.9996435705907231
+          },
+          "a-urgent": {
+            "type": "noul",
+            "noul": 0.9918291332957672
+          },
+          "m-severity": {
+            "type": "score",
+            "score": 0.1696380725103287,
+            "probabilities": {
+              "0": 0.833071389456311,
+              "1": 0.16421914857704925,
+              "2": 0.002709461966639727
+            },
+            "confidence": 0.5768888653028557,
+            "legend": {
+              "0": "low",
+              "1": "medium",
+              "2": "high"
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 194,
+          "output_tokens": 0
+        }
+      }
+    },
+    "json": {
+      "probabilities": {
+        "z-route": [0.9978237152099609, 0.0021763283293694258],
+        "a-urgent": [0.0001652214996283874, 0.9998347759246826],
+        "m-severity": [0.03297034278512001, 0.17550666630268097, 0.7915229797363281]
+      },
+      "response": {
+        "model": "d3-turbo",
+        "answers": {
+          "z-route": {
+            "type": "choice",
+            "choice": "billing",
+            "probabilities": {
+              "billing": 0.9978236717653864,
+              "technical": 0.0021763282346135516
+            },
+            "confidence": 0.9776164376957713
+          },
+          "a-urgent": {
+            "type": "noul",
+            "noul": 0.9998347784999461
+          },
+          "m-severity": {
+            "type": "score",
+            "score": 1.7585526454286946,
+            "probabilities": {
+              "0": 0.03297034315359231,
+              "1": 0.17550666826412084,
+              "2": 0.7915229885822869
+            },
+            "confidence": 0.451171097948585,
+            "legend": {
+              "0": "low",
+              "1": "medium",
+              "2": "high"
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 211,
+          "output_tokens": 0
+        }
+      }
+    },
+    "typed-error": {
+      "probabilities": {
+        "valid-noul": [0.001529302797280252, 0.9984707236289978]
+      },
+      "response": {
+        "model": "d3-turbo",
+        "answers": {
+          "bad-choice": {
+            "type": "choice",
+            "error": "invalid_question",
+            "message": "choice criteria must map 1 to 255 option keys to descriptions",
+            "reason": "question_malformed"
+          },
+          "valid-noul": {
+            "type": "noul",
+            "noul": 0.9984706972431335
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 0
+        }
+      }
+    },
+    "over-limit": {
+      "probabilities": {},
+      "response": {
+        "model": "d3-turbo",
+        "answers": {
+          "over": {
+            "type": "noul",
+            "error": "max_length_exceeded",
+            "message": "the question prompt has 32857 tokens, over the maximum context length of 32768 tokens; nothing was truncated",
+            "reason": "question_tokens"
+          }
+        },
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0
+        }
+      }
+    },
+    "image-png": {
+      "probabilities": {
+        "z-route": [0.44766029715538025, 0.5523397326469421],
+        "a-urgent": [0.9988817572593689, 0.0011182863963767886],
+        "m-severity": [0.7245371341705322, 0.12135859578847885, 0.1541043370962143]
+      },
+      "response": {
+        "model": "d3-turbo",
+        "answers": {
+          "z-route": {
+            "type": "choice",
+            "choice": "technical",
+            "probabilities": {
+              "billing": 0.44766028381406414,
+              "technical": 0.5523397161859358
+            },
+            "confidence": 0.007918869378496729
+          },
+          "a-urgent": {
+            "type": "noul",
+            "noul": 0.0011182863475571643
+          },
+          "m-severity": {
+            "type": "score",
+            "score": 0.4295672411761793,
+            "probabilities": {
+              "0": 0.7245370855865346,
+              "1": 0.1213585876507514,
+              "2": 0.15410432676271393
+            },
+            "confidence": 0.292195800063381,
+            "legend": {
+              "0": "low",
+              "1": "medium",
+              "2": "high"
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 262,
+          "output_tokens": 0
+        }
+      }
+    },
+    "image-jpg": {
+      "probabilities": {
+        "z-route": [0.44766029715538025, 0.5523397326469421],
+        "a-urgent": [0.9988817572593689, 0.0011182863963767886],
+        "m-severity": [0.7245371341705322, 0.12135859578847885, 0.1541043370962143]
+      },
+      "response": {
+        "model": "d3-turbo",
+        "answers": {
+          "z-route": {
+            "type": "choice",
+            "choice": "technical",
+            "probabilities": {
+              "billing": 0.44766028381406414,
+              "technical": 0.5523397161859358
+            },
+            "confidence": 0.007918869378496729
+          },
+          "a-urgent": {
+            "type": "noul",
+            "noul": 0.0011182863475571643
+          },
+          "m-severity": {
+            "type": "score",
+            "score": 0.4295672411761793,
+            "probabilities": {
+              "0": 0.7245370855865346,
+              "1": 0.1213585876507514,
+              "2": 0.15410432676271393
+            },
+            "confidence": 0.292195800063381,
+            "legend": {
+              "0": "low",
+              "1": "medium",
+              "2": "high"
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 262,
+          "output_tokens": 0
+        }
+      }
+    }
+  },
+  "provenance": {
+    "source_revision": "074ea2259f615932db4559a67e64f7fd91cbdbad",
+    "generator": "tests/d3/turbo_reference.py",
+    "generator_sha256": "a1f53cc481451fdc5980e47f255c31c1155332b46002edec0f323ec4093291e3",
+    "generation": "D3_STATE_ONCE=1 (or 0) PYTHONPATH=src python tests/d3/turbo_reference.py freeze --model <pinned-package> --source-revision <full-source-SHA> --output <fixture.json>",
+    "image_origin": "Synthetic 64x64 checkerboard generated by this test suite; no external asset."
+  },
+  "preparation_file": "turbo-preparation.json",
+  "preparation_file_sha256": "f53f6733a5dc3b4e5e7325e3024d917c08ab37e8db8135ee6888eb189b7f8deb"
+}

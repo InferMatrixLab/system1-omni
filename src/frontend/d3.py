@@ -65,6 +65,16 @@ def _decode(
 def decide(raw: bytes, executor: D3Executor) -> dict[str, Any]:
     """Admit, decode, execute, and finish one complete request."""
 
+    if getattr(executor, "profile", "legacy") == "turbo":
+        from models.d3.turbo_protocol import parse_request as turbo_request, finish_response as turbo_finish
+        request = turbo_request(parse_body(raw))
+        images = _decode(request.images, executor.load_images, executor.image_unavailable, TEXT_ONLY_IMAGES_MESSAGE)
+        try:
+            response = executor.system_one(state=request.state, questions=dict(request.questions), images=images)
+        except ValueError as exc:
+            raise RequestError(f"request rejected by the pinned runtime: {exc}", 422) from exc
+        return turbo_finish(tuple(name for name, _ in request.questions), response)
+
     request = parse_request(parse_body(raw))
     questions = dict(request.questions)
     # The decode stage mirrors upstream d3_server.py system_one: images then
@@ -201,6 +211,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--profile", default="legacy", choices=("legacy", "turbo"))
     parser.add_argument("--model", required=True, help="pinned d3 package directory")
     parser.add_argument("--device", default=None)
     parser.add_argument("--batch-size", type=int, default=8)
@@ -214,7 +225,11 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
     logging.basicConfig(level=logging.INFO)
-    executor = D3Executor(
+    executor_type = D3Executor
+    if args.profile == "turbo":
+        from models.d3.turbo import D3TurboExecutor
+        executor_type = D3TurboExecutor
+    executor = executor_type(
         args.model,
         device=args.device,
         batch_size=args.batch_size,
