@@ -89,9 +89,12 @@ before FP32 calibration and CPU response assembly. Laya computes its scorer and
 action head on CUDA. Its fixed-shape
 Graph captures Encoder/Decision; gather, scorer/action head and synchronized
 readback remain outside capture. Native Metal remains planned; Python workers
-retain their documented reference/serving roles. The Clef reference worker
-is one of those Python paths: it loads the checkpoint's joint schema head
-on a Qwen3.5 backbone and does not use the shared Qwen CUDA executor.
+retain their documented reference/serving roles. Clef's default server is
+the Rust `omni-clef` worker. It admits one complete text request through
+`SerialScheduler` and forwards the body to a single executor process. That
+process runs the checkpoint's joint schema head on its main thread, which is
+the thread that initialized CUDA. The joint head is still that Python module.
+Clef does not use the shared Qwen CUDA executor.
 
 The Qwen executor's `forward_shared` takes a request prefix, group prefixes and
 branches, ends each prefix at its last multiple of 64 tokens, and returns one final
@@ -107,11 +110,23 @@ algorithm per weight shape, so on GPUs where that keeps rows independent of M
 (checked by `fixed_gemm_rows_do_not_depend_on_m`, so far on sm_89) each result equals
 `forward_fixed` on the full prompt bit for bit; it differs from `forward` by
 rounding. `check_fixed_rows` repeats a short version of that check for a loaded
-model's projection shapes; Open-Jev runs it at startup when sharing is selected.
+model's projection shapes; Open-Jev runs it at startup when sharing is selected,
+and Cua-S1 when its prefix cache is on.
 Both take merged weights with the default numerics only, and refuse an unmerged
 adapter, reference numerics or FP32 GDN before any device work. Each
 prefix state takes about 50 MiB on Qwen3.5-4B and 9B, plus 32 KiB per position of
 its prefix rounded up to 1,024 positions, and the GEMM handle a 32 MiB workspace.
+
+`prefix_cache::PrefixCache` keeps such states across requests, one per leading token
+block that a worker names, sized to the block, keyed by its token IDs and evicted least
+recently used within a byte budget. `capture_fixed` saves a block's state and `continue_fixed`
+runs the rest of a prompt from it, both with the fixed GEMMs, so on those GPUs a
+prompt's result equals `forward_fixed` whether its block was cached or not. A prompt
+without a block, or with one over the whole budget or whose state the device cannot
+allocate, runs as one `forward_fixed` pass; other errors while saving a state fail the
+call.
+The Cua-S1 text worker uses it
+([#188](https://github.com/InferMatrixLab/system1-omni/issues/188)).
 
 ## Native worker boundaries
 
@@ -129,6 +144,7 @@ and candidate identity, usage, and response metadata outside the executor.
 | Laya | One padded request: token IDs, true lengths, question types and ordered option markers; at most 16 questions, 512 tokens per row and 2048 markers. | Per-question FP32 option logits and two action logits copied back after GPU heads. | Calibrate and decode ordered `choice`, `score` and `noul` answers, usage and metadata. |
 | JEMM | Ordered token IDs, three-axis positions, candidate counts and optional shared image patches for one complete request. | Per-question selected BF16 label logits copied back as FP32. | Apply checksum-covered text/image calibration and reconstruct ordered `choice`, `score` and `noul` answers and usage. |
 | StartLux Instant 4B | One unpadded token-ID prompt per question, or per knockout group and then a final prompt, in request order. | FP32 letter logits from a CPU dot of the tied embedding rows at the last position. | Per-type temperature, none-check split, wide-choice residual, and ordered `choice`, `noul`, and `score` answers with token usage. |
+| Clef | The raw `systemone` body. Preparation stays in the pinned Python encoder. | One joint-schema forward on the executor process main thread. The Rust closure only exchanges a frame. | The checkpoint's `systemone_answer` object, forwarded with its HTTP status unchanged. |
 
 Cua-S1 and Open-Jev-9B input collections are serial work. For Open-Jev-27B-v1.1,
 Open-Jev's model-specific batch adapter packs up to 16 independent candidates and
@@ -136,7 +152,7 @@ Open-Jev's model-specific batch adapter packs up to 16 independent candidates an
 execute alone. It restores question/candidate grouping before normalization.
 Laya batches questions within one request. Shared runtime
 admission precedes blocking dispatch: Cua-S1 admits one question forward at a
-time; Open-Jev, Decider, Laya, and StartLux Instant admit one complete request. StartLux runs each prompt inside that admission one at a time. Cua-S1's CPU letter projection
+time; Open-Jev, Decider, Laya, StartLux Instant, and Clef admit one complete request. Clef's admitted work is the frame exchange with its executor process. StartLux runs each prompt inside that admission one at a time. Cua-S1's CPU letter projection
 stays outside admission; Open-Jev's scalar heads and Laya's GPU heads and
 synchronized readback remain inside their request unit. Decider includes every
 backbone row and CUDA head projection, synchronizes both streams and retires

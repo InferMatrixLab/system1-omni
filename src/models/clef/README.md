@@ -1,9 +1,15 @@
 # Clef and Clef-flash
 
-Python reference worker for the Cloudflare Clef family on `POST /v1/systemone`.
-The default bring-up is Clef-flash (9B). Clef (27B) uses the same loader,
-tokenizer and request contract with its own backbone and joint-head config.
-Native CUDA is not implemented. Image and video inputs are rejected.
+Cloudflare Clef on `POST /v1/systemone`. The default bring-up is Clef-flash
+(9B). Clef (27B) uses the same loader, tokenizer and request contract with
+its own backbone and joint-head config. Image and video inputs are rejected.
+
+The default server is the Rust binary `omni-clef`. It admits one request at
+a time through `omni-runtime` and forwards the body to one Python executor
+process. That process loads the pinned joint-schema checkpoint and scores
+every request on its main thread, the thread that initialized CUDA. The
+joint head is still the checkpoint's Python module. A native reimplementation
+on the shared Qwen CUDA executor is not this slice.
 
 The checkpoint is not an Open-Jev export. `joint_schema_model.py` loads
 `Qwen3_5ForConditionalGeneration` and a separate `JointSchemaHead`. The
@@ -85,17 +91,21 @@ and rejects a longer prompt. The pinned encoder would otherwise drop the tail
 of the state. The blog's 64k window and the backbone
 `max_position_embeddings` of 262144 are not admission limits here.
 
-HTTP bodies larger than 8 MiB are rejected. That cap is larger than a 16384
-token text request and smaller than an unbounded upload. Unknown request
-fields are rejected. `thinking` is a known field and is admitted only by the
+HTTP bodies larger than 8 MiB are rejected with the same 413 detail as the
+previous handler. A negative `Content-Length` is rejected by the HTTP stack
+with status 400 and an empty body before that check. The cap is larger than
+a 16384 token text request and smaller than an unbounded upload. Unknown
+request fields are rejected. `thinking` is a known field and is admitted only by the
 rule above. Non-empty `images` or `videos` are rejected with a message that
 those modalities are not served. Empty lists are accepted and add no media
 tokens.
 
-One request is scored at a time. The executor holds the loaded weights and
-the joint head for the process lifetime. The handler takes a process-wide
-lock for the request, so a second in-flight request receives HTTP 503.
-There is no cross-request batch and no prefix cache.
+One request is scored at a time. `omni-clef` admits it through
+`SerialScheduler`, so a second request waits instead of receiving HTTP 503.
+The queue is not bounded. The executor process holds the loaded weights and
+the joint head for its lifetime. HTTP acceptance does not create a thread
+that touches CUDA: warmup and every later `serve` run on that process's
+main thread. There is no cross-request batch and no prefix cache.
 
 ## Processor and executor
 
@@ -115,6 +125,10 @@ belong to the checkpoint file. This repository does not reimplement them.
 
 CPU tests cover the envelope, the three answer formulas, the 16384-token
 refusal, media refusal, the hash gate, and the checked-in prompt fixture.
+They also cover the frame loop and the Rust server: concurrent requests
+share one executor process and its main thread, and
+`python -m frontend.clef` execs `omni-clef` instead of binding
+`ThreadingHTTPServer`.
 The fixture's token ids were produced from the pinned tokenizer with
 `tokenizers.Tokenizer.encode(..., add_special_tokens=False)` and checked
 against `encode_record` from the pinned loader. Regenerate it from the
@@ -189,11 +203,29 @@ primary a later tip has to beat.
 | H3 | `torch.compile` or CUDA graphs on the Qwen3.5 backbone. | Uncertain on the linear-attention layers. | Not implemented. No measured H200 delta |
 | H4 | Bind `flash-linear-attention` 0.5.2 and `causal-conv1d` >= 1.5 before the Qwen3.5 layers copy the chunk global. The default prefill is that FLA chunk. `--gdn-prefill flashinfer` uses FlashInfer GDN prefill 0.6.16.post3 with `use_cp` false only when the flag is set, the package loads, and the reported capability major is 9, 10, or 12. Reported 8.9, including nvidia-smi name `NVIDIA L20X`, stays on the FLA chunk and still starts. Startup is not ready on `torch_chunk` or `F.conv1d`. vLLM CuteDSL, CUDA graphs, and `torch.compile` are not used. | Replaces the PyTorch chunk loop. `/health` names the bind that started. | Tip `594528a9`, L20X-labeled host, warmup 5, concurrency 1, stock Public231 with `thinking.enabled` false, metric `successful_latency`, `/health` `fla+causal_conv1d`: p50 164.969 ms, p95 216.755 ms, 231/231. Versus `9030065` run1: Δp50 −82.549 ms (−33.35%), Δp95 −196.270 ms (−47.52%). This is the primary. FlashInfer has no forward and no answer parity against it |
 
+`omni-clef` removes the `ThreadingHTTPServer` path. An operator diagnosis on
+the L20X-labeled host put the first CUDA touch on a fresh HTTP thread near
+110 ms: HTTP about 162–175 ms, the same executor on a persistent thread
+about 48–65 ms. That diagnosis is not a Public231 paste. Against
+the vLLM p50 cited with that diagnosis (~32 ms), a persistent-thread serve
+of ~48–65 ms would leave about 1.55×. That remainder is unverified here.
+The primary to beat remains tip `594528a9`. Operator-reported Public231 C1
+of `omni-clef` tip `f9127a03b732aaf6e88c99a0212e02acfdb01880` on that host,
+not re-run here: smoke 4/4, `/health` `fla+causal_conv1d`, R1 p50 169.605 ms
+and p95 220.003 ms (231/231), R2 53.580 / 97.031, R3 52.950 / 97.608,
+quality `choice_acc=0.8417`, `noul_acc=0.7973`, `score_mae=0.2488` (matches
+the `594528a9` baseline). This is a serve-path measurement, not a latency
+KEEP. R1 does not pass the dual gate against 164.969 / 216.755. R2 and R3
+are not a new primary. Start the binary with `CLEF_PYTHON` set to the
+recipe venv; the command is in the recipe. System `python3` lacks
+`causal-conv1d` and the executor dies before the port opens.
+
 ## Status
 
 | Path | Clef-flash | Clef |
 | --- | --- | --- |
-| Text `choice` / `noul` / `score`, non-thinking prompt | Contract tested. `9030065` run1 p50 247.518 ms, p95 413.025 ms. Tip `594528a9` primary on the L20X-labeled host: p50 164.969 ms, p95 216.755 ms, 231/231, `/health` `fla+causal_conv1d`, Δp50 −82.549 ms, Δp95 −196.270 ms. Answer parity not checked | Same loader pin; both latency campaigns were flash only |
+| Text `choice` / `noul` / `score`, non-thinking prompt | Contract tested. Kept primary is the previous `ThreadingHTTPServer` worker: `9030065` run1 p50 247.518 ms, p95 413.025 ms; tip `594528a9` p50 164.969 ms, p95 216.755 ms, 231/231, `/health` `fla+causal_conv1d`, Δp50 −82.549 ms, Δp95 −196.270 ms. `omni-clef` `f9127a0` is recorded above and is not a KEEP | Same loader pin; the recorded latency campaigns were flash only |
 | Image and video | Rejected | Rejected |
-| Native CUDA | Not implemented | Not implemented |
+| Rust HTTP + persistent Python executor | Default serve path. CPU tests, plus the operator `f9127a0` paste above (not a KEEP). `CLEF_PYTHON` must be the recipe venv | Same server, `--variant clef` |
+| Joint-head native CUDA | Not implemented | Not implemented |
 | Workers AI proxy | Out of scope | Out of scope |

@@ -143,20 +143,29 @@ pub fn map_request(body: &Map<String, Value>) -> Result<(String, Vec<Question>),
 /// `add_generation_prompt=True`. The template trims message content, which changes
 /// nothing here: the user message starts with "Goal: " or "App: " and ends with "letter.".
 pub fn chat_text(state: &str, question: &Question) -> String {
-    let goal = match question.goal.as_str() {
-        "" => String::new(),
-        goal => format!("Goal: {goal}\n\n"),
-    };
     let options: Vec<String> = LETTERS
         .chars()
         .zip(&question.labels)
         .map(|(letter, label)| format!("{letter}. Decision \"{label}\" -> select"))
         .collect();
     format!(
-        "<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n{goal}App: Cua Driver\n\
-         Task family: closed-candidate decision\n\nAccessibility tree:\n{state}\n\nOptions:\n{}\n\n\
+        "{}{state}\n\nOptions:\n{}\n\n\
          Answer with a single letter.<|im_end|>\n<|im_start|>assistant\n<think>\n",
+        chat_head(question),
         options.join("\n")
+    )
+}
+
+/// The start of `chat_text` up to the state: the system message, the goal and the
+/// header. An agent sends it again with every state it asks this question about.
+pub fn chat_head(question: &Question) -> String {
+    let goal = match question.goal.as_str() {
+        "" => String::new(),
+        goal => format!("Goal: {goal}\n\n"),
+    };
+    format!(
+        "<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n{goal}App: Cua Driver\n\
+         Task family: closed-candidate decision\n\nAccessibility tree:\n"
     )
 }
 

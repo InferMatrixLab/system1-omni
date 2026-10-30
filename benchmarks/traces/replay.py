@@ -47,7 +47,7 @@ def offsets(groups, together):
     return {g: (v - first) / 1000 for g, v in starts.items()}
 
 
-async def run_episode(client, url, model, records, delay, scale, clock, sink, deadline_s=None):
+async def run_episode(client, url, model, records, delay, scale, clock, results, save):
     await asyncio.sleep(delay)
     for i, record in enumerate(records):
         if i:
@@ -56,39 +56,50 @@ async def run_episode(client, url, model, records, delay, scale, clock, sink, de
         if model:
             body["model"] = model
         sent = time.perf_counter()
-        error = None
+        result = results[record["id"]]
+        result.update(state="incomplete", sent_s=round(sent - clock, 6))
         try:
-            response = await client.post(url, json=body)
-            status, content = response.status_code, response.content
-        except httpx.HTTPError as e:
-            status, content, error = None, b"", f"{type(e).__name__}: {e}"
-        latency = (time.perf_counter() - sent) * 1000
-        prefix_cache = None
-        if status == 200:
+            error = None
             try:
-                prefix_cache = json.loads(content).get("metadata", {}).get("prefix_cache")
-            except (ValueError, AttributeError):
-                pass
-        deadline = deadline_s if deadline_s is not None else record.get("deadline_s")
-        answered = status == 200
-        sink.append({
-            "id": record["id"], "group": record["group"], "step": record["step"],
-            "attempt": record.get("attempt", 0), "sent_s": round(sent - clock, 6),
-            "latency_ms": round(latency, 3), "status": status, "error": error,
-            "deadline_s": deadline,
-            "missed": latency > deadline * 1000 if answered and deadline is not None else None,
-            "prefix_cache": prefix_cache, "body": base64.b64encode(content).decode(),
-        })
+                response = await client.post(url, json=body)
+                status, content = response.status_code, response.content
+            except httpx.HTTPError as e:
+                status, content, error = None, b"", f"{type(e).__name__}: {e}"
+            latency = (time.perf_counter() - sent) * 1000
+            prefix_cache = None
+            if status == 200:
+                try:
+                    prefix_cache = json.loads(content).get("metadata", {}).get("prefix_cache")
+                except (ValueError, AttributeError):
+                    pass
+            deadline = result["deadline_s"]
+            result.update(
+                state="completed", latency_ms=round(latency, 3), status=status, error=error,
+                missed=latency > deadline * 1000 if status == 200 and deadline is not None else None,
+                prefix_cache=prefix_cache, body=base64.b64encode(content).decode(),
+            )
+        except asyncio.CancelledError:
+            result["error"] = "request cancelled before its response completed"
+            raise
+        except Exception as exc:
+            result["error"] = f"{type(exc).__name__}: {exc}"
+            raise
+        finally:
+            save(result)
 
 
 def summarize(records, elapsed):
     """Latency of answered requests, with `bench.py`'s median and nearest-rank p95."""
-    ok = [r for r in records if r["status"] == 200]
+    completed = [r for r in records if r["state"] == "completed"]
+    ok = [r for r in completed if r["status"] == 200]
     latencies = sorted(r["latency_ms"] for r in ok)
     with_deadline = [r for r in ok if r["missed"] is not None]
-    shared = [r for r in ok if (r["prefix_cache"] or {}).get("enabled")]
+    shared = [r for r in ok if isinstance(r["prefix_cache"], dict) and r["prefix_cache"].get("enabled")]
     return {
-        "requests": len(records), "ok": len(ok), "failed": len(records) - len(ok),
+        "requests": len(records), "ok": len(ok), "failed": len(completed) - len(ok),
+        "completed": len(completed),
+        "incomplete": sum(r["state"] == "incomplete" for r in records),
+        "unattempted": sum(r["state"] == "unattempted" for r in records),
         "elapsed_s": round(elapsed, 3),
         "latency_ms": {
             "p50": statistics.median(latencies) if latencies else None,
@@ -107,19 +118,70 @@ async def replay(args):
     groups = episodes(requests, args.skip_retries)
     starts = offsets(groups, args.together)
     url = args.url.rstrip("/") + "/v1/systemone"
-    sink = []
+    results = {
+        r["id"]: {
+            "id": r["id"], "group": r["group"], "step": r["step"], "attempt": r.get("attempt", 0),
+            "state": "unattempted", "sent_s": None, "latency_ms": None, "status": None,
+            "error": None, "deadline_s": args.deadline_s if args.deadline_s is not None else r.get("deadline_s"),
+            "missed": None, "prefix_cache": None, "body": "",
+        }
+        for group in groups.values() for r in group
+    }
+    config = {
+        "trace": str(args.trace), "trace_sha256": digest(args.trace), "url": args.url,
+        "model": args.model, "think_scale": args.think_scale, "together": args.together,
+        "sequential": args.sequential, "deadline_s": args.deadline_s,
+        "skip_retries": args.skip_retries, "timeout_s": args.timeout,
+        "response_format": RESPONSE_FORMAT, "python": platform.python_version(),
+        "httpx": httpx.__version__, "planned_ids": list(results),
+    }
+    # mkdir claims the whole run atomically, including against another replay process.
+    # Even an empty existing directory may belong to a run that has just started.
+    args.out.mkdir(parents=True)
+    write_json(args.out / "config.json", config)
+    saved = set()
     clock = time.perf_counter()
-    limits = httpx.Limits(max_connections=len(groups), max_keepalive_connections=len(groups))
-    async with httpx.AsyncClient(timeout=args.timeout, trust_env=False, limits=limits) as client:
-        if args.sequential:
-            for records in groups.values():
-                await run_episode(client, url, args.model, records, 0.0, args.think_scale, clock, sink, args.deadline_s)
-        else:
-            await asyncio.gather(*(
-                run_episode(client, url, args.model, records, starts[g], args.think_scale, clock, sink, args.deadline_s)
-                for g, records in groups.items()
-            ))
-    return sink, time.perf_counter() - clock
+    stop_reason = "error"
+    with (args.out / "responses.jsonl").open("x", encoding="utf-8") as responses:
+        def save(result):
+            responses.write(json.dumps(result, allow_nan=False) + "\n")
+            responses.flush()
+            saved.add(result["id"])
+
+        limits = httpx.Limits(max_connections=len(groups), max_keepalive_connections=len(groups))
+        try:
+            async with httpx.AsyncClient(timeout=args.timeout, trust_env=False, limits=limits) as client:
+                tasks = []
+                try:
+                    if args.sequential:
+                        for records in groups.values():
+                            await run_episode(client, url, args.model, records, 0.0, args.think_scale,
+                                              clock, results, save)
+                    else:
+                        tasks = [asyncio.create_task(run_episode(
+                            client, url, args.model, records, starts[g], args.think_scale,
+                            clock, results, save,
+                        )) for g, records in groups.items()]
+                        await asyncio.gather(*tasks)
+                finally:
+                    # gather propagates one failure without stopping its siblings. Drain
+                    # every episode before closing the client or finalizing the evidence.
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+            stop_reason = "completed"
+        except asyncio.CancelledError:
+            stop_reason = "interrupted"
+            raise
+        finally:
+            for result in results.values():
+                if result["id"] not in saved:
+                    save(result)
+            summary = summarize(list(results.values()), time.perf_counter() - clock)
+            summary["stop_reason"] = stop_reason
+            write_json(args.out / "summary.json", summary)
+    return summary
 
 
 def main():
@@ -139,20 +201,13 @@ def main():
         parser.error("--think-scale must be nonnegative")
     if args.sequential and args.together:
         parser.error("--sequential and --together exclude each other")
-    args.out.mkdir(parents=True, exist_ok=True)
-    write_json(args.out / "config.json", {
-        "trace": str(args.trace), "trace_sha256": digest(args.trace), "url": args.url,
-        "model": args.model, "think_scale": args.think_scale, "together": args.together,
-        "sequential": args.sequential, "deadline_s": args.deadline_s,
-        "skip_retries": args.skip_retries, "timeout_s": args.timeout,
-        "response_format": RESPONSE_FORMAT, "python": platform.python_version(),
-        "httpx": httpx.__version__,
-    })
-    records, elapsed = asyncio.run(replay(args))
-    records.sort(key=lambda r: r["sent_s"])
-    (args.out / "responses.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
-    summary = summarize(records, elapsed)
-    write_json(args.out / "summary.json", summary)
+    try:
+        summary = asyncio.run(replay(args))
+    except FileExistsError:
+        parser.error(f"output directory already exists: {args.out}; choose a new --out directory")
+    except KeyboardInterrupt:
+        print(f"Replay interrupted; check {args.out} for partial results", file=sys.stderr)
+        raise SystemExit(130)
     print(json.dumps(summary, indent=2))
 
 

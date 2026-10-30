@@ -10,7 +10,10 @@ it repeats, and replay it at the pace the agent sent it.
 - [`replay.py`](replay.py) replays a trace against a running server, one client per
   episode, keeping its order and think time.
 - [`samples/`](samples/) holds two small traces whose content may be shared.
-- [The first results](results-2026-10-25.md) come from traces recorded on 2026-10-25.
+- The [historical report from 2026-10-25](https://github.com/InferMatrixLab/system1-omni/blob/c18e9e7c634412e623cfa0f18aed25809c3d75a0/benchmarks/traces/results-2026-10-25.md)
+  remains available at the original revision for [PR #185](https://github.com/InferMatrixLab/system1-omni/pull/185).
+  It is author-reported experiment evidence, not a maintained benchmark input or a
+  validation of the current revision.
 
 They need Python 3.11+ and `httpx==0.28.1`; `metrics.py` also needs `tokenizers`.
 
@@ -90,8 +93,30 @@ misses count answered requests only. The output has `config.json` (with the trac
 checksum), `responses.jsonl` (latency, status, deadline miss, `prefix_cache`, base64
 body) and `summary.json` (median and nearest-rank p95, as `bench.py` reports them).
 
+`--out` must name a new directory; an existing directory, even an empty one, is
+rejected before sending requests or modifying its contents. `config.json` lists
+all planned request IDs after `--skip-retries` filtering. Each finished attempt is
+appended and flushed to `responses.jsonl` immediately, in completion order; use
+`sent_s` to recover send order. On Ctrl-C or a replay error, all episode tasks stop
+before the files are finalized, and the process exits unsuccessfully. Every
+planned request then has a row with one of these states:
+
+- `completed`: an HTTP response or transport error was observed;
+- `incomplete`: it was attempted but interrupted before its response completed;
+- `unattempted`: it was still waiting for its episode start or next step.
+
+Incomplete and unattempted rows have no response latency or deadline result.
+The summary separates `completed`, `incomplete`, and `unattempted`; `failed`
+counts completed HTTP/transport failures, and `ok` counts completed HTTP 200
+responses. It also records `stop_reason` (`completed`, `interrupted`, or `error`).
+Latency/deadline statistics exclude unfinished work, while `requests` retains the
+full planned denominator. A forced kill or machine failure cannot run finalization:
+keep the already-flushed responses and config as partial evidence, not a completed
+run. A flush is not a power-loss durability guarantee.
+
 ## Data
 
 Traces of real web pages copy third-party content. Keep them outside this repository
-and commit only derived counts, or traces from local fixtures, self-hosted pages or
-sets whose license allows it.
+and retain raw run output and derived reports in PR/CI evidence or durable artifact
+archives. The source tree should contain maintained replay inputs or fixtures from
+local fixtures, self-hosted pages or sets whose license allows it.
