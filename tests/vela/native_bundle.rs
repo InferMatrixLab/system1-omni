@@ -112,6 +112,23 @@ fn an_extra_unlisted_file_fails_the_gate() {
 }
 
 #[test]
+fn an_unlisted_file_inside_an_admitted_directory_fails_the_gate() {
+    let dir = temp_dir("bf16-extra");
+    write_bundle(&dir);
+    let manifest_path = dir.join("vela_native_manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).expect("read")).expect("json");
+    std::fs::create_dir(dir.join("bf16")).expect("mkdir");
+    std::fs::write(dir.join("bf16/model.safetensors"), b"bf16 tensors").expect("write");
+    std::fs::write(dir.join("bf16/extra.bin"), b"unlisted").expect("write");
+    manifest["files_sha256"]["bf16/model.safetensors"] = json!(sha256(b"bf16 tensors"));
+    std::fs::write(&manifest_path, serde_json::to_vec(&manifest).expect("json")).expect("write");
+    let error = Bundle::load(&dir).unwrap_err();
+    assert!(error.to_string().contains("bf16/extra.bin"), "{error}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn an_empty_files_map_fails_the_gate() {
     let dir = temp_dir("empty-files");
     write_bundle(&dir);

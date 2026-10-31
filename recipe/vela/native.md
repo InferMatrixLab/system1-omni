@@ -88,8 +88,9 @@ Rust implementation:
   oracles within 1.5e-6 (4/4);
 - executor parity — the backbone on CUDA replays the recorded
   reference logits with a worst drift of 0.285 (the uniform-BF16
-  backbone against the CPU-FP32 reference; gate 0.35, overridable via
-  `VELA_GPU_LOGIT_GATE`), 4/4 small cases.
+  backbone against the CPU-FP32 reference; gate 0.35, tighten-only via
+  `VELA_GPU_LOGIT_GATE`: a wider value clamps back down), 4/4 small
+  cases.
 
 For a field-level diff of one token-plan case:
 

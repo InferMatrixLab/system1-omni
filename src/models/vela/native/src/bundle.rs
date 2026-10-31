@@ -80,26 +80,37 @@ impl Bundle {
         // Fail closed on the directory, as the reference gate walks the
         // package root: a top-level entry must be a pinned file, this
         // manifest, or a directory holding pinned paths (the export's
-        // bf16/ backbone) — anything else is unlisted.
+        // bf16/ backbone) — anything else is unlisted, and inside an
+        // admitted directory every file must be pinned too.
         let pinned: HashSet<&str> = files
             .keys()
             .map(String::as_str)
             .chain(std::iter::once("vela_native_manifest.json"))
             .collect();
-        let mut unpinned: Vec<String> = std::fs::read_dir(dir)
+        let mut unpinned: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(dir)
             .with_context(|| format!("cannot list the bundle directory {}", dir.display()))?
-            .map(|entry| {
-                entry
-                    .expect("a readable bundle entry")
-                    .file_name()
-                    .to_string_lossy()
-                    .into_owned()
-            })
-            .filter(|name| {
-                let prefix = format!("{name}/");
-                !pinned.contains(name.as_str()) && !files.keys().any(|key| key.starts_with(&prefix))
-            })
-            .collect();
+        {
+            let entry = entry.context("a readable bundle entry")?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if pinned.contains(name.as_str()) {
+                continue;
+            }
+            let prefix = format!("{name}/");
+            if !files.keys().any(|key| key.starts_with(&prefix)) {
+                unpinned.push(name);
+                continue;
+            }
+            for inner in std::fs::read_dir(entry.path())
+                .with_context(|| format!("cannot list the bundle subdirectory {name}"))?
+            {
+                let inner = inner.context("a readable bundle entry")?;
+                let inner_name = format!("{name}/{}", inner.file_name().to_string_lossy());
+                if !pinned.contains(inner_name.as_str()) {
+                    unpinned.push(inner_name);
+                }
+            }
+        }
         unpinned.sort();
         ensure!(
             unpinned.is_empty(),
