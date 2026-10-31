@@ -27,7 +27,10 @@ reference's own mixed layout), the 37 F32 heads in `heads.safetensors`
 config root (the shared qwen3_5 `Config::load` shape), calibration and
 tokenizer, and `vela_native_manifest.json` pinning the source
 revision, the gate's file table, the tensor inventory and every file's
-SHA-256.
+SHA-256. The set is staged in a sibling directory and moved into place
+with one rename, so a run killed mid-write can no longer strand a
+partial bundle under `--out`; a non-empty target directory is refused
+and the staging remnant is cleared by the next run.
 
 ## Freeze the token-plan fixtures (opt-in, needs the package)
 
