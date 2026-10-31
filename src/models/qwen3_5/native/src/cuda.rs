@@ -622,6 +622,7 @@ impl DeviceBuffer {
     /// finish writes before passing the view to a different stream.
     pub fn bf16_matrix(&self, rows: usize, columns: usize) -> Result<DeviceBf16Matrix<'_>> {
         Ok(DeviceBf16Matrix {
+            offset: 0,
             buffer: self,
             layout: DeviceFeatureLayout::new(rows, columns, self.bytes, self.device)?,
         })
@@ -674,16 +675,37 @@ impl DeviceFeatureLayout {
 /// allocation are prevented while this view is alive.
 #[derive(Clone, Copy)]
 pub struct DeviceBf16Matrix<'a> {
+    offset: usize,
     buffer: &'a DeviceBuffer,
     layout: DeviceFeatureLayout,
 }
 
 impl DeviceBf16Matrix<'_> {
+    /// Checked contiguous rows retaining the original producer borrow. Empty
+    /// ranges have no device view and are used by text-only suffix windows.
+    pub fn slice_rows(self, range: std::ops::Range<usize>) -> Result<Option<Self>> {
+        ensure!(
+            range.start <= range.end && range.end <= self.layout.rows,
+            "device row slice outside producer"
+        );
+        if range.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            buffer: self.buffer,
+            offset: self.offset + range.start * self.layout.columns * 2,
+            layout: DeviceFeatureLayout {
+                rows: range.end - range.start,
+                ..self.layout
+            },
+        }))
+    }
+
     pub fn layout(&self) -> DeviceFeatureLayout {
         self.layout
     }
     pub(crate) fn at(&self, offset: usize) -> *const c_void {
-        self.buffer.at(offset)
+        self.buffer.at(self.offset + offset)
     }
     pub(crate) fn validate_finite(&self, stream: Stream) -> Result<()> {
         let flag = DeviceBuffer::new(4)?;

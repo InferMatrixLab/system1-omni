@@ -76,11 +76,11 @@ multimodal adapter and reports prompt-token usage with zero generated tokens.
 
 ## Execution controls and limits
 
-`CUA_S1_GRAPH=1` enables host-feature language Graph replay;
+`CUA_S1_GRAPH=1` enables language Graph replay for host or resident features;
 `CUA_S1_VISION_GRAPH=1` independently enables vision Graph replay.
 `CUA_S1_DEVICE_FEATURES=1` keeps vision features on the GPU and copies image rows
-directly into language scratch. Its language path remains eager; it can be paired
-with either vision Graph setting. All three controls default off. See the
+directly into language scratch before capture/replay. It can be paired with
+either vision Graph setting. All three controls default off. See the
 [resident-feature contract](native_vision_graph.md#gpu-resident-vision-features)
 for strict control parsing, synchronization and reproduction commands.
 
@@ -121,8 +121,9 @@ or less than 64 shared tokens, uses complete fixed passes and never reads a
 previous snapshot. Retained capacity is additional device memory, separate from
 the vision-cache budget.
 
-All active prefix modes require host features and language Graph off; vision Graph
-remains independently selectable. They keep the existing prompt, CPU letter head,
+The `fixed` and `shared` modes require host features and language Graph off.
+`matched` supports host or resident features and either language Graph setting;
+vision Graph remains independently selectable. They keep the existing prompt, CPU letter head,
 answer order and usage accounting. Fixed GEMMs can round differently from default
 execution: compare `shared` with `fixed` for continuation parity, and separately
 report probability drift/decision changes against `off`. No automatic mode or
@@ -185,8 +186,10 @@ and restore the ordinary/fixed-M64 handle selection before returning/unwinding.
 Descriptor equality and algorithm support do not establish arithmetic invariance
 across row counts on every GPU. Qualify the exact GPU/cuBLAS/model combination
 before relying on ordinary-output parity. Keep `off` as the ordinary numerical
-control and `fixed`/`shared` as the separate M64 controls. No automatic policy,
-language Graph integration, changed prompt or new precision profile is enabled.
+control and `fixed`/`shared` as the separate M64 controls. No automatic policy, changed prompt or new precision profile is enabled.
+With `CUA_S1_GRAPH=1`, admitted matched prefixes and suffixes use bounded window
+Graphs; with `CUA_S1_DEVICE_FEATURES=1`, current image rows are copied directly
+from the borrowed vision output into owned language scratch.
 
 ```sh
 cargo test --release --locked -p omni-qwen3-5-native --test kernels \
@@ -239,3 +242,87 @@ and acquisition scripts, failures and final-source mapping are in the
 [2026-10-26 qualification](https://github.com/Levius-Fubuki/system1-omni/releases/download/cua-mm-qualification-20261026/cua-mm-matched-qualification-20261026.tar.gz). Original real screenshot pixels are omitted.
 These measurements precede the startup-symbol guard. That guard has host-only
 missing-symbol regression coverage; no new GPU numerical or timing run is claimed.
+
+### Resident matched prefixes with window Graphs
+
+```sh
+export CUA_S1_MM_PREFIX=matched CUA_S1_DEVICE_FEATURES=1
+export CUA_S1_GRAPH=1 CUA_S1_VISION_GRAPH=1
+# Keep prefix=off as the ordinary complete-request numerical control.
+```
+
+The matched implementation is shared with PR184; this extension combines it
+with the resident language-Graph path. Prefix reuse removes repeated computation
+across questions; any combined speedup must be attributed to that work as well
+as Graph submission savings. A single question or incompatible GEMM plans still
+uses ordinary independent execution, preserving the selected Graph/device mode.
+
+Host and device windows use the same token/T-H-W prefix planner and CPU letter
+head. Checked device row slices retain the vision producer borrow. The consumer
+copies current rows into its own scratch before capture; no vision pointer is
+recorded. Device window exits drain the language stream, including errors.
+
+Window Graph keys contain absolute begin/end rows, both source and destination
+prefix allocation identities, and the selected GEMM handle. Entries retain both
+prefix allocations, including the simultaneous continue-and-capture case. This
+makes producer release and prefix-storage replacement safe. At most 128 window
+Graphs are retained; eviction drains first. Scratch growth and matched-workspace
+retirement clear affected captures after synchronization. Recording failure keeps
+the warmed eager result, disables all language Graph modes and retires their
+caches. Vision Graph is independent. Retained snapshot allocations, Graph objects
+and up to 16 matched 32 MiB workspaces add GPU memory beyond the vision budget.
+
+Warm the largest request and the complete shape working set, then check traces
+for new captures or failures in the measured region. Cold capture and cache
+churn must be reported separately; all switches remain opt-in.
+
+```sh
+CUA_S1_GRAPH=1 CUA_S1_DEVICE_FEATURES=1 CUA_S1_MM_PREFIX=matched \
+  cargo test --release --locked -p omni-cua-s1-native --lib prefix_tests \
+  -- --ignored --test-threads=1 --nocapture
+# Repeat with vision Graph0 and1.
+CUA_S1_TEST_MODEL="$CUA_S1_MODEL" cargo test --release --locked \
+  -p omni-qwen3-5-native --lib model::graph_tests \
+  -- --ignored --test-threads=1 --nocapture
+```
+
+### Recorded resident matched qualification
+
+On RTX 4090 / SM8.9 / CUDA 13.0, the 2026-10-26 frozen complete-request
+comparison measured the following. O is original PR183 at `911faa0d`, E is
+resident matched prefix eager, and G is resident matched prefix with window
+Graphs. All use vision Graph and the same pinned artifacts. Each mode has 64
+synthetic requests and 96 requests from 12 fixed real screenshots, concurrency 1.
+
+| Workload / mode | Mean ms | p50 ms | p95 ms | Sampled process maximum MiB |
+|---|---:|---:|---:|---:|
+| Synthetic / O | 130.257 | 117.968 | 269.950 | 10202 |
+| Synthetic / E | 105.979 | 102.867 | 169.251 | 10448 |
+| Synthetic / G | 104.902 | 101.780 | 172.540 | 10538 |
+| Real / O | 248.819 | 258.092 | 263.407 | 10256 |
+| Real / E | 150.949 | 151.120 | 157.391 | 10606 |
+| Real / G | 147.868 | 148.416 | 154.275 | 10694 |
+
+G reduces the real mean by 40.6% and p95 by 41.4% versus O, with 438 MiB higher
+sampled process maximum. Relative to E, Graph reduces the real mean by 2.0%; the
+large combined gain therefore includes prefix computation reuse. Synthetic mean
+falls 19.5% versus O, while the smallest two-question case regresses 4.8%; G's
+synthetic p95 is 1.9% higher than E. These are scoped measurements, not a default-on
+recommendation or a universal speedup.
+
+Two balanced O/E/G/G/E/O visits per suite each exclude a growth traversal, a
+stabilization traversal and five warmups, then time four shuffled traversals.
+The 480 timed HTTP samples include response parsing/schema validation; 300
+excluded and 135 feasibility samples remain separate. No timed new capture or
+capture failure occurred. Five profiles each produced 192 regular numerical
+records: raw logits, full responses and token/T-H-W inputs match original O
+exactly, including separate single-question extraction and malformed-input
+recovery. Cold/growth timings and startup are retained separately. Real quality
+remains 119/192 correlated choice permutations, with existing native-vs-FP32
+reference limitations; this is not official ScreenSpot accuracy.
+
+The [raw qualification and portable audit](https://github.com/Levius-Fubuki/system1-omni/releases/tag/cua183-resident-20261026)
+bind source/build/model pins, corpus reconstruction, cold and measured samples,
+per-case regressions, memory, admission traces and GPU lifecycle tests. Original
+screenshot pixels are omitted. Other hardware, concurrent serving and general
+GUI task quality require separate qualification.
