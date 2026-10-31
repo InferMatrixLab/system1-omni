@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -64,6 +65,29 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def stage_into_place(target: Path, write_files) -> None:
+    """Stage the artifact set in a sibling directory and move it into place
+    with one rename, so the target only ever holds a complete export: a run
+    killed mid-write leaves at most the staging directory, which the next
+    run with the same target removes."""
+    if target.exists() and any(target.iterdir()):
+        raise SystemExit(f"output directory {target} already exists and is not empty")
+    staging = target.with_name(target.name + ".export-partial")
+    if staging.is_dir():
+        # Remains of a run killed mid-write with the same target directory.
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+    try:
+        write_files(staging)
+        if target.exists():
+            # Empty, checked above; the rename replaces the directory whole.
+            target.rmdir()
+        os.replace(staging, target)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
 
 
 def main(argv=None) -> int:
@@ -110,15 +134,6 @@ def main(argv=None) -> int:
         heads[name] = value
         dtypes["heads"][name] = f"{str(value.dtype).removeprefix('torch.')}:{list(value.shape)}"
 
-    out.mkdir(parents=True, exist_ok=True)
-    if not args.executor_only:
-        save_file(backbone, str(out / "backbone.safetensors"))
-    save_file(heads, str(out / "heads.safetensors"))
-    # config.json for the family loader: backbone_config at the root.
-    (out / "config.json").write_text(json.dumps(backbone_config, indent=1) + "\n", encoding="utf-8")
-    for name in ("calibration.json", "tokenizer.json", "tokenizer_config.json"):
-        shutil.copyfile(package / name, out / name)
-
     bf16 = sum(1 for d in dtypes["backbone"].values() if d.startswith("bfloat16"))
     fp32 = len(dtypes["backbone"]) - bf16
     manifest = {
@@ -154,24 +169,37 @@ def main(argv=None) -> int:
         # reference's own GPU setting runs the backbone under bf16
         # autocast too).
         bf16_dir = Path(args.bf16_out)
-        bf16_dir.mkdir(parents=True, exist_ok=True)
         uniform = {name: value.to(torch.bfloat16) for name, value in backbone.items()}
-        save_file(uniform, str(bf16_dir / "model.safetensors"))
-        (bf16_dir / "config.json").write_text(json.dumps(backbone_config, indent=1) + "\n", encoding="utf-8")
+
+        def write_bf16(directory: Path) -> None:
+            save_file(uniform, str(directory / "model.safetensors"))
+            (directory / "config.json").write_text(json.dumps(backbone_config, indent=1) + "\n", encoding="utf-8")
+
+        stage_into_place(bf16_dir, write_bf16)
         print(f"bf16 backbone: {len(uniform)} tensors -> {bf16_dir}")
 
-    bundle_files = ["heads.safetensors", "config.json",
-                   "calibration.json", "tokenizer.json", "tokenizer_config.json"]
-    if not args.executor_only:
-        bundle_files.insert(0, "backbone.safetensors")
-    for name in bundle_files:
-        manifest["files_sha256"][name] = sha256(out / name)
-    if args.bf16_out:
-        for name in ("model.safetensors", "config.json"):
-            manifest["files_sha256"][f"bf16/{name}"] = sha256(bf16_dir / name)
-    (out / "vela_native_manifest.json").write_text(
-        json.dumps(manifest, indent=1, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    def write_bundle(out: Path) -> None:
+        if not args.executor_only:
+            save_file(backbone, str(out / "backbone.safetensors"))
+        save_file(heads, str(out / "heads.safetensors"))
+        # config.json for the family loader: backbone_config at the root.
+        (out / "config.json").write_text(json.dumps(backbone_config, indent=1) + "\n", encoding="utf-8")
+        for name in ("calibration.json", "tokenizer.json", "tokenizer_config.json"):
+            shutil.copyfile(package / name, out / name)
+        bundle_files = ["heads.safetensors", "config.json",
+                       "calibration.json", "tokenizer.json", "tokenizer_config.json"]
+        if not args.executor_only:
+            bundle_files.insert(0, "backbone.safetensors")
+        for name in bundle_files:
+            manifest["files_sha256"][name] = sha256(out / name)
+        if args.bf16_out:
+            for name in ("model.safetensors", "config.json"):
+                manifest["files_sha256"][f"bf16/{name}"] = sha256(bf16_dir / name)
+        (out / "vela_native_manifest.json").write_text(
+            json.dumps(manifest, indent=1, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+    stage_into_place(out, write_bundle)
 
     print(f"export ok: {out}")
     print(f"  backbone: {len(backbone)} tensors ({bf16} bf16, {fp32} fp32), re-keyed {BACKBONE_PREFIX} -> model.")

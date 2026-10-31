@@ -68,10 +68,15 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
     );
     assert!(library.exists(), "{} does not exist", library.display());
     let mut executor = Executor::load(&bundle, &library).expect("executor loads");
+    // The env gate may only tighten the documented ceiling: an
+    // unparseable value is an error, and a wider one clamps back down.
     let logit_gate = std::env::var("VELA_GPU_LOGIT_GATE")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0.35);
+        .map(|v| {
+            v.parse::<f32>()
+                .expect("VELA_GPU_LOGIT_GATE must be a number")
+        })
+        .unwrap_or(0.35)
+        .min(0.35);
 
     let m = member_label();
 
