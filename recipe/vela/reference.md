@@ -1,8 +1,9 @@
-# Vela 2.0 reference workers (0.3B, 0.8B hybrid)
+# Vela 2.0 reference workers (0.3B, 0.8B/4B/9B hybrid)
 
 This recipe serves the Vela 2.0 members through the Python reference
-worker and the existing Rust frontend: the 0.3B encoder and the 0.8B
-hybrid, one pinned member per worker process. The model-side
+worker and the existing Rust frontend: the 0.3B encoder and the
+decoder members (0.8B, 4B, 9B — one runtime, one registry), one pinned
+member per worker process. The model-side
 implementation is under
 [`src/models/vela/`](../../src/models/vela/) (0.3B in `engine.py`, the
 0.8B hybrid in `hybrid.py`), and the worker is
@@ -21,7 +22,10 @@ description, not here.
 Scope:
 
 - packages: [`vllm-sr/Vela-2.0-0.3B`](https://huggingface.co/vllm-sr/Vela-2.0-0.3B)
-  and [`vllm-sr/Vela-2.0-0.8B`](https://huggingface.co/vllm-sr/Vela-2.0-0.8B)
+  and the decoder members
+  ([`0.8B`](https://huggingface.co/vllm-sr/Vela-2.0-0.8B),
+  [`4B`](https://huggingface.co/vllm-sr/Vela-2.0-4B),
+  [`9B`](https://huggingface.co/vllm-sr/Vela-2.0-9B))
   at the pinned revisions below;
 - the Python reference worker behind the Rust frontend, executing each
   checkpoint's own pinned runtime (`vela2_inference.py` and siblings)
@@ -31,12 +35,15 @@ Scope:
   (`spans`/`sets`/`thresholds`, `span_heads` on the hybrid, and their
   Noul views) served forward-untouched;
 - FP32 parameters, one bidirectional forward per assembled sequence
-  (0.3B) or one parts pass with per-question continuation (hybrid),
+  (0.3B) or one shared state prefix with per-question causal
+  continuation (decoder members),
   calibrated readouts; zero generated tokens.
 
-Out of scope: the larger hybrid members (4B/9B), the ONNX backend of
-the 0.3B, any native Rust/CUDA executor, and `noul_calibration` (off
-by default; documented as a reference-server feature only).
+Out of scope: the ONNX backend of
+the 0.3B, any native Rust/CUDA executor (the decoder members' native
+library is documented separately in [native.md](native.md)), and
+`noul_calibration` (off by default; documented as a reference-server
+feature only).
 
 ## Architecture and ownership
 
@@ -59,7 +66,8 @@ The ownership boundary follows
   is the pinned runtime's, verbatim;
 - `preprocess.py` maps the runtime's `SystemOneError` to 422/413;
 - `engine.py` owns the 0.3B pinned runtime and its package gate;
-  `hybrid.py` mirrors it for the 0.8B (a 10-file pin table including
+  `hybrid.py` mirrors it for every decoder member (a member registry
+  keyed by `config.json` `model_name`; per-member 10-file pin tables including
   the shard index and the side-loaded `broad_head.safetensors`);
 - `postprocess.py` owns the pure formulas and response finishing,
   member-aware for the hybrid's `span_heads` field;
@@ -70,15 +78,15 @@ The ownership boundary follows
 
 ## Pinned artifacts
 
-| Artifact | 0.3B | 0.8B hybrid |
+| Artifact | 0.3B | decoder members |
 | --- | --- | --- |
-| Package | [vllm-sr/Vela-2.0-0.3B](https://huggingface.co/vllm-sr/Vela-2.0-0.3B) | [vllm-sr/Vela-2.0-0.8B](https://huggingface.co/vllm-sr/Vela-2.0-0.8B) |
-| Pinned revision | `d6f03aa9baca4f9017fa8f8e9c2764d3bed3f409` | `326b01d81f61fff7fd4ae570e54b87a49119e490` |
+| Package | [vllm-sr/Vela-2.0-0.3B](https://huggingface.co/vllm-sr/Vela-2.0-0.3B) | 0.8B / [4B](https://huggingface.co/vllm-sr/Vela-2.0-4B) / [9B](https://huggingface.co/vllm-sr/Vela-2.0-9B), pinned per member in `hybrid.py`'s registry |
+| Pinned revision | `d6f03aa9baca4f9017fa8f8e9c2764d3bed3f409` | 0.8B `326b01d81f61fff7fd4ae570e54b87a49119e490`, 4B `d692394127f6f87fc581d8634c9558fe4776efce`, 9B `068425bb145c05884a98b870c219047da22d9aea` |
 | Package gate | config structural identity + a 7-file SHA-256 table in `engine.py`; no unlisted importables, `__pycache__` or directory symlinks in the package root | config structural identity (incl. `model_name`) + a 10-file SHA-256 table in `hybrid.py`, cross-checked against the package's own SHA256SUMS |
-| Weights check | exact 1,236,473,252 bytes | exact 2,022,189,488 bytes + hashed `broad_head.safetensors` |
-| Served name | `vllm-sr/Vela-2.0-0.3B` | `vllm-sr/Vela-2.0-0.8B` (from `config.json`) |
+| Weights check | exact 1,236,473,252 bytes | exact per-member shard bytes (0.8B one shard 2,022,189,488; 4B three shards 9,705,025,832; 9B five shards 17,942,962,360) + hashed `broad_head.safetensors` |
+| Served name | `vllm-sr/Vela-2.0-0.3B` | the member's own `vllm-sr/Vela-2.0-<member>` (from `config.json`) |
 | Input window | 8,192 tokens | 16,384 tokens |
-| License | Apache-2.0; tokenizer material under Gemma Terms of Use | Apache-2.0; Qwen3.5-0.8B lineage notices in the package |
+| License | Apache-2.0; tokenizer material under Gemma Terms of Use | Apache-2.0; Qwen3.5 lineage notices in the package (`LICENSES/Qwen3.5-*-LICENSE.txt` per member) |
 
 Each gate's file table is checked in (never read from the package), so
 a later snapshot — self-consistent or not — cannot pass as the pinned
@@ -89,6 +97,9 @@ curl -sS "https://huggingface.co/api/models/vllm-sr/Vela-2.0-0.3B/revision/d6f03
 sha256sum weights/vela-2.0-0.3b/{vela2_inference.py,modeling_vela2.py,configuration_vela2.py,vela2_serve.py,config.json,calibration.json,tokenizer.json}
 curl -sS "https://huggingface.co/api/models/vllm-sr/Vela-2.0-0.8B/revision/326b01d81f61fff7fd4ae570e54b87a49119e490" | jq -r '.sha'
 sha256sum weights/vela-2.0-0.8b/{vela2_inference.py,modeling_vela2.py,configuration_vela2.py,vela2_serve.py,config.json,calibration.json,tokenizer.json,tokenizer_config.json,model.safetensors.index.json,broad_head.safetensors}
+# the 4B and 9B pins re-check the same way against their revisions
+curl -sS "https://huggingface.co/api/models/vllm-sr/Vela-2.0-4B/revision/d692394127f6f87fc581d8634c9558fe4776efce" | jq -r '.sha'
+curl -sS "https://huggingface.co/api/models/vllm-sr/Vela-2.0-9B/revision/068425bb145c05884a98b870c219047da22d9aea" | jq -r '.sha'
 ~~~
 
 ## Install and prepare the artifacts
@@ -107,6 +118,11 @@ export VELA_HYBRID_REV=326b01d81f61fff7fd4ae570e54b87a49119e490
 mkdir -p weights
 .venv/bin/hf download vllm-sr/Vela-2.0-0.3B --revision "$VELA_REV" --local-dir "$VELA_PKG"
 .venv/bin/hf download vllm-sr/Vela-2.0-0.8B --revision "$VELA_HYBRID_REV" --local-dir "$VELA_HYBRID_PKG"
+# the larger members, when serving them (see the memory notes below):
+#   4B — revision d692394127f6f87fc581d8634c9558fe4776efce, 3 shards (~9.7 GB)
+#   9B — revision 068425bb145c05884a98b870c219047da22d9aea, 5 shards (~17.9 GB)
+# .venv/bin/hf download vllm-sr/Vela-2.0-4B --revision <sha> --local-dir "$PWD/weights/vela-2.0-4b"
+# .venv/bin/hf download vllm-sr/Vela-2.0-9B --revision <sha> --local-dir "$PWD/weights/vela-2.0-9b"
 ~~~
 
 The 0.3B package is about 4.4 GB (the 1.24 GB FP32 safetensors, a 34 MB
@@ -115,7 +131,25 @@ tokenizer, the ONNX exports and doc assets); serving needs roughly
 The 0.8B package is about 2.1 GB (a 2.02 GB shard plus the 4.5 MB
 broad-head file); FP32 parameters take about 3 GB of RAM on CPU (about
 3 GB of GPU memory on CUDA, where the backbone runs under bf16
-autocast). A worker refuses to start when the config is not its pinned
+autocast). The 4B package is about 9.7 GB on disk (three shards plus
+the 11 MB broad head) and needs about 17 GB of memory to load FP32 on
+CPU, or a ≥12 GB GPU for the bf16-autocast backbone plus FP32 heads;
+the 9B is about 17.9 GB on disk (five shards plus the 18 MB broad
+head), about 32 GB to load FP32, or a ≥24 GB GPU for bf16 autocast.
+The 4B's first author-run is recorded on a rented RTX 4090 48 GB
+(sm_89, CUDA 13.3 driver / 13.2 toolkit, 2 vCPU / 4 GB RAM container —
+the GPU bf16-autocast setting, the evaluated deployment profile): the
+package gate, load and all-kind warmup; nine-case exact-match reference
+parity against the pinned upstream server (four 200s byte-equal
+including key order, agreed 422/413); oracle, token-plan and head-input
+fixtures exported under the `Vela-2.0-4B` labels; see
+[native.md](native.md) for the native parity numbers. A warm worker
+answered the example request in ~0.2 s on that GPU — a single
+observation, not a benchmark. The **9B's author-run is recorded on the
+same host** (the 48 GB card fits its ~18 GB bf16-autocast backbone):
+package gate, load and warmup, nine-case exact-match reference parity,
+and the frozen `Vela-2.0-9B` oracle/token-plan/head-input fixtures —
+see [native.md](native.md) for its native parity numbers. A worker refuses to start when the config is not its pinned
 member's, when any gated file fails its hash, when the package root
 holds an importable entry the table does not name, an existing
 `__pycache__` or a directory symlink, or when the weights file is not
@@ -128,7 +162,7 @@ gate runs before any package code is imported.
 PYTHONPATH=src .venv/bin/python -m frontend.vela \
   --model "$VELA_PKG" --device cpu --port 8000          # 0.3B
 PYTHONPATH=src .venv/bin/python -m frontend.vela \
-  --model "$VELA_HYBRID_PKG" --device cpu --port 8001    # 0.8B hybrid
+  --model "$VELA_HYBRID_PKG" --device cpu --port 8001    # any decoder member (0.8B/4B/9B)
 ~~~
 
 The worker detects the member from the package's `model_type`, verifies
@@ -278,7 +312,7 @@ the oracle setting; keep flash-linear-attention out of the fixture path
 path is not documented upstream) and do not substitute GPU
 bf16-autocast numbers for the baseline. The tool rewrites the example
 files' `model` field to the served member and exports the hybrid's
-oracle fixtures under an `oracle-hybrid-` prefix.
+oracle fixtures under an `oracle-hybrid-<member>-` prefix.
 
 ## Troubleshooting and limits
 
