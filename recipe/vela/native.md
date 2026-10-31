@@ -38,7 +38,11 @@ config root (the shared qwen3_5 `Config::load` shape), calibration and
 tokenizer, and `vela_native_manifest.json` pinning the source
 revision, the gate's file table, the tensor inventory and every file's
 SHA-256. `--bf16-out` additionally writes the uniform-BF16 backbone
-(`model.safetensors`) that the shared loader consumes.
+(`model.safetensors`) that the shared loader consumes. Both sets are
+staged in sibling directories and moved into place with one rename, so
+a run killed mid-write can no longer strand a partial bundle under
+`--out` or `--bf16-out`; a non-empty target directory is refused and
+the staging remnant is cleared by the next run.
 
 ## Freeze the fixtures (opt-in, needs the package)
 
