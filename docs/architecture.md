@@ -7,7 +7,7 @@ design. Concrete input/output types follow each executor's supported layout.
 ## Implementation status
 
 The [Rust frontend](../src/frontend/README.md) currently forwards HTTP requests
-to separately running workers. Cua-S1, Open-Jev, Decider, and StartLux Instant
+to separately running workers. Cua-S1, Open-Jev, Decider, Kev-4B, and StartLux Instant
 4B have native Rust/CUDA workers that share the
 [Qwen3.5/3.8 executor](../src/models/qwen3_5/native/), which accepts
 single prompts and bounded packed prefill. StartLux Instant uses a
@@ -81,6 +81,14 @@ FP32 adapters and framework-reference arithmetic. It computes selected BF16
 label-head logits on CUDA, then calibrates typed answers on the CPU. JEMM admits
 one complete text or 1–4-image request and synchronizes both model streams before
 releasing its resources. See its [model contract](../src/models/jemm/README.md).
+Kev uses merged BF16 weights and an optional Torch 2.8 numerical profile. It
+recomputes state then question in eager mode, matching the pinned official
+padding and projection shapes, and downloads selected option/decision hidden
+rows for its FP32 pointer head. Temporary GDN/KV state belongs to one question
+call and is drained before release; it is not shared between requests. Its
+processor owns prompt tokens and question geometry, while complete-question
+calibration and typed response reconstruction remain in postprocessing.
+The existing Qwen default, fixed and reference profiles keep their own paths.
 Decider projects selected tied-embedding rows on CUDA with BF16 output rounding
 before FP32 calibration and CPU response assembly. Laya computes its scorer and
 action head on CUDA. Its fixed-shape
@@ -138,6 +146,7 @@ and candidate identity, usage, and response metadata outside the executor.
 | Cua-S1 | One unpadded token-ID vector and option count per question, in request order. | One FP32 answer-letter logit vector per question. | Per-question softmax, choice/confidence, ordered answers, and token usage. |
 | Open-Jev | Token-ID vectors grouped by question, then independent candidate, in request order. | One FP32 learned scalar per candidate in the same grouping. | Add the `noul` false logit of zero, calibrate across each complete question, and restore typed answers, usage, and metadata. |
 | Decider | Complete independent token-ID rows in question order; Score expands one no/yes row per level. | One BF16-projection-rounded FP32 selected-label logit vector per row. | Per-type calibration, whole-Score normalization, ordered typed answers and unique-prefix token usage. |
+| Kev-4B | Complete text rows, consecutive positions and ordered option/decision readouts, one row per question. | One FP32 pointer-logit vector per complete question. | Saved-temperature softmax over all candidates, ordered Choice/Noul/Score answers and official token billing. |
 | Laya | One padded request: token IDs, true lengths, question types and ordered option markers; at most 16 questions, 512 tokens per row and 2048 markers. | Per-question FP32 option logits and two action logits copied back after GPU heads. | Calibrate and decode ordered `choice`, `score` and `noul` answers, usage and metadata. |
 | JEMM | Ordered token IDs, three-axis positions, candidate counts and optional shared image patches for one complete request. | Per-question selected BF16 label logits copied back as FP32. | Apply checksum-covered text/image calibration and reconstruct ordered `choice`, `score` and `noul` answers and usage. |
 | StartLux Instant 4B | One unpadded token-ID prompt per question, or per knockout group and then a final prompt, in request order. | FP32 letter logits from a CPU dot of the tied embedding rows at the last position. | Per-type temperature, none-check split, wide-choice residual, and ordered `choice`, `noul`, and `score` answers with token usage. |
@@ -149,7 +158,7 @@ Open-Jev's model-specific batch adapter packs up to 16 independent candidates an
 execute alone. It restores question/candidate grouping before normalization.
 Laya batches questions within one request. Shared runtime
 admission precedes blocking dispatch: Cua-S1 admits one question forward at a
-time; Open-Jev, Decider, Laya, StartLux Instant, and Clef admit one complete request. Clef's admitted work is the frame exchange with its executor process. StartLux runs each prompt inside that admission one at a time. Cua-S1's CPU letter projection
+time; Open-Jev, Decider, Kev, Laya, StartLux Instant, and Clef admit one complete request. Kev runs all question rows and its FP32 head inside that admission; listener readiness follows a real mixed-question warmup. Clef's admitted work is the frame exchange with its executor process. StartLux runs each prompt inside that admission one at a time. Cua-S1's CPU letter projection
 stays outside admission; Open-Jev's scalar heads and Laya's GPU heads and
 synchronized readback remain inside their request unit. Decider includes every
 backbone row and CUDA head projection, synchronizes both streams and retires
@@ -211,6 +220,11 @@ semantics.
   applies that model's normalization, decision, confidence, and response rules.
   Preserve whole-request failure behavior, error status/body, and usage fields
   when splitting or regrouping work.
+
+Kev prepares one complete causal row per question, reads every candidate closing
+marker plus the final decision marker through the shared Qwen selected-position
+readout, and applies its FP32 pointer head. Its eager executor recomputes the state
+for each question and admits one whole request through the serial scheduler.
 
 Cua-S1 prepares one prompt per question and reads option-letter logits.
 Open-Jev prepares independent candidate prompts and normalizes across the

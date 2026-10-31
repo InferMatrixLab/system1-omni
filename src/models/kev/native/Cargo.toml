@@ -1,0 +1,31 @@
+[package]
+name = "omni-kev-native"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Kev-4B eager Rust/CUDA text worker"
+
+[dependencies]
+anyhow = "1.0.100"
+axum = "0.8.8"
+omni-qwen3-5-native = { path = "../../qwen3_5/native" }
+omni-runtime = { path = "../../../runtime" }
+regex = "1"
+safetensors = "0.8.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1.0.149", features = ["float_roundtrip", "preserve_order"] }
+sha2 = "0.10"
+tokenizers = { version = "=0.22.2", default-features = false, features = ["onig"] }
+tokio = { version = "1.49.0", features = ["macros", "net", "rt-multi-thread", "sync"] }
+
+[[test]]
+name = "head"
+path = "../../../../tests/kev/head.rs"
+
+[[test]]
+name = "processing"
+path = "../../../../tests/kev/processing.rs"
+
+[[test]]
+name = "checkpoint"
+path = "../../../../tests/kev/checkpoint.rs"

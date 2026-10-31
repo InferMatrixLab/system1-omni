@@ -195,3 +195,12 @@ run the matched projection regression in `tests/qwen3_5/kernels.rs` and the
 [Cua screenshot qualification](../../../../recipe/cua_s1/native_screenshot.md#full-prompt-matched-algorithms)
 for each supported GPU/library/model combination. Other numerical profiles,
 vision GEMMs and the existing default/fixed policies stay on their own handles.
+
+## Kev default-service profile
+
+`recipe/kev/build_cuda.sh` enables optional Torch 2.8 reductions, stateful FP32
+GDN and masked CUTLASS SDPA. The existing ABI entry points retain their original
+arithmetic; the profile uses additive symbols and is selected only by Kev.
+Ordinary builds need no Torch/CUTLASS headers. The Kev build pins and verifies
+CUTLASS and uses PyTorch 2.8.0 headers only at compile time, with no libtorch or
+Python runtime linkage. See [numerical diagnosis](../../../../recipe/kev/numerical-diagnosis.md).

@@ -42,6 +42,9 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
 - [OmniJev-4B v1.1 preparation](omnijev/README.md): export the checkpoint and
   regenerate the CPU fixtures; [native worker](omnijev/native.md): serve it on CUDA
   and compare it with the reference.
+- [Kev-4B preparation](kev/README.md): export all LoRA projections and validate
+  the Rust FP32 pointer head on CPU; [native worker](kev/native.md) serves eager
+  text Choice/Noul/Score with explicit numerical acceptance gates.
 - [CLM behind the frontend](clm/README.md): run CLM's own server behind the frontend on
   CPU with a stub encoder, and what the response comparison has to allow for.
 - [pplx-decider reference worker](pplx_decider/README.md): pin
