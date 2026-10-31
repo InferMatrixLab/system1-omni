@@ -7,6 +7,17 @@ The [v3 numerical repair](numerical-diagnosis.md) and
 [v2 protocol and failures](service-acceptance.md) remain available. This is author-run
 qualification evidence; contributor/maintainer review remains pending.
 
+## Evidence availability after environment recovery
+
+On 2026-10-31 the previous `/tmp/system1-issue-27` directory was unavailable.
+The v1-v5 raw captures, layer dumps and local handoff archive referenced below
+have not been recovered. The committed reports and fixed fixtures preserve the
+recorded results and gates, but are not a replacement for those raw artifacts.
+The [review follow-up in #197](https://github.com/InferMatrixLab/system1-omni/pull/197)
+distinguishes fresh checks after the main sync from the historical campaign.
+Full-checkpoint BF16/HTTP and prefix-cache requalification remain unverified at
+that updated head; the old measurements must not be labeled as fresh passes.
+
 ## Discovery frozen before inference
 
 The additional pool reads only the pinned official repository's 29
