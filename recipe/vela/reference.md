@@ -35,8 +35,11 @@ Scope:
   calibrated readouts; zero generated tokens.
 
 Out of scope: the larger hybrid members (4B/9B), the ONNX backend of
-the 0.3B, any native Rust/CUDA executor, and `noul_calibration` (off
-by default; documented as a reference-server feature only).
+the 0.3B, native execution for the reference workers (the ModernBERT
+profile's own `cuda`-gated route under
+[`native/`](../../src/models/vela/native/README.md) is a separate
+slice), and `noul_calibration` (off by default; documented as a
+reference-server feature only).
 
 ## Architecture and ownership
 
@@ -256,11 +259,15 @@ share one loaded engine: the pinned
 `frontend.vela.decide` pipeline. The criterion is reference parity:
 **exact match** including JSON key order for 200s,
 and agreement on status and body for rejections (needs `pip install
-fastapi uvicorn httpx` on top of the requirements file).
+fastapi uvicorn httpx` on top of the requirements file). The run also
+compares the worker's verbatim endpoint bodies — `/health`, `/ready`,
+`/v1/models` and the unauthorized 401 — against the live reference app,
+so a drift in either direction fails the run.
 `--export tests/vela/fixtures/oracle-<case>.json` freezes each passing
-200 case — request, SystemOne response and predict()-level answers — as
-the frozen comparison baseline, and writes it only after a passing
-comparison.
+200 case — request, SystemOne response, predict()-level answers and the
+generating run's provenance — as
+the frozen comparison baseline for the future native encoder
+slices, and writes it only after a passing comparison.
 
 ~~~sh
 PYTHONPATH=src .venv/bin/python recipe/vela/compare_reference.py \

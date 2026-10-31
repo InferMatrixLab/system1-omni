@@ -16,6 +16,7 @@ import os
 import py_compile
 import re
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -303,6 +304,21 @@ def test_a_runtime_module_from_another_directory_is_refused(tmp_path):
     finally:
         sys.path.remove(str(other))
         sys.modules.pop("modeling_vela2", None)
+
+
+def test_a_runtime_module_without_a_file_is_refused(tmp_path):
+    # A namespace package or builtin resolves with __file__ = None; it
+    # cannot be this package's flat module, so the gate fails closed
+    # instead of crashing on the None path.
+    package = tmp_path / "pkg"
+    package.mkdir()
+    build_package(package, small_files())
+    sys.modules["vela2_inference"] = types.ModuleType("vela2_inference")
+    try:
+        with pytest.raises(ValueError, match="namespace"):
+            verify_no_foreign_runtime(package)
+    finally:
+        sys.modules.pop("vela2_inference", None)
 
 
 def test_the_package_root_is_forced_to_the_front_of_sys_path(tmp_path):
