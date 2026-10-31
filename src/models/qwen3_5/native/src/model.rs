@@ -2086,26 +2086,18 @@ impl Model {
     }
 
     fn alloc_prefix_storage(&self, len: usize) -> Result<PrefixState> {
-        let kvrow = self.cfg.kv_heads * self.cfg.head_dim * BF16;
-        let w = Widths::of(&self.cfg);
-        let nfull = self.cfg.full_attention.iter().filter(|&&f| f).count();
-        let ngdn = self.cfg.full_attention.len() - nfull;
-        let mut bytes = 0usize;
+        let (kvrow, nfull, ngdn, state_bytes, tail_bytes) = self.prefix_layout();
         let mut attn_kv = Vec::with_capacity(nfull);
         for _ in 0..nfull {
             let k = DeviceBuffer::new(len * kvrow)?;
             let v = DeviceBuffer::new(len * kvrow)?;
-            bytes += 2 * len * kvrow;
             attn_kv.push((k, v));
         }
-        let state_floats = self.cfg.lin_v_heads * self.cfg.lin_k_dim * self.cfg.lin_v_dim;
-        let tail_bytes = 3 * w.gdn_in * BF16;
         let mut gdn_state = Vec::with_capacity(ngdn);
         let mut conv_tail = Vec::with_capacity(ngdn);
         for _ in 0..ngdn {
-            gdn_state.push(DeviceBuffer::new(state_floats * F32)?);
+            gdn_state.push(DeviceBuffer::new(state_bytes)?);
             conv_tail.push(DeviceBuffer::new(tail_bytes)?);
-            bytes += state_floats * F32 + tail_bytes;
         }
         Ok(PrefixState {
             owner: Arc::clone(&self.prefix_owner),
@@ -2115,8 +2107,25 @@ impl Model {
             attn_kv,
             gdn_state,
             conv_tail,
-            bytes,
+            bytes: self.prefix_bytes(len),
         })
+    }
+
+    /// Device bytes `alloc_prefix(len)` takes, without allocating.
+    pub fn prefix_bytes(&self, len: usize) -> usize {
+        let (kvrow, nfull, ngdn, state_bytes, tail_bytes) = self.prefix_layout();
+        nfull * 2 * len * kvrow + ngdn * (state_bytes + tail_bytes)
+    }
+
+    /// K/V row bytes, full-attention and GDN layer counts, and per GDN layer the
+    /// float32 state and conv-tail bytes of a prefix state.
+    fn prefix_layout(&self) -> (usize, usize, usize, usize, usize) {
+        let kvrow = self.cfg.kv_heads * self.cfg.head_dim * BF16;
+        let nfull = self.cfg.full_attention.iter().filter(|&&f| f).count();
+        let ngdn = self.cfg.full_attention.len() - nfull;
+        let state_floats = self.cfg.lin_v_heads * self.cfg.lin_k_dim * self.cfg.lin_v_dim;
+        let tail_bytes = 3 * Widths::of(&self.cfg).gdn_in * BF16;
+        (kvrow, nfull, ngdn, state_floats * F32, tail_bytes)
     }
 
     /// Run the rows `[0, state.len)` of one prompt, collecting the per-layer
@@ -2237,6 +2246,96 @@ impl Model {
         self.embed_tokens(s, ids)?;
         self.run_window(s, 0, t, false, None, None, gemm, None, None)?;
         self.last_hidden(s, t)
+    }
+
+    /// Run the first `state.len` tokens of a prompt with the GEMM algorithms of
+    /// `forward_fixed`, collecting their prefix state into `state` as `forward_shared`
+    /// does for a request prefix. `continue_fixed` then runs the rest of the prompt.
+    pub fn capture_fixed(&mut self, ids: &[u32], state: &mut PrefixState) -> Result<()> {
+        self.ensure_fixed_profile()?;
+        ensure!(
+            Arc::ptr_eq(&self.prefix_owner, &state.owner),
+            "prefix state belongs to a different model instance"
+        );
+        ensure!(
+            ids.len() == state.len,
+            "capture input must cover the cached prefix exactly"
+        );
+        ensure!(
+            ids.iter().all(|&i| (i as usize) < self.embed.shape[0]),
+            "token id outside the vocabulary"
+        );
+        state.initialized = false;
+        let result = (|| {
+            self.prepare_scratch(ids.len())?;
+            let gemm = self.fixed_gemm()?;
+            let s = self.scratch.as_ref().unwrap();
+            self.embed_tokens(s, ids)?;
+            self.run_window(
+                s,
+                0,
+                ids.len(),
+                false,
+                Some(&mut *state),
+                None,
+                gemm,
+                None,
+                None,
+            )?;
+            self.synchronize()
+        })();
+        if result.is_err() {
+            // Work already queued may still use the buffers.
+            let _ = cuda::synchronize(self.stream);
+        }
+        result?;
+        state.initialized = true;
+        Ok(())
+    }
+
+    /// The final-norm hidden state at the last token of a prompt whose first
+    /// `prefix.len` tokens `capture_fixed` captured; `rest` holds the tokens after them.
+    /// On a GPU where the fixed GEMM algorithms keep rows independent of M, the result
+    /// equals `forward_fixed` on the whole prompt bit for bit.
+    pub fn continue_fixed(&mut self, rest: &[u32], prefix: &PrefixState) -> Result<Vec<f32>> {
+        self.ensure_fixed_profile()?;
+        ensure!(
+            Arc::ptr_eq(&self.prefix_owner, &prefix.owner),
+            "prefix state belongs to a different model instance"
+        );
+        ensure!(prefix.initialized, "prefix state has not completed capture");
+        let tend = prefix.len + rest.len();
+        ensure!(
+            !rest.is_empty() && tend <= self.cfg.max_positions,
+            "empty or oversized prompt"
+        );
+        ensure!(
+            rest.iter().all(|&i| (i as usize) < self.embed.shape[0]),
+            "token id outside the vocabulary"
+        );
+        let result = (|| {
+            self.prepare_scratch(tend)?;
+            let gemm = self.fixed_gemm()?;
+            let s = self.scratch.as_ref().unwrap();
+            self.embed_tokens_at(s, rest, prefix.len)?;
+            self.run_window(
+                s,
+                prefix.len,
+                tend,
+                false,
+                None,
+                Some(prefix),
+                gemm,
+                None,
+                None,
+            )?;
+            self.last_hidden(s, tend)
+        })();
+        if result.is_err() {
+            // Work already queued may still use the buffers.
+            let _ = cuda::synchronize(self.stream);
+        }
+        result
     }
 
     /// The final-norm hidden state at the last position of every branch, grouped and

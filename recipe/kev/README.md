@@ -41,6 +41,8 @@ Every required input must match its pinned SHA-256. The output directory must no
 already exist. `kev_export.json` lists merged targets, output hashes, FP32 head
 dimensions and calibration, plus the base tokenizer's five delimiter IDs.
 Do not replace these artifacts with another Kev size or a bare Qwen checkpoint.
+The target inventory is specific to this hash-pinned 32-layer Kev-4B base: full
+attention at layers 3, 7, ..., 31 and all five GDN projections in other layers.
 
 ## CPU checks
 
@@ -56,7 +58,11 @@ KEV_HEAD="$PWD/weights/kev-native/head.safetensors" \
 The final test is opt-in because it needs the released head, but it is still
 CPU-only. It compares the Rust implementation against the committed small oracle
 for 1/2/7/31/255 options. Default CI executes the ordinary head tests without
-downloading weights. Full backbone inference is not part of these checks.
+downloading weights. Synthetic two-shard export tests exercise real safetensors
+I/O, all 248 adapter targets, index/manifest hashes, preserved FP32 head and
+calibration, final directory publication, and cleanup after a late shard failure.
+Only input hash pins are substituted for generated fixture files; release-file
+validation is unchanged. Full backbone inference is not part of these checks.
 
 To regenerate the oracle using the official class rather than this implementation:
 
@@ -66,6 +72,8 @@ git -C /tmp/kev-reference checkout --detach 2074cc44256200bb37540103fa4572901faa
 .venv-kev/bin/python tests/kev/generate_head_fixture.py \
   --reference-model /tmp/kev-reference/kev/model.py \
   --head weights/kev-adapter/head.pt --out /tmp/kev-head-reference.json
+# Exact provenance diff requires torch==2.8.0+cpu, as recorded in head.json.
+# Other wheel suffixes change metadata even if numerical values agree.
 diff -u tests/kev/data/head.json /tmp/kev-head-reference.json
 ```
 

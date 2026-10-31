@@ -41,7 +41,11 @@ CHECKPOINT_FILES = {
 
 
 def expected_targets():
-    """The pinned 32-layer model: 96 MLP, 32 attention and 120 GDN targets."""
+    """Kev-4B only: 96 MLP, 32 attention and 120 GDN targets.
+
+    The hash-pinned base config fixes 32 layers and full attention at 3 mod 4;
+    this inventory is not a validator for other Kev sizes or Qwen checkpoints.
+    """
     targets = set()
     for layer in range(32):
         modules = [f"mlp.{p}_proj" for p in ("gate", "up", "down")]

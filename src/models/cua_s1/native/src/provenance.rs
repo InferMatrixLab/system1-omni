@@ -9,7 +9,7 @@ use std::{
 };
 const LOCK_SHA: &str = "9820bd232c5762f114e19680c0f8203d7e1faaf8a60c196cfe01964d6d8a6c09";
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TextExport {
     Merged,
     Unmerged,
