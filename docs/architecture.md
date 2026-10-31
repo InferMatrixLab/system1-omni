@@ -116,11 +116,23 @@ algorithm per weight shape, so on GPUs where that keeps rows independent of M
 (checked by `fixed_gemm_rows_do_not_depend_on_m`, so far on sm_89) each result equals
 `forward_fixed` on the full prompt bit for bit; it differs from `forward` by
 rounding. `check_fixed_rows` repeats a short version of that check for a loaded
-model's projection shapes; Open-Jev runs it at startup when sharing is selected.
+model's projection shapes; Open-Jev runs it at startup when sharing is selected,
+and Cua-S1 when its prefix cache is on.
 Both take merged weights with the default numerics only, and refuse an unmerged
 adapter, reference numerics or FP32 GDN before any device work. Each
 prefix state takes about 50 MiB on Qwen3.5-4B and 9B, plus 32 KiB per position of
 its prefix rounded up to 1,024 positions, and the GEMM handle a 32 MiB workspace.
+
+`prefix_cache::PrefixCache` keeps such states across requests, one per leading token
+block that a worker names, sized to the block, keyed by its token IDs and evicted least
+recently used within a byte budget. `capture_fixed` saves a block's state and `continue_fixed`
+runs the rest of a prompt from it, both with the fixed GEMMs, so on those GPUs a
+prompt's result equals `forward_fixed` whether its block was cached or not. A prompt
+without a block, or with one over the whole budget or whose state the device cannot
+allocate, runs as one `forward_fixed` pass; other errors while saving a state fail the
+call.
+The Cua-S1 text worker uses it
+([#188](https://github.com/InferMatrixLab/system1-omni/issues/188)).
 
 ## Native worker boundaries
 
