@@ -141,7 +141,7 @@ PYTHONPATH=src python recipe/clef/export_prompt_fixture.py \
   --check
 ```
 
-The flash checkpoint was loaded in the 2026-10-27 acceptance on one NVIDIA
+The flash checkpoint was loaded in the recorded 2026-10-27 run on one NVIDIA
 L20X reporting PyTorch capability 9.0 (nvidia-smi reports 8.9). Both HTTP paths
 completed three Public231 C1 rounds, 231/231 each, with exact parity under identical
 frozen FLA autotune choices. Startup, first/repeated requests, concurrency,
@@ -149,6 +149,9 @@ TCP disconnect recovery and child exit were exercised. The
 [recipe](../../../recipe/clef/reference.md#controlled-migration-acceptance)
 records the six latency results, controls, failed initial cache experiment
 and limitations; its historical section retains the earlier operator reports.
+The contributor confirmed the raw evidence and frozen cache were lost after a
+host restart. These historical GPU results cannot currently be independently
+verified; a new campaign with durable artifacts is needed for acceptance.
 CPU coverage is 18 Rust lifecycle/serving tests and 36 Python contract tests. The
 fixed tokenizer fixture also matches the pinned loader.
 
@@ -156,9 +159,9 @@ fixed tokenizer fixture also matches the pinned loader.
 
 | Path | Clef-flash | Clef |
 | --- | --- | --- |
-| Text `choice` / `noul` / `score`, non-thinking prompt | Real flash GPU validation; 693 exact paired responses under frozen operators; see recipe | Same loader interface; no 27B inference run |
+| Text `choice` / `noul` / `score`, non-thinking prompt | Historical GPU run recorded 693 exact paired responses; raw evidence lost, new acceptance pending; see recipe | Same loader interface; no 27B inference run |
 | Image and video | Rejected | Rejected |
-| Rust HTTP + persistent Python executor | Default serve path; real GPU concurrency, cancellation recovery and idle child exit checked, with CPU lifecycle regression tests | Same server, `--variant clef`; GPU unverified |
+| Rust HTTP + persistent Python executor | Default serve path with CPU lifecycle regression tests; previous GPU checks are recorded, but their raw evidence is lost | Same server, `--variant clef`; GPU unverified |
 | Joint-head native CUDA | Not implemented | Not implemented |
 | Workers AI proxy | Out of scope | Out of scope |
 

@@ -61,11 +61,14 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   Clef-flash (9B) or Clef (27B), and serve text `choice`/`noul`/`score`.
   The joint head stays in the checkpoint's Python module, on one persistent
   executor thread. Image, video, and a native joint head are not served.
-  The [flash acceptance](clef/reference.md#controlled-migration-acceptance)
+  The [historical flash run](clef/reference.md#controlled-migration-acceptance)
   records real GPU behavior checks and three Public231 C1 rounds per HTTP
   path with exact parity under frozen FLA configurations. 27B has not been
   run. Set `CLEF_PYTHON` to the recipe environment and keep snapshot bytecode
   writes disabled as shown in the launch instructions.
+
+  Raw evidence and frozen caches were lost after a host restart; a new
+  campaign with durable artifacts is needed for acceptance.
 
 - [LFM2.5-350M choice worker](lfm2/README.md): score text decisions with independent
   questions, hybrid cache branching and configurable candidate batches.

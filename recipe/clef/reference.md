@@ -188,6 +188,12 @@ HTTP server at `504b272c46dc1963f981c6bed9ef0c7ebdd40c69` with the Rust service
 at `3364dbd7f8b2cb414c24e73f24b74dd785888ecc`, based on main `22b7717` including
 #182. The GPU measurements below apply to that exact commit. The subsequent
 panic-cleanup hardening has CPU regression coverage but no new GPU latency run.
+The contributor confirmed on 2026-10-31 that the host restart lost the raw
+archive, reproduction scripts and frozen autotune cache. The numbers below are
+historical author-run results whose raw evidence can no longer be checked.
+They do not establish independently verifiable acceptance of the current head;
+a new controlled campaign with durable artifacts is required. See
+[PR #194](https://github.com/InferMatrixLab/system1-omni/pull/194) for status.
 Both services ran sequentially in one GPU allocation: NVIDIA L20X as reported
 by the device, PyTorch capability 9.0 (nvidia-smi reports 8.9), driver
 570.133.20, Torch CUDA 13.0. Both capability readings are retained. Do not
@@ -501,6 +507,9 @@ itself poison the stream.
 
 The queue is not bounded and a live executor that never answers has no inference
 deadline. Client cancellation does not promise to stop submitted CUDA work.
+A health check that already observed the ready flag can wait on the child mutex
+while failure cleanup calls `kill()` and `wait()`. This synchronous reap has no
+separate deadline, so a short or bounded health-check delay is not guaranteed.
 
 The CPU tests under `tests/clef/serve.rs` cover real TCP disconnects, queued
 cancellation, retained resources after dispatched cancellation, idle child exit,
