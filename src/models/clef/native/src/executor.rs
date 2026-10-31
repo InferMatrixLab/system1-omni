@@ -7,6 +7,7 @@
 //! closure only writes a frame and waits; it does not call CUDA.
 
 use std::{
+    panic::{UnwindSafe, catch_unwind, resume_unwind},
     process::{Child, Command, Stdio},
     sync::{
         Mutex,
@@ -61,7 +62,18 @@ impl Executor {
     }
 
     pub(crate) fn ready(&self) -> bool {
-        self.ready.load(Ordering::Acquire)
+        if !self.ready.load(Ordering::Acquire) {
+            return false;
+        }
+        // Health must notice an idle process exit without sending an inference.
+        let alive = self
+            .child
+            .lock()
+            .is_ok_and(|mut child| matches!(child.try_wait(), Ok(None)));
+        if !alive {
+            self.ready.store(false, Ordering::Release);
+        }
+        alive
     }
 
     pub(crate) fn health(&self) -> &[u8] {
@@ -69,15 +81,35 @@ impl Executor {
     }
 
     pub(crate) fn exchange(&self, body: &[u8]) -> Result<WorkerResponse> {
+        self.with_pipes(|pipes| {
+            frame::write_request(&mut pipes.stdin, frame::OPCODE_DECIDE, body)?;
+            frame::read_response(&mut pipes.stdout)
+        })
+    }
+
+    fn with_pipes(
+        &self,
+        exchange: impl FnOnce(&mut Pipes) -> Result<WorkerResponse> + UnwindSafe,
+    ) -> Result<WorkerResponse> {
         if !self.ready() {
             bail!("executor unavailable");
         }
-        let mut pipes = self
-            .pipes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("executor lock poisoned"))?;
-        frame::write_request(&mut pipes.stdin, frame::OPCODE_DECIDE, body)?;
-        frame::read_response(&mut pipes.stdout)
+        let result = catch_unwind(|| {
+            let mut pipes = self
+                .pipes
+                .lock()
+                .map_err(|_| anyhow::anyhow!("executor lock poisoned"))?;
+            exchange(&mut pipes)
+        });
+        if !matches!(result, Ok(Ok(_))) {
+            // Publish errors and panics before releasing admission, even if the
+            // caller disconnected. Unwinding has already released the pipes lock.
+            self.fail();
+        }
+        match result {
+            Ok(result) => result,
+            Err(panic) => resume_unwind(panic),
+        }
     }
 
     pub(crate) fn fail(&self) {
@@ -105,3 +137,7 @@ fn reap(child: &mut Child) -> String {
         Err(error) => error.to_string(),
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../../tests/clef/executor.rs"]
+mod tests;
