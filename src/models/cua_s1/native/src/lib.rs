@@ -1,7 +1,7 @@
 //! Native Cua-S1 text and screenshot workers using shared Qwen execution.
 
 pub mod contract;
-pub use omni_qwen3_5_native::{cuda, inputs, json, model};
+pub use omni_qwen3_5_native::{cuda, inputs, json, model, prefix_cache};
 pub mod engine;
 pub mod executor;
 pub mod image_preprocess;
