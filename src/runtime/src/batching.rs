@@ -2,6 +2,7 @@
 
 use std::collections::VecDeque;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 
 use anyhow::{Context, Result, anyhow, ensure};
@@ -51,6 +52,16 @@ pub struct BatchScheduler<I, O> {
 struct Worker<I, O> {
     sender: Option<mpsc::Sender<Request<I, O>>>,
     thread: Option<std::thread::JoinHandle<()>>,
+    available: Arc<AtomicBool>,
+}
+
+// Also marks unavailable on an unexpected unwind outside the execute callback.
+struct WorkerExit(Arc<AtomicBool>);
+
+impl Drop for WorkerExit {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 impl<I, O> Drop for Worker<I, O> {
@@ -87,19 +98,32 @@ impl<I: Send + 'static, O: Send + 'static> BatchScheduler<I, O> {
     ) -> Result<Self> {
         ensure!(limits.items > 0 && limits.cost > 0, "empty batch budget");
         let (sender, receiver) = mpsc::channel();
+        let available = Arc::new(AtomicBool::new(true));
+        let worker_available = available.clone();
         let thread = std::thread::Builder::new()
             .name("omni-batch".into())
-            .spawn(move || dispatch(receiver, limits, cost, execute))
+            .spawn(move || {
+                let _exit = WorkerExit(worker_available.clone());
+                dispatch(receiver, limits, cost, execute, &worker_available);
+            })
             .context("start batch execution thread")?;
         Ok(Self {
             worker: Arc::new(Worker {
                 sender: Some(sender),
                 thread: Some(thread),
+                available,
             }),
         })
     }
 
+    /// Whether the worker can still execute requests; shared by all clones.
+    /// A busy worker remains available. A retired worker requires replacement.
+    pub fn is_available(&self) -> bool {
+        self.worker.available.load(Ordering::Acquire)
+    }
+
     pub async fn run(&self, items: Vec<I>) -> Result<Vec<O>> {
+        ensure!(self.is_available(), "batch executor is unavailable");
         if items.is_empty() {
             return Ok(Vec::new());
         }
@@ -124,6 +148,7 @@ fn dispatch<I, O>(
     limits: BatchLimits,
     cost: impl Fn(&I) -> BatchCost,
     mut execute: impl FnMut(&[I]) -> Result<Vec<O>>,
+    available: &AtomicBool,
 ) {
     let mut pending = None;
     loop {
@@ -185,6 +210,11 @@ fn dispatch<I, O>(
         }
         let result = catch_unwind(AssertUnwindSafe(|| execute(&inputs)));
         let panicked = result.is_err();
+        if panicked {
+            // Publish failure before notifying affected callers, so their next
+            // health probe cannot observe a ready but permanently dead worker.
+            available.store(false, Ordering::Release);
+        }
         let result = result
             .unwrap_or_else(|_| Err(anyhow!("batch executor panicked")))
             .and_then(|outputs| {

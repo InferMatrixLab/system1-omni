@@ -25,7 +25,7 @@ The native worker follows the [architecture contracts](../../../docs/architectur
 with independent [processing](native/src/processing.rs) and
 [executor](native/src/executor.rs) modules. Preparation returns token IDs grouped
 by question and candidate, plus the response context for identity/order,
-calibration, usage, and metadata. On 27B, preparation tokenizes up to 16 candidates
+calibration, usage, and metadata. By default, preparation tokenizes up to 16 candidates
 from one question in parallel when the tokenizer has no padding; singleton and
 padded inputs retain per-candidate encoding. Token IDs, candidate order and the
 first validation error are preserved. `RAYON_NUM_THREADS` controls tokenizer
@@ -61,14 +61,22 @@ Input usage still counts complete prompts. See the
 [native recipe](../../../recipe/open_jev/native.md#validation-and-optimization-scope)
 for field semantics and the unchanged default-path numerical validation gates.
 Results are regrouped before question normalization.
-Open-Jev-9B runs candidates one at a time until packing is validated for it.
+Open-Jev-9B packs candidates and batches queued requests by default. Set
+`OPEN_JEV_PACK=0` to restore serial tokenization, serial request scheduling and
+eager per-candidate forwards, without prefix reuse or packed backend capabilities.
+This is an execution-strategy fallback, not a restoration of every historical
+kernel implementation. See the [rollback recipe](../../../recipe/open_jev/native.md#9b-packing-rollback)
+for configuration constraints and validation commands.
 Optionally, the executor plans the candidates' shared token prefixes with the shared
 Qwen planner and runs each prefix once per request through `forward_shared`, or runs
 every candidate with the same fixed GEMM algorithms as a control; see
 [optional request-local shared prefixes](../../../recipe/open_jev/native.md#optional-request-local-shared-prefixes).
-The engine owns a
-[shared serial scheduler](../../runtime/README.md) that admits the complete request
-before blocking dispatch. Cross-request batching and shared queue budgets remain planned.
+The engine owns a [shared runtime scheduler](../../runtime/README.md): default 9B
+uses cross-request batching; rollback, explicit prefix modes and 27B admit complete
+requests serially. Shared queue capacity limits remain planned. `/health` reports
+HTTP 503 with `status: failed` after a batch worker exits or the model mutex is
+poisoned. A busy worker and ordinary request errors do not mark it failed; recovery
+from permanent failure requires restarting the process.
 
 
 The experimental 9B layerwise prefix tree can batch the independent suffix
@@ -89,7 +97,8 @@ unchanged. Single sequences, reference numerics, bidirectional attention and
 unvalidated adapter modes keep their previous entry points. Older CUDA
 libraries without the optional symbol also retain separate launches.
 
-For opted-in SM90 / cuBLASLt 13.1.1 prefix projections, the original algorithm
+For opted-in prefix projections on the measured device profile (CUDA-reported
+`NVIDIA L20X`, SM 9.0, 132 multiprocessors, `cublasLtGetVersion() == 130101`), the original algorithm
 must still support the actual row count. Within the already validated compatible
 arithmetic profiles, the runtime can then select the heuristic for that actual
 count. Unknown or split-K profiles and other hardware retain the original

@@ -151,6 +151,10 @@ async fn errors_discard_partial_results_and_leave_later_requests_usable() {
         )
         .unwrap();
         assert!(done(scheduler.run(vec![1, 2, 3])).await.is_err());
+        assert!(
+            scheduler.is_available(),
+            "ordinary errors do not retire the worker"
+        );
         assert_eq!(done(scheduler.run(vec![4])).await.unwrap(), [4]);
         assert_eq!(*calls.lock().unwrap(), [1, 2, 4]);
     }
@@ -164,6 +168,8 @@ async fn a_panicked_executor_closes_admission_instead_of_reusing_bad_state() {
         |_| -> Result<Vec<usize>> { panic!("device executor failed") },
     )
     .unwrap();
+    let observer = scheduler.clone();
+    assert!(observer.is_available());
     assert!(
         done(scheduler.run(vec![1]))
             .await
@@ -171,6 +177,11 @@ async fn a_panicked_executor_closes_admission_instead_of_reusing_bad_state() {
             .to_string()
             .contains("panicked")
     );
+    assert!(
+        !observer.is_available(),
+        "failure is visible before the caller resumes"
+    );
+    assert!(done(observer.run(Vec::new())).await.is_err());
     assert!(done(scheduler.run(vec![2])).await.is_err());
 }
 

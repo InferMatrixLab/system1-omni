@@ -3,11 +3,25 @@
 use std::path::PathBuf;
 
 use omni_open_jev_native::{
-    engine::{Engine, check_graph, exact_prefix_value, prefix_values},
+    engine::{Engine, check_graph, exact_prefix_value, packing_value, prefix_values},
     executor::PrefixUse,
 };
 use omni_qwen3_5_native::{model::Model, prefix::PrefixMode};
 use serde_json::json;
+
+#[test]
+fn packing_rollback_rejects_conflicting_modes_and_bad_values() {
+    assert!(packing_value(None, PrefixMode::Off, None).unwrap());
+    assert!(packing_value(Some("1"), PrefixMode::Off, Some(true)).unwrap());
+    for exact in [None, Some(false)] {
+        assert!(!packing_value(Some("0"), PrefixMode::Off, exact).unwrap());
+    }
+    for mode in [PrefixMode::Fixed, PrefixMode::Shared, PrefixMode::Auto] {
+        assert!(packing_value(Some("0"), mode, None).is_err());
+    }
+    assert!(packing_value(Some("0"), PrefixMode::Off, Some(true)).is_err());
+    assert!(packing_value(Some("auto"), PrefixMode::Off, None).is_err());
+}
 
 #[test]
 fn switches_follow_decider() {

@@ -114,6 +114,15 @@ enum SchedulerKind {
     Batched(omni_runtime::batching::BatchScheduler<batched::WorkItem, batched::Output>),
 }
 
+impl Scheduler {
+    pub fn is_available(&self) -> bool {
+        match &self.0 {
+            SchedulerKind::Serial(_) => true,
+            SchedulerKind::Batched(scheduler) => scheduler.is_available(),
+        }
+    }
+}
+
 pub struct Executor {
     model: Arc<Mutex<Model>>,
     head: DecisionHead,
@@ -131,11 +140,13 @@ impl Executor {
         checkpoint: &Checkpoint,
         prefix: PrefixMode,
         graph: bool,
+        pack: bool,
     ) -> Result<Self> {
         let (d, lib) = (dir.to_path_buf(), library.to_path_buf());
         let sharing = matches!(prefix, PrefixMode::Shared | PrefixMode::Auto);
-        let batch_gdn = checkpoint.pack_candidates;
-        let equivalent_tiles = checkpoint.alias == "open-jev-9b";
+        let pack = pack && checkpoint.pack_candidates;
+        let batch_gdn = pack;
+        let equivalent_tiles = pack && checkpoint.alias == "open-jev-9b";
         let model = tokio::task::spawn_blocking(move || {
             let mut model = Model::load_with_graph(&d, &lib, graph)?;
             if batch_gdn {
@@ -143,7 +154,7 @@ impl Executor {
                 model.enable_packed_projections()?;
             }
             if equivalent_tiles && model.enable_equivalent_projection_tiles()? {
-                eprintln!("Open-Jev-9B: validated SM90 long-prefill projection tiles enabled");
+                eprintln!("Open-Jev-9B: validated device profile projection tiles enabled");
             }
             // Shared prefixes reproduce the fixed rows only where rows do not depend on M.
             if sharing {
@@ -157,21 +168,25 @@ impl Executor {
         Ok(Self {
             model: Arc::new(Mutex::new(model)),
             head,
-            pack: checkpoint.pack_candidates,
-            share_packed_prefix: checkpoint.share_packed_prefix,
-            share_packed_inputs: checkpoint.alias == "open-jev-9b",
+            pack,
+            share_packed_prefix: pack && checkpoint.share_packed_prefix,
+            share_packed_inputs: pack && checkpoint.alias == "open-jev-9b",
             prefix,
         })
     }
 
     pub(crate) fn scheduler(&self, checkpoint: &Checkpoint) -> Result<Scheduler> {
         Ok(Scheduler(
-            if checkpoint.alias == "open-jev-9b" && self.prefix == PrefixMode::Off {
+            if self.pack && checkpoint.alias == "open-jev-9b" && self.prefix == PrefixMode::Off {
                 SchedulerKind::Batched(batched::new(self.model.clone(), self.head.clone())?)
             } else {
                 SchedulerKind::Serial(SerialScheduler::default())
             },
         ))
+    }
+
+    pub fn is_available(&self) -> bool {
+        !self.model.is_poisoned()
     }
 
     /// Configure exact within-question reuse before the engine admits requests.
@@ -309,3 +324,7 @@ impl Executor {
 #[cfg(test)]
 #[path = "../../../../../tests/open_jev/head.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../../../../../tests/open_jev/rollback.rs"]
+mod rollback_tests;

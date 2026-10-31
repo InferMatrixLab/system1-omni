@@ -128,7 +128,7 @@ and CUDA kernel tests are opt-in; the latter require a GPU reservation:
 ```sh
 # Tokenizer cases against either merged export, on CPU:
 OPEN_JEV_MODEL=weights/open-jev-9b-merged \
-  cargo test --locked -p omni-open-jev-native --lib -- --ignored
+  cargo test --locked -p omni-open-jev-native --lib tokenization_tests -- --ignored
 # Inside a GPU reservation, after building the library:
 CUA_S1_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
   cargo test --release --locked -p omni-qwen3-5-native --test kernels -- --ignored
@@ -389,7 +389,8 @@ tokenizers retain serial encoding, and any batch error is retried in original
 order so validation reports the same first error. The exact-token regression
 includes Unicode, special tokens, batch boundaries and oversized prompts for 9B.
 
-On SM90 with cuBLASLt 13.1.1, the 9B worker can combine 512–4096-row
+On the measured device profile (CUDA-reported `NVIDIA L20X`, SM 9.0,
+132 multiprocessors, `cublasLtGetVersion() == 130101`), the 9B worker can combine 512–4096-row
 projections using a tested engine-66 profile (stage 35, no split-K or reduction,
 custom options 0/1/2/4/5/6/7, clusters 2×1×1, 4×1×1 or 1×2×1, undefined inner shape). It
 requires the listed configuration; other options retain the original comparison.
@@ -407,6 +408,51 @@ prefix when the original packed input/gate-up GEMMs are compatible with the
 candidate projections. The check includes each original batch's total row count.
 Any mismatch declines the entire sharing attempt before computation and retains
 the original candidate packing. Other prefix modes and the 27B policy are unchanged.
+
+### 9B packing rollback
+
+`OPEN_JEV_PACK=0` is a startup escape hatch for Open-Jev-9B. It restores serial
+tokenization and request scheduling, then runs each candidate through the eager
+`Model::forward` path. It disables candidate packing, cross-request batching,
+prefix reuse, packed GDN/projection capabilities and equivalent projection tiles.
+It forces CUDA Graph off even if `CUA_S1_GRAPH=1` is inherited. Shared kernel
+implementations still come from the loaded CUDA library; this is not a promise
+of an identical historical binary or historical performance.
+
+```sh
+OPEN_JEV_PACK=0 OPEN_JEV_PREFIX=0 OPEN_JEV_FIXED=0 OPEN_JEV_EXACT_PREFIX=0 \
+OPEN_JEV_MODEL=weights/open-jev-9b-merged \
+OPEN_JEV_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
+  target/release/omni-open-jev-native
+```
+
+The default is `OPEN_JEV_PACK=1`. Values other than `0`/`1`, a 27B rollback,
+or combining rollback with fixed/shared/auto or enabled exact-prefix reuse fail
+at startup. Prefix options may also be unset. `Engine::load` reads this switch;
+embedded callers can use `Engine::load_with_packing(..., PrefixMode::Off, false)`.
+The existing explicit `load_with_prefix` API keeps packing enabled.
+
+The frozen original-native oracle also covers the rollback route. Inside a GPU
+reservation, with the pinned 9B export (8192-token capacity) and matching library,
+run the following for both `CUA_S1_GRAPH=0` and `1`; both must take the eager route:
+
+```sh
+OPEN_JEV_PACK=0 OPEN_JEV_PREFIX=0 OPEN_JEV_FIXED=0 OPEN_JEV_EXACT_PREFIX=0 \
+OPEN_JEV_MODEL=/absolute/path/to/open-jev-9b-merged \
+OPEN_JEV_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so CUA_S1_GRAPH=1 \
+  cargo test --release --locked -p omni-open-jev-native --lib \
+  rollback_uses_serial_candidates_and_matches_original_logits \
+  -- --ignored --test-threads=1
+```
+
+CPU tests check configuration rejection, tokenization equivalence, device-profile
+gating and worker failure health responses. They do not substitute for this GPU
+oracle check. An unavailable batch executor or poisoned model mutex makes
+`/health` return HTTP 503 with `{"status":"failed","model":"..."}`; ordinary
+request errors and a busy executor retain HTTP 200 / `ready`. Restart the worker
+after permanent failure. This endpoint does not probe CUDA on each request.
+
+### Cross-request batching
 
 The 9B default execution path batches already queued requests through the shared
 runtime, up to 16 candidates and 8192 tokens per GPU dispatch, without an added
@@ -426,7 +472,7 @@ Their outputs are gathered back into the compact layout. All projection algorith
 are checked against the original packed input sizes and individual output sizes
 before execution; unsupported layouts keep the complete forward. Short retained
 checks use tested 64–511-row profiles, including custom option 3 and cluster 4×2×1,
-under the same SM90/cuBLASLt scope. Ordinary packed GEMM grouping is unchanged.
+under the same device-profile/cuBLASLt scope. Ordinary packed GEMM grouping is unchanged.
 
 This path stores only reusable row-index buffers and recomputes every request.
 It does not count projection-only reuse as full-prefix `saved_tokens`; reported

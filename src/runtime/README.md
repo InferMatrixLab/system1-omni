@@ -101,6 +101,15 @@ and its model resources remain owned by the worker until it finishes. Dropping a
 scheduler handles closes admission and joins the execution thread, waiting for
 dispatched work and callback resources to retire before the owner exits.
 
+`BatchScheduler::is_available()` reports worker liveness shared by all clones.
+The worker marks itself unavailable before returning an executor-panic error and
+also on thread exit. Subsequent requests fail, including empty requests. Ordinary
+callback errors fail their requests but leave the worker available. Availability
+does not measure queue capacity or probe GPU health. Open-Jev combines this state
+with model-mutex poisoning in `/health`: HTTP 200 / `ready` while available and
+HTTP 503 / `failed` after permanent failure. It requires a process restart; it
+does not rebuild possibly corrupted model state automatically.
+
 Shared processing orchestration and cross-worker coordination remain planned.
 Batch layout keys include both candidate lengths and original input projection
 groups, so CUDA Graph replay cannot conflate different numerical layouts.

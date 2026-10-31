@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "ops.h"
+#include "gemm_profile.h"
 
 namespace {
 
@@ -523,6 +524,7 @@ extern "C" int cs1_gemm_enable_equivalent_tiles(void* gemm) {
     auto error = cudaGetDevice(&device);
     if (error == cudaSuccess) error = cudaGetDeviceProperties(&prop, device);
     if (error != cudaSuccess) return -static_cast<int>(error);
-    g->equivalent_tiles = prop.major == 9 && prop.minor == 0 && cublasLtGetVersion() == 130101;
+    g->equivalent_tiles = qwen3_5::equivalent_tiles_device(
+        prop.name, prop.major, prop.minor, prop.multiProcessorCount, cublasLtGetVersion());
     return g->equivalent_tiles ? 1 : 0;
 }
