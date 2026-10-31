@@ -87,7 +87,7 @@ def main() -> None:
     lines, ok = tool.compare_case("fixture", (200, response()), (422, rejection))
     check("worker answering a rejected request fails", not ok, "\n".join(lines))
 
-    # 3. The default case set carries the documented fixture list shape.
+    # 3. The default case set carries the fixture list's shape.
     cases = tool.default_cases()
     names = [name for name, _ in cases]
     check(

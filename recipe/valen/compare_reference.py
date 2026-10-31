@@ -30,12 +30,25 @@ import base64
 import hashlib
 import json
 import math
+import subprocess
 import sys
+from importlib.machinery import BYTECODE_SUFFIXES, EXTENSION_SUFFIXES, SOURCE_SUFFIXES
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 HERE = Path(__file__).resolve().parent
 PROBABILITY_TOLERANCE = 1e-6
+
+# A sourceless bytecode or extension module imports exactly like its .py
+# source would, so every importable suffix is swept, not just source files.
+IMPORTABLE_SUFFIXES = tuple(
+    suffix.lower()
+    for suffix in sorted(
+        set(SOURCE_SUFFIXES) | set(BYTECODE_SUFFIXES) | set(EXTENSION_SUFFIXES),
+        key=len,
+        reverse=True,
+    )
+)
 
 DEFAULT_TEXT_BODY = {
     "model": "valen-preview-0923",
@@ -177,6 +190,16 @@ def reference_confidence(probabilities):
     return max(0.0, (max(probabilities) - 1 / count) / (1 - 1 / count))
 
 
+def reference_score_confidence(probabilities):
+    """Mirror the worker's score concentration formula (see postprocess.py)."""
+
+    mode = max(range(len(probabilities)), key=probabilities.__getitem__)
+    count = len(probabilities)
+    distance = sum(p * abs(i - mode) for i, p in enumerate(probabilities))
+    uniform_mad = sum(abs(i - (count - 1) / 2) for i in range(count)) / count
+    return max(0.0, 1.0 - distance / uniform_mad)
+
+
 def scalar_answer_fields(answer, expected_type, ref_answer):
     """Every scalar the per-type branches fold into a running maximum.
 
@@ -306,7 +329,9 @@ def compare_case(
             if ref_answer is not None and "confidence" in ref_answer:
                 ref_confidence = ref_answer["confidence"]
             else:
-                ref_confidence = reference_confidence(ref_probs)
+                # The reference score answer carries no confidence; the worker
+                # exposes Valen's score concentration formula.
+                ref_confidence = reference_score_confidence(ref_probs)
             max_conf_delta = max(max_conf_delta, abs(answer["confidence"] - ref_confidence))
         else:
             decision = ref_keys[max(range(len(ref_probs)), key=ref_probs.__getitem__)]
@@ -405,6 +430,63 @@ def run_reference(model, base_processor, record, media_root, max_length, media_k
     }
 
 
+def _importable_stray(entry):
+    """Whether an untracked or ignored path could be imported by name.
+
+    Only a module sitting where its .py would be can shadow a dependency:
+    a sourceless `peft.pyc` or an extension `peft.so` imports just like
+    `peft.py`. Bytecode under `__pycache__` is the cache of a real import
+    and is not importable on its own, so re-runs after a first import stay
+    clean.
+    """
+
+    if "__pycache__" in Path(entry).parts:
+        return False
+    return entry.lower().endswith(IMPORTABLE_SUFFIXES)
+
+
+def _verify_clean_checkout(source):
+    """Reject a dirty pinned checkout before it can produce evidence.
+
+    Every evidence-producing harness in this recipe imports the pinned
+    valen package from this tree, so a local modification would make the
+    records certify agreement with code nobody pinned; a clean tracked
+    tree with no importable strays is part of what a record claims.
+    """
+
+    status = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(source),
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--ignored=matching",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    problems = []
+    for line in status.stdout.splitlines():
+        entry = line[3:]
+        if line.startswith(("??", "!!")):
+            # Untracked or ignored non-code cannot change what gets
+            # imported; a stray importable module on the package path can,
+            # and an ignored one hides from plain `status`.
+            if _importable_stray(entry):
+                state = "untracked" if line.startswith("??") else "ignored"
+                problems.append(f"{state} importable file {entry}")
+        else:
+            problems.append(f"locally changed {entry}")
+    if problems:
+        raise SystemExit(
+            "--valen-source must be a clean checkout of the pinned revision "
+            "(commit or restore):\n  " + "\n  ".join(problems)
+        )
+
+
 def main(argv=None):
     args = parse_args(argv)
     sys.path.insert(0, str(HERE.parents[1] / "src"))
@@ -414,6 +496,7 @@ def main(argv=None):
 
     source = Path(args.valen_source).resolve()
     _verify_source_revision(source)
+    _verify_clean_checkout(source)
     sys.path.insert(0, str(source))
 
     checkpoint = Path(args.checkpoint).resolve()

@@ -1,6 +1,6 @@
 [package]
 name = "omni-qwen3-5-native"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 publish = false
 description = "Shared Qwen3.5/3.8 prefill implementation for native decision workers"

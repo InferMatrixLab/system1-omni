@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare the Vela 2.0 0.3B worker pipeline against the pinned upstream server.
+"""Compare the Vela 2.0 worker pipeline against the pinned upstream server.
 
 Runs each fixture request through two paths that share one loaded pinned
 engine, so the comparison isolates this repository's admission and
@@ -27,11 +27,14 @@ and fastapi+uvicorn+httpx; see recipe/vela/reference.md.
 
 The default fixture set is the recipe's four example requests plus
 five synthetic rejections: an invalid span question (whole-request
-422), a schema that alone exceeds the 8,192-token window (413), and
+422), a schema that alone exceeds the member's input window (413), and
 the three envelope 422s (missing field, extra field, wrong model
 name) that freeze the worker's preamble admission against the pinned
-runtime's. CPU FP32 is the oracle setting; GPU bf16-autocast is a
-deployment option, not this tool's default.
+runtime's. The example files' ``model`` field is rewritten to the
+served member's name, and the hybrid member's oracle fixtures export
+under an ``oracle-hybrid-`` prefix, so both members share one tool.
+CPU FP32 is the oracle setting; GPU bf16-autocast is a deployment
+option, not this tool's default.
 """
 
 from __future__ import annotations
@@ -47,7 +50,7 @@ MODEL_NAME = "vllm-sr/Vela-2.0-0.3B"
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--model", required=True, help="pinned Vela 2.0 0.3B package directory")
+    parser.add_argument("--model", required=True, help="pinned Vela 2.0 package directory")
     parser.add_argument("--device", default="cpu", help="torch device (default: the CPU FP32 oracle)")
     parser.add_argument(
         "--fixture",
@@ -65,8 +68,8 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def over_limit_body():
-    """A schema that alone cannot fit the 8,192-token window.
+def over_limit_body(model=MODEL_NAME):
+    """A schema that alone cannot fit the member's input window.
 
     255 choice options with ~300-character descriptions: far past
     ``max_length`` before any state is rendered, which is exactly the
@@ -82,7 +85,7 @@ def over_limit_body():
         for index in range(255)
     }
     return {
-        "model": MODEL_NAME,
+        "model": model,
         "state": "short",
         "questions": {
             "big": {"type": "choice", "instructions": "Pick one.", "criteria": criteria}
@@ -90,11 +93,11 @@ def over_limit_body():
     }
 
 
-def invalid_span_body():
+def invalid_span_body(model=MODEL_NAME):
     """A span question whose criteria is a list, not a label mapping."""
 
     return {
-        "model": MODEL_NAME,
+        "model": model,
         "state": "short",
         "questions": {
             "bad": {
@@ -112,50 +115,63 @@ def missing_model_body():
     return {"state": "short", "questions": {"q": {"type": "noul", "instructions": "any?"}}}
 
 
-def extra_field_body():
+def extra_field_body(model=MODEL_NAME):
     """An envelope with a field the preamble does not permit ('extra_forbidden')."""
 
     return {
-        "model": MODEL_NAME,
+        "model": model,
         "state": "short",
         "questions": {"q": {"type": "noul", "instructions": "any?"}},
         "images": [],
     }
 
 
-def wrong_model_body():
+def wrong_model_body(served=MODEL_NAME):
     """Another member's name on this runtime ('value_error.model' 422)."""
 
+    other = "vllm-sr/Vela-2.0-0.3B" if served.endswith("0.8B") else "vllm-sr/Vela-2.0-0.8B"
     return {
-        "model": "vllm-sr/Vela-2.0-0.8B",
+        "model": other,
         "state": "short",
         "questions": {"q": {"type": "noul", "instructions": "any?"}},
     }
 
 
-def default_cases():
+def default_cases(served=MODEL_NAME):
     return [
         ("example-request", HERE / "example-request.json"),
         ("example-request-set-threshold", HERE / "example-request-set-threshold.json"),
         ("example-request-cjk", HERE / "example-request-cjk.json"),
         ("example-request-score", HERE / "example-request-score.json"),
-        ("invalid-span-422", invalid_span_body()),
-        ("over-limit-413", over_limit_body()),
+        ("invalid-span-422", invalid_span_body(served)),
+        ("over-limit-413", over_limit_body(served)),
         ("missing-model-422", missing_model_body()),
-        ("extra-field-422", extra_field_body()),
-        ("wrong-model-422", wrong_model_body()),
+        ("extra-field-422", extra_field_body(served)),
+        ("wrong-model-422", wrong_model_body(served)),
     ]
 
 
-def load_cases(paths):
+def load_cases(paths, served=MODEL_NAME):
     if not paths:
-        cases = default_cases()
+        cases = default_cases(served)
     else:
         cases = [(Path(path).name, path) for path in paths]
-    return [
-        (name, body if isinstance(body, dict) else json.loads(Path(body).read_text(encoding="utf-8")))
-        for name, body in cases
-    ]
+    loaded = []
+    for name, source in cases:
+        body = source if isinstance(source, dict) else json.loads(Path(source).read_text(encoding="utf-8"))
+        # The example files are member-agnostic apart from their model field;
+        # serving the other member rewrites it so the case exercises the 200
+        # path it was written for, on both compared paths alike. Synthetic
+        # bodies (including the deliberate wrong-model one) are never touched.
+        if (
+            not isinstance(source, dict)
+            and isinstance(body, dict)
+            and body.get("model") != served
+            and body.get("model") in (MODEL_NAME, "vllm-sr/Vela-2.0-0.8B")
+        ):
+            body = {**body, "model": served}
+        loaded.append((name, body))
+    return loaded
 
 
 def reference_response(client, body):
@@ -287,10 +303,10 @@ def main(argv=None):
     sys.path.insert(0, str(HERE.parents[1] / "src"))
     from fastapi.testclient import TestClient
 
-    from frontend.vela import decide
-    from models.vela.engine import Vela2Executor
+    from frontend.vela import decide, detect_member
 
-    executor = Vela2Executor(args.model, device=args.device)
+    executor_class, _default_name = detect_member(args.model)
+    executor = executor_class(args.model, device=args.device)
     # Both runtime imports stay inside a no-bytecode window: the package
     # gate refuses existing caches, and vela2_serve is a fresh import that
     # would otherwise write the __pycache__ the next worker start rejects.
@@ -310,17 +326,21 @@ def main(argv=None):
         vela2_serve.create_app(executor.engine, model_name=executor.model_name, api_key="parity-key")
     )
     source = {
-        "model": MODEL_NAME,
+        "model": executor.model_name,
         "device": args.device,
         "generator": "recipe/vela/compare_reference.py --export",
     }
     # A well-formed probe body: any answer other than the worker's 401
     # means the reference's key gate drifted, not the probe itself.
     unauthorized_probe = {
-        "model": MODEL_NAME,
+        "model": executor.model_name,
         "state": "short",
         "questions": {"q": {"type": "noul", "instructions": "any?"}},
     }
+    served = executor.model_name
+    # The hybrid member's oracle fixtures get their own prefix so both
+    # members' frozen baselines can live in one directory.
+    prefix = "oracle-hybrid-" if getattr(executor, "is_hybrid", False) else "oracle-"
 
     exported = 0
     failed = 0
@@ -340,7 +360,7 @@ def main(argv=None):
         print("\n".join(endpoint_lines))
         print()
         failed += endpoint_failures
-        for name, body in load_cases(args.fixture):
+        for name, body in load_cases(args.fixture, served):
             raw = json.dumps(body).encode("utf-8")
             worker = worker_response(raw, executor, decide)
             reference = reference_response(client, body)
@@ -352,7 +372,7 @@ def main(argv=None):
                 req, _plan = vela2_inference.system_one_to_predict(body["state"], body["questions"])
                 target = Path(args.export)
                 if target.is_dir():
-                    target = target / f"oracle-{name}.json"
+                    target = target / f"{prefix}{name}.json"
                 export_oracle(name, body, worker[1], executor.engine.predict(req), target, source)
                 exported += 1
             print()

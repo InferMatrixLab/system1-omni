@@ -1,10 +1,13 @@
-"""Python reference worker for Vela 2.0 0.3B.
+"""Python reference worker for the Vela 2.0 members (0.3B, 0.8B hybrid).
 
 The Rust frontend remains the public transport layer. This worker owns
 only HTTP lifecycle and request orchestration; wire admission lives in
 models.vela.protocol, the pinned-runtime error mapping in
-models.vela.preprocess, the pinned runtime and its package gate in
-models.vela.engine, and response finishing in models.vela.postprocess.
+models.vela.preprocess, the pinned runtimes and their package gates in
+models.vela.engine (0.3B) and models.vela.hybrid (0.8B), and response
+finishing in models.vela.postprocess. The executor is chosen by the
+package's declared ``model_type``; one worker process serves one pinned
+member.
 
 The error surface has two layers: transport errors follow the shared
 Python-worker discipline, and every request rejection the pinned runtime
@@ -13,7 +16,8 @@ the upstream whole-request 422 ``{"detail": [{"loc", "msg", "type"}]}``
 (or 413 ``too_long``), passed through verbatim. There are no per-question
 errors. Over-limit state text is truncated exactly as the pinned
 reference truncates it (see the model contract); only questions plus
-schema that cannot fit the 8,192-token window are refused.
+schema that cannot fit the member's input window (8,192 or 16,384
+tokens) are refused.
 """
 
 from __future__ import annotations
@@ -26,17 +30,21 @@ import os
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 from models.vela.engine import Vela2Executor
+from models.vela.hybrid import EXPECTED_MODEL_NAME as HYBRID_MODEL_NAME, Vela2HybridExecutor
 from models.vela.postprocess import finish_response
 from models.vela.preprocess import map_runtime_error, to_request_error
 from models.vela.protocol import MODEL_NAME, MAX_BODY, RequestError, parse_body, admit_request
 
 LOG = logging.getLogger(__name__)
 
-# Upstream vela2_serve.py /v1/models entry, kept verbatim so clients see
-# the reference server's description and release date.
+# Upstream vela2_serve.py /v1/models entry for the 0.3B member, kept
+# verbatim so clients see the reference server's description and release
+# date; the hybrid members source their entry from config.json, exactly
+# as their vela2_serve.py does.
 MODELS_ENTRY = {
     "name": None,  # the served model name, filled per request
     "release_date": "2026-09-29",
@@ -52,7 +60,57 @@ HEALTH_BODY = {"status": "ok"}
 READY_BODY = {"ready": True}
 
 
-def decide(raw: bytes, executor: Vela2Executor) -> dict[str, Any]:
+def detect_member(package: str | Path) -> tuple[type, str]:
+    """Pick the pinned executor for a package's declared member.
+
+    Returns the executor class and the member's default served name; the
+    structural gate inside the executor is the real authority — this
+    only routes the right gate to the package.
+    """
+
+    config_path = Path(package) / "config.json"
+    if not config_path.is_file():
+        raise ValueError(f"the package is missing config.json: {package}")
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"config.json in {package} is not readable JSON") from exc
+    if not isinstance(config, dict):
+        raise ValueError(f"config.json in {package} is not a JSON object")
+    model_type = config.get("model_type")
+    if model_type == "vela2-unified":
+        return Vela2Executor, MODEL_NAME
+    if model_type == "vela2-decoder":
+        return Vela2HybridExecutor, HYBRID_MODEL_NAME
+    raise ValueError(
+        f"config.json declares model_type {model_type!r}; this worker serves the "
+        "vela2-unified (0.3B) and vela2-decoder (0.8B) members of Vela 2.0"
+    )
+
+
+def models_entry(executor) -> dict[str, Any]:
+    """The /v1/models entry, verbatim per member's reference server."""
+
+    if getattr(executor, "is_hybrid", False):
+        # Upstream hybrid vela2_serve.py: name/description/release_date
+        # straight from config.json.
+        config = getattr(executor, "engine", None)
+        config = getattr(config, "config", None) if config is not None else None
+        config = config or {}
+        return {
+            "name": executor.model_name,
+            "release_date": config.get("release_date", ""),
+            "description": config.get(
+                "description",
+                "Vela 2.0: SystemOne Choice / Noul / Score with span and set extensions",
+            ),
+        }
+    entry = dict(MODELS_ENTRY)
+    entry["name"] = executor.model_name
+    return entry
+
+
+def decide(raw: bytes, executor) -> dict[str, Any]:
     """Admit, execute, and finish one complete request."""
 
     body = admit_request(parse_body(raw), executor.served)
@@ -66,13 +124,13 @@ def decide(raw: bytes, executor: Vela2Executor) -> dict[str, Any]:
         # layer cannot foresee (state rendering, question semantics, the
         # window budget); its rejections are client errors, not failures.
         raise map_runtime_error(exc) from exc
-    return finish_response(questions, response)
+    return finish_response(questions, response, hybrid=getattr(executor, "is_hybrid", False))
 
 
 class WorkerServer(ThreadingHTTPServer):
     daemon_threads = False
 
-    def __init__(self, address, executor: Vela2Executor, api_key: str | None = None):
+    def __init__(self, address, executor: Vela2Executor | Vela2HybridExecutor, api_key: str | None = None):
         self.executor = executor
         self.api_key = api_key
         self.inference_lock = threading.Lock()
@@ -143,9 +201,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/v1/models":
             if self._unauthorized():
                 return
-            entry = dict(MODELS_ENTRY)
-            entry["name"] = self.server.executor.model_name
-            self.send_json(200, {"models": [entry]})
+            self.send_json(200, {"models": [models_entry(self.server.executor)]})
         else:
             self.send_json(404, {"detail": "unknown route"})
 
@@ -194,12 +250,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="Python reference worker for Vela 2.0 0.3B")
-    parser.add_argument("--model", required=True, help="pinned Vela 2.0 0.3B package directory")
-    parser.add_argument("--device", default="cpu", help="torch device (reference contract: cpu)")
+    parser = argparse.ArgumentParser(description="Python reference worker for Vela 2.0 members")
+    parser.add_argument("--model", required=True,
+                        help="pinned Vela 2.0 package directory (0.3B or the 0.8B hybrid)")
+    parser.add_argument("--device", default="cpu",
+                        help="torch device (reference contract: cpu; cuda runs the hybrid "
+                             "backbone under bf16 autocast with FP32 heads)")
     parser.add_argument("--batch-size", type=int, default=None)
-    parser.add_argument("--name", default=os.environ.get("VELA2_MODEL_NAME", MODEL_NAME),
-                        help="model name accepted in the request's model field")
+    parser.add_argument("--name", default=os.environ.get("VELA2_MODEL_NAME"),
+                        help="model name accepted in the request's model field "
+                             "(default: the pinned member's served name)")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     return parser.parse_args(argv)
@@ -208,10 +268,11 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
     logging.basicConfig(level=logging.INFO)
-    executor = Vela2Executor(
+    executor_class, default_name = detect_member(args.model)
+    executor = executor_class(
         args.model,
         device=args.device,
-        model_name=args.name,
+        model_name=args.name or default_name,
         batch_size=args.batch_size,
     )
     server = None

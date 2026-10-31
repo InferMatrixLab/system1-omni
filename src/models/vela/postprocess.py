@@ -102,27 +102,36 @@ def _question_ids_of(questions: Mapping[str, Any], *kinds: str) -> list[str]:
     ]
 
 
-def finish_response(questions: Mapping[str, Any], response: dict[str, Any]) -> dict[str, Any]:
+def finish_response(
+    questions: Mapping[str, Any],
+    response: dict[str, Any],
+    *,
+    hybrid: bool = False,
+) -> dict[str, Any]:
     """Check the runtime response against the admitted questions and pass it through.
 
     The pinned runtime owns every value in this response; these checks
     only refuse a response that could not be reconstructed for the
-    request that produced it (wrong key set or order, a hybrid-only
+    request that produced it (wrong key set or order, a member-invented
     field, broken usage accounting, an answer view that is not an
     object or carries fields its kind does not allow).
+    ``hybrid`` selects the member: the hybrid executor's responses carry
+    ``span_heads`` alongside ``spans`` (upstream emits both together,
+    keyed by the span question ids); the 0.3B member's never do.
     """
 
     if not isinstance(response, dict):
         raise RuntimeError("the pinned runtime returned a non-object response")
     keys = set(response)
     foreign = keys & HYBRID_ONLY_FIELDS
-    if foreign:
+    if foreign and not hybrid:
         raise RuntimeError(
             f"the pinned runtime returned hybrid-only field(s) {sorted(foreign)}; "
             "this worker serves the 0.3B member"
         )
     missing = [field for field in REQUIRED_FIELDS if field not in response]
-    if missing or not keys <= TOP_LEVEL_FIELDS:
+    allowed = TOP_LEVEL_FIELDS | HYBRID_ONLY_FIELDS if hybrid else TOP_LEVEL_FIELDS
+    if missing or not keys <= allowed:
         raise RuntimeError("the pinned runtime returned an unexpected response envelope")
     answers = response["answers"]
     expected = expected_answer_order(questions)
@@ -152,6 +161,14 @@ def finish_response(questions: Mapping[str, Any], response: dict[str, Any]) -> d
     for qid, threshold in (response.get("thresholds") or {}).items():
         if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
             raise RuntimeError(f"threshold {qid!r} is not a number")
+    if hybrid:
+        span_ids = _question_ids_of(questions, "span")
+        if span_ids:
+            heads = response.get("span_heads")
+            if not isinstance(heads, dict) or list(heads) != span_ids:
+                raise RuntimeError("span_heads do not match the request's span questions")
+        elif "span_heads" in response:
+            raise RuntimeError("the pinned runtime returned span_heads without span questions")
     usage = response["usage"]
     if (
         not isinstance(usage, dict)

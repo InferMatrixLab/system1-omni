@@ -89,3 +89,85 @@ These results are for 9B on one GPU. They make no claim about 27B.
 
 Request manifests, raw responses, hidden-state dumps and scripts are kept
 locally, outside this repository.
+
+## Shared prefixes, 2026-10-25
+
+The same 253 requests ran through five workers, one request at a time:
+`main`, and this worker with no switch, with `OPEN_JEV_FIXED=1`, with
+`OPEN_JEV_PREFIX=1` and with `OPEN_JEV_PREFIX=auto`. Each request was sent twice
+in a row; times are the faster of the two, measured at the client.
+
+**Responses.** With no switch, all 253 responses equal `main`'s apart from
+timing. With `OPEN_JEV_PREFIX=1`, the 95 requests with at least one reusable
+64-token chunk ran on shared prefixes, and all 253 responses equal those with
+`OPEN_JEV_FIXED=1` apart from timing and `prefix_cache`. With `auto`, the 46
+requests it shared equal the fixed responses and the other 207 equal those with
+no switch.
+
+**Fixed against default GEMM algorithms.** Against the default path, and both
+against the reference from the comparison above:
+
+| Requests | Questions | Fixed vs default: changed decisions | largest difference | Against the reference, default / fixed: changed decisions | largest difference |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| M1 to M3 (22) | 87 | 0 | 0.035 | 0 / 0 | 0.041 / 0.042 |
+| M4 (74) | 74 | 0 | 0.098 | 0 / 0 | 0.068 / 0.030 |
+| M5 (157) | 157 | 1 | 0.064 | 2 / 1 | 0.104 / 0.141 |
+
+The changed decision is the three-way near tie described above: 0.52/0.48 with
+the default algorithms, 0.46/0.54 with the fixed ones and 0.44/0.56 in the
+reference. The fixed path's largest difference from the reference is on the same
+four-way choice as the default path's. Against JevBench's labels, the reference
+answers 165 of the 231 tasks correctly, the default path 163, fixed and shared
+164, and `auto` 163.
+
+**Time.** Sums of the per-request times, in seconds:
+
+| Requests | Input tokens | Not recomputed when shared | `main` | No switch | Fixed | Shared | `auto` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| M1 to M3 (22) | 1,966,702 | 95% | 305.3 | 308.7 | 371.1 | 35.5 | 37.9 |
+| M4 (74) | 31,802 | 0 | 5.76 | 5.74 | 6.44 | 6.16 | 5.69 |
+| M5 (157) | 464,274 | 69% | 80.0 | 79.8 | 92.0 | 34.3 | 42.0 |
+| M5 requests over 8,192 input tokens (30) | 347,670 | 75% | 54.9 | 54.8 | 65.2 | 17.5 | 17.5 |
+
+Single requests: 255 candidates over a 3,072-token state take 6.7 s shared
+instead of 122.5 s, 32 candidates over a 1,024-token state 0.86 s instead of
+5.3 s, and `support_28` 1.06 s instead of 1.88 s. The fixed algorithms alone add
+12 to 20% to these sums. Requests with nothing to share pay that under
+`OPEN_JEV_PREFIX=1` (M4: 6.16 s instead of 5.74 s); `auto` keeps them on the
+default path. Its threshold also leaves some requests unshared that would gain:
+M2's requests of 2,600 to 5,500 tokens run 2 to 3 times faster shared, but save
+fewer than 4,096 tokens.
+
+With no switch, the worker takes as long as `main`. Sent alternately to both
+(A B B A, `main` at `27176cb`), the 253 requests took 393.5 s against 392.8 s,
+with a median per-request ratio of 1.001 (0.99 to 1.02 from the 5th to the 95th
+percentile), and identical responses. In the five-way run `main` and no switch ran
+one after the other, so their 1% gap there, up to 11% on the first requests with
+many short candidates, is drift between runs.
+
+### Controls
+
+- Same GPU, export, CUDA build and HTTP setup as above. The five-way run used an
+  earlier state of this change on `main` `7b4c194`. Its later changes (the
+  `CUA_S1_GRAPH` check, tests and documentation) and `main` up to `51f80ad` leave
+  the responses with no switch, shared and `auto` unchanged.
+- On 2026-10-26, on the same GPU, the `prefix` and `prefill_batch` GPU tests and
+  `fixed_gemm_rows_do_not_depend_on_m` pass at `01c84c6` and again at `2a19ed2`, which
+  adds the startup check of fixed GEMM rows. On this export the check takes 0.37 s
+  at startup.
+- After `main` with #186 was merged in (`5235e50`), the `prefix` test and
+  `fixed_gemm_rows_do_not_depend_on_m` pass again, and the 253 requests keep the
+  same answers with no switch, shared and `auto`. #186's own `prefill_batch` test
+  needs a checkpoint that packs candidates and fails on this export, as it does on
+  `main` `28f4957`.
+- `002f510` adds `packing_options_leave_fixed_rows_unchanged` to
+  `tests/qwen3_5/prefix.rs`. It selects batched GDN and packed projections, as
+  Open-Jev does at load for checkpoints that pack candidates (27B), and checks that
+  shared prefixes and `forward_fixed` still equal `forward_fixed` without them bit
+  for bit, also after a packed batch. It passes on this export at `002f510`, with
+  the other `tests/qwen3_5/prefix.rs` tests and
+  `fixed_gemm_rows_do_not_depend_on_m`. No run on 27B itself.
+- Device memory after warmup, and after the 22 M1 to M3 requests and the five
+  longest JevBench tasks: 15,874 and 16,674 MiB with no switch, 15,906 and
+  16,884 MiB with `OPEN_JEV_PREFIX=1`. The difference is the fixed-algorithm GEMM
+  workspace (32 MiB, allocated at warmup) and the prefix states.

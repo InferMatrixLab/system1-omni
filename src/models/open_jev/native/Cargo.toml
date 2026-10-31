@@ -1,6 +1,6 @@
 [package]
 name = "omni-open-jev-native"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 publish = false
 description = "Native Rust/CUDA worker for Open-Jev-27B-v1.1 and Open-Jev-9B"
@@ -21,3 +21,7 @@ path = "../../../../tests/open_jev/contract.rs"
 [[test]]
 name = "prefill_batch"
 path = "../../../../tests/open_jev/prefill_batch.rs"
+
+[[test]]
+name = "prefix"
+path = "../../../../tests/open_jev/prefix.rs"

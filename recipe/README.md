@@ -14,6 +14,9 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
 - [Valen-Preview-0923 reference worker](valen/reference.md): prepare the pinned
   Preview checkpoint and Qwen base, start the text-or-image `choice`/`noul`/`score`
   worker and verify the frontend.
+- [Valen-Preview-0923 checkpoint export](valen/export.md): export the pinned
+  checkpoint and base to a manifest-described safetensors artifact set and run
+  the export regression.
 - [Cua-S1 4B 0.2 native text worker](cua_s1/native.md): build the CUDA library and
   the Rust worker, export BF16 weights with the original FP32 adapter and start
   the worker.
@@ -25,7 +28,8 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   multimodal language checkpoint and serve one-image decisions with Rust/CUDA.
 - [Open-Jev native text worker](open_jev/native.md): export the merged text
   backbone and trained decision head of Open-Jev-27B-v1.1 or Open-Jev-9B, then
-  serve with Rust and CUDA. [Open-Jev-9B validation](open_jev/validation-9b.md)
+  serve with Rust and CUDA; the 27B path supports compatible candidate batching
+  and within-question prefix sharing. [Open-Jev-9B validation](open_jev/validation-9b.md)
   compares the 9B worker with the reference.
 - [StartLux Instant 4B native worker](startlux/README.md): build the Ada sm_89
   CUDA library, serve the pinned CC BY-NC Instant checkpoint, and run the
@@ -48,17 +52,26 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   verify its runtime manifest, and serve `choice`/`noul`/`score` decisions over
   text, image and video state through the Python worker and the Rust frontend
   (text serving and parity validated on A100; media budgets and caps in the recipe).
-- [Vela 2.0 0.3B reference worker](vela/reference.md): download the pinned
+- [Vela 2.0 reference workers (0.3B and the 0.8B hybrid)](vela/reference.md): download the pinned
   vllm-sr/Vela-2.0-0.3B package, pass its full-hash package gate, and serve all
   five SystemOne question kinds (`choice`/`noul`/`score` plus the `span`/`set`
-  extensions) through the Python worker and the Rust frontend on CPU FP32.
-- [Clef reference worker](clef/reference.md): load pinned Clef-flash (9B) or
-  Clef (27B) and serve text `choice`/`noul`/`score`. Image, video and native
-  CUDA are not served. Operator-reported flash Public231 concurrency-1
-  timing on the L20X-labeled lab host is in the recipe. The primary is
-  tip `594528a9`: p50 164.969 ms, p95 216.755 ms, `/health`
+  extensions) through the Python worker and the Rust frontend on CPU FP32;
+  or vllm-sr/Vela-2.0-0.8B at revision `326b01d8` behind its own 10-file gate.
+- [Clef reference worker](clef/reference.md): build `omni-clef`, load pinned
+  Clef-flash (9B) or Clef (27B), and serve text `choice`/`noul`/`score`.
+  The joint head stays in the checkpoint's Python module, on one persistent
+  executor thread. Image, video, and a native joint head are not served.
+  Operator-reported flash Public231 concurrency-1 timing on the L20X-labeled
+  lab host is the previous Python HTTP server. The primary is tip
+  `594528a9`: p50 164.969 ms, p95 216.755 ms, `/health`
   `fla+causal_conv1d`, versus `9030065` run1 p50 247.518 ms, p95 413.025 ms
-  (Δp50 −82.549 ms, Δp95 −196.270 ms).
+  (Δp50 −82.549 ms, Δp95 −196.270 ms). Operator-reported `omni-clef` tip
+  `f9127a0` is a serve-path paste, not a latency KEEP: R1 p50 169.605 ms,
+  p95 220.003 ms (231/231) does not pass the dual gate versus
+  164.969/216.755; R2 53.580/97.031 and R3 52.950/97.608 are not a new
+  primary. Smoke 4/4, `/health` `fla+causal_conv1d`. Start `omni-clef`
+  with `CLEF_PYTHON` set to the recipe venv; system `python3` lacks
+  `causal-conv1d`.
 
 - [LFM2.5-350M choice worker](lfm2/README.md): score text decisions with independent
   questions, hybrid cache branching and configurable candidate batches.

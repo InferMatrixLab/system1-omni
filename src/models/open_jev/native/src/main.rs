@@ -27,11 +27,11 @@ async fn decide(engine: &Engine, raw: &[u8]) -> Response {
         Err(e) => return error(StatusCode::UNPROCESSABLE_ENTITY, e),
     };
     let result = async {
-        let rows = engine
+        let (rows, prefix) = engine
             .executor
-            .execute(&engine.scheduler, prepared.inputs)
+            .execute_with_prefix(&engine.scheduler, prepared.inputs)
             .await?;
-        prepared.context.finish(rows)
+        prepared.context.finish_with_prefix(rows, Some(&prefix))
     }
     .await;
     match result {

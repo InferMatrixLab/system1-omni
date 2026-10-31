@@ -50,3 +50,43 @@ fn head_loader_checks_the_selected_checkpoints_backbone() {
     // The trained head must match the selected backbone's width.
     assert!(DecisionHead::load(&qwen_9b, &manifest(5120), open_jev_9b).is_err());
 }
+
+#[test]
+fn candidates_plan_as_question_groups_and_rebuild_in_order() {
+    let state: Vec<u32> = (0..200).collect();
+    let prompt = |question: &[u32], candidate: &[u32]| [&state[..], question, candidate].concat();
+    let ids = vec![
+        vec![
+            prompt(&[900; 100], &[1, 2]),
+            prompt(&[900; 100], &[1, 3]),
+            prompt(&[900; 100], &[4]),
+        ],
+        vec![prompt(&[901; 10], &[5])],
+    ];
+    let rows = rows(&ids);
+    assert_eq!(
+        rows.iter().map(|row| row.question).collect::<Vec<_>>(),
+        [0, 0, 0, 1]
+    );
+    let plan = PrefixPlan::new(&rows).unwrap();
+    assert_eq!(plan.prompts.groups.len(), 2);
+    let rebuilt: Vec<Vec<u32>> = plan
+        .prompts
+        .groups
+        .iter()
+        .flat_map(|group| {
+            group
+                .branches
+                .iter()
+                .map(|branch| [plan.prompts.prefix, group.prefix, branch].concat())
+        })
+        .collect();
+    assert_eq!(rebuilt, ids.concat());
+    // The 200-token state is floored to 192; the first question's 100 extra tokens
+    // reach 256 for its other two candidates.
+    assert_eq!(plan.saved_tokens, 3 * 192 + 2 * (256 - 192));
+    assert!(plan.shares_across_groups());
+    // One question's candidates share only within it.
+    let one = super::rows(&ids[..1]);
+    assert!(!PrefixPlan::new(&one).unwrap().shares_across_groups());
+}

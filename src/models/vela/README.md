@@ -1,49 +1,71 @@
-# Vela 2.0 0.3B reference contract
+# Vela 2.0 reference contracts (0.3B, 0.8B hybrid)
 
-This directory contains the System1-Omni integration slice for
+This directory contains the System1-Omni integration slices for
 [Vela 2.0 0.3B](https://huggingface.co/vllm-sr/Vela-2.0-0.3B)
-(`vela2-unified`). It is a reference-serving boundary only: a Python
-worker that runs the checkpoint's own pinned runtime for text state and
-all five typed question kinds (`choice`, `noul`, `score`, `span`, `set`)
-on `/v1/systemone`. Native execution is not part of this slice; this
-worker freezes the text/token_ids input, the position-level final-hidden
-readout contract, the error/length boundaries and the parity baseline
-for later ModernBERT-profile work. The CPU half of that native route —
-the 0.3B ModernBERT profile registration, the checkpoint census and the
-YaRN tables — lives in [`native/`](native/README.md), whose
-`cuda`-gated executor runs the encoder on the regenerated bundle.
+# Vela 2.0 reference contracts (0.3B, 0.8B hybrid)
+
+This directory contains the System1-Omni integration slices for
+[Vela 2.0 0.3B](https://huggingface.co/vllm-sr/Vela-2.0-0.3B)
+(`vela2-unified`) and
+[Vela 2.0 0.8B](https://huggingface.co/vllm-sr/Vela-2.0-0.8B)
+(`vela2-decoder`, the first hybrid member): a Python worker that runs
+the checkpoint's own pinned runtime for text state and all five typed
+question kinds (`choice`, `noul`, `score`, `span`, `set`) on
+`/v1/systemone`, one pinned member per worker process. The 0.3B
+worker's contract freezes the text/token_ids input, the
+position-level final-hidden readout contract, the error/length
+boundaries and the parity baseline for later ModernBERT-profile work;
+the CPU half of that native route — the 0.3B ModernBERT profile
+registration, the checkpoint census and the YaRN tables — lives in
+[`native/`](native/README.md), whose `cuda`-gated executor runs the
+encoder on the regenerated bundle.
 
 The shared Vela 2.0 wire module is deliberately shaped for the family:
 the envelope admission (`protocol`), the pinned-runtime error mapping
 (`preprocess`) and response finishing (`postprocess`) are member-neutral;
-this slice ships the 0.3B pinned executor (`engine`). The hybrid members
-(0.8B/4B/9B) reuse the same wire layer with their own executors.
+this directory ships the 0.3B pinned executor (`engine`) and the 0.8B
+hybrid executor (`hybrid`). The worker picks the executor from the
+package's declared `model_type`. The 4B/9B members are not
+implemented.
 
 ## Pinned artifacts
 
-| Artifact | Value |
-| --- | --- |
-| Package | [vllm-sr/Vela-2.0-0.3B](https://huggingface.co/vllm-sr/Vela-2.0-0.3B) |
-| Pinned revision | `d6f03aa9baca4f9017fa8f8e9c2764d3bed3f409` |
-| Identity | `vela2-unified` / `Vela2Model`, 309,114,369 parameters, all FP32 (1,236,473,252-byte safetensors) |
-| Runtime | the checkpoint's own flat files: `vela2_inference.py`, `modeling_vela2.py`, `configuration_vela2.py`, `vela2_serve.py` |
-| Calibration | the package's own `calibration.json` (never cross-copied between members) |
-| License | Apache-2.0; the inherited tokenizer material carries Gemma Terms of Use |
-| Runtime dependencies | [recipe/vela/requirements.txt](../../../recipe/vela/requirements.txt) (torch, transformers, safetensors, tokenizers, numpy) |
+| Artifact | 0.3B | 0.8B hybrid |
+| --- | --- | --- |
+| Package | [vllm-sr/Vela-2.0-0.3B](https://huggingface.co/vllm-sr/Vela-2.0-0.3B) | [vllm-sr/Vela-2.0-0.8B](https://huggingface.co/vllm-sr/Vela-2.0-0.8B) |
+| Pinned revision | `d6f03aa9baca4f9017fa8f8e9c2764d3bed3f409` | `326b01d81f61fff7fd4ae570e54b87a49119e490` |
+| Identity | `vela2-unified` / `Vela2Model`, 309,114,369 parameters, all FP32 (1,236,473,252-byte safetensors) | `vela2-decoder` / `Vela2DecoderModel`, 754,565,954 parameters (2,022,189,488-byte shard + hashed 4,480,172-byte `broad_head.safetensors`) |
+| Input window | 8,192 tokens | 16,384 tokens |
+| Runtime | the checkpoint's own flat files: `vela2_inference.py`, `modeling_vela2.py`, `configuration_vela2.py`, `vela2_serve.py` | the same four modules, decoder-specific |
+| Calibration | the package's own `calibration.json` (never cross-copied between members — shipped thresholds differ) | same rule; the side-loaded broad head needs its `broad_head` block |
+| License | Apache-2.0; the inherited tokenizer material carries Gemma Terms of Use | Apache-2.0; Qwen3.5-0.8B lineage notices ship in the package |
+| Runtime dependencies | [recipe/vela/requirements.txt](../../../recipe/vela/requirements.txt) (torch, transformers, safetensors, tokenizers, numpy) | same |
 
-The package ships no manifest, so the executor's startup gate checks the
-config's structural identity (model type, architecture, `max_length`
-8,192, the 8 marker ids), then hashes every small file the runtime reads
-or executes — the four runtime modules, `config.json`,
-`calibration.json` and `tokenizer.json` — against the table checked in
-for the pinned revision, before anything is imported, and refuses
-importable entries the table does not name plus any existing
-`__pycache__` bytecode cache or directory symlink (`model.safetensors` is
-checked by exact size; the runtime's strict safetensors load rejects
-truncated or structurally mismatched weights, but not same-size
-bit-level corruption).
+The 0.3B package ships no manifest, so its gate checks the config's
+structural identity (model type, architecture, `max_length` 8,192, the
+8 marker ids), then hashes every small file the runtime reads or
+executes — the four runtime modules, `config.json`, `calibration.json`
+and `tokenizer.json` — against the table checked in for the pinned
+revision, before anything is imported, and refuses importable entries
+the table does not name plus any existing `__pycache__` bytecode cache
+or directory symlink (`model.safetensors` is checked by exact size; the
+runtime's strict safetensors load rejects truncated or structurally
+mismatched weights, but not same-size bit-level corruption). The 0.8B
+gate mirrors this with a 10-file table — the same four runtime modules,
+`config.json` (identity includes the served `model_name`, so a 4B or 9B
+package fails with its own name), `calibration.json`, `tokenizer.json`,
+`tokenizer_config.json`, `model.safetensors.index.json` (the shard map)
+and the hashed `broad_head.safetensors` — with the 2 GB shard checked
+by exact size.
 A later self-consistent snapshot rewrites its own files and fails the
 checked-in pin.
+
+On either member the runtime loads parameters in FP32; on `cuda` the
+hybrid runs its backbone under bf16 autocast with FP32 heads (the
+evaluated setting), and on `cpu` it runs FP32 throughout. The hybrid's
+served name comes from `config.json` (`vllm-sr/Vela-2.0-0.8B`); the
+runtime's family-generic `DEFAULT_MODEL_NAME` is never used as a
+default.
 
 ## Current serving scope
 
@@ -105,8 +127,14 @@ The response envelope is the pinned runtime's, passed through verbatim
   answers echo the value without a rule field). Serving-time
   temperatures divide the logits per question type; the learned
   `tau`/`tau_span` live inside the model.
-  The hybrid-only fields (`span_heads`, `noul_calibration`) do not
-  exist on this member.
+  The hybrid-only `noul_calibration` block is default-off on every
+  member (env `VELA2_NOUL_CALIBRATION` or the reference server's flag
+  enable it); the worker serves the default path only. On the 0.3B the
+  `span_heads` field does not exist; on the hybrid it is emitted
+  together with `spans`, keyed by the span question ids
+  (`{"router"|"broad"}` per question, after the runtime's six-rule
+  dispatch: the `"head"` override, trained ids, exact router label
+  sets, PII subsets, hallucination aliases, else broad).
 - `usage.input_tokens` is the sum over every rendered sequence — span
   window rows and extra span-question rows included, nothing
   deduplicated; `usage.output_tokens` is always 0.
@@ -130,7 +158,8 @@ per-question errors on this path:
    upstream server would answer 500); no such path is reachable on the
    pinned runtime's request path.
 3. HTTP 413 (`too_long`) only when the questions plus schema alone
-   exceed the 8,192-token window.
+   exceed the member's input window (8,192 on 0.3B, 16,384 on the
+   hybrid).
 4. HTTP 401 (`{"detail": "Missing or invalid API key"}`) only when
    `VELA2_API_KEY` is set and the request does not carry exactly
    `Authorization: Bearer <key>` (applies to `/v1/systemone` and
@@ -168,14 +197,17 @@ every question kind), so answering at all means ready.
 - `preprocess.py` owns the mapping of the pinned runtime's
   `SystemOneError` to HTTP (422, or 413 for `too_long`) and of its
   other ValueErrors to client errors.
-- `engine.py` owns the pinned runtime, the pre-import package gate, the
-  served name, device state and the all-kind warmup.
+- `engine.py` owns the 0.3B pinned runtime, the pre-import package gate, the
+  served name, device state and the all-kind warmup; `hybrid.py` mirrors
+  it for the 0.8B (its warmup also drives both span heads).
 - `postprocess.py` owns the pure confidence/score formulas (mirrored
   for the CPU tests) and response finishing: answer-order and key-set
-  reconstruction including set views, usage accounting, and refusal of
-  hybrid-only fields on this member.
-- `src/frontend/vela.py` owns HTTP lifecycle, the single-flight lock,
-  the API-key gate and orchestration.
+  reconstruction including set views, usage accounting, the
+  member-aware `span_heads` check, and refusal of hybrid-only fields
+  on the 0.3B.
+- `src/frontend/vela.py` owns HTTP lifecycle, member detection from the
+  package's `model_type`, the per-member `/v1/models` entry, the
+  single-flight lock, the API-key gate and orchestration.
 - The Rust frontend owns transport and forwarding, not model state.
 
 The server-side error surface and envelope semantics are recorded as
@@ -186,16 +218,18 @@ the shared worker-contract issue, and nothing is posted upstream.
 
 - CPU contract tests, no weights, no torch:
   `PYTHONPATH=src python -m pytest tests/vela -q` (envelope triples,
-  transport discipline, package gate, formula mirrors, response
-  finishing, the HTTP surface with a contract fake).
+  transport discipline, both package gates, formula mirrors, response
+  finishing including the hybrid `span_heads` surface, member
+  detection, the HTTP surface with a contract fake).
 - Reference parity is exact match on recorded fixtures under the pinned
   versions: `recipe/vela/compare_reference.py` drives the recipe
   fixtures plus five synthetic rejections (invalid-span 422,
   over-limit 413, and the missing-field / extra-field / wrong-model
   envelope 422s) through both the pinned `vela2_serve.py` app and the
-  production worker pipeline over one shared engine, and freezes the
-  oracle fixture for the native encoder slices. CPU FP32 (no
+  production worker pipeline over one shared engine, for either member,
+  and freezes the oracle fixture for the native slices (`oracle-` for
+  0.3B, `oracle-hybrid-` for 0.8B). CPU FP32 (no
   flash-linear-attention) is the oracle setting; GPU bf16-autocast is
-  a deployment option outside this slice's evidence.
+  a deployment option outside these slices' evidence.
 - The serving procedure, hardware requirements and the recorded
   evidence pointer are [recipe/vela/reference.md](../../../recipe/vela/reference.md).
