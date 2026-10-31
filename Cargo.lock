@@ -1264,6 +1264,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "omni-kev-native"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "safetensors 0.8.0",
+ "serde_json",
+]
+
+[[package]]
 name = "omni-laya"
 version = "0.2.0"
 dependencies = [
