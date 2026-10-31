@@ -13,6 +13,7 @@ use omni_qwen3_5_native::prefix::PrefixMode;
 
 pub struct Processor {
     checkpoint: &'static Checkpoint,
+    parallel_tokenization: bool,
     tokenizer: Tokenizer,
     prefix: String,
     suffix: String,
@@ -49,12 +50,17 @@ impl Processor {
             Tokenizer::from_file(dir.join("tokenizer.json")).map_err(anyhow::Error::msg)?;
         Ok(Self {
             checkpoint,
+            parallel_tokenization: checkpoint.parallel_tokenization,
             tokenizer,
             prefix,
             suffix,
             temperature,
             max_length,
         })
+    }
+
+    pub(crate) fn disable_parallel_tokenization(&mut self) {
+        self.parallel_tokenization = false;
     }
 
     /// Validate every candidate length before inference; never truncate.
@@ -67,7 +73,7 @@ impl Processor {
             &self.suffix,
             self.max_length,
             &questions,
-            self.checkpoint.parallel_tokenization,
+            self.parallel_tokenization,
         )?;
         let input_tokens = inputs.iter().flatten().map(Vec::len).sum();
         let candidates = inputs.iter().map(Vec::len).sum();

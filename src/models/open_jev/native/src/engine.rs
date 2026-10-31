@@ -4,17 +4,16 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail, ensure};
 use omni_qwen3_5_native::prefix::PrefixMode;
-use omni_runtime::SerialScheduler;
 use serde_json::Value;
 
 use crate::contract::Checkpoint;
-use crate::executor::{DecisionHead, Executor};
+use crate::executor::{DecisionHead, Executor, Scheduler};
 use crate::processing::Processor;
 
 pub struct Engine {
     pub checkpoint: &'static Checkpoint,
     pub processor: Processor,
-    pub scheduler: SerialScheduler,
+    pub scheduler: Scheduler,
     pub executor: Executor,
 }
 
@@ -61,9 +60,55 @@ pub fn prefix_env() -> Result<PrefixMode> {
     )
 }
 
+/// Exact request-local reuse keeps each complete prompt's GEMM algorithms.
+/// It is separate from the fixed-algorithm prefix modes.
+pub fn exact_prefix_value(value: Option<&str>, prefix: PrefixMode) -> Result<Option<bool>> {
+    let enabled = match value {
+        None => None,
+        Some("0") => Some(false),
+        Some("1") => Some(true),
+        Some(_) => bail!("OPEN_JEV_EXACT_PREFIX must be 0 or 1"),
+    };
+    ensure!(
+        enabled != Some(true) || prefix == PrefixMode::Off,
+        "OPEN_JEV_EXACT_PREFIX cannot be combined with fixed/shared/auto prefix modes"
+    );
+    Ok(enabled)
+}
+
+/// Disable all 9B packing-related paths, not just exact prefix reuse.
+pub fn packing_value(value: Option<&str>, prefix: PrefixMode, exact: Option<bool>) -> Result<bool> {
+    let enabled = match value {
+        None | Some("1") => true,
+        Some("0") => false,
+        Some(_) => bail!("OPEN_JEV_PACK must be 0 or 1"),
+    };
+    ensure!(
+        enabled || (prefix == PrefixMode::Off && exact != Some(true)),
+        "OPEN_JEV_PACK=0 requires OPEN_JEV_PREFIX=0, OPEN_JEV_FIXED=0 and OPEN_JEV_EXACT_PREFIX=0 (or unset)"
+    );
+    Ok(enabled)
+}
+
 impl Engine {
     pub async fn load(dir: &Path, library: &Path) -> Result<Self> {
-        Self::load_with_prefix(dir, library, prefix_env()?).await
+        let prefix = prefix_env()?;
+        let raw = match std::env::var("OPEN_JEV_EXACT_PREFIX") {
+            Ok(value) => Some(value),
+            Err(std::env::VarError::NotPresent) => None,
+            Err(error) => return Err(error).context("OPEN_JEV_EXACT_PREFIX"),
+        };
+        let exact = exact_prefix_value(raw.as_deref(), prefix)?;
+        let pack = match std::env::var("OPEN_JEV_PACK") {
+            Ok(value) => packing_value(Some(&value), prefix, exact)?,
+            Err(std::env::VarError::NotPresent) => packing_value(None, prefix, exact)?,
+            Err(error) => return Err(error).context("OPEN_JEV_PACK"),
+        };
+        let mut engine = Self::load_with_packing(dir, library, prefix, pack).await?;
+        if let Some(enabled) = exact {
+            engine.executor.set_exact_prefix(enabled);
+        }
+        Ok(engine)
     }
 
     pub async fn load_with_prefix(
@@ -71,14 +116,30 @@ impl Engine {
         library: &Path,
         prefix_mode: PrefixMode,
     ) -> Result<Self> {
-        // `Model::load` reads the switch the same way.
-        let graph = std::env::var("CUA_S1_GRAPH").as_deref() == Ok("1");
+        Self::load_with_packing(dir, library, prefix_mode, true).await
+    }
+
+    /// Explicit per-engine packing choice; does not read OPEN_JEV_PACK/PREFIX.
+    /// `pack=false` restores the eager, per-candidate 9B execution path.
+    pub async fn load_with_packing(
+        dir: &Path,
+        library: &Path,
+        prefix_mode: PrefixMode,
+        pack: bool,
+    ) -> Result<Self> {
+        packing_value(Some(if pack { "1" } else { "0" }), prefix_mode, None)?;
+        // Rollback always uses eager execution, even with an inherited graph switch.
+        let graph = pack && std::env::var("CUA_S1_GRAPH").as_deref() == Ok("1");
         check_graph(prefix_mode, graph)?;
         let manifest: Value = serde_json::from_slice(
             &std::fs::read(dir.join("open_jev_export.json"))
                 .context("export the merged checkpoint; see recipe/open_jev/native.md")?,
         )?;
         let checkpoint = Checkpoint::from_export(&manifest)?;
+        ensure!(
+            pack || checkpoint.alias == "open-jev-9b",
+            "OPEN_JEV_PACK=0 is supported only for Open-Jev-9B"
+        );
         let temperature = manifest["temperature"].as_f64().context("temperature")?;
         ensure!(
             temperature.is_finite() && temperature > 0.0,
@@ -98,13 +159,23 @@ impl Engine {
             .context("chat_suffix")?
             .to_owned();
         let head = DecisionHead::load(dir, &manifest, checkpoint)?;
-        let processor = Processor::load(dir, checkpoint, prefix, suffix, temperature, max_length)?;
-        let executor = Executor::load(dir, library, head, checkpoint, prefix_mode, graph).await?;
+        let mut processor =
+            Processor::load(dir, checkpoint, prefix, suffix, temperature, max_length)?;
+        if !pack {
+            processor.disable_parallel_tokenization();
+        }
+        let executor =
+            Executor::load(dir, library, head, checkpoint, prefix_mode, graph, pack).await?;
+        let scheduler = executor.scheduler(checkpoint)?;
         Ok(Self {
             checkpoint,
             processor,
-            scheduler: SerialScheduler::default(),
+            scheduler,
             executor,
         })
+    }
+
+    pub fn is_available(&self) -> bool {
+        self.scheduler.is_available() && self.executor.is_available()
     }
 }

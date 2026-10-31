@@ -56,6 +56,7 @@ fn processor(max_length: usize) -> Processor {
     ));
     Processor {
         checkpoint: &CHECKPOINTS[0],
+        parallel_tokenization: true,
         tokenizer,
         prefix: "".into(),
         suffix: "".into(),
@@ -67,6 +68,15 @@ fn processor(max_length: usize) -> Processor {
 const REQUEST: &[u8] = br#"{"state":"x","questions":{
     "z":{"type":"choice","instructions":"Route","criteria":{"technical":null,"billing":null}},
     "a":{"type":"noul","instructions":"Verify"}}}"#;
+
+#[test]
+fn serial_preparation_preserves_tokens_and_question_mapping() {
+    let mut processor = processor(4096);
+    let expected = processor.prepare(REQUEST).unwrap().inputs;
+    processor.disable_parallel_tokenization();
+    assert!(!processor.parallel_tokenization);
+    assert_eq!(processor.prepare(REQUEST).unwrap().inputs, expected);
+}
 
 #[test]
 fn preparation_applies_the_saved_chat_prefix_and_suffix() {

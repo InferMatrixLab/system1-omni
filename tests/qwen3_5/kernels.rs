@@ -68,9 +68,11 @@ fn residual_rms_norm_matches_rounded_reference() {
     let st = setup();
     let eps = 1e-6f32;
     // Cua-S1 and Open-Jev widths, scalar fallbacks for other widths, and a BF16
-    // element offset to check that cached loads need no packed alignment.
+    // element offset to exercise the scalar fallback for packed loads.
     for (d, offset) in [
         (2560usize, 0usize),
+        (4096, 0),
+        (4096, 1),
         (5120, 0),
         (8192, 0),
         (257, 0),
@@ -137,6 +139,89 @@ fn residual_rms_norm_matches_rounded_reference() {
                         actual.to_bits().abs_diff(want.to_bits()) <= 1,
                         "norm mismatch d={d}, offset={offset}, row={row}, i={i}: {actual} vs {want}"
                     );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "needs a GPU and CUA_S1_CUDA_LIB"]
+fn residual_rms_norm_vector_matches_each_unaligned_fallback() {
+    let st = setup();
+    let d = 4096usize;
+    // Each pointer independently forces the scalar fallback on identical values.
+    // Both kernels must preserve BF16 rounding and the FP32 reduction order.
+    for rows in [1usize, 3, 107, 256] {
+        for amp in [0.5, 32.0] {
+            let n = rows * d;
+            let residual = random(n, 61, amp);
+            let delta = random(n, 62, amp / 8.0);
+            let weights = random(d, 63, 0.25);
+            let mut reference = None;
+            for offsets in [
+                [8usize; 4],
+                [1, 8, 8, 8],
+                [8, 1, 8, 8],
+                [8, 8, 1, 8],
+                [8, 8, 8, 1],
+            ] {
+                let guard = bf16::from_f32(-7.0);
+                let mut host = [
+                    vec![guard; n + offsets[0] + 8],
+                    vec![guard; n + offsets[1] + 8],
+                    vec![guard; d + offsets[2] + 8],
+                    vec![guard; n + offsets[3] + 8],
+                ];
+                host[0][offsets[0]..offsets[0] + n].copy_from_slice(&residual);
+                host[1][offsets[1]..offsets[1] + n].copy_from_slice(&delta);
+                host[2][offsets[2]..offsets[2] + d].copy_from_slice(&weights);
+                let buffers = host.each_ref().map(|v| to_device(v, st));
+                // SAFETY: distinct allocations, complete rows and weights after
+                // each BF16 offset, with eight guard elements after each region.
+                unsafe {
+                    check(
+                        (api().cs1_add_rms_norm)(
+                            buffers[0].at(offsets[0] * 2),
+                            buffers[1].at(offsets[1] * 2),
+                            buffers[2].at(offsets[2] * 2),
+                            buffers[3].at(offsets[3] * 2),
+                            rows as i32,
+                            d as i32,
+                            1e-6,
+                            st,
+                        ),
+                        "vector residual norm",
+                    )
+                    .unwrap();
+                }
+                let mut actual = Vec::new();
+                for i in 0..4 {
+                    let got = from_device(&buffers[i], host[i].len(), st);
+                    let len = if i == 2 { d } else { n };
+                    assert!(got[..offsets[i]].iter().all(|v| *v == guard.to_f32()));
+                    assert!(got[offsets[i] + len..].iter().all(|v| *v == guard.to_f32()));
+                    let bits: Vec<_> = got[offsets[i]..offsets[i] + len]
+                        .iter()
+                        .map(|v| bf16::from_f32(*v).to_bits())
+                        .collect();
+                    if i == 1 || i == 2 {
+                        let original: Vec<_> = host[i][offsets[i]..offsets[i] + len]
+                            .iter()
+                            .map(|v| v.to_bits())
+                            .collect();
+                        assert_eq!(bits, original, "read-only buffer changed");
+                    } else {
+                        actual.push(bits);
+                    }
+                }
+                if let Some(expected) = &reference {
+                    assert_eq!(
+                        &actual, expected,
+                        "rows={rows}, amp={amp}, offsets={offsets:?}"
+                    );
+                } else {
+                    reference = Some(actual);
                 }
             }
         }
@@ -1592,3 +1677,10 @@ mod shared_suffix;
 mod vector_conv;
 
 mod wide_gdn;
+
+mod equivalent_tiles;
+
+mod batched_attention;
+
+#[path = "actual_row_gemm.rs"]
+mod actual_row_gemm;

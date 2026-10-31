@@ -705,6 +705,19 @@ pub struct PrefixState {
     bytes: usize,
 }
 
+#[path = "prefix_compaction.rs"]
+mod prefix_compaction;
+use prefix_compaction::{Compaction, Projection};
+#[path = "prefix_tree.rs"]
+mod prefix_tree;
+use prefix_tree::Tree;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WindowReadout {
+    Hidden,
+    StateOnly,
+}
+
 /// A packed suffix batch uses one freshly captured prefix and original algorithm.
 struct SuffixBatch<'a> {
     prefix: &'a PrefixState,
@@ -862,6 +875,10 @@ pub struct Model {
     /// Hidden rows and logits for `forward_multimodal_readout`'s vocabulary pass, and
     /// the host copy of the logits; allocated on first use.
     vocab_buffers: Option<(DeviceBuffer, DeviceBuffer, Vec<u8>)>,
+    /// Reusable row-index storage; contains no request values.
+    compaction_maps: Option<(usize, DeviceBuffer)>,
+    /// One layer's FP32 recurrent state and prefix V, overwritten on every use.
+    tree_workspace: Option<(usize, DeviceBuffer)>,
     /// Opt-in replay keyed by sequence lengths; bounded separately for each mode.
     graph_enabled: bool,
     graph_stats: GraphStats,
@@ -1035,6 +1052,8 @@ impl Model {
             scratch: None,
             shared: [None, None],
             vocab_buffers: None,
+            compaction_maps: None,
+            tree_workspace: None,
             graph_enabled: graph,
             graph_stats: GraphStats {
                 requested: graph,
@@ -1064,6 +1083,27 @@ impl Model {
         );
         self.packed_gemm = Some(cuda::api().packed_gemm()?);
         Ok(())
+    }
+
+    /// Opt into the backend's validated long-prefill output-tile equivalence.
+    /// Unsupported devices/libraries keep conservative algorithm matching.
+    pub fn enable_equivalent_projection_tiles(&mut self) -> Result<bool> {
+        ensure!(
+            self.scratch.is_none()
+                && self.reference.is_none()
+                && self.lora.is_none()
+                && self.fp32_gdn.is_none(),
+            "select projection tiles on a merged model before the first forward"
+        );
+        let Some(enable) = cuda::api().equivalent_tiles() else {
+            return Ok(false);
+        };
+        // SAFETY: the ordinary GEMM handle belongs to this unstarted model.
+        match unsafe { enable(self.gemm) } {
+            0 => Ok(false),
+            1 => Ok(true),
+            code => anyhow::bail!("projection tile setup failed: {code}"),
+        }
     }
 
     /// Opt into independent GDN batching before allocating any request buffers.
@@ -1392,6 +1432,53 @@ impl Model {
     /// Pack independent text prompts for input and gate/up GEMMs.
     /// Mixers reset at each boundary; final-position hidden states retain input order.
     pub fn forward_batch(&mut self, inputs: &[&[u32]]) -> Result<Vec<Vec<f32>>> {
+        self.forward_batch_layout(inputs, None)
+    }
+
+    /// Combine original candidate batches without changing their input/gate-up
+    /// GEMM algorithms. `groups` counts candidates in each original batch; mixer
+    /// boundaries and output/down projections still use each candidate's length.
+    pub fn forward_batch_preserving_groups(
+        &mut self,
+        inputs: &[&[u32]],
+        groups: &[usize],
+    ) -> Result<Vec<Vec<f32>>> {
+        ensure!(
+            !groups.is_empty()
+                && groups.iter().all(|&n| n > 0)
+                && groups.iter().try_fold(0usize, |a, &b| a.checked_add(b)) == Some(inputs.len()),
+            "invalid original candidate batch groups"
+        );
+        if groups.len() == 1 {
+            return self.forward_batch(inputs);
+        }
+        ensure!(
+            self.packed_gemm.is_some()
+                && self.lora.is_none()
+                && self.reference.is_none()
+                && self.fp32_gdn.is_none(),
+            "grouped batches require merged BF16 packed projections"
+        );
+        let mut start = 0;
+        let original_rows: Result<Vec<usize>> = groups
+            .iter()
+            .map(|&count| {
+                let rows = inputs[start..start + count]
+                    .iter()
+                    .try_fold(0usize, |a, ids| a.checked_add(ids.len()))
+                    .context("original batch row overflow");
+                start += count;
+                rows
+            })
+            .collect();
+        self.forward_batch_layout(inputs, Some(&original_rows?))
+    }
+
+    fn forward_batch_layout(
+        &mut self,
+        inputs: &[&[u32]],
+        original_rows: Option<&[usize]>,
+    ) -> Result<Vec<Vec<f32>>> {
         ensure!(!inputs.is_empty(), "empty batch");
         ensure!(
             inputs
@@ -1420,7 +1507,18 @@ impl Model {
         let ids: Vec<u32> = inputs.iter().flat_map(|ids| ids.iter().copied()).collect();
         self.embed_tokens(s, &ids)?;
         if self.graph_enabled {
-            if let Some((_, graph)) = self.graphs.iter().find(|(shape, _)| *shape == lengths) {
+            let graph_key = if let Some(rows) = original_rows {
+                // Zero cannot occur in a valid candidate length vector. Include both
+                // layouts: identical candidate lengths can have different input GEMMs.
+                let mut key = vec![0];
+                key.extend_from_slice(rows);
+                key.push(0);
+                key.extend_from_slice(&lengths);
+                key
+            } else {
+                lengths.clone()
+            };
+            if let Some((_, graph)) = self.graphs.iter().find(|(shape, _)| *shape == graph_key) {
                 graph.launch(self.stream)?;
                 self.graph_stats.replays += 1;
                 if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
@@ -1429,14 +1527,23 @@ impl Model {
             } else {
                 // Warm plans and keep the eager result: run() advances the residual
                 // in place, so replaying on this cache miss would advance it twice.
-                self.run(s, &lengths, false, false)?;
-                cuda::synchronize(self.stream)?;
-                let captured =
-                    cuda::Graph::capture(self.stream, || self.run(s, &lengths, false, false));
-                self.cache_graph(&lengths, false, captured)?;
+                self.run_with_layout(s, &lengths, false, false, None, original_rows, None, None)?;
+                // Pinned9B plans are warm after host submission. Capture records
+                // subsequent operations without executing them, so recording can
+                // overlap eager GPU work. Readback still retires that eager work.
+                if (self.cfg.hidden, self.cfg.intermediate, self.layers.len()) != (4096, 12288, 32)
+                    || self.reference.is_some()
+                    || self.lora.is_some()
+                {
+                    cuda::synchronize(self.stream)?;
+                }
+                let captured = cuda::Graph::capture(self.stream, || {
+                    self.run_with_layout(s, &lengths, false, false, None, original_rows, None, None)
+                });
+                self.cache_graph(&graph_key, false, t, captured)?;
             }
         } else {
-            self.run(s, &lengths, false, false)?;
+            self.run_with_layout(s, &lengths, false, false, None, original_rows, None, None)?;
         }
         let s = self.scratch.as_ref().unwrap();
         let mut end = 0;
@@ -1457,6 +1564,37 @@ impl Model {
         &mut self,
         inputs: &[&[u32]],
         prefix_len: usize,
+    ) -> Result<Option<SharedPrefixOutput>> {
+        self.shared_prefix_with_original_rows(inputs, prefix_len, None)
+    }
+
+    /// Share a prefix only when it also preserves the input/gate-up projections
+    /// of an existing packed forward. `packed_rows[i]` is the total row count of
+    /// the original batch containing candidate i. Output/down projections retain
+    /// each candidate's original row count. Incompatibility declines the whole
+    /// operation before computation, allowing the caller to run its original batches.
+    pub fn try_forward_shared_packed_prefix(
+        &mut self,
+        inputs: &[&[u32]],
+        prefix_len: usize,
+        packed_rows: &[usize],
+    ) -> Result<Option<SharedPrefixOutput>> {
+        ensure!(
+            packed_rows.len() == inputs.len()
+                && packed_rows
+                    .iter()
+                    .zip(inputs)
+                    .all(|(&rows, ids)| { rows >= ids.len() && rows <= i32::MAX as usize }),
+            "invalid original packed projection rows"
+        );
+        self.shared_prefix_with_original_rows(inputs, prefix_len, Some(packed_rows))
+    }
+
+    fn shared_prefix_with_original_rows(
+        &mut self,
+        inputs: &[&[u32]],
+        prefix_len: usize,
+        packed_rows: Option<&[usize]>,
     ) -> Result<Option<SharedPrefixOutput>> {
         ensure!(
             self.lora.is_none(),
@@ -1501,23 +1639,32 @@ impl Model {
                 Mixer::Linear(la) => (&la.in_proj, &la.out),
                 Mixer::Full(fa) => (&fa.qkv, &fa.o),
             };
-            for weight in [input, output, &layer.gate_up, &layer.down] {
-                shapes.insert((weight.shape[0], weight.shape[1]));
+            for (weight, packed) in [
+                (input, true),
+                (output, false),
+                (&layer.gate_up, true),
+                (&layer.down, false),
+            ] {
+                shapes.insert((weight.shape[0], weight.shape[1], packed));
             }
         }
         let gemm = self.gemm;
-        let Some(groups) = compatible_prefix_groups(inputs.len(), |indices| {
+        let compatible = |indices: &[usize]| {
             let originals: Vec<usize> = indices.iter().map(|&i| original_rows[i]).collect();
             let mut windows: Vec<usize> = originals.iter().map(|&n| n - prefix_len).collect();
             windows.push(prefix_len);
-            for &(n, k) in &shapes {
+            for &(n, k, packed) in &shapes {
+                let mut projection_rows = originals.clone();
+                if packed && let Some(rows) = packed_rows {
+                    projection_rows.extend(indices.iter().map(|&i| rows[i]));
+                }
                 // SAFETY: host arrays stay alive for the synchronous capability
                 // check. No device output or prefix state is produced here.
                 let rc = unsafe {
                     (reuse.check)(
                         gemm,
-                        originals.as_ptr(),
-                        originals.len(),
+                        projection_rows.as_ptr(),
+                        projection_rows.len(),
                         windows.as_ptr(),
                         windows.len(),
                         n as i32,
@@ -1530,9 +1677,20 @@ impl Model {
                 check(rc, "prefix projection compatibility")?;
             }
             Ok(true)
-        })?
-        else {
-            return Ok(None);
+        };
+        let all: Vec<usize> = (0..inputs.len()).collect();
+        let groups = if packed_rows.is_some() {
+            // Partial groups would change the input GEMM size of fallback
+            // candidates. Keep their entire original packing plan on rejection.
+            if !compatible(&all)? {
+                return Ok(None);
+            }
+            vec![all]
+        } else {
+            let Some(groups) = compatible_prefix_groups(inputs.len(), compatible)? else {
+                return Ok(None);
+            };
+            groups
         };
         let (capacity, mut state) = match self.text_prefix_workspace.take() {
             Some((capacity, state)) if capacity >= prefix_len => (capacity, state),
@@ -1562,7 +1720,7 @@ impl Model {
                     let target = [rows];
                     let mut packed = ops.is_some() && indices.len() > 1;
                     if packed {
-                        for &(n, k) in &shapes {
+                        for &(n, k, _) in &shapes {
                             // SAFETY: synchronous shape-only check, before prefix capture.
                             let rc = unsafe {
                                 (reuse.check)(
@@ -1603,6 +1761,13 @@ impl Model {
                     None,
                     self.gemm,
                     projection,
+                    if (self.cfg.hidden, self.cfg.intermediate, self.layers.len())
+                        == (4096, 12288, 32)
+                    {
+                        WindowReadout::StateOnly
+                    } else {
+                        WindowReadout::Hidden
+                    },
                 )?;
                 self.synchronize()?;
                 state.initialized = true;
@@ -1647,6 +1812,7 @@ impl Model {
                                 Some(&state),
                                 self.gemm,
                                 projection,
+                                WindowReadout::Hidden,
                             )?;
                             hidden[index] = self.last_hidden(s, ids.len())?;
                         }
@@ -1703,7 +1869,7 @@ impl Model {
                 self.run(s, &[t], true, false)?;
                 cuda::synchronize(self.stream)?;
                 let captured = cuda::Graph::capture(self.stream, || self.run(s, &[t], true, false));
-                self.cache_graph(&[t], true, captured)?;
+                self.cache_graph(&[t], true, t, captured)?;
             }
         } else {
             self.run(s, &[t], true, false)?;
@@ -1716,6 +1882,7 @@ impl Model {
         &mut self,
         lengths: &[usize],
         multimodal: bool,
+        tokens: usize,
         captured: Result<cuda::Graph>,
     ) -> Result<()> {
         let mode = if multimodal { "multimodal" } else { "text" };
@@ -1741,8 +1908,7 @@ impl Model {
                 }
                 cache.push_back((lengths.to_vec(), graph));
                 if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
-                    let t: usize = lengths.iter().sum();
-                    eprintln!("CUA_S1_GRAPH mode={mode} event=capture tokens={t}");
+                    eprintln!("CUA_S1_GRAPH mode={mode} event=capture tokens={tokens}");
                 }
             }
             Err(error) => {
@@ -1865,6 +2031,7 @@ impl Model {
             prefix,
             gemm,
             None,
+            WindowReadout::Hidden,
         )?;
         if let Some(cap) = capture {
             cap.initialized = true;
@@ -2148,7 +2315,17 @@ impl Model {
         self.upload_positions(s, input.position_ids)?;
         self.embed_tokens(s, input.token_ids)?;
         self.overwrite_image_rows(s, input, 0)?;
-        self.run_window(s, 0, t, true, Some(state), None, self.gemm, None)?;
+        self.run_window(
+            s,
+            0,
+            t,
+            true,
+            Some(state),
+            None,
+            self.gemm,
+            None,
+            WindowReadout::Hidden,
+        )?;
         self.synchronize()?;
         state.initialized = true;
         Ok(())
@@ -2199,6 +2376,7 @@ impl Model {
             Some(prefix),
             self.gemm,
             None,
+            WindowReadout::Hidden,
         )?;
         self.last_hidden(s, tend)
     }
@@ -2229,7 +2407,17 @@ impl Model {
         let gemm = self.fixed_gemm()?;
         let s = self.scratch.as_ref().unwrap();
         self.embed_tokens(s, ids)?;
-        self.run_window(s, 0, t, false, None, None, gemm, None)?;
+        self.run_window(
+            s,
+            0,
+            t,
+            false,
+            None,
+            None,
+            gemm,
+            None,
+            WindowReadout::Hidden,
+        )?;
         self.last_hidden(s, t)
     }
 
@@ -2256,7 +2444,17 @@ impl Model {
             let gemm = self.fixed_gemm()?;
             let s = self.scratch.as_ref().unwrap();
             self.embed_tokens(s, ids)?;
-            self.run_window(s, 0, ids.len(), false, Some(&mut *state), None, gemm, None)?;
+            self.run_window(
+                s,
+                0,
+                ids.len(),
+                false,
+                Some(&mut *state),
+                None,
+                gemm,
+                None,
+                WindowReadout::Hidden,
+            )?;
             self.synchronize()
         })();
         if result.is_err() {
@@ -2293,7 +2491,17 @@ impl Model {
             let gemm = self.fixed_gemm()?;
             let s = self.scratch.as_ref().unwrap();
             self.embed_tokens_at(s, rest, prefix.len)?;
-            self.run_window(s, prefix.len, tend, false, None, Some(prefix), gemm, None)?;
+            self.run_window(
+                s,
+                prefix.len,
+                tend,
+                false,
+                None,
+                Some(prefix),
+                gemm,
+                None,
+                WindowReadout::Hidden,
+            )?;
             self.last_hidden(s, tend)
         })();
         if result.is_err() {
@@ -2371,7 +2579,17 @@ impl Model {
             let request = match request {
                 Some(state) => {
                     self.embed_tokens(s, &runs.prefix)?;
-                    self.run_window(s, 0, p, false, Some(&mut *state), None, gemm, None)?;
+                    self.run_window(
+                        s,
+                        0,
+                        p,
+                        false,
+                        Some(&mut *state),
+                        None,
+                        gemm,
+                        None,
+                        WindowReadout::Hidden,
+                    )?;
                     Some(&*state)
                 }
                 None => None,
@@ -2386,7 +2604,17 @@ impl Model {
                     let state = group.as_deref_mut().unwrap();
                     state.len = start;
                     self.embed_tokens_at(s, &run.prefix, p)?;
-                    self.run_window(s, p, start, false, Some(&mut *state), request, gemm, None)?;
+                    self.run_window(
+                        s,
+                        p,
+                        start,
+                        false,
+                        Some(&mut *state),
+                        request,
+                        gemm,
+                        None,
+                        WindowReadout::Hidden,
+                    )?;
                     Some(&*state)
                 };
                 let rows = run
@@ -2395,7 +2623,17 @@ impl Model {
                     .map(|b| {
                         let end = start + b.len();
                         self.embed_tokens_at(s, b, start)?;
-                        self.run_window(s, start, end, false, None, from, gemm, None)?;
+                        self.run_window(
+                            s,
+                            start,
+                            end,
+                            false,
+                            None,
+                            from,
+                            gemm,
+                            None,
+                            WindowReadout::Hidden,
+                        )?;
                         self.last_hidden(s, end)
                     })
                     .collect::<Result<Vec<_>>>()?;
@@ -2762,6 +3000,30 @@ impl Model {
         bidirectional: bool,
         suffix: Option<&SuffixBatch<'_>>,
     ) -> Result<()> {
+        self.run_with_layout(
+            s,
+            lengths,
+            custom_positions,
+            bidirectional,
+            suffix,
+            None,
+            None,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)] // Original numerical layouts share one canonical layer loop.
+    fn run_with_layout(
+        &self,
+        s: &Scratch,
+        lengths: &[usize],
+        custom_positions: bool,
+        bidirectional: bool,
+        suffix: Option<&SuffixBatch<'_>>,
+        original_rows: Option<&[usize]>,
+        compaction: Option<&Compaction>,
+        tree: Option<&Tree>,
+    ) -> Result<()> {
         let bidir = if bidirectional {
             ensure!(
                 self.reference.is_none() && self.lora.is_none() && suffix.is_none(),
@@ -2786,6 +3048,7 @@ impl Model {
         let (ti, hi, eps) = (t as i32, cfg.hidden as i32, cfg.eps);
         let (kd, vd, hv) = (cfg.key_dim(), cfg.value_dim(), cfg.lin_v_heads);
         let (hq, hk, hd) = (cfg.heads as i32, cfg.kv_heads as i32, cfg.head_dim as i32);
+        let point_rows = compaction.map_or(t, |c| c.rows) as i32;
         let w = Widths::of(cfg);
         let p = |off: usize| s.at(off);
         let (cos, sin) = if custom_positions {
@@ -2794,31 +3057,65 @@ impl Model {
             let offset = suffix.map_or(0, |x| x.prefix.len * cfg.rotary_half * BF16);
             (s.cos + offset, s.sin + offset)
         };
-        let project = |x: usize, weight: &Tensor, y: usize, group: Option<Group>| {
-            if let Some(suffix) = suffix {
-                // SAFETY: combined rows were checked against the original algorithm;
-                // scratch owns the compact batch and all work uses the model stream.
-                unsafe {
-                    check(
-                        (suffix.gemm.run)(
-                            self.gemm,
-                            p(x),
-                            weight.ptr,
-                            p(y),
-                            t as i32,
-                            weight.shape[0] as i32,
-                            weight.shape[1] as i32,
-                            suffix.original_rows as i32,
-                            st,
-                        ),
-                        "packed suffix projection",
-                    )
+        let project =
+            |x: usize, weight: &Tensor, y: usize, group: Option<Group>, role: Projection| {
+                if let Some(tree) = tree {
+                    return tree.project(self, s, x, weight, y, role);
                 }
-            } else if let Some(group) = group {
-                self.gemm_group(s, x, weight, y, t, lengths, group)
-            } else {
-                self.gemm_sequences(s, x, weight, y, lengths)
-            }
+                if let Some(compact) = compaction {
+                    return compact.project(self, s, x, weight, y, role);
+                }
+                if let Some(suffix) = suffix {
+                    // SAFETY: combined rows were checked against the original algorithm;
+                    // scratch owns the compact batch and all work uses the model stream.
+                    unsafe {
+                        check(
+                            (suffix.gemm.run)(
+                                self.gemm,
+                                p(x),
+                                weight.ptr,
+                                p(y),
+                                t as i32,
+                                weight.shape[0] as i32,
+                                weight.shape[1] as i32,
+                                suffix.original_rows as i32,
+                                st,
+                            ),
+                            "packed suffix projection",
+                        )
+                    }
+                } else if let Some(group) = group {
+                    if let Some(rows) = original_rows {
+                        self.gemm_sequences(s, x, weight, y, rows)
+                    } else {
+                        self.gemm_group(s, x, weight, y, t, lengths, group)
+                    }
+                } else {
+                    self.gemm_sequences(s, x, weight, y, lengths)
+                }
+            };
+        // Batch only independent default 9B causal sequences. Other numerical
+        // modes and old libraries retain their original per-sequence entry points.
+        let attention_batch = if (
+            cfg.hidden,
+            cfg.intermediate,
+            self.layers.len(),
+            cfg.heads,
+            cfg.kv_heads,
+            cfg.head_dim,
+        ) == (4096, 12288, 32, 16, 4, 256)
+            && self.packed_gemm.is_some()
+            && self.reference.is_none()
+            && self.lora.is_none()
+            && self.fp32_gdn.is_none()
+            && suffix.is_none()
+            && tree.is_none()
+            && !bidirectional
+            && (2..=16).contains(&lengths.len())
+        {
+            cuda::api().batched_attention()
+        } else {
+            None
         };
         let mut linear_index = 0;
         let mut attention_index = 0;
@@ -2832,7 +3129,7 @@ impl Model {
                     p(s.res),
                     self.layers[0].input_norm.ptr,
                     p(s.x),
-                    ti,
+                    point_rows,
                     hi,
                     eps,
                     st,
@@ -2851,125 +3148,74 @@ impl Model {
         for (i, layer) in self.layers.iter().enumerate() {
             match &layer.mixer {
                 Mixer::Linear(la) => {
-                    project(s.x, &la.in_proj, s.gdn_in, Some(Group::LinearInput))?;
+                    project(
+                        s.x,
+                        &la.in_proj,
+                        s.gdn_in,
+                        Some(Group::LinearInput),
+                        Projection::MixerInput,
+                    )?;
                     self.apply_lora(i, Group::LinearInput, s, s.x, s.gdn_in, lengths)?;
-                    let ld = w.gdn_in as i32;
-                    let z = s.gdn_in + w.conv * BF16;
-                    let b = z + vd * BF16;
-                    let a = b + hv * BF16;
-                    unsafe {
-                        for &(offset, length) in &sequences {
-                            check(
-                                if let Some(suffix) = suffix {
-                                    (suffix.ops.conv)(
-                                        p(s.gdn_in + offset * w.gdn_in * BF16),
-                                        suffix.prefix.conv_tail[linear_index].at(0),
-                                        ld,
-                                        la.conv.ptr,
-                                        p(s.lq + offset * kd * BF16),
-                                        p(s.lk + offset * kd * BF16),
-                                        p(s.lv + offset * vd * BF16),
-                                        length,
-                                        kd as i32,
-                                        vd as i32,
-                                        st,
-                                    )
-                                } else {
-                                    (convolution)(
-                                        p(s.gdn_in + offset * w.gdn_in * BF16),
-                                        ld,
-                                        la.conv.ptr,
-                                        p(s.lq + offset * kd * BF16),
-                                        p(s.lk + offset * kd * BF16),
-                                        p(s.lv + offset * vd * BF16),
-                                        length,
-                                        kd as i32,
-                                        vd as i32,
-                                        st,
-                                    )
-                                },
-                                "gdn conv",
-                            )?;
-                        }
-                        check(
-                            (cuda::api().cs1_gdn_gates)(
-                                p(b),
-                                p(a),
-                                ld,
-                                la.a_log.ptr,
-                                la.dt_bias.ptr,
-                                p(s.beta),
-                                p(s.g).cast(),
-                                ti,
-                                hv as i32,
-                                st,
-                            ),
-                            "gdn gates",
-                        )?;
-                        if let Some(suffix) = suffix {
+                    if let Some(tree) = tree {
+                        tree.linear(self, s, la, lengths)?;
+                    } else {
+                        let ld = w.gdn_in as i32;
+                        let z = s.gdn_in + w.conv * BF16;
+                        let b = z + vd * BF16;
+                        let a = b + hv * BF16;
+                        unsafe {
                             for &(offset, length) in &sequences {
                                 check(
-                                    (cuda::api().cs1_gdn_prefill_x)(
-                                        p(s.lq + offset * kd * BF16),
-                                        p(s.lk + offset * kd * BF16),
-                                        p(s.lv + offset * vd * BF16),
-                                        p(s.g + offset * hv * F32).cast(),
-                                        p(s.beta + offset * hv * BF16),
-                                        p(s.lo + offset * vd * BF16),
-                                        p(s.workspace).cast(),
-                                        length,
-                                        hv as i32,
-                                        cfg.lin_k_heads as i32,
-                                        (cfg.lin_k_dim as f32).powf(-0.5),
-                                        suffix.prefix.gdn_state[linear_index].at(0),
-                                        std::ptr::null_mut(),
-                                        st,
-                                    ),
-                                    "suffix GDN prefill",
-                                )?;
-                            }
-                        } else if let Some(gdn) = &self.batched_gdn
-                            && (2..=16).contains(&lengths.len())
-                        {
-                            check(
-                                (gdn.run)(
-                                    p(s.lq),
-                                    p(s.lk),
-                                    p(s.lv),
-                                    p(s.g).cast(),
-                                    p(s.beta),
-                                    p(s.lo),
-                                    p(s.workspace).cast(),
-                                    s.workspace_bytes,
-                                    lengths.as_ptr(),
-                                    lengths.len(),
-                                    hv as i32,
-                                    cfg.lin_k_heads as i32,
-                                    (cfg.lin_k_dim as f32).powf(-0.5),
-                                    st,
-                                ),
-                                "batched GDN prefill",
-                            )?;
-                        } else {
-                            for &(offset, length) in &sequences {
-                                check(
-                                    if let Some(gdn) = &self.fp32_gdn {
-                                        gdn.run(
+                                    if let Some(suffix) = suffix {
+                                        (suffix.ops.conv)(
+                                            p(s.gdn_in + offset * w.gdn_in * BF16),
+                                            suffix.prefix.conv_tail[linear_index].at(0),
+                                            ld,
+                                            la.conv.ptr,
                                             p(s.lq + offset * kd * BF16),
                                             p(s.lk + offset * kd * BF16),
                                             p(s.lv + offset * vd * BF16),
-                                            p(s.g + offset * hv * F32).cast(),
-                                            p(s.beta + offset * hv * BF16),
-                                            p(s.lo + offset * vd * BF16),
-                                            p(s.workspace).cast(),
                                             length,
-                                            hv as i32,
-                                            cfg.lin_k_heads as i32,
-                                            (cfg.lin_k_dim as f32).powf(-0.5),
+                                            kd as i32,
+                                            vd as i32,
                                             st,
                                         )
                                     } else {
-                                        gdn_prefill(
+                                        (convolution)(
+                                            p(s.gdn_in + offset * w.gdn_in * BF16),
+                                            ld,
+                                            la.conv.ptr,
+                                            p(s.lq + offset * kd * BF16),
+                                            p(s.lk + offset * kd * BF16),
+                                            p(s.lv + offset * vd * BF16),
+                                            length,
+                                            kd as i32,
+                                            vd as i32,
+                                            st,
+                                        )
+                                    },
+                                    "gdn conv",
+                                )?;
+                            }
+                            check(
+                                (cuda::api().cs1_gdn_gates)(
+                                    p(b),
+                                    p(a),
+                                    ld,
+                                    la.a_log.ptr,
+                                    la.dt_bias.ptr,
+                                    p(s.beta),
+                                    p(s.g).cast(),
+                                    ti,
+                                    hv as i32,
+                                    st,
+                                ),
+                                "gdn gates",
+                            )?;
+                            if let Some(suffix) = suffix {
+                                for &(offset, length) in &sequences {
+                                    check(
+                                        (cuda::api().cs1_gdn_prefill_x)(
                                             p(s.lq + offset * kd * BF16),
                                             p(s.lk + offset * kd * BF16),
                                             p(s.lv + offset * vd * BF16),
@@ -2981,136 +3227,232 @@ impl Model {
                                             hv as i32,
                                             cfg.lin_k_heads as i32,
                                             (cfg.lin_k_dim as f32).powf(-0.5),
+                                            suffix.prefix.gdn_state[linear_index].at(0),
+                                            std::ptr::null_mut(),
                                             st,
-                                        )
-                                    },
-                                    "gdn prefill",
+                                        ),
+                                        "suffix GDN prefill",
+                                    )?;
+                                }
+                            } else if let Some(gdn) = &self.batched_gdn
+                                && (2..=16).contains(&lengths.len())
+                            {
+                                check(
+                                    (gdn.run)(
+                                        p(s.lq),
+                                        p(s.lk),
+                                        p(s.lv),
+                                        p(s.g).cast(),
+                                        p(s.beta),
+                                        p(s.lo),
+                                        p(s.workspace).cast(),
+                                        s.workspace_bytes,
+                                        lengths.as_ptr(),
+                                        lengths.len(),
+                                        hv as i32,
+                                        cfg.lin_k_heads as i32,
+                                        (cfg.lin_k_dim as f32).powf(-0.5),
+                                        st,
+                                    ),
+                                    "batched GDN prefill",
                                 )?;
+                            } else {
+                                for &(offset, length) in &sequences {
+                                    check(
+                                        if let Some(gdn) = &self.fp32_gdn {
+                                            gdn.run(
+                                                p(s.lq + offset * kd * BF16),
+                                                p(s.lk + offset * kd * BF16),
+                                                p(s.lv + offset * vd * BF16),
+                                                p(s.g + offset * hv * F32).cast(),
+                                                p(s.beta + offset * hv * BF16),
+                                                p(s.lo + offset * vd * BF16),
+                                                p(s.workspace).cast(),
+                                                length,
+                                                hv as i32,
+                                                cfg.lin_k_heads as i32,
+                                                (cfg.lin_k_dim as f32).powf(-0.5),
+                                                st,
+                                            )
+                                        } else {
+                                            gdn_prefill(
+                                                p(s.lq + offset * kd * BF16),
+                                                p(s.lk + offset * kd * BF16),
+                                                p(s.lv + offset * vd * BF16),
+                                                p(s.g + offset * hv * F32).cast(),
+                                                p(s.beta + offset * hv * BF16),
+                                                p(s.lo + offset * vd * BF16),
+                                                p(s.workspace).cast(),
+                                                length,
+                                                hv as i32,
+                                                cfg.lin_k_heads as i32,
+                                                (cfg.lin_k_dim as f32).powf(-0.5),
+                                                st,
+                                            )
+                                        },
+                                        "gdn prefill",
+                                    )?;
+                                }
                             }
+                            check(
+                                (cuda::api().cs1_gated_rms_norm)(
+                                    p(s.lo),
+                                    p(z),
+                                    ld,
+                                    la.norm.ptr,
+                                    p(s.ln),
+                                    ti,
+                                    hv as i32,
+                                    cfg.lin_v_dim as i32,
+                                    eps,
+                                    st,
+                                ),
+                                "gated norm",
+                            )?;
                         }
-                        check(
-                            (cuda::api().cs1_gated_rms_norm)(
-                                p(s.lo),
-                                p(z),
-                                ld,
-                                la.norm.ptr,
-                                p(s.ln),
-                                ti,
-                                hv as i32,
-                                cfg.lin_v_dim as i32,
-                                eps,
-                                st,
-                            ),
-                            "gated norm",
-                        )?;
                     }
-                    project(s.ln, &la.out, s.delta, None)?;
+                    project(s.ln, &la.out, s.delta, None, Projection::MixerOutput)?;
                     self.apply_lora(i, Group::LinearOutput, s, s.ln, s.delta, lengths)?;
                     linear_index += 1;
                 }
                 Mixer::Full(fa) => {
-                    project(s.x, &fa.qkv, s.attn_in, Some(Group::AttentionInput))?;
+                    project(
+                        s.x,
+                        &fa.qkv,
+                        s.attn_in,
+                        Some(Group::AttentionInput),
+                        Projection::MixerInput,
+                    )?;
                     self.apply_lora(i, Group::AttentionInput, s, s.x, s.attn_in, lengths)?;
-                    let ld = w.attn_in as i32;
-                    let k = s.attn_in + w.attn_q * BF16;
-                    let v = k + cfg.kv_heads * cfg.head_dim * BF16;
-                    unsafe {
-                        for &(offset, length) in &sequences {
-                            check(
-                                (self
-                                    .reference
-                                    .map_or(cuda::api().cs1_attn_prep, |r| r.attn_prep))(
-                                    p(s.attn_in + offset * w.attn_in * BF16),
-                                    p(k + offset * w.attn_in * BF16),
-                                    ld,
-                                    fa.q_norm.ptr,
-                                    fa.k_norm.ptr,
-                                    p(cos),
-                                    p(sin),
-                                    p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
-                                    p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
-                                    p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
-                                    length,
-                                    hq,
-                                    hk,
-                                    hd,
-                                    cfg.rotary_half as i32,
-                                    eps,
-                                    st,
-                                ),
-                                "attention prep",
-                            )?;
-                            let scale = (cfg.head_dim as f32).powf(-0.5);
-                            check(
-                                if let Some(suffix) = suffix {
-                                    (suffix.ops.attention)(
-                                        p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
-                                        p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
-                                        p(v + offset * w.attn_in * BF16),
+                    if let Some(tree) = tree {
+                        tree.attention(self, s, fa, lengths)?;
+                    } else {
+                        let ld = w.attn_in as i32;
+                        let k = s.attn_in + w.attn_q * BF16;
+                        let v = k + cfg.kv_heads * cfg.head_dim * BF16;
+                        unsafe {
+                            for &(offset, length) in &sequences {
+                                check(
+                                    (self
+                                        .reference
+                                        .map_or(cuda::api().cs1_attn_prep, |r| r.attn_prep))(
+                                        p(s.attn_in + offset * w.attn_in * BF16),
+                                        p(k + offset * w.attn_in * BF16),
                                         ld,
+                                        fa.q_norm.ptr,
+                                        fa.k_norm.ptr,
+                                        p(cos),
+                                        p(sin),
+                                        p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
                                         p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
-                                        p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
-                                        suffix.prefix.attn_kv[attention_index].0.at(0),
-                                        suffix.prefix.attn_kv[attention_index].1.at(0),
+                                        p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
                                         length,
-                                        suffix.prefix.len as i32,
+                                        hq,
+                                        hk,
+                                        hd,
+                                        cfg.rotary_half as i32,
+                                        eps,
+                                        st,
+                                    ),
+                                    "attention prep",
+                                )?;
+                                // Every preparation writes disjoint rows. A single
+                                // attention launch below waits for all of them.
+                                if attention_batch.is_some() {
+                                    continue;
+                                }
+                                let scale = (cfg.head_dim as f32).powf(-0.5);
+                                check(
+                                    if let Some(suffix) = suffix {
+                                        (suffix.ops.attention)(
+                                            p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
+                                            p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
+                                            p(v + offset * w.attn_in * BF16),
+                                            ld,
+                                            p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
+                                            p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
+                                            suffix.prefix.attn_kv[attention_index].0.at(0),
+                                            suffix.prefix.attn_kv[attention_index].1.at(0),
+                                            length,
+                                            suffix.prefix.len as i32,
+                                            hq,
+                                            hk,
+                                            hd,
+                                            (cfg.head_dim as f32).powf(-0.5),
+                                            st,
+                                        )
+                                    } else if let Some(bidir) = bidir {
+                                        (bidir)(
+                                            p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
+                                            p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
+                                            p(v + offset * w.attn_in * BF16),
+                                            ld,
+                                            p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
+                                            p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
+                                            length,
+                                            hq,
+                                            hk,
+                                            hd,
+                                            scale,
+                                            st,
+                                        )
+                                    } else if let Some(reference) = self.reference {
+                                        (reference.attention)(
+                                            p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
+                                            p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
+                                            p(v + offset * w.attn_in * BF16),
+                                            ld,
+                                            p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
+                                            p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
+                                            length,
+                                            hq,
+                                            hk,
+                                            scale,
+                                            p(s.workspace),
+                                            st,
+                                        )
+                                    } else {
+                                        (cuda::api().cs1_attention_gated)(
+                                            p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
+                                            p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
+                                            p(v + offset * w.attn_in * BF16),
+                                            ld,
+                                            p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
+                                            p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
+                                            length,
+                                            hq,
+                                            hk,
+                                            hd,
+                                            scale,
+                                            st,
+                                        )
+                                    },
+                                    "gated attention",
+                                )?;
+                            }
+                            if let Some(batch) = attention_batch {
+                                check(
+                                    batch(
+                                        p(s.aq),
+                                        p(s.ak),
+                                        p(v),
+                                        ld,
+                                        p(s.agate),
+                                        p(s.ao),
+                                        lengths.as_ptr(),
+                                        lengths.len(),
                                         hq,
                                         hk,
                                         hd,
                                         (cfg.head_dim as f32).powf(-0.5),
                                         st,
-                                    )
-                                } else if let Some(bidir) = bidir {
-                                    (bidir)(
-                                        p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
-                                        p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
-                                        p(v + offset * w.attn_in * BF16),
-                                        ld,
-                                        p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
-                                        p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
-                                        length,
-                                        hq,
-                                        hk,
-                                        hd,
-                                        scale,
-                                        st,
-                                    )
-                                } else if let Some(reference) = self.reference {
-                                    (reference.attention)(
-                                        p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
-                                        p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
-                                        p(v + offset * w.attn_in * BF16),
-                                        ld,
-                                        p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
-                                        p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
-                                        length,
-                                        hq,
-                                        hk,
-                                        scale,
-                                        p(s.workspace),
-                                        st,
-                                    )
-                                } else {
-                                    (cuda::api().cs1_attention_gated)(
-                                        p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
-                                        p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
-                                        p(v + offset * w.attn_in * BF16),
-                                        ld,
-                                        p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
-                                        p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
-                                        length,
-                                        hq,
-                                        hk,
-                                        hd,
-                                        scale,
-                                        st,
-                                    )
-                                },
-                                "gated attention",
-                            )?;
+                                    ),
+                                    "batched causal attention",
+                                )?;
+                            }
                         }
                     }
-                    project(s.ao, &fa.o, s.delta, None)?;
+                    project(s.ao, &fa.o, s.delta, None, Projection::MixerOutput)?;
                     self.apply_lora(i, Group::AttentionOutput, s, s.ao, s.delta, lengths)?;
                     attention_index += 1;
                 }
@@ -3129,7 +3471,7 @@ impl Model {
                         p(s.delta),
                         layer.post_norm.ptr,
                         p(s.x),
-                        ti,
+                        point_rows,
                         hi,
                         eps,
                         st,
@@ -3137,7 +3479,13 @@ impl Model {
                     "post-attention norm",
                 )?;
             }
-            project(s.x, &layer.gate_up, s.gate_up, Some(Group::GateUp))?;
+            project(
+                s.x,
+                &layer.gate_up,
+                s.gate_up,
+                Some(Group::GateUp),
+                Projection::GateUp,
+            )?;
             self.apply_lora(i, Group::GateUp, s, s.x, s.gate_up, lengths)?;
             unsafe {
                 check(
@@ -3145,14 +3493,14 @@ impl Model {
                         p(s.gate_up),
                         (2 * cfg.intermediate) as i32,
                         p(s.act),
-                        ti,
+                        point_rows,
                         cfg.intermediate as i32,
                         st,
                     ),
                     "silu mul",
                 )?;
             }
-            project(s.act, &layer.down, s.delta, None)?;
+            project(s.act, &layer.down, s.delta, None, Projection::Down)?;
             self.apply_lora(i, Group::Down, s, s.act, s.delta, lengths)?;
             let next = self
                 .layers
@@ -3167,7 +3515,7 @@ impl Model {
                         p(s.delta),
                         next.ptr,
                         p(s.x),
-                        ti,
+                        point_rows,
                         hi,
                         eps,
                         st,
@@ -3204,6 +3552,7 @@ impl Model {
         prefix: Option<&PrefixState>,
         gemm: *mut c_void,
         reuse: Option<(cuda::ReuseGemm, usize)>,
+        readout: WindowReadout,
     ) -> Result<()> {
         ensure!(
             self.fp32_gdn.is_none(),
@@ -3214,6 +3563,11 @@ impl Model {
                 && prefix.map_or(qb == 0, |pre| pre.len == qb)
                 && capture.as_deref().is_none_or(|cap| cap.len == tend),
             "prefix window shape"
+        );
+        ensure!(
+            readout != WindowReadout::StateOnly
+                || (capture.is_some() && prefix.is_none() && !custom_positions && reuse.is_some()),
+            "state-only execution requires an exact text-prefix capture"
         );
         let cfg = &self.cfg;
         let st = self.stream;
@@ -3466,6 +3820,11 @@ impl Model {
                             // K must be post-prep (normed + rotary); V is the raw column.
                             cuda::copy_dd(cap.attn_kv[fa_i].0.at(0), p(s.ak), tend * kvb, st)?;
                             cuda::copy2d(cap.attn_kv[fa_i].1.at(0), kvb, p(v), ab, kvb, tend, st)?;
+                            if readout == WindowReadout::StateOnly && i + 1 == self.layers.len() {
+                                // The suffix consumes K/V, not final prefix hidden rows.
+                                // The caller synchronizes these copies before publishing state.
+                                return Ok(());
+                            }
                         }
                         check(
                             (cuda::api().cs1_attention_gated_prefix)(
@@ -3497,6 +3856,9 @@ impl Model {
                     )?;
                     fa_i += 1;
                 }
+            }
+            if readout == WindowReadout::StateOnly && i + 1 == self.layers.len() {
+                return Ok(());
             }
             unsafe {
                 check(
@@ -3596,3 +3958,15 @@ mod prefix_group_tests;
 #[cfg(test)]
 #[path = "../../../../../tests/qwen3_5/last_mlp.rs"]
 mod last_mlp_tests;
+
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/capture_only.rs"]
+mod capture_only_tests;
+
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/prefix_tree.rs"]
+mod prefix_tree_tests;
+
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/tree_graph.rs"]
+mod tree_graph_tests;

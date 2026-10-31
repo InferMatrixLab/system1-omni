@@ -131,9 +131,11 @@ fn exports_select_their_pinned_checkpoint() {
 }
 
 #[test]
-fn only_validated_checkpoints_pack_candidates() {
+fn packing_and_legacy_prefix_reuse_are_independent() {
     assert!(OPEN_JEV_27B.pack_candidates);
-    assert!(!OPEN_JEV_9B.pack_candidates);
+    assert!(OPEN_JEV_9B.pack_candidates);
+    assert!(OPEN_JEV_27B.share_packed_prefix);
+    assert!(!OPEN_JEV_9B.share_packed_prefix);
 }
 
 #[test]

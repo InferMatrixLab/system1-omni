@@ -25,3 +25,7 @@ path = "../../../../tests/open_jev/prefill_batch.rs"
 [[test]]
 name = "prefix"
 path = "../../../../tests/open_jev/prefix.rs"
+
+[[test]]
+name = "packing_parity"
+path = "../../../../tests/open_jev/packing_parity.rs"

@@ -661,9 +661,9 @@ __global__ void __launch_bounds__(THREADS) gdn_batch_prep(
                        v + offset * H * V, g + offset * H, beta + offset * H,
                        sequence.ws, sequence.tokens, H, HK, scale, (sequence.tokens + C - 1) / C);
 }
-__global__ void __launch_bounds__(ST_THREADS) gdn_batch_state(Batch batch) {
+__global__ void __launch_bounds__(ST_THREADS) gdn_batch_state(Batch batch, const float* state) {
     const auto sequence = batch.sequences[blockIdx.z];
-    gdn_chunk_state_body(sequence.ws, (sequence.tokens + C - 1) / C, nullptr, nullptr);
+    gdn_chunk_state_body(sequence.ws, (sequence.tokens + C - 1) / C, state, nullptr);
 }
 __global__ void __launch_bounds__(OUT_THREADS) gdn_batch_out(Batch batch, bf16* o, int H) {
     const auto sequence = batch.sequences[blockIdx.z];
@@ -786,9 +786,10 @@ size_t cs1_gdn_batch_workspace_floats(int tokens, int H, int count) {
     return (Layout(tokens + (count - 1) * (C - 1), H).total + count * 9 * 256 + 3) / 4;
 }
 
-int cs1_gdn_prefill_batch(const void* q, const void* k, const void* v, const float* g,
+int cs1_gdn_prefill_batch_shared(const void* q, const void* k, const void* v, const float* g,
                          const void* beta, void* o, float* workspace, size_t workspace_bytes,
-                         const size_t* lengths, size_t count, int H, int HK, float scale, void* stream) {
+                         const size_t* lengths, size_t count, int H, int HK, float scale,
+                         const void* state, void* stream) {
     if (!q || !k || !v || !g || !beta || !o || !workspace || !lengths || !count ||
         count > MAX_SEQUENCES || H <= 0 || HK <= 0 || H % HK != 0) return cudaErrorInvalidValue;
     Batch batch{};
@@ -817,9 +818,17 @@ int cs1_gdn_prefill_batch(const void* q, const void* k, const void* v, const flo
     gdn_batch_prep<<<dim3(chunks, H, count), THREADS, SMEM1_BYTES, st>>>(
         static_cast<const bf16*>(q), static_cast<const bf16*>(k), static_cast<const bf16*>(v), g,
         static_cast<const bf16*>(beta), batch, H, HK, scale);
-    gdn_batch_state<<<dim3(H, V / BVS, count), ST_THREADS, SMEM2_BYTES, st>>>(batch);
+    gdn_batch_state<<<dim3(H, V / BVS, count), ST_THREADS, SMEM2_BYTES, st>>>(batch, static_cast<const float*>(state));
     gdn_batch_out<<<dim3(chunks, H, count), OUT_THREADS, SMEM3_BYTES, st>>>(batch, static_cast<bf16*>(o), H);
     return cudaGetLastError();
+}
+
+// Legacy independent sequences use the same arithmetic with a zero initial state.
+int cs1_gdn_prefill_batch(const void* q, const void* k, const void* v, const float* g,
+                         const void* beta, void* o, float* workspace, size_t workspace_bytes,
+                         const size_t* lengths, size_t count, int H, int HK, float scale, void* stream) {
+    return cs1_gdn_prefill_batch_shared(q, k, v, g, beta, o, workspace, workspace_bytes,
+                                      lengths, count, H, HK, scale, nullptr, stream);
 }
 
 }  // extern "C"

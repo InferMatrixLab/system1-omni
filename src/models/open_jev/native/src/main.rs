@@ -21,6 +21,19 @@ fn error(status: StatusCode, message: impl ToString) -> Response {
     (status, Json(json!({"error": message.to_string()}))).into_response()
 }
 
+fn health_response(model: &str, available: bool) -> Response {
+    let (status, state) = if available {
+        (StatusCode::OK, "ready")
+    } else {
+        (StatusCode::SERVICE_UNAVAILABLE, "failed")
+    };
+    (status, Json(json!({"status": state, "model": model}))).into_response()
+}
+
+async fn health(State(engine): State<Arc<Engine>>) -> Response {
+    health_response(engine.checkpoint.model_id, engine.is_available())
+}
+
 async fn decide(engine: &Engine, raw: &[u8]) -> Response {
     let prepared = match engine.processor.prepare(raw) {
         Ok(prepared) => prepared,
@@ -83,12 +96,8 @@ async fn main() -> Result<()> {
     let port: u16 = std::env::var("OPEN_JEV_PORT")
         .map_or(Ok(8000), |v| v.parse())
         .context("OPEN_JEV_PORT")?;
-    let model = engine.checkpoint.model_id;
     let app = Router::new()
-        .route(
-            "/health",
-            get(move || async move { Json(json!({"status": "ready", "model": model})) }),
-        )
+        .route("/health", get(health))
         .route("/v1/systemone", post(systemone))
         .layer(DefaultBodyLimit::max(4 << 20))
         .with_state(engine);
@@ -97,3 +106,7 @@ async fn main() -> Result<()> {
     axum::serve(listener, app).await?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "../../../../../tests/open_jev/health.rs"]
+mod tests;
