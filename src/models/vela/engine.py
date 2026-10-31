@@ -208,10 +208,16 @@ def verify_no_foreign_runtime(root: Path) -> None:
 
     for name in RUNTIME_MODULES:
         loaded = sys.modules.get(name)
-        if loaded is not None and Path(loaded.__file__).resolve().parent != Path(root).resolve():
+        if loaded is None:
+            continue
+        origin = getattr(loaded, "__file__", None)
+        if origin is None or Path(origin).resolve().parent != Path(root).resolve():
+            # A module without a file is a namespace package or a
+            # builtin; either way it is not this package's flat module.
             raise ValueError(
-                f"a {name} module from another package directory is already "
-                "imported in this process; serve one package per process"
+                f"a {name} module from another package directory (or a namespace "
+                "package) is already imported in this process; "
+                "serve one package per process"
             )
 
 
