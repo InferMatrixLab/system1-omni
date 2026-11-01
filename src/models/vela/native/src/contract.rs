@@ -26,7 +26,7 @@ pub struct RequestError {
 }
 
 impl RequestError {
-    fn detail(status: u16, message: &str) -> Self {
+    pub(crate) fn detail(status: u16, message: &str) -> Self {
         Self {
             status,
             body: json!({"detail": message}),

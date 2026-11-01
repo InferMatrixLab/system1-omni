@@ -1,7 +1,8 @@
 //! Debug helper: compare the rendered rows against one fixture and
 //! print the first differing field. Run with:
 //!
-//!     VELA_NATIVE_BUNDLE=/abs/path cargo run -p omni-vela-native --example parity -- example-request
+//!     VELA_NATIVE_BUNDLE=/abs/path VELA_NATIVE_MANIFEST_SHA256=<exporter's digest> \
+//!       cargo run -p omni-vela-native --example parity -- example-request
 
 use std::path::PathBuf;
 
@@ -12,6 +13,8 @@ fn main() {
     let bundle = PathBuf::from(
         std::env::var("VELA_NATIVE_BUNDLE").expect("VELA_NATIVE_BUNDLE points at the export"),
     );
+    let anchor = std::env::var("VELA_NATIVE_MANIFEST_SHA256")
+        .expect("VELA_NATIVE_MANIFEST_SHA256 is the manifest digest the exporter prints");
     let fixture: Value = serde_json::from_str(
         &std::fs::read_to_string(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -22,7 +25,7 @@ fn main() {
     )
     .expect("fixture json");
 
-    let processor = omni_vela_native::processing::Processor::load(&bundle).expect("load");
+    let processor = omni_vela_native::processing::Processor::load(&bundle, &anchor).expect("load");
     let request = fixture["request"].as_object().expect("request");
     match processor.plan(request) {
         Ok(planned) => {
