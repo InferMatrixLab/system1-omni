@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -14,8 +14,9 @@ from models.vela import hybrid
 from .test_hybrid import build_package, small_files
 
 
+@pytest.mark.parametrize("exporter_name", ["export_token_plan", "export_head_inputs"])
 @pytest.mark.parametrize("preload_runtime", [False, True])
-def test_token_plan_exporter_keeps_package_verifiable(tmp_path, monkeypatch, preload_runtime):
+def test_exporter_keeps_package_verifiable(tmp_path, monkeypatch, exporter_name, preload_runtime):
     package = tmp_path / "package"
     package.mkdir()
     files = small_files()
@@ -34,6 +35,8 @@ class Vela2:
     # The test covers imports and initialization only; no numerical library
     # is needed by the empty case list.
     monkeypatch.setitem(sys.modules, "numpy", ModuleType("numpy"))
+    monkeypatch.setitem(sys.modules, "safetensors", ModuleType("safetensors"))
+    monkeypatch.setitem(sys.modules, "safetensors.numpy", SimpleNamespace(save_file=None))
     monkeypatch.setattr(sys, "path", sys.path.copy())
     monkeypatch.setattr(sys, "dont_write_bytecode", False)
     for name in ("vela2_inference", "configuration_vela2", "modeling_vela2"):
@@ -46,11 +49,13 @@ class Vela2:
         exec(files["vela2_inference.py"], runtime.__dict__)
         monkeypatch.setitem(sys.modules, "vela2_inference", runtime)
 
-    path = Path(__file__).resolve().parents[2] / "recipe" / "vela" / "export_token_plan.py"
-    spec = importlib.util.spec_from_file_location("export_token_plan", path)
+    path = Path(__file__).resolve().parents[2] / "recipe" / "vela" / f"{exporter_name}.py"
+    spec = importlib.util.spec_from_file_location(exporter_name, path)
     exporter = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(exporter)
     monkeypatch.setattr(exporter, "cases", lambda: [])
+    if exporter_name == "export_head_inputs":
+        monkeypatch.setattr(exporter, "Recorder", lambda *_args: None)
 
     args = ["--model", str(package), "--out", str(tmp_path / "fixtures")]
     for _ in range(2):
