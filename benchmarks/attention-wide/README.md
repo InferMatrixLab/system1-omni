@@ -1,9 +1,10 @@
 # 128-query attention tile
 
-The causal full pass and 128-aligned prefix windows of at least 640 query rows
-use a 128-query, 256-thread block instead of 64 queries and 128 threads on sm_89
-and sm_120. Each query row keeps the same 32-key tile walk and epilogue, so the
-outputs are byte-identical; only occupancy and K/V reuse change. Code:
+The full pass (causal or bidirectional) and 128-aligned causal prefix windows of
+at least 640 query rows use a 128-query, 256-thread block instead of 64 queries
+and 128 threads on sm_89 and sm_120. Each query row keeps the same 32-key tile
+walk and epilogue, so the outputs are byte-identical; only occupancy and K/V
+reuse change. Code:
 [`attention.cu`](../../src/backends/cuda/qwen3_5/attention.cu).
 
 ## Why
@@ -59,14 +60,15 @@ rows up. Per-trial medians and delta ranges are in [`results.json`](results.json
 
 - Measured on one L20 and one RTX 5060 Laptop. `H200`/sm_90 is unverified and
   stays on the 64-query tile.
-- The shared-prefix kernel and the batch entry points are unchanged;
-  `cs1_attention_gated_prefix` uses the wider tile only when `q_base % 128 == 0`.
+- `cs1_attention_gated_shared` keeps 64 queries; `cs1_attention_gated_prefix`
+  uses the wider tile only when `q_base % 128 == 0`. The bidirectional entry
+  point shares `launch<>` and widens the same way (it always has `q_base = 0`).
 - No HTTP or Public231 C1 measurement; a serving-level claim needs the full-C1
   protocol on the same named hardware as its baseline.
 
 ## Reproduction
 
-The measurement programs were local scratch, not committed, per the repository's
-guidance against per-PR microbenchmarks; `plan.json` fixes what they implement.
-Build each revision for the target (`build.sh <out> 89` on CUDA 12.1, `120` on
-CUDA 12.9) and follow the protocol above.
+The per-batch records from both runs are in commit `a3bb8c4` on this branch;
+this tree keeps the frozen protocol and the per-trial results. Build each
+revision for the target (`build.sh <out> 89` on CUDA 12.1, `120` on CUDA 12.9)
+and follow the protocol above.
