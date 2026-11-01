@@ -79,7 +79,7 @@ multimodal adapter and reports prompt-token usage with zero generated tokens.
 `CUA_S1_GRAPH=1` enables host-feature language Graph replay;
 `CUA_S1_VISION_GRAPH=1` independently enables vision Graph replay.
 `CUA_S1_DEVICE_FEATURES=1` keeps vision features on the GPU and copies image rows
-directly into language scratch. Its language path remains eager; it can be paired
+directly into language scratch. Its separate-question language path remains eager; it can be paired
 with either vision Graph setting. All three controls default off. See the
 [resident-feature contract](native_vision_graph.md#gpu-resident-vision-features)
 for strict control parsing, synchronization and reproduction commands.
@@ -94,6 +94,81 @@ Recorded RTX 4090 evidence covers native screenshot parity and Graph regressions
 the resident-feature comparison covers host/device output equality on its fixed
 real-screenshot corpus. These scopes do not establish general GUI task accuracy
 or native equivalence to every reference precision and environment.
+
+## Request-local question batches
+
+`CUA_S1_MM_BATCH=1` opts into batching questions from one admitted screenshot
+request. Unset or `0` retains separate question execution; other values fail at
+startup. Set `CUA_S1_MM_PREFIX=off` when enabling it. The batch adapter supports
+host or resident image features and independent language/vision Graph controls:
+
+```sh
+export CUA_S1_MM_PREFIX=off
+export CUA_S1_MM_BATCH=1
+export CUA_S1_GRAPH=1
+export CUA_S1_VISION_GRAPH=1
+export CUA_S1_DEVICE_FEATURES=1
+```
+
+Preparation validates up to eight questions, 4096 tokens per prompt and 26 options
+per question. Compatible questions share an exact 64-token-aligned prefix and
+pack independent suffixes while retaining the complete prompts' GEMM algorithms,
+three rotary axes and attention/GDN boundaries. Unsupported cohorts execute
+serially. Every request recomputes prefix tensors; retained allocations, shape
+plans and Graphs do not cache screenshot results. Question/option order, prompt
+token accounting, CPU letter readout and response interpretation are unchanged.
+GPU work drains before the request releases admission, including failures.
+
+When every retained original algorithm supports the combined row count, each
+layer projects `[prefix, suffix 0, ...]` together. Prefix mixers produce that
+layer's fresh FP32 GDN state and attention KV before independent suffix mixers
+consume them. Unsupported or oversized combinations keep the separate
+prefix/suffix passes. This does not join attention across questions or reuse
+prefix results from another request.
+
+A rebuilt CUDA library can batch suffix GDN continuation from the same readonly
+FP32 prefix state. This is an optional additive entry point; libraries without
+it keep the existing per-suffix continuation loop. Other model adapters retain
+their existing dispatch. Qualify BF16 outputs and FP32 final states as well as
+end-to-end responses when enabling the rebuilt library:
+
+```sh
+cargo test --release --locked -p omni-qwen3-5-native --test kernels \
+  seeded_gdn_batch_matches_independent_outputs_and_fp32_states_after_replay \
+  -- --ignored --test-threads=1 --nocapture
+```
+
+The shared native adapter bounds each of at most 16 prompts to 8192 tokens,
+scratch to 8192 rows and compact suffix segments to 4096 rows. Duplicate prefix
+rows do not count as simultaneously allocated scratch. Without a shared prefix,
+the Cua planner splits groups at 8192 combined tokens. Qualify exact output bits
+on the intended GPU/cuBLAS/model combination before deployment; this mode does
+not establish general GUI task accuracy or a speedup for every request shape.
+
+`CUA_S1_RESIZE_WORKERS=1` independently opts the Cua processor into RGB integer
+resize with runtime SSE4.1/AVX2 dispatch on supported x86 CPUs and a scalar
+fallback. Unset/`0` keeps the existing resize entry point; `1`–`4` cap active CPU
+workers per request, and other values fail at startup. Coefficients, accumulation
+order, rounding, output pixels and patch layout are preserved. Small work may
+remain serial. This switch does not select the accelerated entry point for JEMM,
+OmniJev or Jev-VL. Measure CPU contention before increasing the worker count.
+
+With the pinned model and library variables from the setup above:
+
+```sh
+cargo test -p omni-qwen3-5-native --lib image_preprocess
+CUA_S1_MM_BATCH=0 CUA_S1_MM_PREFIX=off \
+  cargo test --release --locked -p omni-cua-s1-native --lib \
+  question_batch_keeps_logits_response_order_and_changed_pixels \
+  -- --ignored --test-threads=1 --nocapture
+cargo test --release --locked -p omni-qwen3-5-native --lib \
+  multimodal_shared_suffix_batch_keeps_hidden_bits_after_pixel_changes \
+  -- --ignored --test-threads=1 --nocapture
+```
+
+Repeat the Cua GPU regression with each language/vision Graph setting (`0`/`1`).
+The native shared-prefix regression exercises both eager and Graph execution,
+including batches whose duplicate raw prefixes exceed 8192 total tokens.
 
 ## Request-local language prefix reuse
 

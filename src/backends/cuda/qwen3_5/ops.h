@@ -92,6 +92,13 @@ size_t cs1_gdn_batch_workspace_floats(int tokens, int H, int count);
 int cs1_gdn_prefill_batch(const void* q, const void* k, const void* v, const float* g,
                          const void* beta, void* o, float* workspace, size_t workspace_bytes,
                          const size_t* lengths, size_t count, int H, int HK, float scale, void* stream);
+// Optional suffix batching: initial_state is a readonly FP32 [H,128,128] matrix.
+// final_states may be null, or disjoint FP32 [count,H,128,128] output matrices.
+// All state/input/output/workspace allocations remain live through stream drain.
+int cs1_gdn_prefill_seeded_batch(const void* q, const void* k, const void* v, const float* g,
+                                const void* beta, void* o, float* workspace, size_t workspace_bytes,
+                                const size_t* lengths, size_t count, int H, int HK, float scale,
+                                const void* initial_state, void* final_states, void* stream);
 size_t cs1_gdn_workspace_floats(int T, int H);
 // Optional no-FLA text precision mode: FP32 normalized Q/K and recurrent state,
 // BF16 output. Context and scratch remain model-owned; prefix continuation is unsupported.

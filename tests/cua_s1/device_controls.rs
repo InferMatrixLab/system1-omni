@@ -153,3 +153,64 @@ fn non_unicode_prefix_is_rejected_before_loading() {
             .contains("CUA_S1_MM_PREFIX must be off, fixed, shared, or matched")
     );
 }
+
+#[test]
+fn question_batch_controls_fail_before_checkpoint_or_cuda_loading() {
+    for (value, prefix, expected) in [
+        ("", "off", "CUA_S1_MM_BATCH must be unset, 0, or 1"),
+        ("true", "off", "CUA_S1_MM_BATCH must be unset, 0, or 1"),
+        ("2", "off", "CUA_S1_MM_BATCH must be unset, 0, or 1"),
+        (
+            "1",
+            "matched",
+            "CUA_S1_MM_BATCH requires CUA_S1_MM_PREFIX=off",
+        ),
+    ] {
+        let missing =
+            std::env::temp_dir().join(format!("cua-batch-missing-{}", std::process::id()));
+        assert!(!missing.exists());
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_omni-cua-s1-vision"))
+            .env("CUA_S1_MM_BATCH", value)
+            .env("CUA_S1_MM_PREFIX", prefix)
+            .env("CUA_S1_GRAPH", "0")
+            .env("CUA_S1_DEVICE_FEATURES", "0")
+            .env("CUA_S1_BASE", &missing)
+            .env("CUA_S1_VISION_ADAPTER", &missing)
+            .env("CUA_S1_MODEL", &missing)
+            .env("CUA_S1_CUDA_LIB", &missing)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let error = String::from_utf8(output.stderr).unwrap();
+        assert!(error.contains(expected), "{error}");
+        assert!(!error.contains("export the multimodal language checkpoint"));
+    }
+}
+
+#[test]
+fn resize_worker_controls_reject_invalid_values_before_loading() {
+    for value in ["", "5", "true", "+1", "01", " 1"] {
+        let missing =
+            std::env::temp_dir().join(format!("cua-resize-missing-{}", std::process::id()));
+        assert!(!missing.exists());
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_omni-cua-s1-vision"))
+            .env("CUA_S1_RESIZE_WORKERS", value)
+            .env("CUA_S1_MM_BATCH", "0")
+            .env("CUA_S1_MM_PREFIX", "off")
+            .env("CUA_S1_DEVICE_FEATURES", "0")
+            .env("CUA_S1_GRAPH", "0")
+            .env("CUA_S1_BASE", &missing)
+            .env("CUA_S1_MODEL", &missing)
+            .env("CUA_S1_VISION_ADAPTER", &missing)
+            .env("CUA_S1_CUDA_LIB", &missing)
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        let error = String::from_utf8(out.stderr).unwrap();
+        assert!(
+            error.contains("CUA_S1_RESIZE_WORKERS must be unset or 0..=4"),
+            "{error}"
+        );
+        assert!(!error.contains("export the multimodal language checkpoint"));
+    }
+}

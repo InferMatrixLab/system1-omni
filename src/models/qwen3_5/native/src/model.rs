@@ -13,6 +13,9 @@
 //! once and every branch from the state after it (see `SharedPrompts`).
 
 mod matched;
+mod multimodal_batch;
+mod multimodal_shared;
+pub use multimodal_batch::MAX_MULTIMODAL_BATCH_TOKENS;
 
 use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
@@ -705,13 +708,19 @@ pub struct PrefixState {
     bytes: usize,
 }
 
-/// A packed suffix batch uses one freshly captured prefix and original algorithm.
+/// A suffix batch consumes a captured prefix, or produces it in its leading sequence,
+/// while retaining the complete prompts' original GEMM algorithms.
 struct SuffixBatch<'a> {
     prefix: &'a PrefixState,
     ops: cuda::SharedSuffix,
     gemm: cuda::ReuseGemm,
     original_rows: usize,
+    seeded_gdn: Option<cuda::SeededGdnBatch>,
+    /// The leading sequence produces this layer's prefix before suffix mixing.
+    include_prefix: bool,
 }
+
+const MAX_SUFFIX_BATCH_ROWS: usize = 4096;
 
 /// Bound only the suffix work; oversized suffixes retain individual windows.
 fn suffix_segments(indices: &[usize], lengths: &[usize], prefix: usize) -> Vec<Vec<usize>> {
@@ -720,7 +729,7 @@ fn suffix_segments(indices: &[usize], lengths: &[usize], prefix: usize) -> Vec<V
     let mut tokens = 0;
     for &index in indices {
         let suffix = lengths[index] - prefix;
-        if !group.is_empty() && (group.len() == 16 || tokens + suffix > 4096) {
+        if !group.is_empty() && (group.len() == 16 || tokens + suffix > MAX_SUFFIX_BATCH_ROWS) {
             groups.push(std::mem::take(&mut group));
             tokens = 0;
         }
@@ -855,6 +864,7 @@ pub struct Model {
     fp32_gdn: Option<cuda::Fp32Gdn>,
     batched_gdn: Option<cuda::BatchedGdn>,
     packed_gemm: Option<cuda::PackedGemm>,
+    multimodal_packed: Option<cuda::PackedGemm>,
     /// Buffers for the largest packed token count so far; grows as needed.
     scratch: Option<Scratch>,
     /// The request and group prefix states of `forward_shared`; grow as needed.
@@ -867,6 +877,8 @@ pub struct Model {
     graph_stats: GraphStats,
     graphs: VecDeque<(Vec<usize>, cuda::Graph)>,
     mm_graphs: VecDeque<(Vec<usize>, cuda::Graph)>,
+    mm_batch_windows: VecDeque<multimodal_shared::Entry>,
+    mm_batch_prefix: Option<(usize, PrefixState)>,
     // The stream retires after every model allocation, including adapter resources.
     _stream_owner: ModelStream,
 }
@@ -889,6 +901,8 @@ impl Drop for Model {
         let _ = cuda::synchronize(self.stream);
         self.graphs.clear();
         self.mm_graphs.clear();
+        self.mm_batch_windows.clear();
+        self.mm_batch_prefix = None;
         self.scratch = None;
         self.shared = [None, None];
         // Retire the FP32 cuBLAS context while its last stream is still valid.
@@ -1032,6 +1046,7 @@ impl Model {
             fp32_gdn: None,
             batched_gdn: None,
             packed_gemm: None,
+            multimodal_packed: None,
             scratch: None,
             shared: [None, None],
             vocab_buffers: None,
@@ -1043,6 +1058,8 @@ impl Model {
             graphs: VecDeque::new(),
             _stream_owner: stream_owner,
             mm_graphs: VecDeque::new(),
+            mm_batch_windows: VecDeque::new(),
+            mm_batch_prefix: None,
         };
         Ok(model)
     }
@@ -1050,7 +1067,7 @@ impl Model {
     pub fn graph_stats(&self) -> GraphStats {
         GraphStats {
             enabled: self.graph_enabled,
-            cached_shapes: self.graphs.len() + self.mm_graphs.len(),
+            cached_shapes: self.graphs.len() + self.mm_graphs.len() + self.mm_batch_windows.len(),
             ..self.graph_stats
         }
     }
@@ -1059,7 +1076,10 @@ impl Model {
     /// Select before the first forward; other model consumers retain separate GEMMs.
     pub fn enable_packed_projections(&mut self) -> Result<()> {
         ensure!(
-            self.scratch.is_none() && self.reference.is_none() && self.lora.is_none(),
+            self.scratch.is_none()
+                && self.reference.is_none()
+                && self.lora.is_none()
+                && self.multimodal_packed.is_none(),
             "select packed projections on a merged model before the first forward"
         );
         self.packed_gemm = Some(cuda::api().packed_gemm()?);
@@ -1260,8 +1280,21 @@ impl Model {
         y: usize,
         lengths: &[usize],
     ) -> Result<()> {
+        self.gemm_sequences_with(s, x, w, y, lengths, self.packed_gemm)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn gemm_sequences_with(
+        &self,
+        s: &Scratch,
+        x: usize,
+        w: &Tensor,
+        y: usize,
+        lengths: &[usize],
+        packed: Option<cuda::PackedGemm>,
+    ) -> Result<()> {
         let (n, k) = (w.shape[0], w.shape[1]);
-        if let Some(packed) = self.packed_gemm
+        if let Some(packed) = packed
             && self.reference.is_none()
             && self.lora.is_none()
         {
@@ -1332,11 +1365,15 @@ impl Model {
         .next_multiple_of(1024);
         if self.scratch.as_ref().is_none_or(|s| capacity > s.cap) {
             cuda::synchronize(self.stream)?;
-            if !self.graphs.is_empty() || !self.mm_graphs.is_empty() {
+            if !self.graphs.is_empty()
+                || !self.mm_graphs.is_empty()
+                || !self.mm_batch_windows.is_empty()
+            {
                 self.graph_stats.invalidations += 1;
             }
             self.graphs.clear();
             self.mm_graphs.clear();
+            self.mm_batch_windows.clear();
             self.scratch = None;
             self.scratch = Some(Scratch::new(
                 &self.cfg,
@@ -1627,6 +1664,8 @@ impl Model {
                                 ops: ops.unwrap(),
                                 gemm: reuse,
                                 original_rows: original_rows[indices[0]],
+                                seeded_gdn: None,
+                                include_prefix: false,
                             }),
                         )?;
                         let mut end = 0;
@@ -1753,6 +1792,7 @@ impl Model {
                 self.graph_enabled = false;
                 self.graphs.clear();
                 self.mm_graphs.clear();
+                self.mm_batch_windows.clear();
             }
         }
         Ok(())
@@ -2772,6 +2812,20 @@ impl Model {
             None
         };
         let t: usize = lengths.iter().sum();
+        let fresh_prefix = suffix.is_some_and(|batch| batch.include_prefix);
+        let prefix_rows = suffix
+            .filter(|batch| batch.include_prefix)
+            .map_or(0, |batch| batch.prefix.len);
+        ensure!(
+            !fresh_prefix
+                || (custom_positions
+                    && !bidirectional
+                    && prefix_rows >= 64
+                    && prefix_rows.is_multiple_of(64)
+                    && (2..=17).contains(&lengths.len())
+                    && lengths[0] == prefix_rows),
+            "invalid combined prefix/suffix layout"
+        );
         let mut start = 0;
         let sequences: Vec<(usize, i32)> = lengths
             .iter()
@@ -2814,6 +2868,10 @@ impl Model {
                         "packed suffix projection",
                     )
                 }
+            } else if custom_positions && lengths.len() > 1 && self.multimodal_packed.is_some() {
+                // Preserve each original prompt's algorithm for every projection,
+                // including input and gate/up, instead of selecting at combined M.
+                self.gemm_sequences_with(s, x, weight, y, lengths, self.multimodal_packed)
             } else if let Some(group) = group {
                 self.gemm_group(s, x, weight, y, t, lengths, group)
             } else {
@@ -2858,9 +2916,20 @@ impl Model {
                     let b = z + vd * BF16;
                     let a = b + hv * BF16;
                     unsafe {
+                        if fresh_prefix {
+                            // Capture current-layer pre-convolution history before suffixes read it.
+                            cuda::copy_dd(
+                                suffix.unwrap().prefix.conv_tail[linear_index].at(0),
+                                p(s.gdn_in + (prefix_rows - 3) * w.gdn_in * BF16),
+                                3 * w.gdn_in * BF16,
+                                st,
+                            )?;
+                        }
                         for &(offset, length) in &sequences {
                             check(
-                                if let Some(suffix) = suffix {
+                                if let Some(suffix) =
+                                    suffix.filter(|batch| !batch.include_prefix || offset != 0)
+                                {
                                     (suffix.ops.conv)(
                                         p(s.gdn_in + offset * w.gdn_in * BF16),
                                         suffix.prefix.conv_tail[linear_index].at(0),
@@ -2907,17 +2976,41 @@ impl Model {
                             "gdn gates",
                         )?;
                         if let Some(suffix) = suffix {
-                            for &(offset, length) in &sequences {
+                            if fresh_prefix {
                                 check(
                                     (cuda::api().cs1_gdn_prefill_x)(
-                                        p(s.lq + offset * kd * BF16),
-                                        p(s.lk + offset * kd * BF16),
-                                        p(s.lv + offset * vd * BF16),
-                                        p(s.g + offset * hv * F32).cast(),
-                                        p(s.beta + offset * hv * BF16),
-                                        p(s.lo + offset * vd * BF16),
+                                        p(s.lq),
+                                        p(s.lk),
+                                        p(s.lv),
+                                        p(s.g).cast(),
+                                        p(s.beta),
+                                        p(s.lo),
                                         p(s.workspace).cast(),
-                                        length,
+                                        prefix_rows as i32,
+                                        hv as i32,
+                                        cfg.lin_k_heads as i32,
+                                        (cfg.lin_k_dim as f32).powf(-0.5),
+                                        std::ptr::null(),
+                                        suffix.prefix.gdn_state[linear_index].at(0),
+                                        st,
+                                    ),
+                                    "current-layer prefix GDN",
+                                )?;
+                            }
+                            let suffix_lengths = &lengths[usize::from(fresh_prefix)..];
+                            if let Some(seeded) = suffix.seeded_gdn {
+                                check(
+                                    seeded(
+                                        p(s.lq + prefix_rows * kd * BF16),
+                                        p(s.lk + prefix_rows * kd * BF16),
+                                        p(s.lv + prefix_rows * vd * BF16),
+                                        p(s.g + prefix_rows * hv * F32).cast(),
+                                        p(s.beta + prefix_rows * hv * BF16),
+                                        p(s.lo + prefix_rows * vd * BF16),
+                                        p(s.workspace).cast(),
+                                        s.workspace_bytes,
+                                        suffix_lengths.as_ptr(),
+                                        suffix_lengths.len(),
                                         hv as i32,
                                         cfg.lin_k_heads as i32,
                                         (cfg.lin_k_dim as f32).powf(-0.5),
@@ -2925,8 +3018,30 @@ impl Model {
                                         std::ptr::null_mut(),
                                         st,
                                     ),
-                                    "suffix GDN prefill",
+                                    "seeded suffix GDN batch",
                                 )?;
+                            } else {
+                                for &(offset, length) in &sequences[usize::from(fresh_prefix)..] {
+                                    check(
+                                        (cuda::api().cs1_gdn_prefill_x)(
+                                            p(s.lq + offset * kd * BF16),
+                                            p(s.lk + offset * kd * BF16),
+                                            p(s.lv + offset * vd * BF16),
+                                            p(s.g + offset * hv * F32).cast(),
+                                            p(s.beta + offset * hv * BF16),
+                                            p(s.lo + offset * vd * BF16),
+                                            p(s.workspace).cast(),
+                                            length,
+                                            hv as i32,
+                                            cfg.lin_k_heads as i32,
+                                            (cfg.lin_k_dim as f32).powf(-0.5),
+                                            suffix.prefix.gdn_state[linear_index].at(0),
+                                            std::ptr::null_mut(),
+                                            st,
+                                        ),
+                                        "suffix GDN prefill",
+                                    )?;
+                                }
                             }
                         } else if let Some(gdn) = &self.batched_gdn
                             && (2..=16).contains(&lengths.len())
@@ -3025,8 +3140,18 @@ impl Model {
                                     ld,
                                     fa.q_norm.ptr,
                                     fa.k_norm.ptr,
-                                    p(cos),
-                                    p(sin),
+                                    p(cos
+                                        + if custom_positions {
+                                            offset * cfg.rotary_half * BF16
+                                        } else {
+                                            0
+                                        }),
+                                    p(sin
+                                        + if custom_positions {
+                                            offset * cfg.rotary_half * BF16
+                                        } else {
+                                            0
+                                        }),
                                     p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
                                     p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
                                     p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
@@ -3040,9 +3165,30 @@ impl Model {
                                 ),
                                 "attention prep",
                             )?;
+                            if fresh_prefix && offset == 0 {
+                                let state = suffix.unwrap().prefix;
+                                let bytes = prefix_rows * cfg.kv_heads * cfg.head_dim * BF16;
+                                cuda::copy_dd(
+                                    state.attn_kv[attention_index].0.at(0),
+                                    p(s.ak),
+                                    bytes,
+                                    st,
+                                )?;
+                                cuda::copy2d(
+                                    state.attn_kv[attention_index].1.at(0),
+                                    cfg.kv_heads * cfg.head_dim * BF16,
+                                    p(v),
+                                    w.attn_in * BF16,
+                                    cfg.kv_heads * cfg.head_dim * BF16,
+                                    prefix_rows,
+                                    st,
+                                )?;
+                            }
                             let scale = (cfg.head_dim as f32).powf(-0.5);
                             check(
-                                if let Some(suffix) = suffix {
+                                if let Some(suffix) =
+                                    suffix.filter(|batch| !batch.include_prefix || offset != 0)
+                                {
                                     (suffix.ops.attention)(
                                         p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
                                         p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),

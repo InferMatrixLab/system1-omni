@@ -1,5 +1,6 @@
 //! Native screenshot-to-decision orchestration, with request-local vision reuse.
 mod prefix;
+mod question_batch;
 pub use crate::vision_processing::PreparedRequest;
 use crate::vision_processing::{VisionProcessor, probabilities};
 use crate::{
@@ -25,6 +26,7 @@ pub struct VisionEngine {
     language: Model,
     letters: Vec<f32>,
     device_features: bool,
+    batch_questions: bool,
     prefix_mode: prefix::Mode,
     prefix_storage: Option<crate::model::PrefixState>,
 }
@@ -45,6 +47,20 @@ impl VisionEngine {
             }
         };
         let prefix_mode = prefix::Mode::from_env(device_features)?;
+        let batch_questions = match std::env::var("CUA_S1_MM_BATCH") {
+            Ok(value) => question_batch::enabled(Some(&value), prefix_mode)?,
+            Err(std::env::VarError::NotPresent) => false,
+            Err(std::env::VarError::NotUnicode(_)) => {
+                anyhow::bail!("CUA_S1_MM_BATCH must be unset, 0, or 1")
+            }
+        };
+        let resize_workers = match std::env::var("CUA_S1_RESIZE_WORKERS") {
+            Ok(value) => crate::vision_processing::resize_workers(Some(&value))?,
+            Err(std::env::VarError::NotPresent) => 0,
+            Err(std::env::VarError::NotUnicode(_)) => {
+                anyhow::bail!("CUA_S1_RESIZE_WORKERS must be unset or 0..=4")
+            }
+        };
         let marker: Value = serde_json::from_slice(
             &std::fs::read(language.join("cua_s1_language_export.json"))
                 .context("export the multimodal language checkpoint first")?,
@@ -69,7 +85,10 @@ impl VisionEngine {
                 Ok(enc.get_ids()[0])
             })
             .collect::<Result<Vec<_>>>()?;
-        let model = Model::load(language, library)?;
+        let mut model = Model::load(language, library)?;
+        if batch_questions {
+            model.enable_multimodal_batching()?;
+        }
         ensure!(
             tokenizer.token_to_id("<|image_pad|>") == model.cfg.image_token_id
                 && model.cfg.image_token_id.is_some(),
@@ -78,14 +97,15 @@ impl VisionEngine {
         let letters = letter_rows(language, &ids, model.cfg.hidden)?;
         let vision = VisionModel::load(base, adapter, library)?;
         Ok(Self {
-            processor: Arc::new(VisionProcessor::new(
-                tokenizer,
-                model.cfg.image_token_id.unwrap(),
-            )),
+            processor: Arc::new(
+                VisionProcessor::new(tokenizer, model.cfg.image_token_id.unwrap())
+                    .with_resize_workers(resize_workers)?,
+            ),
             vision,
             language: model,
             letters,
             device_features,
+            batch_questions,
             prefix_mode,
             prefix_storage: None,
         })
@@ -215,7 +235,28 @@ impl VisionEngine {
                 prepared.prompts.len() == counts.len() && !counts.is_empty(),
                 "question/prompt count mismatch"
             );
-            if self.prefix_mode == prefix::Mode::Matched {
+            if self.batch_questions {
+                let groups = question_batch::plan(prepared)?;
+                if self.device_features {
+                    let features = self.vision.forward_device(&prepared.image)?;
+                    question_batch::execute(
+                        &mut self.language,
+                        &self.letters,
+                        prepared,
+                        &groups,
+                        question_batch::Features::Device(features),
+                    )
+                } else {
+                    let features = self.vision.forward(&prepared.image)?;
+                    question_batch::execute(
+                        &mut self.language,
+                        &self.letters,
+                        prepared,
+                        &groups,
+                        question_batch::Features::Host(&features),
+                    )
+                }
+            } else if self.prefix_mode == prefix::Mode::Matched {
                 let (lengths, windows) = prefix::matched_windows(&prepared.prompts)?;
                 let features = self.vision.forward(&prepared.image)?;
                 let result = self

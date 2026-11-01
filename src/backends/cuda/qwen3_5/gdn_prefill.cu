@@ -665,6 +665,13 @@ __global__ void __launch_bounds__(ST_THREADS) gdn_batch_state(Batch batch) {
     const auto sequence = batch.sequences[blockIdx.z];
     gdn_chunk_state_body(sequence.ws, (sequence.tokens + C - 1) / C, nullptr, nullptr);
 }
+// Every sequence reads the same immutable FP32 prefix; final states are disjoint.
+__global__ void __launch_bounds__(ST_THREADS) gdn_batch_seeded_state(
+    Batch batch, const float* initial, float* finals, int H) {
+    const auto sequence = batch.sequences[blockIdx.z];
+    float* out = finals ? finals + static_cast<size_t>(blockIdx.z) * H * K * V : nullptr;
+    gdn_chunk_state_body(sequence.ws, (sequence.tokens + C - 1) / C, initial, out);
+}
 __global__ void __launch_bounds__(OUT_THREADS) gdn_batch_out(Batch batch, bf16* o, int H) {
     const auto sequence = batch.sequences[blockIdx.z];
     if (blockIdx.x >= (sequence.tokens + C - 1) / C) return;
@@ -786,9 +793,9 @@ size_t cs1_gdn_batch_workspace_floats(int tokens, int H, int count) {
     return (Layout(tokens + (count - 1) * (C - 1), H).total + count * 9 * 256 + 3) / 4;
 }
 
-int cs1_gdn_prefill_batch(const void* q, const void* k, const void* v, const float* g,
+static int gdn_batch_run(const void* q, const void* k, const void* v, const float* g,
                          const void* beta, void* o, float* workspace, size_t workspace_bytes,
-                         const size_t* lengths, size_t count, int H, int HK, float scale, void* stream) {
+                         const size_t* lengths, size_t count, int H, int HK, float scale, const void* initial_state, void* final_states, void* stream) {
     if (!q || !k || !v || !g || !beta || !o || !workspace || !lengths || !count ||
         count > MAX_SEQUENCES || H <= 0 || HK <= 0 || H % HK != 0) return cudaErrorInvalidValue;
     Batch batch{};
@@ -813,13 +820,39 @@ int cs1_gdn_prefill_batch(const void* q, const void* k, const void* v, const flo
         return e;
     }();
     if (configured != cudaSuccess) return configured;
+    if (initial_state) {
+        static const cudaError_t seeded_configured = cudaFuncSetAttribute(
+            gdn_batch_seeded_state, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)SMEM2_BYTES);
+        if (seeded_configured != cudaSuccess) return seeded_configured;
+    }
     const auto st = static_cast<cudaStream_t>(stream);
     gdn_batch_prep<<<dim3(chunks, H, count), THREADS, SMEM1_BYTES, st>>>(
         static_cast<const bf16*>(q), static_cast<const bf16*>(k), static_cast<const bf16*>(v), g,
         static_cast<const bf16*>(beta), batch, H, HK, scale);
-    gdn_batch_state<<<dim3(H, V / BVS, count), ST_THREADS, SMEM2_BYTES, st>>>(batch);
+    if (initial_state) {
+        gdn_batch_seeded_state<<<dim3(H, V / BVS, count), ST_THREADS, SMEM2_BYTES, st>>>(
+            batch, static_cast<const float*>(initial_state), static_cast<float*>(final_states), H);
+    } else {
+        gdn_batch_state<<<dim3(H, V / BVS, count), ST_THREADS, SMEM2_BYTES, st>>>(batch);
+    }
     gdn_batch_out<<<dim3(chunks, H, count), OUT_THREADS, SMEM3_BYTES, st>>>(batch, static_cast<bf16*>(o), H);
     return cudaGetLastError();
+}
+
+int cs1_gdn_prefill_batch(const void* q, const void* k, const void* v, const float* g,
+                         const void* beta, void* o, float* workspace, size_t workspace_bytes,
+                         const size_t* lengths, size_t count, int H, int HK, float scale, void* stream) {
+    return gdn_batch_run(q, k, v, g, beta, o, workspace, workspace_bytes,
+                         lengths, count, H, HK, scale, nullptr, nullptr, stream);
+}
+
+int cs1_gdn_prefill_seeded_batch(const void* q, const void* k, const void* v, const float* g,
+                                const void* beta, void* o, float* workspace, size_t workspace_bytes,
+                                const size_t* lengths, size_t count, int H, int HK, float scale,
+                                const void* initial_state, void* final_states, void* stream) {
+    if (!initial_state) return cudaErrorInvalidValue;
+    return gdn_batch_run(q, k, v, g, beta, o, workspace, workspace_bytes,
+                         lengths, count, H, HK, scale, initial_state, final_states, stream);
 }
 
 }  // extern "C"
