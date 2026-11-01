@@ -3,6 +3,7 @@ import asyncio
 import base64
 import io
 import json
+import math
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -913,3 +914,390 @@ class ValidationTests(unittest.TestCase):
                 )
             with self.assertRaises(ValueError):
                 bench.compare(args)
+
+
+def screen_case(index, tokens):
+    return {
+        "id": f"s{index:03d}",
+        "prompt_tokens": tokens,
+        "request": {
+            "state": f"state {index}",
+            "questions": {"q": {"type": "noul", "instructions": "Is this a test?"}},
+        },
+        "expected": {"q": True},
+    }
+
+
+def screen_population():
+    cases = []
+    index = 0
+    for base, count in ((0, 12), (128, 12), (256, 10), (512, 10), (1024, 10), (2048, 20)):
+        for offset in range(count):
+            cases.append(screen_case(index, base + offset))
+            index += 1
+    return cases
+
+
+def noul_ok():
+    return {"answers": {"q": {"type": "noul", "noul": 1.0}}}
+
+
+class FastScreenTests(unittest.IsolatedAsyncioTestCase):
+    def test_protocol_constants_match_the_confirmed_quotas(self):
+        self.assertEqual(
+            [(name, quota) for name, _lo, _hi, quota in bench.FAST_SCREEN_BUCKETS],
+            [
+                ("0-127", 10),
+                ("128-255", 10),
+                ("256-511", 8),
+                ("512-1023", 8),
+                ("1024-2047", 6),
+                ("2048+", 16),
+            ],
+        )
+        self.assertEqual(sum(quota for *_rest, quota in bench.FAST_SCREEN_BUCKETS), 58)
+        self.assertEqual(bench.FAST_SCREEN_BUCKETS[4][3], 6)
+        self.assertEqual(bench.FAST_SCREEN_SEED, 231)
+        self.assertEqual(bench.FAST_SCREEN_RELATIVE, 0.02)
+        self.assertEqual(bench.FAST_SCREEN_ABSOLUTE_MS, 0.5)
+        edges = {
+            0: "0-127",
+            127: "0-127",
+            128: "128-255",
+            255: "128-255",
+            256: "256-511",
+            511: "256-511",
+            512: "512-1023",
+            1023: "512-1023",
+            1024: "1024-2047",
+            2047: "1024-2047",
+            2048: "2048+",
+            100000: "2048+",
+        }
+        for tokens, name in edges.items():
+            self.assertEqual(bench.fast_screen_bucket(tokens), name)
+
+    def test_sample_is_stable_quota_and_manifest_order(self):
+        cases = screen_population()
+        selected, counts, shortfall = bench.fast_screen_sample(cases)
+        again, _counts, _short = bench.fast_screen_sample(cases)
+        self.assertEqual([case["id"] for case in selected], [case["id"] for case in again])
+        self.assertEqual(sum(counts.values()), 58)
+        self.assertEqual(shortfall, [])
+        self.assertEqual(
+            counts,
+            {
+                "0-127": 10,
+                "128-255": 10,
+                "256-511": 8,
+                "512-1023": 8,
+                "1024-2047": 6,
+                "2048+": 16,
+            },
+        )
+        ids = [case["id"] for case in cases]
+        chosen = [case["id"] for case in selected]
+        self.assertEqual(chosen, [case_id for case_id in ids if case_id in set(chosen)])
+        for case in selected:
+            self.assertNotIn("prompt_tokens", case["request"])
+
+    def test_short_bucket_caps_without_borrowing(self):
+        cases = screen_population()
+        long = [case for case in cases if case["prompt_tokens"] >= 2048][:15]
+        short_tail = [case for case in cases if case["prompt_tokens"] < 2048] + long
+        _selected, counts, shortfall = bench.fast_screen_sample(short_tail)
+        self.assertEqual(counts["2048+"], 15)
+        self.assertEqual(counts["1024-2047"], 6)
+        self.assertEqual(shortfall, [{"name": "2048+", "quota": 16, "found": 15}])
+        self.assertEqual(sum(counts.values()), 57)
+        missing = dict(cases[0])
+        missing.pop("prompt_tokens")
+        with self.assertRaisesRegex(ValueError, "prompt_tokens"):
+            bench.fast_screen_sample([missing, *cases[1:]])
+        bad = dict(cases[0])
+        bad["prompt_tokens"] = True
+        with self.assertRaisesRegex(ValueError, "nonnegative integer"):
+            bench.fast_screen_sample([bad, *cases[1:]])
+        mid = [case for case in cases if 1024 <= case["prompt_tokens"] < 2048]
+        self.assertGreaterEqual(len(mid), 6)
+        under = [
+            case for case in cases if not (1024 <= case["prompt_tokens"] < 2048)
+        ]
+        under.extend(mid[:5])
+        selected, counts, shortfall = bench.fast_screen_sample(under)
+        self.assertEqual(counts["1024-2047"], 5)
+        self.assertEqual(counts["2048+"], 16)
+        self.assertEqual(counts["512-1023"], 8)
+        self.assertEqual(shortfall, [{"name": "1024-2047", "quota": 6, "found": 5}])
+        self.assertEqual(
+            sum(1 for case in selected if 1024 <= case["prompt_tokens"] < 2048),
+            5,
+        )
+        exact = [
+            case for case in cases if not (1024 <= case["prompt_tokens"] < 2048)
+        ]
+        exact.extend(mid[:6])
+        _selected, counts, shortfall = bench.fast_screen_sample(exact)
+        self.assertEqual(counts["1024-2047"], 6)
+        self.assertEqual(shortfall, [])
+        with self.assertRaisesRegex(ValueError, "selected no requests"):
+            bench.fast_screen_sample([])
+
+    def test_short_tail_cannot_early_drop(self):
+        summary = {
+            "evidence_complete": True,
+            "failed_requests": 0,
+            "incomplete_requests": 0,
+            "unattempted_requests": 0,
+            "successful_requests": 57,
+            "planned_requests": 57,
+            "successful_latency_p50_ms": 100.0,
+            "successful_latency_p95_ms": 100.0,
+        }
+        screen = {
+            "role": "tip",
+            "bucket_counts": {"2048+": 15},
+            "quota_shortfall": [{"name": "2048+", "quota": 16, "found": 15}],
+            "baseline_p50_ms": 1.0,
+            "baseline_p95_ms": 1.0,
+        }
+        self.assertEqual(
+            bench._saved_fast_screen_decision(screen, summary), "inconclusive"
+        )
+        screen["role"] = "screen_primary"
+        self.assertEqual(
+            bench._saved_fast_screen_decision(screen, summary), "inconclusive"
+        )
+        shorter_mid = {
+            "role": "tip",
+            "bucket_counts": {"2048+": 16, "1024-2047": 5},
+            "quota_shortfall": [{"name": "1024-2047", "quota": 6, "found": 5}],
+            "baseline_p50_ms": 1.0,
+            "baseline_p95_ms": 1.0,
+        }
+        self.assertEqual(
+            bench._saved_fast_screen_decision(shorter_mid, summary), "drop"
+        )
+
+    def test_drop_only_when_both_percentiles_are_clearly_worse(self):
+        relative_tip = 10 * (1 + bench.FAST_SCREEN_RELATIVE)
+        self.assertTrue(bench.latency_clearly_worse(10, relative_tip))
+        self.assertFalse(
+            bench.latency_clearly_worse(10, math.nextafter(relative_tip, 10))
+        )
+        absolute_tip = 1000 + bench.FAST_SCREEN_ABSOLUTE_MS
+        self.assertTrue(bench.latency_clearly_worse(1000, absolute_tip))
+        self.assertFalse(
+            bench.latency_clearly_worse(1000, math.nextafter(absolute_tip, 1000))
+        )
+        self.assertEqual(
+            bench.fast_screen_decision(10, 1000, relative_tip, absolute_tip), "drop"
+        )
+        self.assertEqual(
+            bench.fast_screen_decision(1000, 1000, absolute_tip, absolute_tip),
+            "drop",
+        )
+        self.assertEqual(bench.fast_screen_decision(10, 1000, relative_tip, 999), "full_c1")
+        self.assertEqual(bench.fast_screen_decision(1000, 1000, 1000.5, 1000), "full_c1")
+        self.assertEqual(bench.fast_screen_decision(10, 1000, 9, 900), "full_c1")
+        with self.assertRaisesRegex(ValueError, "positive"):
+            bench.latency_clearly_worse(0, 1)
+        self.assertTrue(bench.is_full_c1_pooled_baseline(7.338, 51.816))
+        self.assertFalse(bench.is_full_c1_pooled_baseline(7.338, 40.0))
+        with self.assertRaisesRegex(ValueError, "Do not type percentiles"):
+            bench.refuse_full_c1_pooled_baseline(7.338, 51.816)
+
+    async def _run_screen(self, root, manifest, name, *, baseline=None, step=None, handler=None):
+        args = run_args(root)
+        args.output = root / name
+        args.manifest = manifest
+        args.fast_screen = True
+        args.warmup = 5
+        args.baseline_screen = baseline
+
+        def default_handler(request):
+            body = json.loads(request.content)
+            self.assertNotIn("prompt_tokens", body)
+            self.assertEqual(body["model"], "english")
+            return httpx.Response(200, json=noul_ok())
+
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler or default_handler)
+        )
+        with patch.object(bench.httpx, "AsyncClient", return_value=client):
+            if step is None:
+                with redirect_stdout(io.StringIO()):
+                    code = await bench.run(args, bench.load_cases(manifest))
+            else:
+                with (
+                    patch.object(bench.time, "perf_counter", _stepping_clock(step)),
+                    redirect_stdout(io.StringIO()),
+                ):
+                    code = await bench.run(args, bench.load_cases(manifest))
+        return args, code
+
+    async def test_screen_primary_is_sixty_ids_and_not_a_keep(self):
+        cases = screen_population()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "public231.jsonl"
+            manifest.write_text("".join(json.dumps(case) + "\n" for case in cases))
+            args, code = await self._run_screen(root, manifest, "primary", step=0.002)
+            self.assertEqual(code, 0)
+            saved = json.loads((args.output / "summary.json").read_text())
+            self.assertEqual(saved, bench.summarize_saved(args.output))
+            self.assertEqual(saved["planned_requests"], 58)
+            self.assertEqual(saved["successful_requests"], 58)
+            self.assertEqual(saved["quota_shortfall"], [])
+            self.assertEqual(saved["fast_screen_decision"], "screen_primary")
+            self.assertNotIn("dropped_at", saved)
+            self.assertFalse((args.output / bench.FAST_SCREEN_DROP_NAME).exists())
+            config = json.loads((args.output / "config.json").read_text())
+            screen = config["fast_screen"]
+            self.assertEqual(screen["role"], "screen_primary")
+            self.assertNotIn("baseline_p50_ms", screen)
+            self.assertEqual(screen["seed"], 231)
+            self.assertEqual(len(screen["selected_ids"]), 58)
+            self.assertEqual(screen["quotas"]["1024-2047"], 6)
+            self.assertEqual(screen["quota_shortfall"], [])
+            self.assertEqual(saved["latency_by_prompt_bucket"]["2048+"]["samples"], 16)
+
+    async def test_tip_compares_same_60_ids_and_drop_records_dropped_at(self):
+        cases = screen_population()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "public231.jsonl"
+            manifest.write_text("".join(json.dumps(case) + "\n" for case in cases))
+            primary, _code = await self._run_screen(
+                root, manifest, "primary", step=0.002
+            )
+            tip, code = await self._run_screen(
+                root, manifest, "tip", baseline=primary.output, step=0.020
+            )
+            self.assertEqual(code, 0)
+            saved = json.loads((tip.output / "summary.json").read_text())
+            self.assertEqual(saved, bench.summarize_saved(tip.output))
+            self.assertEqual(saved["fast_screen_decision"], "drop")
+            self.assertRegex(saved["dropped_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+            record = json.loads((tip.output / bench.FAST_SCREEN_DROP_NAME).read_text())
+            self.assertEqual(record["dropped_at"], saved["dropped_at"])
+            self.assertEqual(record["decision"], "drop")
+            tip_ids = json.loads((tip.output / "config.json").read_text())["fast_screen"]["selected_ids"]
+            primary_ids = json.loads((primary.output / "config.json").read_text())["fast_screen"]["selected_ids"]
+            self.assertEqual(record["selected_ids"], tip_ids)
+            self.assertEqual(tip_ids, primary_ids)
+            again = bench.summarize_saved(tip.output)
+            self.assertEqual(again["dropped_at"], saved["dropped_at"])
+            pooled = run_args(root)
+            pooled.output = root / "pooled"
+            pooled.manifest = manifest
+            pooled.fast_screen = True
+            pooled.warmup = 5
+            pooled.baseline_screen = primary.output
+            pooled.baseline_p50_ms = 7.338
+            pooled.baseline_p95_ms = 51.816
+            with self.assertRaisesRegex(ValueError, "Do not type percentiles"):
+                await bench.run(pooled, bench.load_cases(manifest))
+            self.assertFalse(pooled.output.exists())
+
+            kept, kept_code = await self._run_screen(
+                root, manifest, "faster", baseline=primary.output, step=0.001
+            )
+            self.assertEqual(kept_code, 0)
+            kept_summary = bench.summarize_saved(kept.output)
+            self.assertEqual(kept_summary["fast_screen_decision"], "full_c1")
+            self.assertNotIn("dropped_at", kept_summary)
+            self.assertFalse((kept.output / bench.FAST_SCREEN_DROP_NAME).exists())
+
+    async def test_full_c1_directory_and_other_ids_are_refused(self):
+        cases = screen_population()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "public231.jsonl"
+            manifest.write_text("".join(json.dumps(case) + "\n" for case in cases))
+            primary, _code = await self._run_screen(root, manifest, "primary", step=0.002)
+            full_c1 = root / "full-c1"
+            full_c1.mkdir()
+            bench.write_json(full_c1 / "config.json", {"metadata": {"gpu": "mock-only"}})
+            refused = run_args(root)
+            refused.output = root / "tip"
+            refused.manifest = manifest
+            refused.fast_screen = True
+            refused.warmup = 5
+            refused.baseline_screen = full_c1
+            with self.assertRaisesRegex(ValueError, "full-C1"):
+                await bench.run(refused, bench.load_cases(manifest))
+            self.assertFalse(refused.output.exists())
+
+            config_path = primary.output / "config.json"
+            config = json.loads(config_path.read_text())
+            config["metadata"]["gpu"] = "other-gpu"
+            bench.write_json(config_path, config)
+            mismatched = run_args(root)
+            mismatched.output = root / "mismatch"
+            mismatched.manifest = manifest
+            mismatched.fast_screen = True
+            mismatched.warmup = 5
+            mismatched.baseline_screen = primary.output
+            with self.assertRaisesRegex(ValueError, "gpu does not match"):
+                await bench.run(mismatched, bench.load_cases(manifest))
+            self.assertFalse(mismatched.output.exists())
+
+    async def test_failed_fast_screen_is_inconclusive_and_short_bucket_writes_nothing(self):
+        cases = screen_population()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "public231.jsonl"
+            manifest.write_text("".join(json.dumps(case) + "\n" for case in cases))
+            calls = {"n": 0}
+
+            def handler(_request):
+                calls["n"] += 1
+                if calls["n"] == 6:
+                    return httpx.Response(503, text="busy")
+                return httpx.Response(200, json=noul_ok())
+
+            args, code = await self._run_screen(
+                root, manifest, "broken", handler=handler
+            )
+            self.assertEqual(code, 1)
+            saved = bench.summarize_saved(args.output)
+            self.assertEqual(saved["fast_screen_decision"], "inconclusive")
+            self.assertGreater(saved["failed_requests"], 0)
+            self.assertNotIn("dropped_at", saved)
+
+            refused = run_args(root)
+            refused.output = root / "unused"
+            refused.manifest = manifest
+            refused.fast_screen = True
+            refused.warmup = 3
+            with self.assertRaisesRegex(ValueError, "warmup 5"):
+                await bench.run(refused, bench.load_cases(manifest))
+            self.assertFalse(refused.output.exists())
+
+            long = [case for case in cases if case["prompt_tokens"] >= 2048][:15]
+            short_cases = [case for case in cases if case["prompt_tokens"] < 2048] + long
+            short_manifest = root / "short.jsonl"
+            short_manifest.write_text(
+                "".join(json.dumps(case) + "\n" for case in short_cases)
+            )
+            short_args, code = await self._run_screen(root, short_manifest, "short-out")
+            self.assertEqual(code, 0)
+            saved = bench.summarize_saved(short_args.output)
+            self.assertEqual(saved["fast_screen_decision"], "inconclusive")
+            self.assertEqual(
+                saved["quota_shortfall"],
+                [{"name": "2048+", "quota": 16, "found": 15}],
+            )
+            self.assertNotIn("dropped_at", saved)
+            self.assertFalse((short_args.output / "fast_screen_drop.json").exists())
+
+
+def _stepping_clock(step):
+    state = {"t": 0.0}
+
+    def tick():
+        state["t"] += step
+        return state["t"]
+
+    return tick

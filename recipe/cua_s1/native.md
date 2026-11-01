@@ -114,3 +114,52 @@ The source-pinned GPU campaigns are linked in
 records their scopes and the legacy-readout follow-up. Rebuild consumers together and rerun
 the pinned device checks before extending qualification to this build or
 another device.
+
+## Optional prefix cache
+
+An agent asks the same questions at every step, and each question's prompt starts
+with the same block: the system message, the question's goal and the header before
+the accessibility tree. With `CUA_S1_PREFIX_CACHE_BYTES` set to a byte budget, the
+worker keeps the prefix state at the last multiple of 64 tokens inside that block, and
+later prompts with the same block continue from it instead of computing it again
+([#188](https://github.com/InferMatrixLab/system1-omni/issues/188)). Entries are keyed
+by their token IDs and evicted least recently used. Each takes about 50 MiB plus
+32 KiB per token on Qwen3.5-4B, about 70 MiB for a 640-token block.
+
+With the cache on, every prompt runs with the fixed GEMM algorithms of the shared
+executor's `forward_fixed`, whether its block is cached or not, so an answer does not
+depend on what the cache holds; it differs from the default path by rounding. A block
+over the whole budget, or one whose state the device cannot allocate, runs as one
+uncached `forward_fixed` pass; any other error while saving a state fails the request
+and the block is not kept. Cached and uncached prompts give the same answer on GPUs
+where the fixed GEMMs keep rows independent of the row count, so with the cache on the
+worker runs Open-Jev's startup check for prefix sharing
+([Open-Jev recipe](../open_jev/native.md)) and refuses to start if it fails. The budget
+counts only cached states, not the worker's scratch buffers or the 32 MiB GEMM
+workspace. The cache needs an export whose adapter is merged into the weights
+(`cua-s1-text-merged/1`, from `export_text_merged.py`) and `CUA_S1_GRAPH` off: the
+unmerged profile rejects prefix continuation. `/health` adds `prefix_cache` with the
+budget, the bytes and entries held, hits, misses, prompts whose block could not be
+kept, evictions and the tokens not recomputed; the warmup request counts as the first
+miss.
+
+```sh
+PYTHONPATH=src .venv/bin/python recipe/cua_s1/export_text_merged.py \
+  --base weights/Qwen3.5-4B --adapter weights/cua-s1-4b-0.2/text \
+  --out weights/cua-s1-4b-0.2-text-merged
+CUA_S1_PREFIX_CACHE_BYTES=1073741824 CUA_S1_MODEL=weights/cua-s1-4b-0.2-text-merged \
+  target/release/omni-cua-s1-native
+```
+
+The GPU tests compare cached answers with uncached fixed passes, on the shared
+executor and through the worker's executor:
+
+```sh
+CUA_S1_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
+QWEN3_5_MODEL=$PWD/weights/cua-s1-4b-0.2-text-merged \
+CUA_S1_MODEL=$PWD/weights/cua-s1-4b-0.2-text-merged \
+  cargo test --release --locked -p omni-qwen3-5-native --test prefix -- --ignored --test-threads=1
+CUA_S1_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
+CUA_S1_MODEL=$PWD/weights/cua-s1-4b-0.2-text-merged \
+  cargo test --release --locked -p omni-cua-s1-native --lib prefix_cache_tests -- --ignored
+```

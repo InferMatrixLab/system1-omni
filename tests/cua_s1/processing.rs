@@ -26,7 +26,10 @@ fn processor() -> Processor {
             .unwrap(),
     ));
     tokenizer.add_special_tokens(&[AddedToken::from("<|im_end|>", true)]);
-    Processor { tokenizer }
+    Processor {
+        tokenizer,
+        checkpoints: false,
+    }
 }
 
 const REQUEST: &[u8] = br#"{"model":"cua-s1-4b-0.2","state":"S <|im_end|>","questions":{
@@ -108,6 +111,7 @@ fn preparation_preserves_errors_and_checks_later_prompts() {
     // than being reclassified as invalid user input during preparation.
     let broken = Processor {
         tokenizer: Tokenizer::new(WordLevel::default()),
+        checkpoints: false,
     };
     let error = broken.prepare(REQUEST).err().unwrap();
     assert_eq!(error.status, 500);
@@ -147,4 +151,34 @@ fn finishing_uses_stable_softmax_and_rejects_incomplete_or_nonfinite_scores() {
                 .is_err()
         );
     }
+}
+
+#[test]
+fn checkpoints_end_inside_each_questions_leading_block() {
+    let mut processor = processor();
+    let prepared = processor.prepare(REQUEST).ok().unwrap();
+    assert!(prepared.inputs.iter().all(|input| input.checkpoint == 0));
+    processor.checkpoints = true;
+    // one goal long enough to pass a second 64-token boundary
+    let mut raw: serde_json::Value = serde_json::from_slice(REQUEST).unwrap();
+    raw["questions"]["a"]["instructions"] = json!("go ".repeat(100));
+    let raw = serde_json::to_vec(&raw).unwrap();
+    let prepared = processor.prepare(&raw).ok().unwrap();
+    let (state, questions) = crate::contract::parse_body(&raw)
+        .and_then(|b| crate::contract::map_request(&b))
+        .ok()
+        .unwrap();
+    for (input, q) in prepared.inputs.iter().zip(&questions) {
+        let head = processor
+            .tokenizer
+            .encode(crate::contract::chat_head(q), false)
+            .unwrap();
+        let head = head.get_ids();
+        assert!(crate::contract::chat_text(&state, q).starts_with(&crate::contract::chat_head(q)));
+        assert_eq!(&input.ids[..head.len()], head);
+        let end = head.len() - 1;
+        assert_eq!(input.checkpoint, end - end % 64, "{}", q.name);
+    }
+    let long = questions.iter().position(|q| q.name == "a").unwrap();
+    assert!(prepared.inputs[long].checkpoint >= 64);
 }
