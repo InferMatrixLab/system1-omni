@@ -19,6 +19,8 @@ pub struct Checkpoint {
     /// Pack a request's candidates for shared GEMMs. Packing was validated against
     /// per-candidate execution on 27B only, so 9B runs candidates one at a time.
     pub pack_candidates: bool,
+    /// Parallel preparation has exact-token coverage for the pinned 27B tokenizer.
+    pub parallel_tokenization: bool,
 }
 
 pub static CHECKPOINTS: [Checkpoint; 2] = [
@@ -30,6 +32,7 @@ pub static CHECKPOINTS: [Checkpoint; 2] = [
         alias: "open-jev-27b-v1.1",
         backbone: (5120, 17408, 64, 24, 4, 16, 48),
         pack_candidates: true,
+        parallel_tokenization: true,
     },
     Checkpoint {
         name: "Open-Jev-9B",
@@ -39,6 +42,7 @@ pub static CHECKPOINTS: [Checkpoint; 2] = [
         alias: "open-jev-9b",
         backbone: (4096, 12288, 32, 16, 4, 16, 32),
         pack_candidates: false,
+        parallel_tokenization: false,
     },
 ];
 

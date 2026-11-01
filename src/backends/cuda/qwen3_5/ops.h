@@ -66,6 +66,19 @@ int cs1_gated_rms_norm(const void* x, const void* z, int ldz, const void* w, voi
 // q [T, key_dim], k [T, key_dim] and v [T, value_dim]. w is [key_dim*2 + value_dim, 4].
 int cs1_gdn_conv(const void* qkv, int ld, const void* w, void* q, void* k, void* v, int T, int key_dim,
                  int value_dim, void* stream);
+// Optional vectorized convolution with exact scalar-layout fallback.
+int cs1_gdn_conv_vector(const void* qkv, int ld, const void* w, void* q, void* k, void* v, int T, int key_dim,
+                 int value_dim, void* stream);
+
+// Optional compact suffix convolution seeded by three immutable pre-conv rows [3,ld].
+int cs1_gdn_conv_prefix(const void* qkv, const void* history, int ld, const void* w,
+                        void* q, void* k, void* v, int T, int key_dim, int value_dim, void* stream);
+// Optional compact suffix attention. Prefix K/V are contiguous [prefix,Hk,Dh];
+// suffix Q/gate/output start at row zero and use absolute query position prefix.
+int cs1_attention_gated_shared(const void* q, const void* k, const void* v, int ldv,
+                               const void* gate, void* out, const void* prefix_k,
+                               const void* prefix_v, int suffix, int prefix, int Hq,
+                               int Hk, int Dh, float scale, void* stream);
 
 // beta = sigmoid(b) (bfloat16) and g = -exp(A_log) * softplus(a + dt_bias) (float32), [T, H];
 // b and a are [T, H] in rows of ld.
@@ -74,6 +87,11 @@ int cs1_gdn_gates(const void* b, const void* a, int ld, const void* A_log, const
 
 // Chunked gated delta rule, q and k L2-normalized inside, q scaled by `scale`.
 // q, k [T, HK, 128], v [T, H, 128], g float [T, H], beta [T, H], o [T, H, 128].
+// Optional independent sequence batching, with separate chunk padding/workspaces.
+size_t cs1_gdn_batch_workspace_floats(int tokens, int H, int count);
+int cs1_gdn_prefill_batch(const void* q, const void* k, const void* v, const float* g,
+                         const void* beta, void* o, float* workspace, size_t workspace_bytes,
+                         const size_t* lengths, size_t count, int H, int HK, float scale, void* stream);
 size_t cs1_gdn_workspace_floats(int T, int H);
 // Optional no-FLA text precision mode: FP32 normalized Q/K and recurrent state,
 // BF16 output. Context and scratch remain model-owned; prefix continuation is unsupported.
@@ -85,6 +103,11 @@ int cs1_gdn_prefill_fp32(void* context,const void* q, const void* k, const void*
                        int T, int H, int HK, float scale, void* stream);
 int cs1_gdn_prefill(const void* q, const void* k, const void* v, const float* g, const void* beta,
                     void* o, float* workspace, int T, int H, int HK, float scale, void* stream);
+
+// Optional wider preparation/output launch for the opt-in 27B text path. Same layout,
+// workspace, arithmetic and output as cs1_gdn_prefill; other shapes fall back.
+int cs1_gdn_prefill_wide(const void* q, const void* k, const void* v, const float* g, const void* beta,
+                         void* o, float* workspace, int T, int H, int HK, float scale, void* stream);
 
 // Same scan with an explicit state: s_in is the [H, K, V] float32 state before
 // this window (null = zero), s_out receives the [H, K, V] float32 state after
@@ -142,9 +165,25 @@ void* cs1_gemm_create(size_t workspace_bytes);
 // runs on). Null if reference_m <= 0 or setup fails. cs1_gemm with this handle returns a
 // cuBLAS status for an M the algorithm cannot serve, rather than switching algorithms.
 void* cs1_gemm_create_fixed(size_t workspace_bytes, int reference_m);
+// Optional additive ABI 9: choose the ordinary reduction mask at reference_m.
+// Compatibility returns 1 for equal complete descriptors, else 0. A null ordinary
+// handle tests support only (used for prefix/suffix windows); no GEMM executes.
+void* cs1_gemm_create_matched(size_t workspace_bytes, int reference_m);
+int cs1_gemm_compatible(void* ordinary, void* matched, int M, int N, int K);
 void cs1_gemm_destroy(void* gemm);
 int cs1_gemm(void* gemm, const void* x, const void* w, void* y, int M, int N, int K, int ldy,
              void* stream);
+
+// Optional packed projections retaining original per-sequence algorithms.
+int cs1_gemm_packed(void* gemm, const void* x, const void* w, void* y,
+                    const size_t* lengths, size_t count, int N, int K, void* stream);
+
+// Optional retained-algorithm projections. Check returns 0 if compatible, -1 if
+// unsupported; other values are errors. Check all windows before computing any.
+int cs1_gemm_reuse_check(void* gemm, const size_t* original_rows, size_t originals,
+                        const size_t* target_rows, size_t targets, int N, int K);
+int cs1_gemm_reuse(void* gemm, const void* x, const void* w, void* y,
+                  int M, int N, int K, int original_M, void* stream);
 
 // ---- vision: single image, 1024 hidden, 16 heads of 64; all BF16 except explicit float pointers ----
 int cs1_vision_linear(void* gemm, const void* x, const void* w, const void* bias, void* y, int M, int N, int K, void* stream);

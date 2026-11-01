@@ -1143,8 +1143,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "omni-clef"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "http-body-util",
+ "omni-runtime",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "omni-clm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1158,7 +1170,7 @@ dependencies = [
 
 [[package]]
 name = "omni-cua-s1-native"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1178,7 +1190,7 @@ dependencies = [
 
 [[package]]
 name = "omni-cuda"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "libloading",
@@ -1187,7 +1199,7 @@ dependencies = [
 
 [[package]]
 name = "omni-decider-native"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1205,7 +1217,7 @@ dependencies = [
 
 [[package]]
 name = "omni-jemm-native"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1223,7 +1235,7 @@ dependencies = [
 
 [[package]]
 name = "omni-jev"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "futures-util",
@@ -1235,7 +1247,7 @@ dependencies = [
 
 [[package]]
 name = "omni-jev-vl-native"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1252,7 +1264,7 @@ dependencies = [
 
 [[package]]
 name = "omni-laya"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1271,7 +1283,7 @@ dependencies = [
 
 [[package]]
 name = "omni-omnijev-native"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1290,7 +1302,7 @@ dependencies = [
 
 [[package]]
 name = "omni-open-jev-native"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1303,7 +1315,7 @@ dependencies = [
 
 [[package]]
 name = "omni-qwen3-5-native"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1318,7 +1330,7 @@ dependencies = [
 
 [[package]]
 name = "omni-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "tokio",
@@ -1326,7 +1338,7 @@ dependencies = [
 
 [[package]]
 name = "omni-startlux-native"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
