@@ -251,7 +251,7 @@ export CUA_S1_GRAPH=1 CUA_S1_VISION_GRAPH=1
 # Keep prefix=off as the ordinary complete-request numerical control.
 ```
 
-The matched implementation is shared with PR184; this extension combines it
+The matched implementation is shared with [PR #184](https://github.com/InferMatrixLab/system1-omni/pull/184); this extension combines it
 with the resident language-Graph path. Prefix reuse removes repeated computation
 across questions; any combined speedup must be attributed to that work as well
 as Graph submission savings. A single question or incompatible GEMM plans still
