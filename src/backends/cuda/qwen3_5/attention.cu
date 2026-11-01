@@ -83,25 +83,35 @@ constexpr int D = 256, BM = 64, BN = 32, THREADS = 128;
 constexpr int LDS = D + 8;  // shared row stride in elements: 528 bytes keeps ldmatrix conflict-free
 constexpr int SMEM_BYTES = (BM + 2 * BN) * LDS * 2;
 
+// Wider query tile for long windows on the device it was measured on (L20,
+// sm_89): eight warps per block instead of four, and each K/V tile is read once
+// for 128 queries instead of 64. A query row still walks the same 32-key tiles
+// in the same order, so the arithmetic and the bfloat16 rounding are unchanged;
+// only which block computes a row changes. 101,376 bytes is the largest dynamic
+// shared-memory request on sm_89, so this stays at one block per SM.
+constexpr int WIDE_BM = 128, WIDE_THREADS = 256;
+constexpr int WIDE_SMEM_BYTES = (WIDE_BM + 2 * BN) * LDS * 2;
+constexpr int WIDE_MIN_ROWS = 640;  // measured crossover on L20; also measured positive on sm_120
+
 // q_base offsets row 0 of the q/gate/out buffers: this launch covers the window
 // [q_base, T_total) while k/v cover [0, T_total). Used by the cached-prefix
 // continuation; q_base = 0 reduces to the plain full pass.
-template <bool Gated, bool Shared, bool Bidirectional = false>
+template <bool Gated, bool Shared, bool Bidirectional = false, int QROWS = BM, int NTHREADS = THREADS>
 __device__ __forceinline__ void flash_body(const bf16* __restrict__ q, const bf16* __restrict__ k, const bf16* __restrict__ v, int ldv,
                  const bf16* __restrict__ gate, bf16* __restrict__ out, int T, int Hq, int Hk,
                  float scale_log2, int q_base, const bf16* __restrict__ prefix_k,
                  const bf16* __restrict__ prefix_v) {
     extern __shared__ __align__(16) unsigned char smem[];
     bf16* qs = reinterpret_cast<bf16*>(smem);
-    bf16* ks = qs + BM * LDS;
+    bf16* ks = qs + QROWS * LDS;
     bf16* vs = ks + BN * LDS;
     const int h = blockIdx.y, hk = h / (Hq / Hk);
-    const int q0 = q_base + (gridDim.x - 1 - blockIdx.x) * BM;  // the longest blocks first
+    const int q0 = q_base + (gridDim.x - 1 - blockIdx.x) * QROWS;  // the longest blocks first
     const int tid = threadIdx.x, warp = tid / 32, lane = tid % 32;
     const int g = lane / 4, t = lane % 4;
     const int row0 = q0 + warp * 16;  // this warp's first query
 
-    for (int c = tid; c < BM * (D / 8); c += THREADS) {
+    for (int c = tid; c < QROWS * (D / 8); c += NTHREADS) {
         const int r = c / (D / 8), col = (c % (D / 8)) * 8, row = q0 + r;
         const int source_row = min(row, T - 1) - (Shared ? q_base : 0);
         cp_async16(qs + r * LDS + col, q + ((size_t)source_row * Hq + h) * D + col, row < T);
@@ -114,9 +124,9 @@ __device__ __forceinline__ void flash_body(const bf16* __restrict__ q, const bf1
     float m[2] = {-INFINITY, -INFINITY}, l[2] = {0.f, 0.f};
 
     // Causal blocks stop at their last query. A bidirectional prompt reads every key.
-    const int kv_end = Bidirectional ? T : min(T, q0 + BM);
+    const int kv_end = Bidirectional ? T : min(T, q0 + QROWS);
     for (int k0 = 0; k0 < kv_end; k0 += BN) {
-        for (int c = tid; c < BN * (D / 8); c += THREADS) {
+        for (int c = tid; c < BN * (D / 8); c += NTHREADS) {
             const int r = c / (D / 8), col = (c % (D / 8)) * 8, s = k0 + r;
             if constexpr (Shared) {
                 const int row = min(s, T - 1);
@@ -128,7 +138,7 @@ __device__ __forceinline__ void flash_body(const bf16* __restrict__ q, const bf1
             }
         }
         cp_async_commit();
-        for (int c = tid; c < BN * (D / 8); c += THREADS) {
+        for (int c = tid; c < BN * (D / 8); c += NTHREADS) {
             const int r = c / (D / 8), col = (c % (D / 8)) * 8, s = k0 + r;
             if constexpr (Shared) {
                 const int row = min(s, T - 1);
@@ -266,12 +276,37 @@ flash_kernel(const bf16* __restrict__ q, const bf16* __restrict__ k, const bf16*
     flash_body<Gated, false, Bidirectional>(q, k, v, ldv, gate, out, T, Hq, Hk, scale_log2, q_base, nullptr, nullptr);
 }
 
+template <bool Gated, bool Bidirectional = false>
+__global__ void __launch_bounds__(WIDE_THREADS)
+flash_wide_kernel(const bf16* __restrict__ q, const bf16* __restrict__ k, const bf16* __restrict__ v, int ldv,
+                  const bf16* __restrict__ gate, bf16* __restrict__ out, int T, int Hq, int Hk,
+                  float scale_log2, int q_base) {
+    flash_body<Gated, false, Bidirectional, WIDE_BM, WIDE_THREADS>(q, k, v, ldv, gate, out, T, Hq, Hk,
+                                                                   scale_log2, q_base, nullptr, nullptr);
+}
+
 __global__ void __launch_bounds__(THREADS)
 flash_shared_kernel(const bf16* __restrict__ q, const bf16* __restrict__ k, const bf16* __restrict__ v, int ldv,
                     const bf16* __restrict__ gate, bf16* __restrict__ out, int T, int Hq, int Hk,
                     float scale_log2, int prefix, const bf16* __restrict__ prefix_k,
                     const bf16* __restrict__ prefix_v) {
     flash_body<true, true>(q, k, v, ldv, gate, out, T, Hq, Hk, scale_log2, prefix, prefix_k, prefix_v);
+}
+
+// The wide tile is enabled only on the devices it was measured on; other devices
+// keep BM = 64. On L20 (sm_89) it wins from 640 rows (-4.6% at 1,024, -12% at
+// 4,096, -16% at 16,384) while 512 rows is 5% slower. On the RTX 5060 Laptop
+// (sm_120) it is 17-20% faster from 512 rows up, so 640 is inside the measured
+// range for both.
+bool wide_tile_supported() {
+    static const bool supported = [] {
+        int device = 0;
+        cudaDeviceProp prop{};
+        if (cudaGetDevice(&device) != cudaSuccess || cudaGetDeviceProperties(&prop, device) != cudaSuccess)
+            return false;
+        return (prop.major == 8 && prop.minor == 9) || (prop.major == 12 && prop.minor == 0);
+    }();
+    return supported;
 }
 
 template <bool Gated, bool Bidirectional = false>
@@ -284,12 +319,24 @@ int launch(const void* q, const void* k, const void* v, int ldv, const void* gat
     if (Bidirectional && q_base != 0) return cudaErrorInvalidValue;
     if (T == q_base) return cudaSuccess;
     if (Gated && gate == nullptr) return cudaErrorInvalidValue;
+    constexpr float LOG2E = 1.4426950408889634f;
+    const int rows = T - q_base;
+    if (wide_tile_supported() && q_base % WIDE_BM == 0 && rows >= WIDE_MIN_ROWS) {
+        static const cudaError_t wide_configured = cudaFuncSetAttribute(
+            flash_wide_kernel<Gated, Bidirectional>, cudaFuncAttributeMaxDynamicSharedMemorySize,
+            WIDE_SMEM_BYTES);
+        if (wide_configured != cudaSuccess) return wide_configured;
+        flash_wide_kernel<Gated, Bidirectional><<<dim3((rows + WIDE_BM - 1) / WIDE_BM, Hq), WIDE_THREADS,
+                                                 WIDE_SMEM_BYTES, static_cast<cudaStream_t>(stream)>>>(
+            static_cast<const bf16*>(q), static_cast<const bf16*>(k), static_cast<const bf16*>(v), ldv,
+            static_cast<const bf16*>(gate), static_cast<bf16*>(out), T, Hq, Hk, scale * LOG2E, q_base);
+        return cudaGetLastError();
+    }
     // Once per specialization (for the device current at the first call).
     static const cudaError_t configured = cudaFuncSetAttribute(
         flash_kernel<Gated, Bidirectional>, cudaFuncAttributeMaxDynamicSharedMemorySize, SMEM_BYTES);
     if (configured != cudaSuccess) return configured;
-    constexpr float LOG2E = 1.4426950408889634f;
-    flash_kernel<Gated, Bidirectional><<<dim3((T - q_base + BM - 1) / BM, Hq), THREADS, SMEM_BYTES,
+    flash_kernel<Gated, Bidirectional><<<dim3((rows + BM - 1) / BM, Hq), THREADS, SMEM_BYTES,
                          static_cast<cudaStream_t>(stream)>>>(
         static_cast<const bf16*>(q), static_cast<const bf16*>(k), static_cast<const bf16*>(v), ldv,
         static_cast<const bf16*>(gate), static_cast<bf16*>(out), T, Hq, Hk, scale * LOG2E, q_base);

@@ -26,6 +26,24 @@ missing. Rebuild this library before starting that worker. This tree does not
 claim that the causal specialization's SASS is bit-identical to the previous
 build; GPU revalidation of Cua-S1 and Open-Jev was not run with this change.
 
+On sm_89 and sm_120 the causal full pass and aligned prefix windows of at least
+640 query rows use a 128-query, 256-thread attention block instead of 64 queries
+and 128 threads: eight warps per SM rather than four, and each K/V tile is read
+once for 128 queries. A query row still walks the same 32-key tiles in the same
+order, so the outputs are bit-identical to the 64-query block, including across
+the two blocks in one comparison. Measured through `cs1_attention_gated` (24/4
+heads, head dim 256), old -> new: on one NVIDIA L20 (sm_89, 92 SMs, driver
+580.126.20, CUDA 12.1), 0.331 -> 0.313 ms at 1,024 rows, 0.980 -> 0.905 at 2,048,
+3.398 -> 3.011 at 4,096 and 12.03 -> 10.43 at 8,192, while 512 rows is unchanged
+because it stays on the 64-query block; on an RTX 5060 Laptop (sm_120, 26 SMs,
+driver 575.57.08, CUDA 12.9), 1.051 -> 0.840 at 640, 2.406 -> 1.844 at 1,024,
+7.491 -> 6.455 at 2,048, 27.07 -> 21.81 at 4,096 and 94.95 -> 79.74 at 8,192.
+`compute-sanitizer` reported no errors on either device, and the kernel tests
+pass with the wide block active. The shared prefix kernel, `H200`/sm_90 and
+end-to-end serving are unverified, so the wide block is limited to the two
+measured capabilities. The frozen protocol, raw samples and per-trial deltas are
+in [benchmarks/attention-wide](../../../../benchmarks/attention-wide/README.md).
+
 HF Qwen3.5 folders store `linear_attn.A_log` and `linear_attn.norm.weight` as
 FP32. The shared loader rounds those two suffixes to BF16 at upload because the
 kernels consume BF16. Other non-BF16 language tensors still fail. That rounding
