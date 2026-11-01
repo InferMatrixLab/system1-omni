@@ -35,9 +35,11 @@ pub struct Planned {
 
 impl Processor {
     /// Load from an exported native bundle (tokenizer + calibration;
-    /// the manifest gate runs first).
-    pub fn load(bundle: &Path) -> Result<Self> {
-        let manifest = crate::bundle::Bundle::load(bundle)?;
+    /// the manifest gate runs first, anchored by `pinned_manifest_sha256`
+    /// — the SHA-256 of `vela_native_manifest.json` that the exporter
+    /// prints, fixed outside the bundle directory).
+    pub fn load(bundle: &Path, pinned_manifest_sha256: &str) -> Result<Self> {
+        let manifest = crate::bundle::Bundle::load(bundle, pinned_manifest_sha256)?;
         let calibration: Value = serde_json::from_slice(
             &std::fs::read(bundle.join("calibration.json")).context("calibration.json")?,
         )
@@ -136,7 +138,7 @@ impl Processor {
         let mut rendered = Vec::new();
         let mut window_rows = Vec::new();
         let mut parts_by_role = std::collections::HashMap::new();
-        for part in self.prepared_parts(&state_parts, &span_roles) {
+        for part in self.prepared_parts(&state_parts, &span_roles)? {
             parts_by_role.insert(part.role.clone(), part);
         }
         for row in rows {
@@ -193,26 +195,26 @@ impl Processor {
         &self,
         state_parts: &[crate::state::Part],
         span_roles: &HashSet<String>,
-    ) -> Vec<PreparedPart> {
+    ) -> Result<Vec<PreparedPart>, RequestError> {
         state_parts
             .iter()
             .map(|part| {
-                let (ids, offsets) = self.encoder.ids_offsets(&part.text);
+                let (ids, offsets) = self.encoder.ids_offsets(&part.text)?;
                 if span_roles.contains(&part.r#type) {
                     let words = crate::words::word_first_tokens(&part.text, &offsets);
-                    PreparedPart {
+                    Ok(PreparedPart {
                         role: part.r#type.clone(),
                         ids,
                         offsets: Some(offsets),
                         words: Some(words),
-                    }
+                    })
                 } else {
-                    PreparedPart {
+                    Ok(PreparedPart {
                         role: part.r#type.clone(),
                         ids,
                         offsets: None,
                         words: None,
-                    }
+                    })
                 }
             })
             .collect()
