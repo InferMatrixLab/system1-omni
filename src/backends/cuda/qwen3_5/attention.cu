@@ -83,15 +83,11 @@ constexpr int D = 256, BM = 64, BN = 32, THREADS = 128;
 constexpr int LDS = D + 8;  // shared row stride in elements: 528 bytes keeps ldmatrix conflict-free
 constexpr int SMEM_BYTES = (BM + 2 * BN) * LDS * 2;
 
-// Wider query tile for long windows on the device it was measured on (L20,
-// sm_89): eight warps per block instead of four, and each K/V tile is read once
-// for 128 queries instead of 64. A query row still walks the same 32-key tiles
-// in the same order, so the arithmetic and the bfloat16 rounding are unchanged;
-// only which block computes a row changes. 101,376 bytes is the largest dynamic
-// shared-memory request on sm_89, so this stays at one block per SM.
+// 128-query tile: eight warps per SM instead of four, and one K/V read per 128
+// queries. Same key tiles and order, so results are bit-identical.
 constexpr int WIDE_BM = 128, WIDE_THREADS = 256;
 constexpr int WIDE_SMEM_BYTES = (WIDE_BM + 2 * BN) * LDS * 2;
-constexpr int WIDE_MIN_ROWS = 640;  // measured crossover on L20; also measured positive on sm_120
+constexpr int WIDE_MIN_ROWS = 640;  // measured crossover
 
 // q_base offsets row 0 of the q/gate/out buffers: this launch covers the window
 // [q_base, T_total) while k/v cover [0, T_total). Used by the cached-prefix
@@ -293,11 +289,7 @@ flash_shared_kernel(const bf16* __restrict__ q, const bf16* __restrict__ k, cons
     flash_body<true, true>(q, k, v, ldv, gate, out, T, Hq, Hk, scale_log2, prefix, prefix_k, prefix_v);
 }
 
-// The wide tile is enabled only on the devices it was measured on; other devices
-// keep BM = 64. On L20 (sm_89) it wins from 640 rows (-4.6% at 1,024, -12% at
-// 4,096, -16% at 16,384) while 512 rows is 5% slower. On the RTX 5060 Laptop
-// (sm_120) it is 17-20% faster from 512 rows up, so 640 is inside the measured
-// range for both.
+// Enabled only on the capabilities it was measured on; others keep BM = 64.
 bool wide_tile_supported() {
     static const bool supported = [] {
         int device = 0;

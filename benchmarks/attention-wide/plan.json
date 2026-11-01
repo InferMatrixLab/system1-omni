@@ -1,56 +1,29 @@
 {
-  "hypothesis": "Doubling the query tile from 64 rows / 128 threads to 128 rows / 256 threads raises attention occupancy from 4 to 8 warps per SM (shared memory stays at one block per SM) and reads each K/V tile once for 128 queries instead of 64, while leaving every query row's 32-key walk and bfloat16 rounding unchanged, so outputs stay bit-identical.",
-  "independent_variable": "Only the attention launch tile: flash_kernel<64,128> versus flash_kernel<128,256> in attention.cu. Same 32-key K tiles, same tile order, same online-softmax recurrence, same epilogue, same inputs, same stream, same buffers.",
+  "hypothesis": "A 128-query, 256-thread attention block raises occupancy from four to eight warps per SM (shared memory still allows one block) and reads each K/V tile once per 128 queries instead of 64, while every query row keeps the same 32-key tile walk and bfloat16 rounding, so outputs stay bit-identical.",
+  "independent_variable": "Only the flash-attention launch tile: flash_kernel<64,128> versus flash_kernel<128,256>.",
   "fixed_controls": {
-    "shared": {
-      "heads": "Hq=24, Hk=4, head_dim=256 (Qwen3.5-27B full-attention shape), ldv=Hk*head_dim",
-      "dtype": "bfloat16 q/k/v/gate/out; float32 scale 0.0625 * log2(e)",
-      "inputs": "Seeded (mt19937 20261101) incompressible random bfloat16 bytes, one allocation per tensor reused by both arms; kernel-level arms write to separate output buffers, library-level runs write the same file path per revision",
-      "cache": "warm; no cache drops, no clock changes",
-      "stream": "one non-blocking stream per process; 1 excluded warmup pair per length before timing",
-      "protocol": "interleaved A B B A per repetition, 10 repetitions per length, each sample is the mean of 5 launches timed with two CUDA events; medians reported; two independent processes (trials) per device, run back to back",
-      "parity": "old and new outputs compared byte for byte at every measured length, plus prefix windows at q_base 64/128/1024 against the full pass",
-      "sanitizer": "compute-sanitizer --tool memcheck --error-exitcode 1 on the candidate"
-    },
-    "runs": [
-      {
-        "device": "NVIDIA L20",
-        "compute_capability": "8.9",
-        "sm_count": 92,
-        "driver": "580.126.20",
-        "cuda": "12.1 (nvcc V12.1.105)",
-        "host": "single-GPU rented CUDA 12.1 host, 8 CPU / 32 GiB",
-        "build": "-O3 -std=c++17 -gencode arch=compute_89,code=sm_89"
-      },
-      {
-        "device": "NVIDIA GeForce RTX 5060 Laptop GPU",
-        "compute_capability": "12.0",
-        "sm_count": 26,
-        "driver": "575.57.08",
-        "cuda": "12.9 (nvcc V12.9.86)",
-        "host": "local workstation",
-        "build": "-O3 -std=c++17 -arch=sm_120"
-      }
-    ]
+    "shape": "Hq=24, Hk=4, head dim 256, ldv=Hk*head_dim (Qwen3.5-27B full attention)",
+    "inputs": "seeded mt19937 20261101, incompressible random bfloat16, same buffers for both arms",
+    "protocol": "1 excluded warmup pair per length, then interleaved A B B A, 10 repetitions, each sample is the mean of 5 launches between two CUDA events, medians per length, two independent trials per device",
+    "cache_stream": "warm cache, no clock changes, one non-blocking stream per process",
+    "quality": "byte comparison of both arms at every length, prefix windows at q_base 64/128/1024 against the full pass, compute-sanitizer memcheck"
   },
-  "run_budget": "Kernel-level: 10 A-B-B-A repetitions per length per trial, two trials per device; no extra repetitions added after seeing results. Library-level: 10 batches of 5 calls per revision per trial, two trials per device. Quality gate runs once per device before timing.",
+  "run_budget": "10 A-B-B-A repetitions per length per trial, two trials per device; nothing added after seeing results.",
   "acceptance": {
-    "fidelity": "Every measured length and every prefix window is byte-identical between arms; compute-sanitizer reports 0 errors; tests/qwen3_5/kernels.rs attention tests pass with the candidate active.",
-    "latency": "Median library-level call time strictly lower for every enabled length on each measured device, with the 512-row point unchanged because it stays on the 64-row tile. No length may regress.",
-    "scope": "Enabled only on sm_89 and sm_120 with a 640-row window minimum; other devices, the shared-prefix kernel, H200/sm_90 and end-to-end serving are out of scope and unverified."
+    "fidelity": "Byte-identical outputs at every measured length; 0 sanitizer errors; attention kernel tests pass with the wide block active.",
+    "latency": "Lower median at every enabled length on each measured device; 512 rows stays on the 64-query block, where the wide tile is 4.9% slower on L20.",
+    "scope": "sm_89 and sm_120 only, windows of at least 640 rows; H200/sm_90, the shared-prefix kernel and end-to-end serving are unverified."
   },
-  "stop": "Stop on any parity mismatch or sanitizer error, or after the declared budget.",
+  "stop": "Stop on any parity mismatch or sanitizer error, or at the end of the budget.",
   "revisions": {
     "base_git_sha": "5fa5179d57f9267bb0d20162004d8ce26352aa9d",
-    "candidate_patch_sha256": "b7c17e8256bd6cef1c6c1db0dd0001c06eaa88514783b4d82b64a2eb26b7d5c0",
-    "candidate_patch": "working tree against base_git_sha: src/backends/cuda/qwen3_5/attention.cu, src/backends/cuda/qwen3_5/README.md",
-    "measurement_programs": "Local scratch programs, not committed: one that runs the two kernel arms and the parity check, one that calls cs1_attention_gated with a swapped library, one for prefix windows. The protocol below is what they implement; ../results.json holds the per-trial aggregates."
+    "devices": [
+      "NVIDIA L20, sm_89, 92 SMs, driver 580.126.20, CUDA 12.1, arch=compute_89,code=sm_89",
+      "NVIDIA GeForce RTX 5060 Laptop GPU, sm_120, 26 SMs, driver 575.57.08, CUDA 12.9, -arch=sm_120"
+    ]
   },
-  "frozen_at_utc": "2026-11-01T08:30:00Z",
   "records": {
-    "kernel_samples": "local per-batch records, not committed; per-trial medians and p10/p90 are in ../results.json",
-    "library_samples": "local per-batch records, not committed; per-trial medians are in ../results.json",
-    "parity": "byte comparisons recorded in ../results.json",
-    "sanitizer": "outcomes recorded in ../results.json"
+    "per_trial_results": "../results.json",
+    "programs": "local scratch, not committed; the protocol above is what they implement"
   }
 }
