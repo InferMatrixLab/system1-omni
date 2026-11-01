@@ -713,6 +713,7 @@ impl DeviceBf16Matrix<'_> {
     /// Request-local identity only: producer contents may change between calls.
     pub(crate) fn same_storage(&self, other: &Self) -> bool {
         std::ptr::eq(self.buffer, other.buffer)
+            && self.at(0) == other.at(0)
             && self.layout.rows == other.layout.rows
             && self.layout.columns == other.layout.columns
             && self.layout.device == other.layout.device
