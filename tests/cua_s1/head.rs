@@ -83,7 +83,10 @@ fn export_profiles_keep_the_four_observed_near_tie_orders_separate() {
             .build()
             .unwrap(),
     );
-    let processor = crate::processing::Processor { tokenizer };
+    let processor = crate::processing::Processor {
+        tokenizer,
+        checkpoints: false,
+    };
     let cases = fixture["cases"].as_array().unwrap();
     assert_eq!(cases.len(), 4);
     for case in cases {
@@ -149,4 +152,28 @@ fn letter_projection_rejects_nonfinite_scores_before_later_prompts() {
         assert!(letter_logits(&[f32::MAX], &[2.0], 1, export).is_err());
         assert!(letter_logits(&[f32::NAN], &[1.0], 1, export).is_err());
     }
+}
+
+#[test]
+fn prefix_cache_switch_needs_merged_adapter_weights_and_no_graphs() {
+    for off in [
+        None,
+        Some(""),
+        Some("0"),
+        Some(" 0 "),
+        Some("00"),
+        Some("+0"),
+    ] {
+        assert_eq!(prefix_cache_bytes(off).unwrap(), None, "{off:?}");
+    }
+    assert_eq!(
+        prefix_cache_bytes(Some("1073741824")).unwrap(),
+        Some(1 << 30)
+    );
+    for bad in ["1G", "-1", "x"] {
+        assert!(prefix_cache_bytes(Some(bad)).is_err(), "{bad}");
+    }
+    check_prefix_cache(TextExport::Merged, false).unwrap();
+    assert!(check_prefix_cache(TextExport::Merged, true).is_err());
+    assert!(check_prefix_cache(TextExport::Unmerged, false).is_err());
 }

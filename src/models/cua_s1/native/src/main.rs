@@ -61,6 +61,15 @@ async fn systemone(
     }
 }
 
+/// With the prefix cache on, its counters too.
+async fn health(State(engine): State<Arc<Engine>>) -> Json<Value> {
+    let mut body = json!({"status": "ready", "model": MODEL_ID});
+    if let Some(stats) = engine.executor.prefix_cache_stats() {
+        body["prefix_cache"] = json!(stats);
+    }
+    Json(body)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let model = std::env::var_os("CUA_S1_MODEL").context("set CUA_S1_MODEL")?;
@@ -79,10 +88,7 @@ async fn main() -> Result<()> {
         .map_or(Ok(8000), |p| p.parse())
         .context("CUA_S1_PORT")?;
     let app = Router::new()
-        .route(
-            "/health",
-            get(|| async { Json(json!({"status": "ready", "model": MODEL_ID})) }),
-        )
+        .route("/health", get(health))
         .route("/v1/systemone", post(systemone))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(engine);

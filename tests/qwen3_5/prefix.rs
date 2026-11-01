@@ -11,6 +11,7 @@
 use std::path::PathBuf;
 
 use omni_qwen3_5_native::model::{Model, PromptGroup, SharedPrompts};
+use omni_qwen3_5_native::prefix_cache::PrefixCache;
 
 fn model() -> Model {
     let var = |name: &str| {
@@ -248,4 +249,58 @@ fn shared_prefix_state_stays_inside_one_call() {
     assert!(model.forward_fixed(outside).is_err());
     let last = model.forward_shared(&a.prompts()).unwrap();
     assert_eq!(bits(&first), bits(&last));
+}
+
+#[test]
+#[ignore = "needs a GPU, CUA_S1_CUDA_LIB and QWEN3_5_MODEL"]
+fn cached_prefixes_match_full_prompts_across_hits_misses_and_evictions() {
+    let mut model = model();
+    let block = |n, seed| tokens(n, seed);
+    let (a, b, c) = (block(128, 21), block(128, 22), block(192, 23));
+    let full = |head: &[u32], n, seed| [head, &tokens(n, seed)].concat();
+    // room for two 128-token blocks, not for a 192-token block next to one
+    let mut cache = PrefixCache::new(2 * model.prefix_bytes(128) + 1);
+    let check = |model: &mut Model, cache: &mut PrefixCache, ids: &[u32], checkpoint| {
+        let got = cache.forward(model, ids, checkpoint).unwrap();
+        let want = model.forward_fixed(ids).unwrap();
+        assert!(
+            got.iter()
+                .map(|v| v.to_bits())
+                .eq(want.iter().map(|v| v.to_bits())),
+            "{} tokens from {checkpoint}",
+            ids.len()
+        );
+    };
+    check(&mut model, &mut cache, &full(&a, 1, 31), 128); // miss
+    check(&mut model, &mut cache, &full(&a, 300, 32), 128); // hit
+    // a hit after the scratch buffers grow past every earlier prompt
+    check(&mut model, &mut cache, &full(&a, 1500, 39), 128);
+    check(&mut model, &mut cache, &full(&b, 40, 33), 128); // miss
+    check(&mut model, &mut cache, &full(&a, 64, 34), 128); // hit
+    let stats = cache.stats();
+    assert_eq!((stats.hits, stats.misses, stats.entries), (3, 2, 2));
+    assert_eq!(stats.saved_tokens, 384);
+    // `c` drops both: `b`, least recently used, and then `a`
+    check(&mut model, &mut cache, &full(&c, 5, 35), 192);
+    let stats = cache.stats();
+    assert_eq!((stats.misses, stats.evictions, stats.entries), (3, 2, 1));
+    assert_eq!(stats.bytes, model.prefix_bytes(192));
+    check(&mut model, &mut cache, &full(&a, 2, 36), 128); // a miss again
+    // a block that ends at or past the prompt, or off a 64-token boundary, runs uncached
+    let before = cache.stats();
+    for (ids, checkpoint) in [
+        (a.clone(), 128),
+        (full(&a, 10, 37), 0),
+        (full(&a, 10, 37), 100),
+    ] {
+        check(&mut model, &mut cache, &ids, checkpoint);
+    }
+    assert_eq!(
+        cache.stats().hits + cache.stats().misses,
+        before.hits + before.misses
+    );
+    // a block over the whole budget runs uncached and is not kept
+    let mut tiny = PrefixCache::new(1);
+    check(&mut model, &mut tiny, &full(&a, 3, 38), 128);
+    assert_eq!((tiny.stats().uncached, tiny.stats().entries), (1, 0));
 }
