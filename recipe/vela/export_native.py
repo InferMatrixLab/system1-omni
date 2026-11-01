@@ -123,20 +123,43 @@ def main(argv=None) -> int:
         heads[name] = value
         dtypes["heads"][name] = f"{str(value.dtype).removeprefix('torch.')}:{list(value.shape)}"
 
-    if args.bf16_out:
-        # Uniform-BF16 re-save for the family crate's loader: every
-        # backbone tensor rounds to bfloat16 once, at export (the
-        # reference's own GPU setting runs the backbone under bf16
-        # autocast too).
-        bf16_dir = Path(args.bf16_out)
-        uniform = {name: value.to(torch.bfloat16) for name, value in backbone.items()}
+    if args.bf16_out and Path(args.bf16_out) != Path(args.out) / "bf16":
+        # The manifest pins the bf16 backbone as bf16/<file> inside the
+        # bundle and the bundle gate walks it there, so the only valid
+        # target is the bundle's own bf16 subdirectory.
+        raise SystemExit(
+            f"--bf16-out must be {Path(args.out) / 'bf16'} (inside --out); got {args.bf16_out}"
+        )
 
-        def write_bf16(directory: Path) -> None:
-            save_file(uniform, str(directory / "model.safetensors"))
-            (directory / "config.json").write_text(json.dumps(backbone_config, indent=1) + "\n", encoding="utf-8")
-
-        stage_into_place(bf16_dir, write_bf16)
-        print(f"bf16 backbone: {len(uniform)} tensors -> {bf16_dir}")
+    bf16 = sum(1 for d in dtypes["backbone"].values() if d.startswith("bfloat16"))
+    fp32 = len(dtypes["backbone"]) - bf16
+    manifest = {
+        "format": FORMAT,
+        "model_id": "vllm-sr/Vela-2.0-0.8B",
+        "model_name": config["model_name"],
+        "max_length": config["max_length"],
+        "description": config.get("description", ""),
+        "source": {
+            "repo": HYBRID_REPO,
+            "revision": HYBRID_REVISION,
+            # The worker gate's own table, re-verified above.
+            "pinned_files_sha256": dict(PINNED_FILES_SHA256),
+            "shard_files": shard_files,
+        },
+        "backbone": {
+            "tensors": len(backbone),
+            "bf16": bf16,
+            "fp32": fp32,
+            "note": "per-tensor dtypes preserved from the package; backbone.X re-keyed to model.X",
+            "inventory": dtypes["backbone"],
+        },
+        "heads": {
+            "tensors": len(heads),
+            "inventory": dtypes["heads"],
+            "note": "Vela-owned F32 heads (CandidateHead, set_bias, span2 router, span_broad) in one file",
+        },
+        "files_sha256": {},
+    }
 
     def write_bundle(out: Path) -> None:
         save_file(backbone, str(out / "backbone.safetensors"))
@@ -145,6 +168,18 @@ def main(argv=None) -> int:
         (out / "config.json").write_text(json.dumps(backbone_config, indent=1) + "\n", encoding="utf-8")
         for name in ("calibration.json", "tokenizer.json", "tokenizer_config.json"):
             shutil.copyfile(package / name, out / name)
+        if args.bf16_out:
+            # Uniform-BF16 re-save for the family crate's loader: every
+            # backbone tensor rounds to bfloat16 once, at export (the
+            # reference's own GPU setting runs the backbone under bf16
+            # autocast too). Written inside the same staging tree so the
+            # whole bundle — bf16 included — lands with one rename and
+            # the manifest below pins the staged bytes.
+            bf16_dir = out / "bf16"
+            bf16_dir.mkdir()
+            uniform = {name: value.to(torch.bfloat16) for name, value in backbone.items()}
+            save_file(uniform, str(bf16_dir / "model.safetensors"))
+            (bf16_dir / "config.json").write_text(json.dumps(backbone_config, indent=1) + "\n", encoding="utf-8")
         for name in [
             "backbone.safetensors", "heads.safetensors", "config.json",
             "calibration.json", "tokenizer.json", "tokenizer_config.json",
@@ -152,12 +187,15 @@ def main(argv=None) -> int:
             manifest["files_sha256"][name] = sha256(out / name)
         if args.bf16_out:
             for name in ("model.safetensors", "config.json"):
-                manifest["files_sha256"][f"bf16/{name}"] = sha256(bf16_dir / name)
+                manifest["files_sha256"][f"bf16/{name}"] = sha256(out / "bf16" / name)
         (out / "vela_native_manifest.json").write_text(
             json.dumps(manifest, indent=1, sort_keys=True) + "\n", encoding="utf-8"
         )
 
     stage_into_place(out, write_bundle)
+
+    if args.bf16_out:
+        print(f"bf16 backbone: {len(backbone)} tensors -> {args.bf16_out}")
 
     print(f"export ok: {out}")
     print(f"  backbone: {len(backbone)} tensors ({bf16} bf16, {fp32} fp32), re-keyed {BACKBONE_PREFIX} -> model.")

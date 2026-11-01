@@ -285,6 +285,6 @@ The native implementation lives in [`native/`](native/) as the
 The crate is a library; the HTTP worker around `Processor` +
 `Executor` is not part of it. Long-span GPU parity and measured
 latency are not recorded. Checks: `cargo test -p omni-vela-native`
-(29 tests, no weights, no GPU; render, head and response parity are
+(28 tests, no weights, no GPU; render, head and response parity are
 opt-in with `VELA_NATIVE_BUNDLE`, executor parity additionally with
 `VELA_CUDA_LIB`; see [recipe/vela/native.md](../../recipe/vela/native.md)).

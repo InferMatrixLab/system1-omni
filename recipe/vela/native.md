@@ -38,11 +38,12 @@ config root (the shared qwen3_5 `Config::load` shape), calibration and
 tokenizer, and `vela_native_manifest.json` pinning the source
 revision, the gate's file table, the tensor inventory and every file's
 SHA-256. `--bf16-out` additionally writes the uniform-BF16 backbone
-(`model.safetensors`) that the shared loader consumes. Both sets are
-staged in sibling directories and moved into place with one rename, so
+(`model.safetensors`) that the shared loader consumes, into the
+bundle's own `bf16/` subdirectory. The whole set — bf16 included — is
+staged in a sibling directory and moved into place with one rename, so
 a run killed mid-write can no longer strand a partial bundle under
-`--out` or `--bf16-out`; a non-empty target directory is refused and
-the staging remnant is cleared by the next run.
+`--out`; a non-empty target directory is refused and the staging
+remnant is cleared by the next run.
 
 ## Freeze the fixtures (opt-in, needs the package)
 
@@ -75,7 +76,7 @@ VELA_CUDA_LIB=/path/to/libqwen3_5_cuda.so \
   cargo test -p omni-vela-native --test vela_native_executor -- --ignored --nocapture
 ~~~
 
-27 tests run everywhere with no weights and no GPU: the wire contract
+28 tests run everywhere with no weights and no GPU: the wire contract
 against the pinned runtime's 422/400 bodies, the bundle manifest gate,
 and the predict-mapping/plan parity on every frozen fixture. The four
 opt-in checks (behind `-- --ignored`) replay the fixtures through the
