@@ -25,8 +25,14 @@ extra=()
 if [ -n "${CUDNN_INCLUDE_DIR:-}" ] || [ -n "${CUDNN_LIB_DIR:-}" ]; then
     : "${CUDNN_INCLUDE_DIR:?set CUDNN_INCLUDE_DIR and CUDNN_LIB_DIR together}"
     : "${CUDNN_LIB_DIR:?set CUDNN_INCLUDE_DIR and CUDNN_LIB_DIR together}"
-    extra=(-DCS1_REFERENCE_CUDNN -I"$CUDNN_INCLUDE_DIR")
+    extra+=(-DCS1_REFERENCE_CUDNN -I"$CUDNN_INCLUDE_DIR")
     link+=(-L"$CUDNN_LIB_DIR" -l:libcudnn.so.9 -Xlinker -rpath -Xlinker "$CUDNN_LIB_DIR")
+fi
+# Optional Kev default-service SDPA; headers are needed only at build time.
+if [ -n "${KEV_ATEN_INCLUDE_DIR:-}" ] || [ -n "${KEV_CUTLASS_INCLUDE_DIR:-}" ]; then
+    : "${KEV_ATEN_INCLUDE_DIR:?set both Kev header paths; use recipe/kev/build_cuda.sh}"
+    : "${KEV_CUTLASS_INCLUDE_DIR:?set both Kev header paths; use recipe/kev/build_cuda.sh}"
+    extra+=(-DCS1_KEV_SDPA -I"$KEV_ATEN_INCLUDE_DIR" -I"$KEV_CUTLASS_INCLUDE_DIR" --expt-relaxed-constexpr)
 fi
 mkdir -p "$out"
 "$nvcc" -O3 -std=c++17 -gencode "arch=compute_${arch},code=[sm_${arch},compute_${arch}]" \

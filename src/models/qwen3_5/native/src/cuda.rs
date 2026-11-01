@@ -202,11 +202,15 @@ macro_rules! api {
             _lib: libloading::Library,
             vision_v2: Option<VisionV2>,
             reference: Option<Reference>,
+            torch28_reference: Option<Reference>,
             $(pub $name: unsafe extern "C" fn($($ty),*) $(-> $ret)?,)*
         }
 
         impl Api {
             /// Language arithmetic does not require cuDNN patch convolution.
+            pub fn torch28_reference(&self) -> Result<&Reference> {
+                self.torch28_reference.as_ref().context("Kev requires the optional Torch 2.8 CUDA profile; run recipe/kev/build_cuda.sh")
+            }
             pub fn language_reference(&self) -> Result<&Reference> {
                 self.reference.as_ref().context("missing framework language CUDA symbols; rebuild the library")
             }
@@ -232,7 +236,8 @@ macro_rules! api {
                 )*
                 let vision_v2=VisionV2::resolve(&lib);
                 let reference=Reference::resolve(&lib);
-                Ok(Self { _lib: lib, vision_v2, reference, $($name,)* })
+                let torch28_reference=Reference::resolve_torch28(&lib);
+                Ok(Self { _lib: lib, vision_v2, reference, torch28_reference, $($name,)* })
             }
         }
     };
@@ -343,14 +348,76 @@ type Fp32GdnRun = unsafe extern "C" fn(
     f32,
     Stream,
 ) -> c_int;
+type Fp32GdnStateRun = unsafe extern "C" fn(
+    *mut c_void,
+    *const c_void,
+    *const c_void,
+    *const c_void,
+    *const f32,
+    *const c_void,
+    *mut c_void,
+    *mut f32,
+    c_int,
+    c_int,
+    c_int,
+    f32,
+    *const c_void,
+    *mut c_void,
+    Stream,
+) -> c_int;
 /// Model-owned FP32 chunk solver. Destruction drains its last producer stream.
 pub struct Fp32Gdn {
     handle: *mut c_void,
     run: Fp32GdnRun,
+    with_state: Option<Fp32GdnStateRun>,
     destroy: unsafe extern "C" fn(*mut c_void),
     size: unsafe extern "C" fn(c_int, c_int) -> usize,
 }
 impl Fp32Gdn {
+    /// # Safety
+    /// Same allocations and stream ownership as `run`; non-null state pointers
+    /// each hold heads * 128 * 128 FP32 entries, retained until completion.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn run_state(
+        &self,
+        q: *const c_void,
+        k: *const c_void,
+        v: *const c_void,
+        g: *const f32,
+        beta: *const c_void,
+        out: *mut c_void,
+        work: *mut f32,
+        t: c_int,
+        h: c_int,
+        hk: c_int,
+        scale: f32,
+        initial: *const c_void,
+        final_state: *mut c_void,
+        stream: Stream,
+    ) -> c_int {
+        let Some(run) = self.with_state else {
+            return 801;
+        };
+        unsafe {
+            run(
+                self.handle,
+                q,
+                k,
+                v,
+                g,
+                beta,
+                out,
+                work,
+                t,
+                h,
+                hk,
+                scale,
+                initial,
+                final_state,
+                stream,
+            )
+        }
+    }
     pub fn workspace_floats(&self, tokens: usize, heads: usize) -> Result<usize> {
         ensure!(tokens <= 65536 && heads <= 256, "FP32 GDN shape limit");
         // SAFETY: this getter does not dereference memory.
@@ -505,12 +572,25 @@ impl Api {
     }
 
     pub fn fp32_gdn(&self) -> Result<Fp32Gdn> {
+        self.make_fp32_gdn(false)
+    }
+
+    pub fn torch28_gdn(&self) -> Result<Fp32Gdn> {
+        self.make_fp32_gdn(true)
+    }
+
+    fn make_fp32_gdn(&self, torch28: bool) -> Result<Fp32Gdn> {
+        let name: &[u8] = if torch28 {
+            b"cs1_gdn_fp32_create_torch28\0"
+        } else {
+            b"cs1_gdn_fp32_create\0"
+        };
         // SAFETY: these optional signatures match ops.h; the library lives in static API.
         let (create, destroy, run, size) = unsafe {
             (
                 *self
                     ._lib
-                    .get::<unsafe extern "C" fn(usize) -> *mut c_void>(b"cs1_gdn_fp32_create\0")?,
+                    .get::<unsafe extern "C" fn(usize) -> *mut c_void>(name)?,
                 *self
                     ._lib
                     .get::<unsafe extern "C" fn(*mut c_void)>(b"cs1_gdn_fp32_destroy\0")?,
@@ -528,6 +608,12 @@ impl Api {
         Ok(Fp32Gdn {
             handle,
             run,
+            with_state: unsafe {
+                self._lib
+                    .get::<Fp32GdnStateRun>(b"cs1_gdn_prefill_fp32_x\0")
+                    .ok()
+                    .map(|f| *f)
+            },
             destroy,
             size,
         })
@@ -877,3 +963,52 @@ impl Drop for Graph {
 #[cfg(test)]
 #[path = "../../../../../tests/qwen3_5/device_cuda.rs"]
 mod device_tests;
+
+#[derive(Clone, Copy)]
+pub struct ServiceReadout {
+    pub gated_norm: unsafe extern "C" fn(
+        *const c_void,
+        *const c_void,
+        c_int,
+        *const c_void,
+        *mut c_void,
+        c_int,
+        c_int,
+        c_int,
+        f32,
+        Stream,
+    ) -> c_int,
+    pub bytes: unsafe extern "C" fn(c_int, c_int, c_int) -> usize,
+    pub zero: unsafe extern "C" fn(*mut c_void, usize, Stream) -> c_int,
+    pub attention: unsafe extern "C" fn(
+        *const c_void,
+        *const c_void,
+        *const c_void,
+        c_int,
+        *const c_void,
+        *mut c_void,
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+        *mut c_void,
+        Stream,
+    ) -> c_int,
+}
+impl Api {
+    pub fn service_readout(&self) -> Result<ServiceReadout> {
+        // SAFETY: additive signatures match ops.h; Api owns the library.
+        unsafe {
+            let _: Fp32GdnStateRun = *self._lib.get(b"cs1_gdn_prefill_fp32_x\0")?;
+            Ok(ServiceReadout {
+                gated_norm: *self._lib.get(b"cs1_torch28_gated_rms_norm\0")?,
+                bytes: *self._lib.get(b"cs1_service_attention_bytes\0")?,
+                zero: *self._lib.get(b"cs1_service_zero\0")?,
+                attention: *self._lib.get(b"cs1_service_attention\0")?,
+            })
+        }
+    }
+}

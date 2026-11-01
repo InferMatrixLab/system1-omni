@@ -276,9 +276,23 @@ fn cpu_fixed_and_shared_refuse_other_profiles_before_device_work() {
     };
     let refuse = |model: &mut Model, profile: &str| {
         let before = unsafe { calls() };
+        // These public cache entry points must reject incompatible profiles
+        // before touching even a prefix's device storage.
+        let mut prefix = PrefixState {
+            owner: Arc::clone(&model.prefix_owner),
+            initialized: true,
+            len: 64,
+            cap: 64,
+            attn_kv: vec![],
+            gdn_state: vec![],
+            conv_tail: vec![],
+            bytes: 0,
+        };
         for error in [
             model.forward_fixed(&[1, 2, 3]).unwrap_err(),
             model.forward_shared(&prompts).unwrap_err(),
+            model.capture_fixed(&[1; 64], &mut prefix).unwrap_err(),
+            model.continue_fixed(&[2, 3], &prefix).unwrap_err(),
             model
                 .forward_multimodal_readout(&input, &[2], &[(2, 4)])
                 .map(drop)
@@ -307,6 +321,11 @@ fn cpu_fixed_and_shared_refuse_other_profiles_before_device_work() {
     model.fp32_gdn = None;
     model.reference = Some(cuda::api().language_reference().unwrap());
     refuse(&mut model, "reference numerics");
+    model.fp32_gdn = Some(cuda::api().torch28_gdn().unwrap());
+    model.service_ops = Some(cuda::api().service_readout().unwrap());
+    refuse(&mut model, "Kev service numerics");
+    model.service_ops = None;
+    model.fp32_gdn = None;
     model.reference = None;
     model.lora = adapter;
     drop(model);

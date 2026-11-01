@@ -206,6 +206,26 @@ int cs1_vision_to_float(const void* x, float* out, size_t n, void* stream);
 int cs1_vision_lora_add(void* x, const float* delta, size_t n, float scale, void* stream);
 
 
+// ---- Optional Kev Torch 2.8 default-service profile (additive; old ABI unchanged) ----
+// Torch 2.8 reduction order; only 4B hidden width 2560 / GDN dimension 128.
+int cs1_torch28_rms_norm(const void* x,const void* w,void* out,int rows,int D,float eps,void* stream);
+int cs1_torch28_add_rms_norm(void* residual,const void* delta,const void* w,void* out,int rows,int D,float eps,void* stream);
+int cs1_torch28_gated_rms_norm(const void* x,const void* z,int ldz,const void* w,void* out,int T,int H,int D,float eps,void* stream);
+int cs1_torch28_attn_prep(const void* qg,const void* kr,int ld,const void* qw,const void* kw,const void* cos,const void* sin,
+                        void* q,void* gate,void* k,int T,int Hq,int Hk,int Dh,int half,float eps,void* stream);
+void* cs1_gdn_fp32_create_torch28(size_t workspace_bytes);
+// Null initial state means zeros; optional final_state receives [H,128,128] FP32.
+// Context and every allocation remain alive until the supplied stream drains.
+int cs1_gdn_prefill_fp32_x(void* context,const void* q,const void* k,const void* v,const float* g,const void* beta,
+                         void* out,float* workspace,int T,int H,int HK,float scale,const void* initial,void* final_state,void* stream);
+// Q/gate/out [nq,H,256]; K [nk,HK,256]; V [nk,ld]. prefix = nk-nq.
+// Mask allows real prefix keys [left,prefix) and causal question keys [prefix,prefix+real),
+// plus each query's own key. Workspace bytes include a BF16 bias with 8-element row alignment.
+size_t cs1_service_attention_bytes(int nq,int nk,int H);
+int cs1_service_attention(const void* q,const void* k,const void* v,int ld,const void* gate,void* out,
+                          int nq,int nk,int H,int HK,int prefix,int left,int real,void* workspace,void* stream);
+int cs1_service_zero(void* ptr,size_t bytes,void* stream);
+
 // ---- Optional JEMM framework numerics (ABI 6 additive) ----
 void* cs1_reference_gemm_create(size_t workspace_bytes);
 int cs1_reference_rms_norm(const void* x, const void* w, void* out, int rows, int D, float eps, void* stream);

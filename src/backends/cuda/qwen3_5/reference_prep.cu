@@ -5,6 +5,7 @@ constexpr int PER = DH / 32;    // values per lane
 
 // One warp per (token, head), q heads first, then k heads. Each lane holds 8
 // consecutive dims, so the rotary partner of dim i < 32 (dim i + 32) sits in lane ^ 4.
+template<bool Torch28>
 __global__ void attn_prep_kernel(const bf16* __restrict__ qg, const bf16* __restrict__ kr, int ld,
                                  const bf16* __restrict__ qw, const bf16* __restrict__ kw,
                                  const bf16* __restrict__ cos, const bf16* __restrict__ sin,
@@ -29,7 +30,7 @@ __global__ void attn_prep_kernel(const bf16* __restrict__ qg, const bf16* __rest
         sums[j]=__fadd_rn(__fmul_rn(a,a),__fmul_rn(b,b));
     }
     float ss=__fadd_rn(__fadd_rn(__fadd_rn(sums[0],sums[1]),sums[2]),sums[3]);
-    for(int step=16;step>0;step/=2)ss=__fadd_rn(ss,__shfl_down_sync(0xffffffff,ss,step));
+    if constexpr(Torch28){for(int step=1;step<32;step*=2)ss=__fadd_rn(ss,__shfl_down_sync(0xffffffff,ss,step));}else{for(int step=16;step>0;step/=2)ss=__fadd_rn(ss,__shfl_down_sync(0xffffffff,ss,step));}
     ss=__shfl_sync(0xffffffff,ss,0);
     const float inv=rsqrtf(__fadd_rn(__fmul_rn(ss,1.f/DH),eps));
     float wv[PER];
@@ -66,7 +67,7 @@ __global__ void attn_prep_kernel(const bf16* __restrict__ qg, const bf16* __rest
 } }
 using namespace cs1;
 using namespace cs1::reference_prep;
-extern "C" int cs1_reference_attn_prep(const void* qg, const void* kr, int ld, const void* qw, const void* kw,
+template<bool Torch28> int reference_attn_prep_run(const void* qg, const void* kr, int ld, const void* qw, const void* kw,
                              const void* cos, const void* sin, void* q, void* gate, void* k, int T, int Hq, int Hk,
                              int Dh, int half, float eps, void* stream) {
     if (ld % 8 != 0 || T < 0) return cudaErrorInvalidValue;
@@ -75,9 +76,17 @@ extern "C" int cs1_reference_attn_prep(const void* qg, const void* kr, int ld, c
     const int warps = T * (Hq + Hk);
     if (warps == 0) return cudaSuccess;
     constexpr int WARPS = 8;
-    attn_prep_kernel<<<(warps + WARPS - 1) / WARPS, WARPS * 32, 0, static_cast<cudaStream_t>(stream)>>>(
+    attn_prep_kernel<Torch28><<<(warps + WARPS - 1) / WARPS, WARPS * 32, 0, static_cast<cudaStream_t>(stream)>>>(
         static_cast<const bf16*>(qg), static_cast<const bf16*>(kr), ld, static_cast<const bf16*>(qw),
         static_cast<const bf16*>(kw), static_cast<const bf16*>(cos), static_cast<const bf16*>(sin),
         static_cast<bf16*>(q), static_cast<bf16*>(gate), static_cast<bf16*>(k), T, Hq, Hk, half, eps);
     return cudaGetLastError();
+}
+
+extern "C" int cs1_reference_attn_prep(const void* qg,const void* kr,int ld,const void* qw,const void* kw,const void* cos,const void* sin,void* q,void* gate,void* k,int t,int hq,int hk,int d,int half,float eps,void* stream) {
+ return reference_attn_prep_run<false>(qg,kr,ld,qw,kw,cos,sin,q,gate,k,t,hq,hk,d,half,eps,stream);
+}
+
+extern "C" int cs1_torch28_attn_prep(const void* qg,const void* kr,int ld,const void* qw,const void* kw,const void* cos,const void* sin,void* q,void* gate,void* k,int t,int hq,int hk,int d,int half,float eps,void* stream) {
+ return reference_attn_prep_run<true>(qg,kr,ld,qw,kw,cos,sin,q,gate,k,t,hq,hk,d,half,eps,stream);
 }
