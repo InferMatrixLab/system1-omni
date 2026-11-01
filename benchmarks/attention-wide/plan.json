@@ -44,14 +44,13 @@
     "base_git_sha": "5fa5179d57f9267bb0d20162004d8ce26352aa9d",
     "candidate_patch_sha256": "b7c17e8256bd6cef1c6c1db0dd0001c06eaa88514783b4d82b64a2eb26b7d5c0",
     "candidate_patch": "working tree against base_git_sha: src/backends/cuda/qwen3_5/attention.cu, src/backends/cuda/qwen3_5/README.md",
-    "measurement_programs": "Local scratch programs, not committed: one that runs the two kernel arms and the parity check, one that calls cs1_attention_gated with a swapped library, one for prefix windows. The protocol below is what they implement; summarize.py recomputes summary.json from the raw records."
+    "measurement_programs": "Local scratch programs, not committed: one that runs the two kernel arms and the parity check, one that calls cs1_attention_gated with a swapped library, one for prefix windows. The protocol below is what they implement; ../results.json holds the per-trial aggregates."
   },
   "frozen_at_utc": "2026-11-01T08:30:00Z",
   "records": {
-    "kernel_samples": "results_<device>.jsonl (kind=sample, 20 samples per arm and length per trial)",
-    "library_samples": "lib_<device>.jsonl (kind=lib_sample)",
-    "parity": "parity_<device>.log and the byte comparisons recorded in summary.json",
-    "sanitizer": "sanitizer_<device>.log",
-    "aggregate": "summarize.py (rebuilds summary.json from the raw records)"
+    "kernel_samples": "local per-batch records, not committed; per-trial medians and p10/p90 are in ../results.json",
+    "library_samples": "local per-batch records, not committed; per-trial medians are in ../results.json",
+    "parity": "byte comparisons recorded in ../results.json",
+    "sanitizer": "outcomes recorded in ../results.json"
   }
 }

@@ -1,4 +1,0 @@
-sanitizer T=640 exit=0 ERROR SUMMARY: 0 errors
-sanitizer T=1024 exit=0 ERROR SUMMARY: 0 errors
-sanitizer T=4096 exit=0 ERROR SUMMARY: 0 errors
-sanitizer T=8192 exit=0 ERROR SUMMARY: 0 errors

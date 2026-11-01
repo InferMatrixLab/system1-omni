@@ -1,3 +1,0 @@
-T=2048 q_base=64 rows=1984 exact
-T=2048 q_base=128 rows=1920 exact
-T=2048 q_base=1024 rows=1024 exact

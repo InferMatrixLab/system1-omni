@@ -32,7 +32,7 @@ shortest measured length.
 
 ## Protocol
 
-Frozen before the recorded runs in [`artifacts/20261101/plan.json`](artifacts/20261101/plan.json):
+Frozen before the recorded runs in [`plan.json`](plan.json):
 
 - Isolated variable: `flash_kernel<64,128>` versus `flash_kernel<128,256>`. Same
   key tiles, order, online-softmax recurrence, epilogue, inputs, buffers, stream.
@@ -85,18 +85,17 @@ Trial-to-trial delta ranges: L20 640 rows -2.62..-3.00%, 8,192 rows
 | 6,144 | -13.2% | -18.0% |
 | 8,192 | -13.8% | -17.5% |
 
-Full per-trial values, sample counts and p10/p90 are in
-[`summary.json`](artifacts/20261101/summary.json); every raw batch is in
-`results_*.jsonl` and `lib_*.jsonl`.
+Per-trial medians, p10/p90 and per-trial delta ranges, with the parity and
+sanitizer outcomes, are in [`results.json`](results.json).
 
 ## Fidelity
 
 - Byte-identical old versus new output at every measured length and in both
-  trials on both devices (12 comparisons per device, `parity_*.log`).
+  trials on both devices (12 comparisons per device).
 - Prefix windows at q_base 64, 128 and 1,024 match the full pass byte for byte
   (`parity_prefix_*.log`); the 128- and 1,024-row cases use the wider tile.
 - `compute-sanitizer --tool memcheck` reports 0 errors at 640, 1,024, 4,096 and
-  8,192 rows on both devices (`sanitizer_*.log`).
+  8,192 rows on both devices.
 - `tests/qwen3_5/kernels.rs` attention tests pass with the wider tile active,
   including `windowed_attention_matches_full_pass_bit_for_bit` and the
   float64 reference at 700 and 2,048 rows. The full ignored suite is 26 passed
@@ -125,11 +124,11 @@ Full per-trial values, sample counts and p10/p90 are in
 
 ## Reproduction
 
-The measurement programs were local scratch, not part of this change: the
-repository's CUDA guidance asks one-off optimizations not to add a per-PR
-microbenchmark, so only the protocol and the raw results are recorded here. The
-protocol is fully specified above; any program that follows it reproduces the
-numbers, and `summarize.py` recomputes `summary.json` from the raw files.
+The measurement programs and per-batch records were local scratch, not part of
+this change: the repository's CUDA guidance asks one-off optimizations not to
+add a per-PR microbenchmark, so only the frozen protocol and the per-trial
+results are recorded here. The protocol is fully specified above and in
+`plan.json`; any program that follows it reproduces the numbers.
 
 ```sh
 # Libraries for each revision (same sources, one attention.cu difference):
@@ -139,10 +138,6 @@ build.sh $WORK/lib_base <arch>     # base_git_sha attention.cu
 # Each arm: 1 excluded warmup pair per length, then interleaved A B B A,
 # 10 repetitions, each sample the mean of 5 launches between two CUDA events,
 # medians per length; run the whole program twice as two trials.
-
-# Recompute summary.json from the recorded raw files:
-python3 benchmarks/attention-wide/artifacts/20261101/summarize.py \
-  benchmarks/attention-wide/artifacts/20261101
 ```
 
 `<arch>` is 89 on CUDA 12.1 (L20) and 120 on CUDA 12.9 (RTX 5060 Laptop). The
