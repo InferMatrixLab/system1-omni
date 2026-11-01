@@ -122,6 +122,29 @@ def test_actual_http_server_routes_turbo_and_recovers_after_error():
     assert executor.closed
 
 
+@pytest.mark.parametrize('placement', ['state', 'criteria'])
+def test_deep_turbo_json_returns_400_before_runtime_and_recovers(placement):
+    body = (raw(state='NESTED') if placement == 'state' else
+            raw(questions={'q': {'type': 'choice', 'criteria': {'a': 'NESTED'}}}))
+    body = body.replace(b'"NESTED"', b'[' * 1500 + b'0' + b']' * 1500)
+    executor = FakeTurbo()
+    server = d3.WorkerServer(('127.0.0.1', 0), executor)
+    thread = threading.Thread(target=server.serve_forever); thread.start()
+    try:
+        for payload, status in [(body, 400), (raw(), 200)]:
+            connection = http.client.HTTPConnection(*server.server_address)
+            try:
+                connection.request('POST', '/v1/systemone', payload, {'Content-Type': 'application/json'})
+                response = connection.getresponse(); response.read()
+                assert response.status == status
+                assert len(executor.calls) == (0 if status == 400 else 1)
+            finally:
+                connection.close()
+    finally:
+        server.shutdown(); server.server_close(); thread.join()
+    assert executor.closed
+
+
 def test_manifest_pin_and_no_verification_bypass(tmp_path):
     turbo = turbo_module()
     fixture = Path(__file__).parent / 'fixtures/turbo-manifest.json'
@@ -165,6 +188,51 @@ def test_turbo_refuses_shadow_imports_and_unlisted_data(tmp_path, monkeypatch, n
     (tmp_path / name).write_text('unlisted')
     with pytest.raises(ValueError, match='unexpected|unlisted'):
         turbo.verify_package(tmp_path)
+
+
+@pytest.mark.parametrize('verify', ['fast', 'full'])
+@pytest.mark.parametrize('name', ['assets/unlisted.py', 'namespace/nested/code.pyc',
+                                 'namespace/hidden.abi3.so', 'assets/extra.json'])
+def test_turbo_rejects_unlisted_nested_files(tmp_path, monkeypatch, verify, name):
+    turbo = make_package(tmp_path, monkeypatch)
+    entry = tmp_path / name
+    entry.parent.mkdir(parents=True)
+    entry.write_bytes(b'unlisted; never executed')
+    with pytest.raises(ValueError, match='unlisted package file ' + name):
+        turbo.verify_package(tmp_path, verify)
+
+
+def test_turbo_rejects_directory_symlink_inventory_bypass(tmp_path, monkeypatch):
+    turbo = make_package(tmp_path, monkeypatch)
+    # A directory link could hide an unlisted namespace module from a walk
+    # that does not follow symlinks; do not follow it outside the package.
+    (tmp_path / 'namespace').symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(ValueError, match='symlink.*namespace'):
+        turbo.verify_package(tmp_path, 'full')
+
+
+def test_turbo_allows_manifest_listed_nested_assets(tmp_path, monkeypatch):
+    turbo = make_package(tmp_path, monkeypatch)
+    asset = tmp_path / 'assets' / 'example.png'
+    asset.parent.mkdir()
+    asset.write_bytes(b'non-load artwork')
+    manifest_path = tmp_path / engine.MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text())
+    manifest['files_sha256']['assets/example.png'] = hashlib.sha256(asset.read_bytes()).hexdigest()
+    manifest['files_bytes']['assets/example.png'] = asset.stat().st_size
+    encoded = json.dumps(manifest).encode(); manifest_path.write_bytes(encoded)
+    monkeypatch.setattr(turbo, 'MANIFEST_SHA256', hashlib.sha256(encoded).hexdigest())
+    assert turbo.verify_package(tmp_path, 'full')['repo_id'] == 'vllm-sr/d3-turbo'
+
+
+def test_turbo_allows_verified_file_symlinks_from_download_cache(tmp_path, monkeypatch):
+    turbo = make_package(tmp_path, monkeypatch)
+    shard = tmp_path / 'model-00001.safetensors'
+    cached = tmp_path / '.cache' / 'huggingface' / 'download' / 'shard'
+    cached.parent.mkdir(parents=True)
+    shard.rename(cached)
+    shard.symlink_to(cached)
+    assert turbo.verify_package(tmp_path, 'full')['repo_id'] == 'vllm-sr/d3-turbo'
 
 
 @pytest.mark.parametrize('first,second', [('legacy', 'turbo'), ('turbo', 'legacy')])

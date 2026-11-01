@@ -58,9 +58,21 @@ def verify_package(root: Path, verify: str = 'fast') -> dict[str, Any]:
         if not weight or verify == 'full' or size <= 64 << 20:
             if _sha256_safe(target) != digest:
                 problems.append(f'{name}: SHA-256 differs from manifest')
-    for entry in root.iterdir():
-        if entry.is_file() and entry.name not in listed and entry.name != MANIFEST_NAME and not entry.name.startswith('.'):
-            problems.append(f'unlisted package file {entry.name}')
+    pending = [root]
+    while pending:
+        for entry in pending.pop().iterdir():
+            name = entry.relative_to(root).as_posix()
+            # Preserve root download/VCS metadata, which cannot form a
+            # top-level Python namespace. Visible directories are inventoried.
+            if name.split('/')[0].startswith('.'):
+                continue
+            if entry.is_dir():
+                if entry.is_symlink():
+                    problems.append(f'unexpected directory symlink {name}')
+                else:
+                    pending.append(entry)
+            elif name not in listed and name != MANIFEST_NAME:
+                problems.append(f'unlisted package file {name}')
     if problems:
         raise ValueError('turbo package verification failed: ' + '; '.join(problems[:8]))
     return manifest

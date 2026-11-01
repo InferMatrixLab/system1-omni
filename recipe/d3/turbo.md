@@ -69,6 +69,11 @@ corruption in large shards and does not re-establish their SHA-256 identity.
 Turbo refuses `--verify none`. Unlisted importable code and package
 bytecode caches are rejected. The worker isolates copied Transformers modules
 from stale dynamic-module caches and refuses old/new package mixing.
+Both modes check for unlisted files throughout visible package directories,
+including assets and namespace packages, and reject directory symlinks rather
+than following them. Root hidden download/VCS metadata is excluded from this
+inventory; the runtime import checks still apply. Manifest-listed file symlinks
+are allowed and their targets undergo the same size/hash checks.
 
 The pinned manifest's README size is stale. Like the package's own
 `loaded_files`, this gate excludes Markdown, artwork, license texts and
@@ -149,6 +154,8 @@ placeholder tokens are also refused rather than interpreted as text.
 Quantization and additional hardware backends are outside this profile.
 
 Malformed transport/JSON retains the worker's 400/411/413/415 behavior.
+JSON nesting that overflows admission's recursive media check returns 400
+before image decoding or inference; the worker remains available afterward.
 Supported-kind questions with invalid criteria or excessive token length keep
 the public AutoModel's **HTTP 200 per-question typed errors**, with its own
 reason/message and usage. This differs deliberately from legacy D3's

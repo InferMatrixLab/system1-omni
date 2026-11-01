@@ -67,7 +67,10 @@ def decide(raw: bytes, executor: D3Executor) -> dict[str, Any]:
 
     if getattr(executor, "profile", "legacy") == "turbo":
         from models.d3.turbo_protocol import parse_request as turbo_request, finish_response as turbo_finish
-        request = turbo_request(parse_body(raw))
+        try:
+            request = turbo_request(parse_body(raw))
+        except RecursionError as exc:
+            raise RequestError("request JSON nesting exceeds the supported depth", 400) from exc
         images = _decode(request.images, executor.load_images, executor.image_unavailable, TEXT_ONLY_IMAGES_MESSAGE)
         try:
             response = executor.system_one(state=request.state, questions=dict(request.questions), images=images)
