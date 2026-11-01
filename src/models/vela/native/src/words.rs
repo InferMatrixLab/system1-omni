@@ -4,6 +4,8 @@
 //! `word_first_tokens`. Offsets are Unicode code points everywhere, as
 //! on the reference.
 
+use std::sync::LazyLock;
+
 use onig::Regex;
 
 /// The CJK ranges of the reference `_WORD` pattern, verbatim.
@@ -11,7 +13,9 @@ const CJK: &str = "⺀-⿿　-〿぀-ヿ㄀-ㇿ㐀-䶿一-鿿ꀀ-꓏가-힯豈-�
 /// Trailing punctuation the URL rule strips.
 const TRAIL: &str = ".,;:!?)\\]}>\"'\u{201d}\u{2019}\u{bb}";
 
-fn word_pattern() -> Regex {
+/// The reference `_WORD` pattern, compiled once per process (compiling
+/// it per request recompiled the same pattern every time).
+static WORD_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     let pattern = concat!(
         "(?:https?://|www\\.)[^\\s{cjk}]+?(?=[{trail}]*(?![^\\s{cjk}]))",
         "|[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}",
@@ -27,7 +31,7 @@ fn word_pattern() -> Regex {
         onig::Syntax::ruby(),
     )
     .expect("the reference word pattern must compile")
-}
+});
 
 /// Start-of-char byte offsets plus the end sentinel; index it with
 /// `partition_point(|&start| start < byte)` to map a byte offset to its
@@ -41,11 +45,10 @@ fn char_starts(text: &str) -> Vec<usize> {
 
 /// The (start, end) word ranges of `text`, in code points.
 pub fn split_words(text: &str) -> Vec<(usize, usize)> {
-    let regex = word_pattern();
     // Byte offsets → code-point offsets.
     let char_of_byte = char_starts(text);
     let to_char = |byte: usize| -> usize { char_of_byte.partition_point(|&start| start < byte) };
-    regex
+    WORD_PATTERN
         .find_iter(text)
         .map(|(start, end)| (to_char(start), to_char(end)))
         .collect()
@@ -102,20 +105,23 @@ pub fn is_cjk_char(ch: char) -> bool {
 /// `@._-+`, or any non-space char. Returns each char's unit id, -1
 /// outside units — the decode's `u` array.
 pub fn unit_ids(chars: &[char]) -> Vec<i64> {
+    static UNIT_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+        let pattern = concat!(
+            "(?:https?://|www\\.)[^\\s\\]\\)\\}>「」『』\"'“”{cjk}]+?(?=[.,;:!?]*(?![^\\s\\]\\)\\}>「」『』\"'“”{cjk}]))",
+            "|(?:(?![{cjk}])[^\\W_]|[@._\\-+])+",
+            "|\\S",
+        )
+        .replace("{cjk}", CJK);
+        Regex::with_options(
+            &pattern,
+            onig::RegexOptions::REGEX_OPTION_IGNORECASE,
+            onig::Syntax::ruby(),
+        )
+        .expect("the reference unit pattern must compile")
+    });
     let mut ids = vec![-1i64; chars.len()];
     let text: String = chars.iter().collect();
-    let pattern = concat!(
-        "(?:https?://|www\\.)[^\\s\\]\\)\\}>「」『』\"'“”{cjk}]+?(?=[.,;:!?]*(?![^\\s\\]\\)\\}>「」『』\"'“”{cjk}]))",
-        "|(?:(?![{cjk}])[^\\W_]|[@._\\-+])+",
-        "|\\S",
-    )
-    .replace("{cjk}", CJK);
-    let regex = Regex::with_options(
-        &pattern,
-        onig::RegexOptions::REGEX_OPTION_IGNORECASE,
-        onig::Syntax::ruby(),
-    )
-    .expect("the reference unit pattern must compile");
+    let regex = &*UNIT_PATTERN;
     // find_iter yields byte offsets; ids indexes characters.
     let char_of_byte = char_starts(&text);
     let to_char = |byte: usize| -> usize { char_of_byte.partition_point(|&start| start < byte) };

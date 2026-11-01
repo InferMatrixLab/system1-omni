@@ -7,6 +7,7 @@
 //! `-- --ignored`:
 //!
 //!     VELA_NATIVE_BUNDLE=weights/vela-2.0-0.8b-native \
+//!       VELA_NATIVE_MANIFEST_SHA256=<the digest the exporter prints> \
 //!       cargo test -p omni-vela-native --test vela_native_processing -- --ignored --nocapture
 
 use std::path::PathBuf;
@@ -114,11 +115,16 @@ fn bundle_dir() -> PathBuf {
     path
 }
 
+fn manifest_anchor() -> String {
+    std::env::var("VELA_NATIVE_MANIFEST_SHA256")
+        .expect("set VELA_NATIVE_MANIFEST_SHA256 to the manifest digest the exporter prints")
+}
+
 #[test]
 #[ignore = "requires VELA_NATIVE_BUNDLE at an exported bundle; CPU only"]
 fn the_rendered_rows_match_every_fixture() {
     let bundle = bundle_dir();
-    let processor = omni_vela_native::processing::Processor::load(&bundle)
+    let processor = omni_vela_native::processing::Processor::load(&bundle, &manifest_anchor())
         .expect("processor loads the exported bundle");
     for case in CASES {
         let fix = fixture(case);
