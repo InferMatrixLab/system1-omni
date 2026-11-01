@@ -201,6 +201,13 @@ def main(argv=None) -> int:
     print(f"  backbone: {len(backbone)} tensors ({bf16} bf16, {fp32} fp32), re-keyed {BACKBONE_PREFIX} -> model.")
     print(f"  heads:    {len(heads)} tensors (F32, incl. span_broad)")
     print(f"  config:   backbone_config at root, model_type={backbone_config.get('model_type')}")
+    # The load-side gate anchors on the manifest's own digest, so the
+    # file table can no longer vouch for itself; the loader needs this
+    # value from outside the bundle directory.
+    manifest_sha = sha256(out / "vela_native_manifest.json")
+    print(f"  manifest: SHA-256 {manifest_sha}")
+    print(f"            loaders must pass it as the anchor, e.g.")
+    print(f"            VELA_NATIVE_MANIFEST_SHA256={manifest_sha}")
     return 0
 
 

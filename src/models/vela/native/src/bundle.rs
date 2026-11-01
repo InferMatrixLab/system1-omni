@@ -30,12 +30,21 @@ pub struct Bundle {
 
 impl Bundle {
     /// Load and fully verify one exported bundle directory.
-    pub fn load(dir: &Path) -> Result<Self> {
-        let manifest: Value = serde_json::from_slice(
-            &std::fs::read(dir.join("vela_native_manifest.json"))
-                .context("export the pinned package first; see recipe/vela/export_native.py")?,
-        )
-        .context("vela_native_manifest.json must be JSON")?;
+    ///
+    /// `pinned_manifest_sha256` anchors the whole integrity chain: the
+    /// manifest's own bytes must hash to it, so the `files_sha256` table
+    /// is checked against a value fixed outside the bundle directory
+    /// (the exporter prints it) instead of against itself.
+    pub fn load(dir: &Path, pinned_manifest_sha256: &str) -> Result<Self> {
+        let manifest_bytes = std::fs::read(dir.join("vela_native_manifest.json"))
+            .context("export the pinned package first; see recipe/vela/export_native.py")?;
+        ensure!(
+            hash_bytes(&manifest_bytes) == pinned_manifest_sha256,
+            "vela_native_manifest.json does not match the pinned SHA-256 anchor; \
+             re-export the pinned package and re-pin the anchor it prints"
+        );
+        let manifest: Value = serde_json::from_slice(&manifest_bytes)
+            .context("vela_native_manifest.json must be JSON")?;
         ensure!(
             manifest["format"] == FORMAT
                 && manifest["model_id"] == MODEL_ID
@@ -61,7 +70,8 @@ impl Bundle {
             "files_sha256 pins no files; the gate must cover the whole bundle"
         );
         for (name, digest) in files {
-            let actual = hash_file(&dir.join(name))?;
+            let path = pinned_path(dir, name)?;
+            let actual = hash_file(&path)?;
             ensure!(
                 actual == digest.as_str().unwrap_or(""),
                 "{name} does not match the manifest SHA-256"
@@ -138,6 +148,34 @@ impl Bundle {
     }
 }
 
+/// Resolve one `files_sha256` key inside the bundle directory: the key
+/// must be a plain relative path (no absolute prefix, no `.`/`..`
+/// components) and must not cross a symlink at any level — otherwise a
+/// crafted manifest could make the gate hash files outside the bundle.
+fn pinned_path(dir: &Path, name: &str) -> Result<PathBuf> {
+    ensure!(!name.is_empty(), "files_sha256 pins an empty name");
+    let relative = Path::new(name);
+    ensure!(
+        !relative.is_absolute(),
+        "files_sha256 key must be a plain relative name: {name:?}"
+    );
+    let mut checked = dir.to_path_buf();
+    for component in relative.components() {
+        let part = match component {
+            std::path::Component::Normal(part) => part,
+            _ => anyhow::bail!("files_sha256 key must be a plain relative name: {name:?}"),
+        };
+        checked.push(part);
+        let meta = std::fs::symlink_metadata(&checked)
+            .with_context(|| format!("cannot stat {}", checked.display()))?;
+        ensure!(
+            !meta.file_type().is_symlink(),
+            "files_sha256 key must not cross a symlink: {name:?}"
+        );
+    }
+    Ok(checked)
+}
+
 fn hash_file(path: &Path) -> Result<String> {
     use anyhow::bail;
     use sha2::{Digest, Sha256};
@@ -163,4 +201,9 @@ fn hash_file(path: &Path) -> Result<String> {
 /// Lower-hex of a digest; sha2 0.11's output has no `LowerHex` impl.
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn hash_bytes(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    hex(&Sha256::digest(bytes))
 }

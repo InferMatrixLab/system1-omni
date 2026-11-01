@@ -11,6 +11,7 @@
 use std::path::PathBuf;
 
 use omni_qwen3_5_native::model::{Model, PromptGroup, SharedPrompts};
+use omni_qwen3_5_native::prefix_cache::PrefixCache;
 
 fn model() -> Model {
     let var = |name: &str| {
@@ -132,6 +133,52 @@ fn shared_prefixes_match_full_prompts() {
 
 #[test]
 #[ignore = "needs a GPU, CUA_S1_CUDA_LIB and QWEN3_5_MODEL"]
+fn packing_options_leave_fixed_rows_unchanged() {
+    let groups: &[(usize, &[usize])] =
+        &[(0, &[1, 64]), (1, &[2, 65]), (70, &[1, 200]), (128, &[3])];
+    let case = Case::new(300, groups, 21);
+    let full: Vec<Vec<u32>> = groups
+        .iter()
+        .enumerate()
+        .flat_map(|(g, (_, branches))| (0..branches.len()).map(move |b| (g, b)))
+        .map(|(g, b)| case.full(g, b))
+        .collect();
+    let want: Vec<Vec<f32>> = {
+        let mut plain = model();
+        full.iter()
+            .map(|ids| plain.forward_fixed(ids).unwrap())
+            .collect()
+    };
+    // what Open-Jev selects at load for checkpoints that pack candidates (27B)
+    let mut model = model();
+    model.enable_batched_gdn().unwrap();
+    model.enable_packed_projections().unwrap();
+    model.check_fixed_rows().unwrap();
+    let flat = |rows: Vec<Vec<Vec<f32>>>| rows.into_iter().flatten().collect::<Vec<_>>();
+    let first = flat(model.forward_shared(&case.prompts()).unwrap());
+    // the packed default path in between, as when `auto` declines a request
+    let inputs: Vec<&[u32]> = full.iter().map(Vec::as_slice).collect();
+    model.forward_batch(&inputs).unwrap();
+    let again = flat(model.forward_shared(&case.prompts()).unwrap());
+    for (i, ids) in full.iter().enumerate() {
+        let fixed = model.forward_fixed(ids).unwrap();
+        for (name, row) in [
+            ("shared", &first[i]),
+            ("shared again", &again[i]),
+            ("fixed", &fixed),
+        ] {
+            assert!(
+                row.iter()
+                    .map(|v| v.to_bits())
+                    .eq(want[i].iter().map(|v| v.to_bits())),
+                "{name}, prompt {i}"
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "needs a GPU, CUA_S1_CUDA_LIB and QWEN3_5_MODEL"]
 fn shared_prefix_state_stays_inside_one_call() {
     let mut model = model();
     let a = Case::new(200, &[(10, &[3, 40, 1]), (0, &[64]), (65, &[2, 7])], 11);
@@ -202,4 +249,58 @@ fn shared_prefix_state_stays_inside_one_call() {
     assert!(model.forward_fixed(outside).is_err());
     let last = model.forward_shared(&a.prompts()).unwrap();
     assert_eq!(bits(&first), bits(&last));
+}
+
+#[test]
+#[ignore = "needs a GPU, CUA_S1_CUDA_LIB and QWEN3_5_MODEL"]
+fn cached_prefixes_match_full_prompts_across_hits_misses_and_evictions() {
+    let mut model = model();
+    let block = |n, seed| tokens(n, seed);
+    let (a, b, c) = (block(128, 21), block(128, 22), block(192, 23));
+    let full = |head: &[u32], n, seed| [head, &tokens(n, seed)].concat();
+    // room for two 128-token blocks, not for a 192-token block next to one
+    let mut cache = PrefixCache::new(2 * model.prefix_bytes(128) + 1);
+    let check = |model: &mut Model, cache: &mut PrefixCache, ids: &[u32], checkpoint| {
+        let got = cache.forward(model, ids, checkpoint).unwrap();
+        let want = model.forward_fixed(ids).unwrap();
+        assert!(
+            got.iter()
+                .map(|v| v.to_bits())
+                .eq(want.iter().map(|v| v.to_bits())),
+            "{} tokens from {checkpoint}",
+            ids.len()
+        );
+    };
+    check(&mut model, &mut cache, &full(&a, 1, 31), 128); // miss
+    check(&mut model, &mut cache, &full(&a, 300, 32), 128); // hit
+    // a hit after the scratch buffers grow past every earlier prompt
+    check(&mut model, &mut cache, &full(&a, 1500, 39), 128);
+    check(&mut model, &mut cache, &full(&b, 40, 33), 128); // miss
+    check(&mut model, &mut cache, &full(&a, 64, 34), 128); // hit
+    let stats = cache.stats();
+    assert_eq!((stats.hits, stats.misses, stats.entries), (3, 2, 2));
+    assert_eq!(stats.saved_tokens, 384);
+    // `c` drops both: `b`, least recently used, and then `a`
+    check(&mut model, &mut cache, &full(&c, 5, 35), 192);
+    let stats = cache.stats();
+    assert_eq!((stats.misses, stats.evictions, stats.entries), (3, 2, 1));
+    assert_eq!(stats.bytes, model.prefix_bytes(192));
+    check(&mut model, &mut cache, &full(&a, 2, 36), 128); // a miss again
+    // a block that ends at or past the prompt, or off a 64-token boundary, runs uncached
+    let before = cache.stats();
+    for (ids, checkpoint) in [
+        (a.clone(), 128),
+        (full(&a, 10, 37), 0),
+        (full(&a, 10, 37), 100),
+    ] {
+        check(&mut model, &mut cache, &ids, checkpoint);
+    }
+    assert_eq!(
+        cache.stats().hits + cache.stats().misses,
+        before.hits + before.misses
+    );
+    // a block over the whole budget runs uncached and is not kept
+    let mut tiny = PrefixCache::new(1);
+    check(&mut model, &mut tiny, &full(&a, 3, 38), 128);
+    assert_eq!((tiny.stats().uncached, tiny.stats().entries), (1, 0));
 }

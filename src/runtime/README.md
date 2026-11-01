@@ -1,9 +1,11 @@
 # Native execution runtime
 
-`omni-runtime` provides `SerialScheduler` for the Cua-S1, Open-Jev, Laya and
-Decider native workers. Their engines assemble a processor, one scheduler for the loaded
-executor, and the executor. HTTP handlers still coordinate
-`prepare` → `execute` → `finish`.
+`omni-runtime` provides `SerialScheduler` for the Cua-S1, Open-Jev, Laya,
+Decider, and Clef workers. Cua-S1, Open-Jev, Laya, and Decider assemble a
+processor, one scheduler for the loaded executor, and the executor. HTTP
+handlers still coordinate `prepare` → `execute` → `finish`. Clef uses the
+same scheduler. Its admitted closure is the frame RPC to its Python
+executor and does not call CUDA.
 
 The scheduler owns FIFO admission and blocking dispatch. A caller waits
 asynchronously for one execution permit before entering Tokio's blocking pool.
@@ -17,6 +19,7 @@ state. Waiting requests no longer occupy blocking threads waiting for that mutex
 | Open-Jev | One complete request's independent candidate forwards and CPU scalar heads. | Request preparation and calibrated response finishing. |
 | Laya | One complete padded request, including GPU scorer/action head and copyback. | Request preparation/padding and calibrated response finishing. |
 | Decider | One complete request's independent rows, including within-request packing and LM-head projection. | Request preparation and calibrated response finishing. An optional request reservation covers both; token reservation begins after preparation. |
+| Clef | One complete text request. The closure writes one frame and waits for that same executor process. | HTTP body reads and the cached health response. CUDA stays on the executor process main thread, including the warmup that runs before the port opens. |
 
 Models retain weights, heads, device state, scratch buffers and graph caches.
 The scheduler takes an owned closure and returns its result; it does not know

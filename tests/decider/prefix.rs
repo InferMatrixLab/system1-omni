@@ -60,7 +60,7 @@ fn question_prefix_and_request_prefix_are_independent_and_ordered() {
 }
 #[test]
 fn short_unique_single_and_identical_rows_fallback_safely() {
-    assert!(PrefixPlan::new(&[]).is_none());
+    assert!(PrefixPlan::new::<RowInput>(&[]).is_none());
     assert!(PrefixPlan::new(&[row(vec![100; 100], "q")]).is_none());
     assert!(PrefixPlan::new(&[row(vec![100; 63], "q"), row(vec![100; 63], "q")]).is_none());
     assert!(PrefixPlan::new(&[row(vec![100; 100], "q"), row(vec![101; 100], "q")]).is_none());

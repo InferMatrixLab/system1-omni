@@ -45,6 +45,15 @@ a run killed mid-write can no longer strand a partial bundle under
 `--out`; a non-empty target directory is refused and the staging
 remnant is cleared by the next run.
 
+The export ends by printing the manifest's own SHA-256. The load-side
+gate requires it as an anchor (`Bundle::load`/`Processor::load` take it
+as `pinned_manifest_sha256`; the opt-in checks read
+`VELA_NATIVE_MANIFEST_SHA256`), so the manifest's file table is checked
+against a digest fixed outside the bundle directory — rewriting the
+manifest after swapping a file no longer passes the gate. `files_sha256`
+keys must also be plain relative names inside the bundle and must not
+cross a symlink.
+
 ## Freeze the fixtures (opt-in, needs the package)
 
 ~~~sh
@@ -60,7 +69,10 @@ blocks and readout positions, truncation, a windowed long-span case);
 the head inputs record the hidden states its F32 heads consume, the
 heads' logits and the calibrated predict answers. The example-request
 token plan totals 1,041 tokens, matching the oracle fixture's
-`usage.input_tokens`.
+`usage.input_tokens`. Both exporters import and initialize the
+runtime with bytecode writing off, so the verified package stays
+reusable: a later `verify_files()` gate run or worker startup is not
+poisoned by a `__pycache__` an export wrote.
 
 ## Checks
 
@@ -69,14 +81,16 @@ cargo test -p omni-vela-native
 cargo fmt --all --check
 cargo clippy -p omni-vela-native --all-targets -- -D warnings
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
+  VELA_NATIVE_MANIFEST_SHA256=<the digest the exporter prints> \
   cargo test -p omni-vela-native --test vela_native_processing \
     --test vela_native_heads --test vela_native_response -- --ignored --nocapture
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
-VELA_CUDA_LIB=/path/to/libqwen3_5_cuda.so \
+  VELA_NATIVE_MANIFEST_SHA256=<the digest the exporter prints> \
+  VELA_CUDA_LIB=/path/to/libqwen3_5_cuda.so \
   cargo test -p omni-vela-native --test vela_native_executor -- --ignored --nocapture
 ~~~
 
-28 tests run everywhere with no weights and no GPU: the wire contract
+40 tests run everywhere with no weights and no GPU: the wire contract
 against the pinned runtime's 422/400 bodies, the bundle manifest gate,
 and the predict-mapping/plan parity on every frozen fixture. The four
 opt-in checks (behind `-- --ignored`) replay the fixtures through the

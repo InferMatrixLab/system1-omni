@@ -27,6 +27,11 @@ fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../tests/vela/fixtures")
 }
 
+fn manifest_anchor() -> String {
+    std::env::var("VELA_NATIVE_MANIFEST_SHA256")
+        .expect("set VELA_NATIVE_MANIFEST_SHA256 to the manifest digest the exporter prints")
+}
+
 fn env_dir(name: &str) -> PathBuf {
     let path = PathBuf::from(std::env::var(name).unwrap_or_else(|_| panic!("set {name}")));
     assert!(path.is_dir(), "{} is not a directory", path.display());
@@ -41,7 +46,8 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
         std::env::var("VELA_CUDA_LIB").expect("set VELA_CUDA_LIB to the built CUDA library"),
     );
     assert!(library.exists(), "{} does not exist", library.display());
-    let mut executor = Executor::load(&bundle, &library).expect("executor loads");
+    let anchor = manifest_anchor();
+    let mut executor = Executor::load(&bundle, &library, &anchor).expect("executor loads");
     // The env gate may only tighten the documented ceiling: an
     // unparseable value is an error, and a wider one clamps back down.
     let logit_gate = std::env::var("VELA_GPU_LOGIT_GATE")
@@ -68,7 +74,8 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
             .expect("request")
             .clone();
         let processor =
-            omni_vela_native::processing::Processor::load(&bundle).expect("processor loads");
+            omni_vela_native::processing::Processor::load(&bundle, &anchor)
+                .expect("processor loads");
         let planned = processor.plan(&request).expect("plan");
         let raw = std::fs::read(fixtures_dir().join(format!("head-input-{case}.safetensors")))
             .expect("safetensors fixture");

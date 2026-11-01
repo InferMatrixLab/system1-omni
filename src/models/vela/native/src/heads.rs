@@ -231,7 +231,12 @@ fn span_head(file: &SafeTensors, prefix: &str, d: usize, slots: usize) -> Result
 }
 
 impl Heads {
-    pub fn load(bundle: &Path) -> Result<Self> {
+    /// Load the head tensors from an exported bundle. The manifest gate
+    /// runs first — anchored by `pinned_manifest_sha256`, the digest the
+    /// exporter prints — so the tensors are only read after every file
+    /// in the directory has matched the anchored manifest.
+    pub fn load(bundle: &Path, pinned_manifest_sha256: &str) -> Result<Self> {
+        crate::bundle::Bundle::load(bundle, pinned_manifest_sha256)?;
         let raw = std::fs::read(bundle.join("heads.safetensors")).context("heads.safetensors")?;
         let file = SafeTensors::deserialize(&raw).context("heads.safetensors must parse")?;
         let set_bias = tensor(&file, "set_bias")?;

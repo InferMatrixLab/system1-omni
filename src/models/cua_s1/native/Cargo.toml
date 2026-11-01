@@ -1,6 +1,6 @@
 [package]
 name = "omni-cua-s1-native"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 publish = false
 description = "Native /v1/systemone worker for Cua-S1 4B 0.2 (text adapter)"

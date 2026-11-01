@@ -78,6 +78,10 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
         .trim()
         .trim_end_matches(';');
     let mut fake = include_str!("graph_loading_fake.c").to_owned();
+    let missing = std::env::var("OMNI_TEST_MATCHED_MISSING_SYMBOL").ok();
+    if let Some(symbol) = &missing {
+        fake = fake.replace(symbol, &format!("omitted_{symbol}"));
+    }
     let implemented = [
         "cs1_abi_version",
         "cs1_error_string",
@@ -130,6 +134,30 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
     let metrics = unsafe { libloading::Library::new(&library).unwrap() };
     let metric =
         |name: &[u8]| unsafe { metrics.get::<unsafe extern "C" fn() -> i32>(name).unwrap()() };
+    if let Some(symbol) = missing {
+        let mut model = Model::load_with_graph(&directory, &library, false).unwrap();
+        // Matched warmup must reject either missing capability even though one
+        // question does not share a prefix. No matched workspace is allocated.
+        let error = model
+            .with_matched_prefix(&[64], &[], |_| Ok(()))
+            .expect_err("matched warmup accepted an incomplete CUDA library");
+        let detail = format!("{error:#}");
+        assert!(detail.contains("rebuild libqwen3_5_cuda"), "{detail}");
+        assert!(detail.contains(&symbol), "{detail}");
+        assert_eq!(metric(b"loading_gemms\0"), 1);
+        // Ordinary and legacy fixed execution still reach their kernel calls;
+        // those fake kernels fail deliberately, without needing matched symbols.
+        for result in [model.forward(&[0]), model.forward_fixed(&[0])] {
+            let error = result.unwrap_err().to_string();
+            assert!(error.contains("unexpected host-test CUDA call"), "{error}");
+        }
+        drop(model);
+        assert_eq!(metric(b"loading_live\0"), 0);
+        assert_eq!(metric(b"loading_gemms\0"), 0);
+        assert_eq!(metric(b"loading_early\0"), 0);
+        std::fs::remove_dir_all(directory).unwrap();
+        return;
+    }
     for graph in [false, true] {
         let mut model = Model::load_with_graph(&directory, &library, graph).unwrap();
         assert_eq!(model.graph_stats().requested, graph);
@@ -138,6 +166,129 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
         // created before this deliberate dispatch error and must retire safely.
         assert!(model.forward_fixed(&[0]).is_err());
         assert_eq!(metric(b"loading_gemms\0"), 2);
+        // Execute the real model's bounded selection/scope logic through a
+        // host-only CUDA boundary. These assertions do not test GEMM arithmetic.
+        let set_compatible = unsafe {
+            metrics
+                .get::<unsafe extern "C" fn(i32)>(b"loading_compatible\0")
+                .unwrap()
+        };
+        let submit = unsafe {
+            metrics
+                .get::<unsafe extern "C" fn()>(b"loading_submit\0")
+                .unwrap()
+        };
+        assert_eq!(
+            model
+                .with_matched_prefix(&[64, 64], &[64], |_| Ok(17))
+                .unwrap(),
+            Some(17)
+        );
+        assert!(
+            model
+                .with_matched_prefix::<()>(&[64, 64], &[64], |_| {
+                    unsafe { submit() };
+                    anyhow::bail!("suffix failure")
+                })
+                .is_err()
+        );
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = model.with_matched_prefix::<()>(&[64, 64], &[64], |_| {
+                unsafe { submit() };
+                panic!("suffix panic");
+            });
+        }));
+        assert!(panic.is_err());
+        assert_eq!(metric(b"loading_pending\0"), 0);
+        assert_eq!(
+            model
+                .with_matched_prefix(&[64, 64], &[64], |_| Ok(23))
+                .unwrap(),
+            Some(23)
+        );
+        assert!(
+            model
+                .with_matched_prefix(&[64, 64], &[64], |m| {
+                    m.with_matched_prefix(&[64, 64], &[64], |_| Ok(()))
+                        .map(|_| ())
+                })
+                .unwrap_err()
+                .to_string()
+                .contains("nested matched execution")
+        );
+        // Returning to M64 must select its original handle after a failed scope.
+        assert!(model.forward_fixed(&[0]).is_err());
+        unsafe { set_compatible(0) };
+        assert_eq!(
+            model
+                .with_matched_prefix(&[64, 64], &[64], |_| -> anyhow::Result<()> {
+                    panic!("incompatible plan executed")
+                })
+                .unwrap(),
+            None
+        );
+        unsafe { set_compatible(1) };
+        let set_window = unsafe {
+            metrics
+                .get::<unsafe extern "C" fn(i32)>(b"loading_window_supported\0")
+                .unwrap()
+        };
+        unsafe { set_window(0) };
+        assert_eq!(
+            model
+                .with_matched_prefix(&[64, 64], &[1, 63], |_| -> anyhow::Result<()> {
+                    panic!("unsupported window executed")
+                })
+                .unwrap(),
+            None
+        );
+        unsafe { set_window(1) };
+        let reject = unsafe {
+            metrics
+                .get::<unsafe extern "C" fn(i32, i32, i32, i32)>(b"loading_reject\0")
+                .unwrap()
+        };
+        // Earlier full shapes and suffixes pass; later failures must still
+        // prevent any window execution, including in a later weight projection.
+        for (ordinary, rows, n, k) in [(1, 62, 0, 0), (0, 7, 0, 0), (1, 64, 8, 256)] {
+            unsafe { reject(ordinary, rows, n, k) };
+            assert_eq!(
+                model
+                    .with_matched_prefix(&[64, 62], &[1, 63, 7], |_| -> anyhow::Result<()> {
+                        panic!("later incompatible shape executed");
+                    })
+                    .unwrap(),
+                None
+            );
+        }
+        unsafe { reject(-1, 0, 0, 0) };
+        assert_eq!(
+            model.with_matched_prefix(&[64], &[64], |_| Ok(1)).unwrap(),
+            None
+        );
+        assert!(
+            model
+                .with_matched_prefix(&[0, 64], &[64], |_| Ok(1))
+                .is_err()
+        );
+        assert!(
+            model
+                .with_matched_prefix(&[64, 65], &[64], |_| Ok(1))
+                .is_err()
+        );
+        // Seventeen distinct reference lengths must retire the first bounded
+        // generation before reusing its cuBLAS workspace slots.
+        for m in 1..=17 {
+            // Represent queued device work just before workspace retirement.
+            unsafe { submit() };
+            assert_eq!(
+                model.with_matched_prefix(&[m, m], &[m], |_| Ok(m)).unwrap(),
+                Some(m)
+            );
+            assert!(metric(b"loading_gemms\0") <= 18);
+            assert_eq!(metric(b"loading_pending\0"), 0);
+            assert_eq!(metric(b"loading_unsynced_destroy\0"), 0);
+        }
         drop(model);
         assert_eq!(metric(b"loading_streams\0"), metric(b"loading_destroyed\0"));
         assert_eq!(metric(b"loading_live\0"), 0);
@@ -154,6 +305,13 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
         std::env::var("CUA_S1_GRAPH").as_deref() == Ok("1")
     );
     let allocations = metric(b"loading_live\0");
+    assert!(
+        model
+            .with_matched_prefix(&[64, 64], &[64], |_| Ok(()))
+            .unwrap_err()
+            .to_string()
+            .contains("only merged weights")
+    );
     let error = model.forward_fixed(&[0]).unwrap_err();
     assert!(error.to_string().contains("only merged weights"));
     let error = model
@@ -201,4 +359,22 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
         "failed construction retires its stream"
     );
     std::fs::remove_dir_all(directory).unwrap();
+    // CUDA API loading is process-global, so isolate each incomplete library.
+    for symbol in ["cs1_gemm_create_matched", "cs1_gemm_compatible"] {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocations",
+                "--nocapture",
+            ])
+            .env("OMNI_TEST_MATCHED_MISSING_SYMBOL", symbol)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{symbol}: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }

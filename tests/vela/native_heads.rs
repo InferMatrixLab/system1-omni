@@ -12,6 +12,9 @@ use omni_vela_native::heads::Heads;
 use omni_vela_native::scoring::{Calibration, SpanOut, aggregate_windows, row_answers};
 use serde_json::Value;
 
+mod native_parity;
+use native_parity::max_logit_drift;
+
 const CASES: [&str; 5] = [
     "example-request",
     "example-request-set-threshold",
@@ -79,6 +82,11 @@ fn bundle_dir() -> PathBuf {
     )
 }
 
+fn manifest_anchor() -> String {
+    std::env::var("VELA_NATIVE_MANIFEST_SHA256")
+        .expect("set VELA_NATIVE_MANIFEST_SHA256 to the manifest digest the exporter prints")
+}
+
 /// Largest absolute difference between two nested JSON numbers; a
 /// structural mismatch — an object key missing on either side, arrays
 /// of unequal length, or a differing non-numeric value — scores the
@@ -107,8 +115,9 @@ fn max_drift(a: &Value, b: &Value) -> f64 {
 #[ignore = "requires VELA_NATIVE_BUNDLE at an exported bundle; CPU only"]
 fn the_heads_reproduce_the_reference_logits_and_the_scoring_the_answers() {
     let bundle = bundle_dir();
-    let heads = Heads::load(&bundle).expect("heads load");
-    let cal = Calibration::load(&bundle).expect("calibration loads");
+    let anchor = manifest_anchor();
+    let heads = Heads::load(&bundle, &anchor).expect("heads load");
+    let cal = Calibration::load(&bundle, &anchor).expect("calibration loads");
     // The env gates may only tighten the documented ceilings: an
     // unparseable value is an error, and a wider one clamps back down.
     let logits_gate = std::env::var("VELA_HEADS_LOGIT_GATE")
@@ -154,15 +163,19 @@ fn the_heads_reproduce_the_reference_logits_and_the_scoring_the_answers() {
                     let queries = f32_matrix(&raw, call["query"].as_str().expect("query"));
                     let want = call["logits"].as_array().expect("logits");
                     assert_eq!(cands.len(), want.len(), "{case}: block count");
+                    assert_eq!(queries.len(), cands.len(), "{case}: query count");
                     let mut got = Vec::new();
                     for (cand, query) in cands.iter().zip(&queries) {
                         got.push(heads.forward_candidate(cand, query));
                     }
                     for (g, w) in got.iter().zip(want) {
-                        for (a, b) in g.iter().zip(w.as_array().unwrap()) {
-                            worst_logit = worst_logit
-                                .max((a - b.as_f64().unwrap_or(0.0) as f32).abs() as f64);
-                        }
+                        let w: Vec<f64> = w
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|v| v.as_f64().unwrap())
+                            .collect();
+                        worst_logit = worst_logit.max(max_logit_drift(g, &w));
                     }
                     q_calls_by_row.entry(row).or_default().push(call.clone());
                 }
@@ -185,9 +198,7 @@ fn the_heads_reproduce_the_reference_logits_and_the_scoring_the_answers() {
                             .iter()
                             .map(|v| v.as_f64().unwrap())
                             .collect();
-                        for (a, b) in g.iter().zip(&w) {
-                            worst_logit = worst_logit.max((a - *b as f32).abs() as f64);
-                        }
+                        worst_logit = worst_logit.max(max_logit_drift(g, &w));
                     }
                     span_calls_by_row
                         .entry(row)

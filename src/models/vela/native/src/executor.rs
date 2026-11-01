@@ -38,8 +38,9 @@ pub struct Executor {
 }
 
 impl Executor {
-    pub fn load(bundle: &Path, library: &Path) -> Result<Self> {
-        Bundle::load(bundle).context("the exported bundle did not pass the manifest gate")?;
+    pub fn load(bundle: &Path, library: &Path, pinned_manifest_sha256: &str) -> Result<Self> {
+        Bundle::load(bundle, pinned_manifest_sha256)
+            .context("the exported bundle did not pass the manifest gate")?;
         let model = Model::load(&bundle.join("bf16"), library)
             .context("the shared qwen3_5 model did not load the uniform-BF16 backbone")?;
         // heads.rs builds every projection at its private HIDDEN = 1024.
@@ -48,7 +49,7 @@ impl Executor {
             "the backbone hidden size {} cannot feed the heads' 1024",
             model.cfg.hidden
         );
-        let heads = Heads::load(bundle)?;
+        let heads = Heads::load(bundle, pinned_manifest_sha256)?;
         Ok(Self {
             model,
             heads,

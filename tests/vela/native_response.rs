@@ -67,8 +67,10 @@ fn the_systemone_finishing_matches_the_frozen_oracles() {
     let bundle = PathBuf::from(
         std::env::var("VELA_NATIVE_BUNDLE").expect("set VELA_NATIVE_BUNDLE to an exported bundle"),
     );
-    let cal = Calibration::load(&bundle).expect("calibration");
-    let heads = omni_vela_native::heads::Heads::load(&bundle).expect("heads");
+    let anchor = std::env::var("VELA_NATIVE_MANIFEST_SHA256")
+        .expect("set VELA_NATIVE_MANIFEST_SHA256 to the manifest digest the exporter prints");
+    let cal = Calibration::load(&bundle, &anchor).expect("calibration");
+    let heads = omni_vela_native::heads::Heads::load(&bundle, &anchor).expect("heads");
     let gate = 2e-6;
 
     for case in CASES {
