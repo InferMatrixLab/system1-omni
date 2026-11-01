@@ -162,6 +162,14 @@ The historical cumulative A800 investigation and frozen-corpus results are recor
 
 ## Native screenshot prefix modes
 
+The independent opt-in `CUA_S1_MM_BATCH=1` batches questions within one screenshot
+request, including compatible fresh prefixes and packed suffixes. It requires
+`CUA_S1_MM_PREFIX=off` and supports host/resident features and independent
+language/vision Graph controls. `CUA_S1_RESIZE_WORKERS=1`–`4` separately selects
+the Cua processor's integer RGB resize acceleration; both switches default off.
+See the [batch and resize controls](../../../recipe/cua_s1/native_screenshot.md#request-local-question-batches)
+for bounds, compatibility, qualification and regression commands.
+
 The screenshot worker optionally shares a request's exact token/3D-position
 prefix with `CUA_S1_MM_PREFIX=shared`. The `fixed` control uses independent full
 prompts with the same fixed GEMMs; unset/`off` preserves default execution.

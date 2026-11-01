@@ -10,6 +10,9 @@
 
 use std::borrow::Cow;
 
+#[cfg(target_arch = "x86_64")]
+mod x86;
+
 use anyhow::{Result, ensure};
 
 const PATCH_SIZE: usize = 16;
@@ -85,6 +88,30 @@ pub fn preprocess_rgb8_with_limits(
     rgb: &[u8],
     limits: &ImageLimits,
 ) -> Result<ProcessedImage> {
+    preprocess_impl(width, height, rgb, limits, 0)
+}
+
+/// Explicit RGB convolution/row scheduling opt-in. Existing entry points retain
+/// their channel-wise serial resize. Uses at most four active CPU workers and
+/// preserves every per-channel integer multiply/add, shift and saturation.
+pub fn preprocess_rgb8_with_workers(
+    width: usize,
+    height: usize,
+    rgb: &[u8],
+    limits: &ImageLimits,
+    workers: usize,
+) -> Result<ProcessedImage> {
+    ensure!((1..=4).contains(&workers), "resize workers must be 1..=4");
+    preprocess_impl(width, height, rgb, limits, workers)
+}
+
+fn preprocess_impl(
+    width: usize,
+    height: usize,
+    rgb: &[u8],
+    limits: &ImageLimits,
+    workers: usize,
+) -> Result<ProcessedImage> {
     ensure!(
         limits.min_pixels >= FACTOR * FACTOR
             && limits.max_pixels >= limits.min_pixels
@@ -148,28 +175,68 @@ pub fn preprocess_rgb8_with_limits(
     if resized_width != width {
         let axis = AxisWeights::new(width, resized_width);
         let mut horizontal = vec![0; horizontal_len];
-        for y in 0..height {
-            for (x, kernel) in axis.kernels.iter().enumerate() {
-                for channel in 0..3 {
-                    horizontal[(y * resized_width + x) * 3 + channel] =
-                        axis.apply(kernel, |source_x| rgb[(y * width + source_x) * 3 + channel]);
+        if workers == 0 {
+            for y in 0..height {
+                for (x, kernel) in axis.kernels.iter().enumerate() {
+                    for channel in 0..3 {
+                        horizontal[(y * resized_width + x) * 3 + channel] = axis
+                            .apply(kernel, |source_x| rgb[(y * width + source_x) * 3 + channel]);
+                    }
                 }
             }
+        } else {
+            resize_rows(&mut horizontal, resized_width, workers, |y, row| {
+                #[cfg(target_arch = "x86_64")]
+                if std::arch::is_x86_feature_detected!("sse4.1") {
+                    // SAFETY: checked feature, complete source row and axis/output extents.
+                    unsafe {
+                        x86::horizontal(&rgb[y * width * 3..(y + 1) * width * 3], row, &axis);
+                    }
+                    return;
+                }
+                for (pixel, kernel) in row.as_chunks_mut::<3>().0.iter_mut().zip(&axis.kernels) {
+                    pixel.copy_from_slice(&axis.apply_rgb(kernel, |source_x| {
+                        let i = (y * width + source_x) * 3;
+                        [rgb[i], rgb[i + 1], rgb[i + 2]]
+                    }));
+                }
+            });
         }
         resized = Cow::Owned(horizontal);
     }
     if resized_height != height {
         let axis = AxisWeights::new(height, resized_height);
         let mut vertical = vec![0; resized_len];
-        for (y, kernel) in axis.kernels.iter().enumerate() {
-            for x in 0..resized_width {
-                for channel in 0..3 {
-                    vertical[(y * resized_width + x) * 3 + channel] = axis
-                        .apply(kernel, |source_y| {
-                            resized[(source_y * resized_width + x) * 3 + channel]
-                        });
+        if workers == 0 {
+            for (y, kernel) in axis.kernels.iter().enumerate() {
+                for x in 0..resized_width {
+                    for channel in 0..3 {
+                        vertical[(y * resized_width + x) * 3 + channel] = axis
+                            .apply(kernel, |source_y| {
+                                resized[(source_y * resized_width + x) * 3 + channel]
+                            });
+                    }
                 }
             }
+        } else {
+            resize_rows(&mut vertical, resized_width, workers, |y, row| {
+                let kernel = &axis.kernels[y];
+                #[cfg(target_arch = "x86_64")]
+                if std::arch::is_x86_feature_detected!("avx2") {
+                    // SAFETY: checked feature, each source row matches row.len(),
+                    // and the axis builder bounds every source row in this kernel.
+                    unsafe {
+                        x86::vertical(&resized, row, kernel, axis.precision);
+                    }
+                    return;
+                }
+                for (x, pixel) in row.as_chunks_mut::<3>().0.iter_mut().enumerate() {
+                    pixel.copy_from_slice(&axis.apply_rgb(kernel, |source_y| {
+                        let i = (source_y * resized_width + x) * 3;
+                        [resized[i], resized[i + 1], resized[i + 2]]
+                    }));
+                }
+            });
         }
         resized = Cow::Owned(vertical);
     }
@@ -284,6 +351,18 @@ impl AxisWeights {
         Self { kernels, precision }
     }
 
+    fn apply_rgb(&self, kernel: &Kernel, pixel: impl Fn(usize) -> [u8; 3]) -> [u8; 3] {
+        let mut accumulators = [1_i32 << (self.precision - 1); 3];
+        for (offset, &weight) in kernel.weights.iter().enumerate() {
+            let rgb = pixel(kernel.start + offset);
+            let weight = i32::from(weight);
+            for (sum, value) in accumulators.iter_mut().zip(rgb) {
+                *sum += i32::from(value) * weight;
+            }
+        }
+        accumulators.map(|sum| (sum >> self.precision).clamp(0, 255) as u8)
+    }
+
     fn apply(&self, kernel: &Kernel, pixel: impl Fn(usize) -> u8) -> u8 {
         let mut accumulator = 1_i32 << (self.precision - 1);
         for (offset, &weight) in kernel.weights.iter().enumerate() {
@@ -291,6 +370,42 @@ impl AxisWeights {
         }
         (accumulator >> self.precision).clamp(0, 255) as u8
     }
+}
+
+/// Disjoint output rows: coefficient and source reads are immutable. The caller
+/// processes the first chunk while at most workers-1 scoped threads process the
+/// rest; both passes join before their intermediate buffer can be reused.
+fn resize_rows(
+    output: &mut [u8],
+    width: usize,
+    workers: usize,
+    operation: impl Fn(usize, &mut [u8]) + Sync,
+) {
+    let row_bytes = width * 3;
+    let height = output.len() / row_bytes;
+    let workers = workers.min(height);
+    if workers <= 1 || output.len() < 256 * 1024 {
+        for (y, row) in output.chunks_exact_mut(row_bytes).enumerate() {
+            operation(y, row);
+        }
+        return;
+    }
+    let chunk_rows = height.div_ceil(workers);
+    std::thread::scope(|scope| {
+        let mut chunks = output.chunks_mut(chunk_rows * row_bytes);
+        let first = chunks.next().unwrap();
+        let op = &operation;
+        for (index, chunk) in chunks.enumerate() {
+            scope.spawn(move || {
+                for (y, row) in chunk.chunks_exact_mut(row_bytes).enumerate() {
+                    op((index + 1) * chunk_rows + y, row);
+                }
+            });
+        }
+        for (y, row) in first.chunks_exact_mut(row_bytes).enumerate() {
+            operation(y, row);
+        }
+    });
 }
 
 fn cubic(x: f64) -> f64 {

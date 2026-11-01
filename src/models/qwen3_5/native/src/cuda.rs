@@ -149,6 +149,27 @@ pub struct BatchedGdn {
     ) -> c_int,
 }
 
+/// Optional independent suffixes seeded from one readonly FP32 prefix state.
+/// Final states, when requested, occupy disjoint sequence-major allocations.
+pub type SeededGdnBatch = unsafe extern "C" fn(
+    *const c_void,
+    *const c_void,
+    *const c_void,
+    *const f32,
+    *const c_void,
+    *mut c_void,
+    *mut f32,
+    usize,
+    *const usize,
+    usize,
+    c_int,
+    c_int,
+    f32,
+    *const c_void,
+    *mut c_void,
+    Stream,
+) -> c_int;
+
 /// Additive dimension-aware vision entry points. Libraries at the required ABI may omit these optional symbols.
 pub struct VisionV2 {
     pub position: unsafe extern "C" fn(
@@ -463,6 +484,16 @@ impl Api {
         }
     }
 
+    pub fn seeded_gdn_batch(&self) -> Option<SeededGdnBatch> {
+        // SAFETY: the optional signature matches ops.h; the API retains the library.
+        unsafe {
+            self._lib
+                .get::<SeededGdnBatch>(b"cs1_gdn_prefill_seeded_batch\0")
+                .ok()
+                .map(|symbol| *symbol)
+        }
+    }
+
     pub fn shared_suffix(&self) -> Option<SharedSuffix> {
         // SAFETY: additive signatures match ops.h; the API retains the library.
         unsafe {
@@ -679,6 +710,14 @@ pub struct DeviceBf16Matrix<'a> {
 }
 
 impl DeviceBf16Matrix<'_> {
+    /// Request-local identity only: producer contents may change between calls.
+    pub(crate) fn same_storage(&self, other: &Self) -> bool {
+        std::ptr::eq(self.buffer, other.buffer)
+            && self.layout.rows == other.layout.rows
+            && self.layout.columns == other.layout.columns
+            && self.layout.device == other.layout.device
+    }
+
     pub fn layout(&self) -> DeviceFeatureLayout {
         self.layout
     }

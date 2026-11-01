@@ -9,13 +9,22 @@ fn packed_projections_match_individual_shapes_and_changed_input_replay() {
     // SAFETY: model-equivalent workspace, released after the final readback.
     let gemm = unsafe { (api().cs1_gemm_create)(32 << 20) };
     assert!(!gemm.is_null());
-    for (n, k) in [(5120usize, 6144usize), (5120, 17408)] {
+    for (n, k) in [
+        (5120usize, 6144usize),
+        (5120, 17408),
+        (12352, 2560),
+        (10240, 2560),
+        (18432, 2560),
+        (2560, 4096),
+        (2560, 9216),
+    ] {
         let weights = to_device(&random(n * k, 91, 0.25), stream);
         for lengths in [
             vec![78, 78, 82, 80],
             vec![64; 4],
             vec![1; 3],
             vec![129, 63, 130],
+            vec![65, 129, 257],
             vec![1024; 2],
         ] {
             let rows: usize = lengths.iter().sum();

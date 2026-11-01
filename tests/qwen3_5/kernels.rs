@@ -1592,3 +1592,5 @@ mod shared_suffix;
 mod vector_conv;
 
 mod wide_gdn;
+
+mod seeded_gdn;

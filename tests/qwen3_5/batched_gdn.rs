@@ -6,7 +6,7 @@ use super::*;
 fn batched_gdn_matches_serial_with_partial_chunks_and_graph_replay() {
     let stream = setup();
     let batched = api().batched_gdn().unwrap();
-    for (heads, key_heads) in [(4usize, 2usize), (48, 16)] {
+    for (heads, key_heads) in [(4usize, 2usize), (32, 16), (48, 16)] {
         for lengths in [
             vec![1usize, 63, 64, 65, 129],
             vec![1; 16],

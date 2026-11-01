@@ -12,6 +12,7 @@ use tokenizers::Tokenizer;
 pub struct VisionProcessor {
     tokenizer: Tokenizer,
     image_token: u32,
+    resize_workers: usize,
 }
 
 pub struct PreparedRequest {
@@ -30,7 +31,16 @@ impl VisionProcessor {
         Self {
             tokenizer,
             image_token,
+            resize_workers: 0,
         }
+    }
+
+    /// Explicit CPU resize scheduling for this processor; zero retains the
+    /// existing shared serial entry point. All child work joins during prepare.
+    pub fn with_resize_workers(mut self, workers: usize) -> Result<Self> {
+        ensure!(workers <= 4, "resize workers must be 0..=4");
+        self.resize_workers = workers;
+        Ok(self)
     }
 
     /// Validate every question and prompt before submitting model work.
@@ -42,7 +52,16 @@ impl VisionProcessor {
         questions: &[Question],
     ) -> Result<PreparedRequest> {
         crate::multimodal::validate_questions(questions)?;
-        let image = preprocess_rgb8(width, height, rgb)?;
+        let image = if self.resize_workers == 0 {
+            preprocess_rgb8(width, height, rgb)?
+        } else {
+            crate::image_preprocess::preprocess_rgb8_workers(
+                width,
+                height,
+                rgb,
+                self.resize_workers,
+            )?
+        };
         let prompts = questions
             .iter()
             .map(|q| prepare_prompt(&self.tokenizer, q, image.image_grid_thw, self.image_token))
@@ -90,3 +109,17 @@ pub(crate) fn probabilities(logits: &[f32]) -> Result<Vec<f32>> {
     let total: f64 = exps.iter().sum();
     Ok(exps.iter().map(|x| (x / total) as f32).collect())
 }
+
+/// Serving switch is local to the Cua screenshot adapter; no process-wide pool
+/// or behavior change in other shared-preprocessor consumers.
+pub(crate) fn resize_workers(value: Option<&str>) -> Result<usize> {
+    match value {
+        None => Ok(0),
+        Some(v @ ("0" | "1" | "2" | "3" | "4")) => Ok(usize::from(v.as_bytes()[0] - b'0')),
+        _ => anyhow::bail!("CUA_S1_RESIZE_WORKERS must be unset or 0..=4"),
+    }
+}
+
+#[cfg(test)]
+#[path = "../../../../../tests/cua_s1/vision_processing.rs"]
+mod tests;
