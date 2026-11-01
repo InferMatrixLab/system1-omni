@@ -16,6 +16,17 @@ const PATCH_SIZE: usize = 16;
 const MERGE_SIZE: usize = 2;
 const FACTOR: usize = PATCH_SIZE * MERGE_SIZE;
 const PATCH_VALUES: usize = 3 * 2 * PATCH_SIZE * PATCH_SIZE;
+// Preserve the reference's float32 subtraction and division for every RGB8 value.
+// Packing only reorders bytes, so each normalized value can be reused exactly.
+const RGB8_NORMALIZED: [f32; 256] = {
+    let mut values = [0.0; 256];
+    let mut pixel = 0;
+    while pixel < values.len() {
+        values[pixel] = (pixel as f32 - 127.5) / 127.5;
+        pixel += 1;
+    }
+    values
+};
 /// Source validation and upstream smart-resize limits. Prompt budgeting belongs to callers.
 ///
 /// Shared by the cua-s1 and jemm consumers, so the limit surface stays
@@ -169,18 +180,20 @@ pub fn preprocess_rgb8_with_limits(
             for merge_y in 0..MERGE_SIZE {
                 for merge_x in 0..MERGE_SIZE {
                     for channel in 0..3 {
-                        for _temporal in 0..2 {
-                            for patch_y in 0..PATCH_SIZE {
-                                for patch_x in 0..PATCH_SIZE {
-                                    let y = block_y * FACTOR + merge_y * PATCH_SIZE + patch_y;
-                                    let x = block_x * FACTOR + merge_x * PATCH_SIZE + patch_x;
-                                    let pixel = resized[(y * resized_width + x) * 3 + channel];
-                                    // Match the fused float32 torchvision normalization,
-                                    // including its operation order (no reciprocal multiply).
-                                    pixel_values.push((f32::from(pixel) - 127.5) / 127.5);
-                                }
+                        let mut plane = [0.0; PATCH_SIZE * PATCH_SIZE];
+                        for patch_y in 0..PATCH_SIZE {
+                            let y = block_y * FACTOR + merge_y * PATCH_SIZE + patch_y;
+                            let x = block_x * FACTOR + merge_x * PATCH_SIZE;
+                            let start = (y * resized_width + x) * 3 + channel;
+                            for patch_x in 0..PATCH_SIZE {
+                                let pixel = resized[start + patch_x * 3];
+                                plane[patch_y * PATCH_SIZE + patch_x] =
+                                    RGB8_NORMALIZED[usize::from(pixel)];
                             }
                         }
+                        // Still images repeat the same patch in both temporal slots.
+                        pixel_values.extend_from_slice(&plane);
+                        pixel_values.extend_from_slice(&plane);
                     }
                 }
             }
@@ -291,3 +304,7 @@ fn cubic(x: f64) -> f64 {
         0.0
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../../tests/qwen3_5/image_preprocess.rs"]
+mod tests;
