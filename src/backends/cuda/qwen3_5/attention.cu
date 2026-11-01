@@ -289,16 +289,30 @@ flash_shared_kernel(const bf16* __restrict__ q, const bf16* __restrict__ k, cons
     flash_body<true, true>(q, k, v, ldv, gate, out, T, Hq, Hk, scale_log2, prefix, prefix_k, prefix_v);
 }
 
-// Enabled only on the capabilities it was measured on; others keep BM = 64.
-bool wide_tile_supported() {
-    static const bool supported = [] {
-        int device = 0;
+// Both the decision and the shared-memory opt-in are per device, and a thread can
+// switch devices between calls, so each thread re-checks when the device changes.
+// Returns whether `device` was measured; `error` is that device's opt-in result.
+template <bool Gated, bool Bidirectional>
+bool wide_tile_ready(int device, cudaError_t& error) {
+    struct State {
+        int device = -1;
+        bool supported = false;
+        cudaError_t configured = cudaSuccess;
+    };
+    static thread_local State state;
+    if (state.device != device) {
         cudaDeviceProp prop{};
-        if (cudaGetDevice(&device) != cudaSuccess || cudaGetDeviceProperties(&prop, device) != cudaSuccess)
-            return false;
-        return (prop.major == 8 && prop.minor == 9) || (prop.major == 12 && prop.minor == 0);
-    }();
-    return supported;
+        const bool known = cudaGetDeviceProperties(&prop, device) == cudaSuccess;
+        state.device = device;
+        state.supported = known &&
+            ((prop.major == 8 && prop.minor == 9) || (prop.major == 12 && prop.minor == 0));
+        state.configured = state.supported
+            ? cudaFuncSetAttribute(flash_wide_kernel<Gated, Bidirectional>,
+                                   cudaFuncAttributeMaxDynamicSharedMemorySize, WIDE_SMEM_BYTES)
+            : cudaSuccess;
+    }
+    error = state.configured;
+    return state.supported;
 }
 
 template <bool Gated, bool Bidirectional = false>
@@ -313,16 +327,21 @@ int launch(const void* q, const void* k, const void* v, int ldv, const void* gat
     if (Gated && gate == nullptr) return cudaErrorInvalidValue;
     constexpr float LOG2E = 1.4426950408889634f;
     const int rows = T - q_base;
-    if (wide_tile_supported() && q_base % WIDE_BM == 0 && rows >= WIDE_MIN_ROWS) {
-        static const cudaError_t wide_configured = cudaFuncSetAttribute(
-            flash_wide_kernel<Gated, Bidirectional>, cudaFuncAttributeMaxDynamicSharedMemorySize,
-            WIDE_SMEM_BYTES);
-        if (wide_configured != cudaSuccess) return wide_configured;
-        flash_wide_kernel<Gated, Bidirectional><<<dim3((rows + WIDE_BM - 1) / WIDE_BM, Hq), WIDE_THREADS,
-                                                 WIDE_SMEM_BYTES, static_cast<cudaStream_t>(stream)>>>(
-            static_cast<const bf16*>(q), static_cast<const bf16*>(k), static_cast<const bf16*>(v), ldv,
-            static_cast<const bf16*>(gate), static_cast<bf16*>(out), T, Hq, Hk, scale * LOG2E, q_base);
-        return cudaGetLastError();
+    if (q_base % WIDE_BM == 0 && rows >= WIDE_MIN_ROWS) {
+        int device = 0;
+        cudaError_t ready = cudaGetDevice(&device);
+        if (ready == cudaSuccess) {
+            if (wide_tile_ready<Gated, Bidirectional>(device, ready) && ready == cudaSuccess) {
+                flash_wide_kernel<Gated, Bidirectional>
+                    <<<dim3((rows + WIDE_BM - 1) / WIDE_BM, Hq), WIDE_THREADS, WIDE_SMEM_BYTES,
+                       static_cast<cudaStream_t>(stream)>>>(
+                        static_cast<const bf16*>(q), static_cast<const bf16*>(k),
+                        static_cast<const bf16*>(v), ldv, static_cast<const bf16*>(gate),
+                        static_cast<bf16*>(out), T, Hq, Hk, scale * LOG2E, q_base);
+                return cudaGetLastError();
+            }
+        }
+        if (ready != cudaSuccess) return ready;
     }
     // Once per specialization (for the device current at the first call).
     static const cudaError_t configured = cudaFuncSetAttribute(

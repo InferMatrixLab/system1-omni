@@ -24,6 +24,6 @@
   },
   "records": {
     "per_trial_results": "../results.json",
-    "programs": "local scratch, not committed; the protocol above is what they implement"
+    "programs": "in commit a3bb8c4 on the PR branch; this tree keeps the protocol and the per-trial results"
   }
 }
