@@ -52,7 +52,10 @@ The token plans record what the pinned runtime feeds the backbone (the
 predict mapping, the per-row decomposition, the rendered `p_ids`,
 blocks and readout positions, truncation, a windowed long-span case).
 The example-request token plan totals 1,041 tokens, matching the
-oracle fixture's `usage.input_tokens`.
+oracle fixture's `usage.input_tokens`. The exporter imports and
+initializes the runtime with bytecode writing off, so the verified
+package stays reusable: a later `verify_files()` gate run or worker
+startup is not poisoned by a `__pycache__` this export wrote.
 
 ## Checks
 
