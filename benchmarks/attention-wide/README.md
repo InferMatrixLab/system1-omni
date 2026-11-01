@@ -125,22 +125,26 @@ Full per-trial values, sample counts and p10/p90 are in
 
 ## Reproduction
 
+The measurement programs were local scratch, not part of this change: the
+repository's CUDA guidance asks one-off optimizations not to add a per-PR
+microbenchmark, so only the protocol and the raw results are recorded here. The
+protocol is fully specified above; any program that follows it reproduces the
+numbers, and `summarize.py` recomputes `summary.json` from the raw files.
+
 ```sh
-# L20 on a CUDA 12.1 host; $WORK is any scratch directory:
-./build.sh $WORK/lib_cand 89                    # candidate tree
-old/build.sh $WORK/lib_base 89                  # base_git_sha attention.cu
-nvcc -O3 -std=c++17 -arch=sm_89 -I . harness/attn_record.cu -o rec
-./rec 0 > results_l20.jsonl && ./rec 1 >> results_l20.jsonl
+# Libraries for each revision (same sources, one attention.cu difference):
+build.sh $WORK/lib_cand <arch>     # candidate tree
+build.sh $WORK/lib_base <arch>     # base_git_sha attention.cu
 
-# RTX 5060 Laptop (CUDA 12.9):
-nvcc -O3 -std=c++17 -arch=sm_120 -I src/backends/cuda/qwen3_5 \
-  benchmarks/attention-wide/artifacts/20261101/harness/attn_record.cu -o rec120
-./rec120 0 > results_sm120.jsonl && ./rec120 1 >> results_sm120.jsonl
+# Each arm: 1 excluded warmup pair per length, then interleaved A B B A,
+# 10 repetitions, each sample the mean of 5 launches between two CUDA events,
+# medians per length; run the whole program twice as two trials.
 
-# Recompute summary.json from the raw files:
-python3 harness/summarize.py .
+# Recompute summary.json from the recorded raw files:
+python3 benchmarks/attention-wide/artifacts/20261101/summarize.py \
+  benchmarks/attention-wide/artifacts/20261101
 ```
 
-The library-level arms need `libqwen3_5_cuda.so` for the base and candidate
-revision in a loader directory; `attn_lib_record.cu` takes the revision label,
-length and output path, and the caller swaps the library between arms.
+`<arch>` is 89 on CUDA 12.1 (L20) and 120 on CUDA 12.9 (RTX 5060 Laptop). The
+library-level arms swap `libqwen3_5_cuda.so` in the loader directory between
+revisions and record the same protocol through `cs1_attention_gated`.

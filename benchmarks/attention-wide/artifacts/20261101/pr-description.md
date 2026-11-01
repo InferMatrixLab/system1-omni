@@ -70,14 +70,15 @@ Scope:
 ## Test Plan
 
 - Frozen protocol, controls and budget: `benchmarks/attention-wide/artifacts/20261101/plan.json`.
-- Kernel arms, two trials per device: `harness/attn_record.cu`.
+- Kernel arms, two trials per device: one program running both tiles in-process
+  (protocol in `plan.json`; the program was local scratch, not committed).
 - Public entry point, two trials per device, with the base and candidate library
-  swapped between arms: `harness/attn_lib_record.cu`.
-- Prefix windows against the full pass: `harness/attn_prefix_check.cu`.
+  swapped between arms.
+- Prefix windows against the full pass at q_base 64/128/1,024.
 - Parity: byte comparison of both arms and both revisions at every length.
 - Memory safety: `compute-sanitizer --tool memcheck --error-exitcode 1`.
 - Kernel tests: `CUA_S1_CUDA_LIB=<candidate> cargo test --release -p omni-qwen3-5-native --test kernels -- --ignored --test-threads=1 attention`.
-- Aggregate rebuild: `python3 benchmarks/attention-wide/artifacts/20261101/harness/summarize.py`.
+- Aggregate rebuild: `python3 benchmarks/attention-wide/artifacts/20261101/summarize.py`.
 
 ## Test Result
 
@@ -110,7 +111,10 @@ suite is 26 passed with 1 failure that only reports the unset
 `benchmarks/attention-wide/README.md` (record), `artifacts/20261101/plan.json`
 (frozen protocol), `summary.json` (aggregates, p10/p90, per-trial deltas),
 `results_*.jsonl` and `lib_*.jsonl` (every batch), `parity_*.log`,
-`sanitizer_*.log`, and the frozen harness sources. No HTTP, Public231 C1 or
+and `sanitizer_*.log`. The measurement programs were local scratch and are not
+committed, per the repository's guidance against per-PR microbenchmarks; the
+protocol is frozen in `plan.json` so the numbers can be reproduced. No HTTP,
+Public231 C1 or
 whole-model measurement is included; the numbers are kernel and entry-point
 latency on two named devices.
 
