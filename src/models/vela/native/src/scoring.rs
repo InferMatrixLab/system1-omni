@@ -23,7 +23,10 @@ pub fn sigmoid(x: f64) -> f64 {
 }
 
 impl Calibration {
-    pub fn load(bundle: &std::path::Path) -> anyhow::Result<Self> {
+    /// Load the calibration from an exported bundle, after the anchored
+    /// manifest gate has verified every file in the directory.
+    pub fn load(bundle: &std::path::Path, pinned_manifest_sha256: &str) -> anyhow::Result<Self> {
+        crate::bundle::Bundle::load(bundle, pinned_manifest_sha256)?;
         Ok(Self {
             data: serde_json::from_slice(&std::fs::read(bundle.join("calibration.json"))?)?,
         })

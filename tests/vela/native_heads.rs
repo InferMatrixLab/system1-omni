@@ -79,6 +79,11 @@ fn bundle_dir() -> PathBuf {
     )
 }
 
+fn manifest_anchor() -> String {
+    std::env::var("VELA_NATIVE_MANIFEST_SHA256")
+        .expect("set VELA_NATIVE_MANIFEST_SHA256 to the manifest digest the exporter prints")
+}
+
 /// Largest absolute difference between two nested JSON numbers; a
 /// structural mismatch — an object key missing on either side, arrays
 /// of unequal length, or a differing non-numeric value — scores the
@@ -107,8 +112,9 @@ fn max_drift(a: &Value, b: &Value) -> f64 {
 #[ignore = "requires VELA_NATIVE_BUNDLE at an exported bundle; CPU only"]
 fn the_heads_reproduce_the_reference_logits_and_the_scoring_the_answers() {
     let bundle = bundle_dir();
-    let heads = Heads::load(&bundle).expect("heads load");
-    let cal = Calibration::load(&bundle).expect("calibration loads");
+    let anchor = manifest_anchor();
+    let heads = Heads::load(&bundle, &anchor).expect("heads load");
+    let cal = Calibration::load(&bundle, &anchor).expect("calibration loads");
     // The env gates may only tighten the documented ceilings: an
     // unparseable value is an error, and a wider one clamps back down.
     let logits_gate = std::env::var("VELA_HEADS_LOGIT_GATE")
