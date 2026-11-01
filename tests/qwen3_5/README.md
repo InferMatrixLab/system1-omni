@@ -45,3 +45,53 @@ Coverage:
 
 These are executor regressions, not a screenshot-encoder or agent-accuracy
 benchmark. No latency, capture-cost or memory claim is made by these tests.
+
+## Prefix-bidirectional full-row baseline
+
+The optional `Model::forward_prompt_prefix_bidirectional` entry consumes one
+complete state+question row. State rows read only state keys; question rows
+read that state and their own question. The semantic split must be inside
+the row and is not rounded. GDN remains causal; Graph, LoRA, reference numerics,
+media, prefix continuation, branch batching and an HTTP worker are outside this
+entry's supported scope. It is a correctness baseline, not a speed optimization.
+
+Build the backend for the actual reserved device (`80` for the A800 used in
+qualification), then run the kernel checks:
+
+```sh
+src/backends/cuda/qwen3_5/build.sh /absolute/backend-output 80
+export CUA_S1_CUDA_LIB=/absolute/backend-output/libqwen3_5_cuda.so
+cargo test --release --locked -p omni-qwen3-5-native --test kernels \
+  prefix_bidirectional -- --ignored --test-threads=1 --nocapture
+```
+
+The dense FP64 oracle covers unaligned state lengths, GQA, strided V and
+nonzero gates. The fixed gate is the existing attention test's 0.016 maximum
+row-normalized absolute error, including the existing BF16 gating policy.
+A two-layer test ensures changed question contents do not affect state bits,
+future state tokens influence earlier state outputs, and repeated rows agree.
+Invalid dimensions use valid allocations; missing buffers are checked separately.
+
+For a small full-layer-loop oracle, use Python with `torch==2.12.1+cu130`,
+`transformers==5.17.0` and their dependencies, on the same GPU. The generator
+initializes a deterministic, all-BF16, three-layer Qwen model with full/linear/
+full attention and uses an independent dense boolean mask. It saves roughly
+a few MB of generated weights and reference arrays outside the checkout; no
+pretrained model download is needed. The native replay fixes the normalized
+hidden-state maximum error gate at 0.03, repeats an earlier row and checks
+that a subsequent causal call is bitwise unchanged.
+
+```sh
+python tests/qwen3_5/prefix_bidir_reference.py /absolute/new-oracle-directory
+export QWEN_PREFIX_BIDIR_FIXTURE=/absolute/new-oracle-directory/reference.json
+export QWEN_PREFIX_BIDIR_OUTPUT=/absolute/native-replay.json
+cargo test --release --locked -p omni-qwen3-5-native --test prefix_bidir \
+  -- --ignored --test-threads=1 --nocapture
+```
+
+The output variable is optional and preserves raw hidden states when set.
+The synthetic numerical gate is not a D3 decision/probability gate. An external
+full-checkpoint replay needs its own frozen inputs, artifact identity and model
+acceptance. Standard workspace checks compile these tests but leave GPU cases
+ignored; `graph_loading` checks missing capability, unsupported graph/adapter
+profiles and input rejection without a GPU.

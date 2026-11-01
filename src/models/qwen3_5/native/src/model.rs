@@ -1389,6 +1389,44 @@ impl Model {
         Ok(())
     }
 
+    /// One complete unpadded state+question row with a semantic, unrounded split.
+    /// Full-attention state rows see only state; question rows see this whole row.
+    /// GDN stays causal. No prefix continuation, Graph, LoRA or reference profile.
+    pub fn forward_prompt_prefix_bidirectional(
+        &mut self,
+        ids: &[u32],
+        state_tokens: usize,
+    ) -> Result<Vec<f32>> {
+        ensure!(
+            !ids.is_empty() && ids.len() <= self.cfg.max_positions,
+            "empty or oversized prompt"
+        );
+        ensure!(
+            state_tokens > 0 && state_tokens < ids.len(),
+            "state boundary must be inside the prompt"
+        );
+        ensure!(
+            ids.iter().all(|&id| (id as usize) < self.embed.shape[0]),
+            "token id outside the vocabulary"
+        );
+        self.require_prompt_prefix_bidirectional()?;
+        self.prepare_scratch(ids.len())?;
+        let s = self.scratch.as_ref().unwrap();
+        self.embed_tokens(s, ids)?;
+        self.run_with_attention(s, &[ids.len()], false, true, None, Some(state_tokens))?;
+        self.last_hidden(s, ids.len())
+    }
+
+    /// Check this optional capability during a model adapter's load/warmup.
+    pub fn require_prompt_prefix_bidirectional(&self) -> Result<()> {
+        ensure!(
+            !self.graph_enabled && self.reference.is_none() && self.lora.is_none(),
+            "prefix-bidirectional prefill is eager, merged and uses the default kernels"
+        );
+        cuda::api().attention_gated_prefix_bidirectional()?;
+        Ok(())
+    }
+
     /// Pack independent text prompts for input and gate/up GEMMs.
     /// Mixers reset at each boundary; final-position hidden states retain input order.
     pub fn forward_batch(&mut self, inputs: &[&[u32]]) -> Result<Vec<Vec<f32>>> {
@@ -2762,7 +2800,33 @@ impl Model {
         bidirectional: bool,
         suffix: Option<&SuffixBatch<'_>>,
     ) -> Result<()> {
-        let bidir = if bidirectional {
+        self.run_with_attention(s, lengths, custom_positions, bidirectional, suffix, None)
+    }
+
+    fn run_with_attention(
+        &self,
+        s: &Scratch,
+        lengths: &[usize],
+        custom_positions: bool,
+        bidirectional: bool,
+        suffix: Option<&SuffixBatch<'_>>,
+        state_tokens: Option<usize>,
+    ) -> Result<()> {
+        let prefix_bidir = if let Some(state) = state_tokens {
+            self.require_prompt_prefix_bidirectional()?;
+            ensure!(
+                bidirectional && !custom_positions && suffix.is_none() && lengths.len() == 1,
+                "prefix-bidirectional prefill requires one complete text row"
+            );
+            ensure!(
+                state > 0 && state < lengths[0],
+                "state boundary must be inside the prompt"
+            );
+            Some(cuda::api().attention_gated_prefix_bidirectional()?)
+        } else {
+            None
+        };
+        let bidir = if bidirectional && state_tokens.is_none() {
             ensure!(
                 self.reference.is_none() && self.lora.is_none() && suffix.is_none(),
                 "prompt-bidirectional prefill does not use reference numerics or an adapter"
@@ -3058,6 +3122,22 @@ impl Model {
                                         hk,
                                         hd,
                                         (cfg.head_dim as f32).powf(-0.5),
+                                        st,
+                                    )
+                                } else if let Some(prefix_bidir) = prefix_bidir {
+                                    (prefix_bidir)(
+                                        p(s.aq + offset * cfg.heads * cfg.head_dim * BF16),
+                                        p(s.ak + offset * cfg.kv_heads * cfg.head_dim * BF16),
+                                        p(v + offset * w.attn_in * BF16),
+                                        ld,
+                                        p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
+                                        p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
+                                        length,
+                                        state_tokens.unwrap() as i32,
+                                        hq,
+                                        hk,
+                                        hd,
+                                        scale,
                                         st,
                                     )
                                 } else if let Some(bidir) = bidir {

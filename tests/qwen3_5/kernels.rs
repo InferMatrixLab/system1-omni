@@ -402,6 +402,228 @@ fn bidirectional_attention_reads_future_keys_after_shared_suffix_refactor() {
     check_flash_attention_reference(true);
 }
 
+#[test]
+#[ignore = "needs a GPU and CUA_S1_CUDA_LIB with prefix-bidirectional attention"]
+fn prefix_bidirectional_attention_matches_dense_block_mask() {
+    let st = setup();
+    let op = api().attention_gated_prefix_bidirectional().unwrap();
+    for (t, state, hq, hk) in [
+        (2, 1, 1, 1),
+        (65, 31, 4, 1),
+        (129, 63, 6, 2),
+        (137, 65, 24, 4),
+        (257, 129, 4, 2),
+    ] {
+        let dh = 256;
+        let ldv = hk * dh + 8; // strided, not a separately packed V matrix
+        let qh = random(t * hq * dh, 71, 0.5);
+        let kh = random(t * hk * dh, 72, 0.5);
+        let vh = random(t * ldv, 73, 1.0);
+        let gh = random(t * hq * dh, 74, 1.0);
+        let q = to_device(&qh, st);
+        let k = to_device(&kh, st);
+        let v = to_device(&vh, st);
+        let gate = to_device(&gh, st);
+        let out = DeviceBuffer::new(t * hq * dh * 2).unwrap();
+        // SAFETY: all buffers contain complete unpadded rows, state is strictly
+        // inside the row, and the stream owns the complete sequence of launches.
+        unsafe {
+            check(
+                op(
+                    q.at(0),
+                    k.at(0),
+                    v.at(0),
+                    ldv as i32,
+                    gate.at(0),
+                    out.at(0),
+                    t as i32,
+                    state as i32,
+                    hq as i32,
+                    hk as i32,
+                    dh as i32,
+                    0.0625,
+                    st,
+                ),
+                "prefix bidirectional",
+            )
+            .unwrap();
+        }
+        let got = from_device(&out, t * hq * dh, st);
+        let mut worst = 0.0f64;
+        for row in 0..t {
+            let keys = if row < state { state } else { t };
+            for head in 0..hq {
+                let group = head / (hq / hk);
+                let scores: Vec<f64> = (0..keys)
+                    .map(|key| {
+                        (0..dh)
+                            .map(|d| {
+                                qh[(row * hq + head) * dh + d].to_f64()
+                                    * kh[(key * hk + group) * dh + d].to_f64()
+                            })
+                            .sum::<f64>()
+                            * 0.0625
+                    })
+                    .collect();
+                let max = scores.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                let weights: Vec<f64> = scores.iter().map(|x| (x - max).exp()).collect();
+                let sum: f64 = weights.iter().sum();
+                let want: Vec<f64> = (0..dh)
+                    .map(|d| {
+                        let a = (0..keys)
+                            .map(|key| weights[key] * vh[key * ldv + group * dh + d].to_f64())
+                            .sum::<f64>()
+                            / sum;
+                        let gate = gh[(row * hq + head) * dh + d].to_f32();
+                        // Existing gated attention rounds attention and sigmoid to
+                        // BF16 independently before the final BF16 multiplication.
+                        bf16::from_f32(
+                            bf16::from_f64(a).to_f32()
+                                * bf16::from_f32(1.0 / (1.0 + (-gate).exp())).to_f32(),
+                        )
+                        .to_f64()
+                    })
+                    .collect();
+                let scale = want.iter().map(|x| x.abs()).fold(1e-3f64, f64::max);
+                for (d, expected) in want.iter().enumerate() {
+                    let actual = got[(row * hq + head) * dh + d] as f64;
+                    assert!(actual.is_finite());
+                    worst = worst.max((actual - expected).abs() / scale);
+                }
+            }
+        }
+        eprintln!("prefix-bidir T={t}, state={state}, heads={hq}/{hk}: {worst:.6e}");
+        assert!(worst < 1.6e-2, "dense block mask mismatch: {worst}");
+    }
+    // Invalid geometry and semantic boundaries are rejected before dereference.
+    let valid = to_device(&vec![bf16::ZERO; 65 * 6 * 256], st);
+    let output = DeviceBuffer::new(65 * 6 * 256 * 2).unwrap();
+    for (t, state, hq, hk, dh, ldv) in [
+        (0, 0, 1, 1, 256, 256),
+        (65, 0, 1, 1, 256, 256),
+        (65, 65, 1, 1, 256, 256),
+        (65, -1, 1, 1, 256, 256),
+        (65, 66, 1, 1, 256, 256),
+        (65, 31, 3, 2, 256, 512),
+        (65, 31, 1, 1, 128, 256),
+        (65, 31, 1, 1, 256, 255),
+        (65, 31, 4, 2, 256, 256),
+        (65, 31, 0, 1, 256, 256),
+        (65, 31, 1, 0, 256, 256),
+    ] {
+        // SAFETY: every tuple is invalid and must return before accessing pointers.
+        let code = unsafe {
+            op(
+                valid.at(0),
+                valid.at(0),
+                valid.at(0),
+                ldv,
+                valid.at(0),
+                output.at(0),
+                t,
+                state,
+                hq,
+                hk,
+                dh,
+                0.0625,
+                st,
+            )
+        };
+        assert_ne!(code, 0, "accepted invalid prefix-bidir geometry");
+    }
+    for missing in 0..5 {
+        let mut pointers = [valid.at(0); 5];
+        pointers[4] = output.at(0);
+        pointers[missing] = std::ptr::null_mut();
+        // SAFETY: otherwise valid geometry must reject each missing buffer.
+        let code = unsafe {
+            op(
+                pointers[0],
+                pointers[1],
+                pointers[2],
+                256,
+                pointers[3],
+                pointers[4],
+                65,
+                31,
+                1,
+                1,
+                256,
+                0.0625,
+                st,
+            )
+        };
+        assert_ne!(code, 0, "accepted null buffer {missing}");
+    }
+    cuda::synchronize(st).unwrap();
+}
+
+#[test]
+#[ignore = "needs a GPU and CUA_S1_CUDA_LIB with prefix-bidirectional attention"]
+fn prefix_bidirectional_two_layers_isolate_state_from_question() {
+    let st = setup();
+    let op = api().attention_gated_prefix_bidirectional().unwrap();
+    for (t, state) in [(3, 1), (65, 63), (129, 65)] {
+        let n = t * 256;
+        let zero = to_device(&vec![bf16::ZERO; n], st);
+        let original: Vec<bf16> = (0..n)
+            .map(|i| bf16::from_f32((i / 256) as f32 / 16.0))
+            .collect();
+        let run = |values: &[bf16]| {
+            let v = to_device(values, st);
+            let out = DeviceBuffer::new(n * 2).unwrap();
+            let second = DeviceBuffer::new(n * 2).unwrap();
+            // SAFETY: two sequential layers share only immutable zero Q/K/gates;
+            // each V input and output is a separate, correctly sized allocation.
+            unsafe {
+                for (input, output) in [(v.at(0), out.at(0)), (out.at(0), second.at(0))] {
+                    check(
+                        op(
+                            zero.at(0),
+                            zero.at(0),
+                            input,
+                            256,
+                            zero.at(0),
+                            output,
+                            t as i32,
+                            state as i32,
+                            1,
+                            1,
+                            256,
+                            0.0625,
+                            st,
+                        ),
+                        "two-layer prefix mask",
+                    )
+                    .unwrap();
+                }
+            }
+            from_device(&second, n, st)
+        };
+        let ordinary = run(&original);
+        let mut question = original.clone();
+        question[state * 256..].fill(bf16::from_f32(32.0));
+        let changed_question = run(&question);
+        assert_eq!(
+            ordinary[..state * 256],
+            changed_question[..state * 256],
+            "question leaked into state"
+        );
+        assert_ne!(ordinary[state * 256..], changed_question[state * 256..]);
+        let mut future_state = original.clone();
+        future_state[(state - 1) * 256..state * 256].fill(bf16::from_f32(16.0));
+        let changed_state = run(&future_state);
+        assert_ne!(
+            ordinary[..256],
+            changed_state[..256],
+            "state incorrectly used a causal mask"
+        );
+        // A subsequent differently sized row must not consume an earlier row.
+        assert_eq!(ordinary, run(&original));
+    }
+    cuda::synchronize(st).unwrap();
+}
+
 fn check_flash_attention_reference(bidirectional: bool) {
     let st = setup();
     let (hq, hk, dh) = (16usize, 4usize, 256usize);
