@@ -61,12 +61,15 @@ The token plans record what the pinned runtime feeds the backbone (the
 predict mapping, the per-row decomposition, the rendered `p_ids`,
 blocks and readout positions, truncation, a windowed long-span case).
 The example-request token plan totals 1,041 tokens, matching the
+The example-request token plan totals 1,041 tokens, matching the
 oracle fixture's `usage.input_tokens`. The head inputs record the
 hidden states the F32 heads consume, the heads' logits and the
-calibrated predict answers. Both exporters import and initialize the
-runtime with bytecode writing off, so the verified package stays
-reusable: a later `verify_files()` gate run or worker startup is not
-poisoned by a `__pycache__` an export wrote.
+calibrated predict answers. Both recorders run the worker's own
+`verify_package()` gate before the package is imported, so the frozen
+fixtures always come from the pinned package. Both exporters import
+and initialize the runtime with bytecode writing off, so the verified
+package stays reusable: a later `verify_files()` gate run or worker
+startup is not poisoned by a `__pycache__` an export wrote.
 
 ## Checks
 
