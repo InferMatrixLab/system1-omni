@@ -123,7 +123,14 @@ def rows_of(engine, body):
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    sys.path.insert(0, str(Path(args.model).resolve()))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+    from models.vela.hybrid import verify_package
+
+    package = Path(args.model)
+    # The worker's own gate, before the package is imported: the recorder
+    # must only freeze what the pinned package actually serves.
+    verify_package(package)
+    sys.path.insert(0, str(package.resolve()))
     # The package gate rejects bytecode caches. Cover initialization too:
     # from_pretrained can import package modules lazily.
     previous_dont_write_bytecode = sys.dont_write_bytecode

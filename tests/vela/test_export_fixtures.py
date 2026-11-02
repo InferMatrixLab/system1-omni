@@ -63,3 +63,31 @@ class Vela2:
         assert not sys.dont_write_bytecode
         hybrid.verify_package(package)
         assert not list(package.rglob("__pycache__"))
+
+
+@pytest.mark.parametrize("exporter_name", ["export_token_plan", "export_head_inputs"])
+def test_exporter_rejects_a_tampered_package(tmp_path, monkeypatch, exporter_name):
+    """The recorders import package code only after the gate passes."""
+
+    package = tmp_path / "package"
+    package.mkdir()
+    files = small_files()
+    files["vela2_inference.py"] = b"raise AssertionError('imported before the gate')\n"
+    pins = build_package(package, files)
+    (package / "vela2_inference.py").write_bytes(
+        files["vela2_inference.py"] + b"# tampered after pinning\n"
+    )
+    monkeypatch.setattr(hybrid, "PINNED_FILES_SHA256", pins)
+    monkeypatch.setitem(sys.modules, "numpy", ModuleType("numpy"))
+    monkeypatch.setitem(sys.modules, "safetensors", ModuleType("safetensors"))
+    monkeypatch.setitem(sys.modules, "safetensors.numpy", SimpleNamespace(save_file=None))
+    monkeypatch.setattr(sys, "path", sys.path.copy())
+
+    path = Path(__file__).resolve().parents[2] / "recipe" / "vela" / f"{exporter_name}.py"
+    spec = importlib.util.spec_from_file_location(exporter_name, path)
+    exporter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(exporter)
+
+    args = ["--model", str(package), "--out", str(tmp_path / "fixtures")]
+    with pytest.raises(ValueError, match="vela2_inference.py"):
+        exporter.main(args)
