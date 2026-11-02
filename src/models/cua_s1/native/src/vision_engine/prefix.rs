@@ -20,7 +20,7 @@ impl Mode {
             _ => anyhow::bail!("CUA_S1_MM_PREFIX must be off, fixed, shared, or matched"),
         };
         ensure!(
-            mode == Self::Off
+            matches!(mode, Self::Off | Self::Matched)
                 || (!device_features && std::env::var("CUA_S1_GRAPH").as_deref() != Ok("1")),
             "multimodal prefix modes require Graph and device features off"
         );
@@ -51,10 +51,16 @@ pub(super) fn common_prefix(prompts: &[ImagePrompt]) -> usize {
     count / 64 * 64
 }
 
+#[derive(Clone, Copy)]
+enum Features<'a> {
+    Host(&'a [bf16]),
+    Device(DeviceBf16Matrix<'a>),
+}
+
 fn window(
     model: &mut Model,
     prompt: &ImagePrompt,
-    features: &[bf16],
+    features: Features<'_>,
     range: std::ops::Range<usize>,
     prefix: Option<&PrefixState>,
     capture: Option<&mut PrefixState>,
@@ -78,18 +84,40 @@ fn window(
     let input = MultimodalInput {
         token_ids: &prompt.token_ids[range.clone()],
         image_token_indices: &indices,
-        image_embeddings: &features[begin * model.cfg.hidden..end * model.cfg.hidden],
+        image_embeddings: match features {
+            Features::Host(rows) => &rows[begin * model.cfg.hidden..end * model.cfg.hidden],
+            Features::Device(_) => &[],
+        },
         position_ids: std::array::from_fn(|axis| &prompt.position_ids[axis][range.clone()]),
     };
-    let mut result = model.readout_window(&input, prefix, capture, &rows, &[])?;
+    let mut result = if let Features::Device(features) = features {
+        if let Some(features) = features.slice_rows(begin..end)? {
+            model.readout_window_device(
+                &DeviceMultimodalInput {
+                    token_ids: input.token_ids,
+                    image_token_indices: input.image_token_indices,
+                    image_embeddings: features,
+                    position_ids: input.position_ids,
+                },
+                prefix,
+                capture,
+                &rows,
+                &[],
+            )?
+        } else {
+            model.readout_window(&input, prefix, capture, &rows, &[])?
+        }
+    } else {
+        model.readout_window(&input, prefix, capture, &rows, &[])?
+    };
     Ok(result.hidden.pop().unwrap_or_default())
 }
 
-pub(super) fn execute(
+fn execute_features(
     model: &mut Model,
     letters: &[f32],
     prepared: &PreparedRequest,
-    features: &[bf16],
+    features: Features<'_>,
     mode: Mode,
     storage: &mut Option<PrefixState>,
 ) -> Result<Vec<Vec<f32>>> {
@@ -116,14 +144,20 @@ pub(super) fn execute(
                 .filter_map(|(i, &id)| (id == image_token).then_some(i))),
             "image indices must exactly match the ordered placeholders"
         );
-        ensure!(
-            prompt
-                .image_token_indices
-                .len()
-                .checked_mul(model.cfg.hidden)
-                == Some(features.len()),
-            "image embedding shape mismatch"
-        );
+        match features {
+            Features::Host(rows) => ensure!(
+                prompt
+                    .image_token_indices
+                    .len()
+                    .checked_mul(model.cfg.hidden)
+                    == Some(rows.len()),
+                "image embedding shape mismatch"
+            ),
+            Features::Device(view) => {
+                view.layout()
+                    .validate(prompt.image_token_indices.len(), model.cfg.hidden, 0)?
+            }
+        }
     }
     let shared = if mode == Mode::Shared {
         common_prefix(&prepared.prompts)
@@ -189,4 +223,39 @@ pub(super) fn matched_windows(prompts: &[ImagePrompt]) -> Result<(Vec<usize>, Ve
         windows.extend(lengths.iter().map(|n| n - shared));
     }
     Ok((lengths, windows))
+}
+
+pub(super) fn execute(
+    model: &mut Model,
+    letters: &[f32],
+    prepared: &PreparedRequest,
+    features: &[bf16],
+    mode: Mode,
+    storage: &mut Option<PrefixState>,
+) -> Result<Vec<Vec<f32>>> {
+    execute_features(
+        model,
+        letters,
+        prepared,
+        Features::Host(features),
+        mode,
+        storage,
+    )
+}
+
+pub(super) fn execute_device(
+    model: &mut Model,
+    letters: &[f32],
+    prepared: &PreparedRequest,
+    features: DeviceBf16Matrix<'_>,
+    storage: &mut Option<PrefixState>,
+) -> Result<Vec<Vec<f32>>> {
+    execute_features(
+        model,
+        letters,
+        prepared,
+        Features::Device(features),
+        Mode::Shared,
+        storage,
+    )
 }

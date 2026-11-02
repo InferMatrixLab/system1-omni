@@ -38,6 +38,7 @@ impl Model {
         let m = lengths[0];
         if !self.matched_handles.contains_key(&m) && self.matched_handles.len() == 16 {
             self.synchronize()?;
+            self.window_graphs.clear();
             // SAFETY: all launches drained before destroying owned workspaces.
             for (_, h) in self.matched_handles.drain() {
                 unsafe { (cuda::api().cs1_gemm_destroy)(h) };
@@ -87,10 +88,16 @@ impl Model {
                         )
                     };
                     if okay != 1 {
+                        if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
+                            eprintln!("CUA_S1_PREFIX event=fallback reference={m}");
+                        }
                         return Ok(None);
                     }
                 }
             }
+        }
+        if std::env::var("CUA_S1_GRAPH_TRACE").as_deref() == Ok("1") {
+            eprintln!("CUA_S1_PREFIX event=admit reference={m}");
         }
         self.matched_ref = m;
         // The worker catches panics and can retain this engine. Restore the

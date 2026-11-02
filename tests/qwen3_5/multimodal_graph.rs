@@ -364,3 +364,348 @@ fn graph_recording_failure_keeps_eager_result_and_disables_both_modes() -> Resul
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "requires the Cua-S1 language checkpoint and real CUDA library; run serially"]
+fn device_multimodal_graph_uses_current_rows_and_releases_external_storage() -> Result<()> {
+    let mut model = load_model()?;
+    let image_token = model.cfg.image_token_id.context("image_token_id")?;
+    let text = text_tokens(&model, 4)?;
+    let mut last = Vec::new();
+    for seed in 0..4 {
+        let ids = [text[seed], image_token, image_token, text[(seed + 1) % 4]];
+        let indices = [1, 2];
+        let temporal = [0, 1 + seed as i64, 1 + seed as i64, 5];
+        let height = [0, 1, 2 + seed as i64, 5];
+        let width = [0, 2 + seed as i64, 1, 5];
+        let features: Vec<bf16> = (0..2 * model.cfg.hidden)
+            .map(|i| bf16::from_f32(((i + seed * 7) % 19) as f32 / 18.0 - 0.5))
+            .collect();
+        let input = MultimodalInput {
+            token_ids: &ids,
+            image_token_indices: &indices,
+            image_embeddings: &features,
+            position_ids: [&temporal, &height, &width],
+        };
+        model.graph_enabled = false;
+        let expected = model.forward_multimodal(&input)?;
+        if !last.is_empty() {
+            assert_ne!(expected, last, "changed input must exercise new data");
+        }
+        let bytes: Vec<_> = features.iter().flat_map(|v| v.to_le_bytes()).collect();
+        let source = DeviceBuffer::new(bytes.len())?;
+        unsafe { cuda::upload(source.at(0), &bytes, model.stream)? };
+        model.synchronize()?;
+        let device = DeviceMultimodalInput {
+            token_ids: &ids,
+            image_token_indices: &indices,
+            image_embeddings: source.bf16_matrix(2, model.cfg.hidden)?,
+            position_ids: input.position_ids,
+        };
+        model.graph_enabled = true;
+        assert_hidden_eq(
+            &model.forward_multimodal_device(&device)?,
+            &expected,
+            "device capture/replay",
+        );
+        assert_eq!(
+            model.mm_graphs.len(),
+            1,
+            "device path must cache the shared MM graph"
+        );
+        assert_eq!(
+            model.graph_stats().captures,
+            1,
+            "same shape must not recapture"
+        );
+        assert_eq!(model.graph_stats().replays, 2 * seed as u64);
+        // A capture must not retain the external producer address. Releasing it
+        // and using host input must replay the same graph safely.
+        drop(source);
+        assert_hidden_eq(
+            &model.forward_multimodal(&input)?,
+            &expected,
+            "host replay after producer release",
+        );
+        assert_eq!(model.graph_stats().replays, 2 * seed as u64 + 1);
+        last = expected;
+    }
+    model.prepare_scratch(model.scratch.as_ref().unwrap().cap + 1)?;
+    assert!(model.mm_graphs.is_empty(), "growth must retire captures");
+    let ids = [text[0], image_token, image_token, text[1]];
+    let positions = [0, 1, 1, 2];
+    let source = DeviceBuffer::new(2 * model.cfg.hidden * BF16)?;
+    let bytes = vec![0; 2 * model.cfg.hidden * BF16];
+    unsafe { cuda::upload(source.at(0), &bytes, model.stream)? };
+    model.synchronize()?;
+    let device = DeviceMultimodalInput {
+        token_ids: &ids,
+        image_token_indices: &[1, 2],
+        image_embeddings: source.bf16_matrix(2, model.cfg.hidden)?,
+        position_ids: [&positions; 3],
+    };
+    let captured = model.forward_multimodal_device(&device)?;
+    assert_eq!(model.mm_graphs.len(), 1);
+    assert_eq!(model.graph_stats().captures, 2);
+    let failed = cuda::Graph::capture(model.stream, || {
+        anyhow::bail!("injected device record failure")
+    });
+    assert!(failed.is_err());
+    model.cache_graph(&[4], true, failed)?;
+    assert!(!model.graph_enabled);
+    assert!(model.mm_graphs.is_empty());
+    assert_hidden_eq(
+        &model.forward_multimodal_device(&device)?,
+        &captured,
+        "device eager recovery",
+    );
+    assert!(!model.graph_enabled);
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires pinned Cua-S1 language weights and CUDA; run serially"]
+fn device_window_graph_stages_current_rows_and_owns_prefix_storage_until_retirement() -> Result<()>
+{
+    let mut model = load_model()?;
+    let image = model.cfg.image_token_id.context("image token")?;
+    let text = text_tokens(&model, 132)?;
+    let mut ids = text.clone();
+    ids[32] = image;
+    ids[33] = image;
+    let indices = [32, 33];
+    let mut positions: [Vec<i64>; 3] = std::array::from_fn(|_| (0..132).collect());
+    let mut state = model.alloc_prefix(128)?;
+    let mut prior = Vec::new();
+    for seed in 0..3 {
+        ids[0] = text[seed];
+        positions[seed][30] += 1;
+        let features: Vec<_> = (0..2 * model.cfg.hidden)
+            .map(|i| bf16::from_f32(((i + seed * 7) % 19) as f32 / 18. - 0.5))
+            .collect();
+        let full = MultimodalInput {
+            token_ids: &ids,
+            image_token_indices: &indices,
+            image_embeddings: &features,
+            position_ids: std::array::from_fn(|a| positions[a].as_slice()),
+        };
+        model.graph_enabled = false;
+        let expected = model
+            .readout_window(&full, None, None, &[131], &[])?
+            .hidden
+            .remove(0);
+        if !prior.is_empty() {
+            assert_ne!(expected, prior);
+        }
+        let buffer = DeviceBuffer::new(features.len() * BF16)?;
+        let bytes: Vec<_> = features.iter().flat_map(|v| v.to_le_bytes()).collect();
+        unsafe {
+            cuda::upload(buffer.at(0), &bytes, model.stream)?;
+        }
+        model.synchronize()?;
+        let prefix = DeviceMultimodalInput {
+            token_ids: &ids[..128],
+            image_token_indices: &indices,
+            image_embeddings: buffer.bf16_matrix(2, model.cfg.hidden)?,
+            position_ids: std::array::from_fn(|a| &positions[a][..128]),
+        };
+        model.graph_enabled = true;
+        model.readout_window_device(&prefix, None, Some(&mut state), &[], &[])?;
+        // The window Graph cannot retain the producer allocation.
+        drop(buffer);
+        let suffix = MultimodalInput {
+            token_ids: &ids[128..],
+            image_token_indices: &[],
+            image_embeddings: &[],
+            position_ids: std::array::from_fn(|a| &positions[a][128..]),
+        };
+        let actual = model
+            .readout_window(&suffix, Some(&state), None, &[131], &[])?
+            .hidden
+            .remove(0);
+        assert_hidden_eq(&actual, &expected, "current device prefix + host suffix");
+        assert_eq!(model.window_graphs.len(), 2);
+        prior = expected;
+    }
+    assert_eq!(model.graph_stats().captures, 2);
+    assert_eq!(model.graph_stats().replays, 4);
+    let retired = Arc::downgrade(&state.buffers);
+    drop(state);
+    assert!(
+        retired.upgrade().is_some(),
+        "live graphs must own recorded prefix storage"
+    );
+    // New same-sized storage must not alias the retired prefix's cache key.
+    let mut replacement = model.alloc_prefix(128)?;
+    let prefix = MultimodalInput {
+        token_ids: &text[..128],
+        image_token_indices: &[],
+        image_embeddings: &[],
+        position_ids: std::array::from_fn(|a| &positions[a][..128]),
+    };
+    model.readout_window(&prefix, None, Some(&mut replacement), &[], &[])?;
+    assert_eq!(model.window_graphs.len(), 3);
+    assert_eq!(model.graph_stats().captures, 3);
+    model.prepare_scratch(1025)?;
+    assert!(model.window_graphs.is_empty());
+    assert!(
+        retired.upgrade().is_none(),
+        "growth must retire Graph-owned storage"
+    );
+    // Exercise the production retirement helper with a real failed recording.
+    model.readout_window(&prefix, None, Some(&mut replacement), &[], &[])?;
+    let failed = cuda::Graph::capture(model.stream, || {
+        anyhow::bail!("injected window recording failure")
+    });
+    assert!(failed.is_err());
+    model.cache_window_graph([0, 128, 0, 0, 0], [None, None], failed)?;
+    assert!(!model.graph_enabled);
+    assert!(model.window_graphs.is_empty());
+    model.readout_window(&prefix, None, Some(&mut replacement), &[], &[])?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires pinned Cua-S1 language weights and CUDA; run serially"]
+fn window_graph_retains_and_keys_both_prefix_and_capture_allocations() -> Result<()> {
+    let mut model = load_model()?;
+    let ids = text_tokens(&model, 132)?;
+    let positions: Vec<i64> = (0..132).collect();
+    let input = |range: std::ops::Range<usize>| MultimodalInput {
+        token_ids: &ids[range.clone()],
+        image_token_indices: &[],
+        image_embeddings: &[],
+        position_ids: [&positions[range.clone()]; 3],
+    };
+    let expected = model
+        .readout_window(&input(0..132), None, None, &[131], &[])?
+        .hidden
+        .remove(0);
+    let mut source = model.alloc_prefix(64)?;
+    let mut first = model.alloc_prefix(128)?;
+    let mut second = model.alloc_prefix(128)?;
+    model.graph_enabled = true;
+    model.readout_window(&input(0..64), None, Some(&mut source), &[], &[])?;
+    model.readout_window(&input(64..128), Some(&source), Some(&mut first), &[], &[])?;
+    let retired = Arc::downgrade(&first.buffers);
+    drop(first);
+    assert!(
+        retired.upgrade().is_some(),
+        "Graph must retain destination as well as source"
+    );
+    model.readout_window(&input(64..128), Some(&source), Some(&mut second), &[], &[])?;
+    assert_eq!(
+        model.window_graphs.len(),
+        3,
+        "a different destination requires a new Graph"
+    );
+    let actual = model
+        .readout_window(&input(128..132), Some(&second), None, &[131], &[])?
+        .hidden
+        .remove(0);
+    assert_hidden_eq(
+        &actual,
+        &expected,
+        "continuation from second Graph destination",
+    );
+    model.prepare_scratch(1025)?;
+    assert!(retired.upgrade().is_none());
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires pinned Cua-S1 language weights and CUDA; run serially"]
+fn window_graph_fifo_and_matched_workspace_retirement_release_owned_storage() -> Result<()> {
+    let mut model = load_model()?;
+    model.graph_enabled = true;
+    let state = model.alloc_prefix(64)?;
+    let retired = Arc::downgrade(&state.buffers);
+    // Real empty CUDA Graphs isolate cache ownership from arithmetic. They are
+    // never replayed; the subsequent matched section uses real window kernels.
+    for i in 0..128 {
+        let graph = cuda::Graph::capture(model.stream, || Ok(()))?;
+        let held = if i == 0 {
+            Some(Arc::clone(&state.buffers))
+        } else {
+            None
+        };
+        model.cache_window_graph([i, 64, 0, 0, 0], [None, held], Ok(graph))?;
+    }
+    drop(state);
+    assert_eq!(model.window_graphs.len(), 128);
+    assert!(retired.upgrade().is_some());
+    let graph = cuda::Graph::capture(model.stream, || Ok(()))?;
+    model.cache_window_graph([128, 64, 0, 0, 0], [None, None], Ok(graph))?;
+    assert_eq!(model.window_graphs.len(), 128);
+    assert!(
+        retired.upgrade().is_none(),
+        "129th insertion must release the oldest entry"
+    );
+    model.prepare_scratch(1025)?;
+    assert!(model.window_graphs.is_empty());
+    let ids = text_tokens(&model, 64)?;
+    let positions: Vec<i64> = (0..64).collect();
+    let input = MultimodalInput {
+        token_ids: &ids,
+        image_token_indices: &[],
+        image_embeddings: &[],
+        position_ids: [&positions; 3],
+    };
+    let mut state = model.alloc_prefix(64)?;
+    let retired = Arc::downgrade(&state.buffers);
+    assert!(
+        model
+            .with_matched_prefix(&[64, 64], &[64], |m| m.readout_window(
+                &input,
+                None,
+                Some(&mut state),
+                &[],
+                &[]
+            ))?
+            .is_some()
+    );
+    assert_eq!(model.window_graphs.len(), 1);
+    drop(state);
+    assert!(retired.upgrade().is_some());
+    for m in 1..=17 {
+        let _ = model.with_matched_prefix(&[m, m], &[m], |_| Ok(()))?;
+    }
+    assert!(
+        model.window_graphs.is_empty(),
+        "matched workspace retirement must clear dependent Graphs"
+    );
+    assert!(retired.upgrade().is_none());
+    let captures = model.graph_stats().captures;
+    let mut state = model.alloc_prefix(64)?;
+    assert!(
+        model
+            .with_matched_prefix(&[64, 64], &[64], |m| m.readout_window(
+                &input,
+                None,
+                Some(&mut state),
+                &[],
+                &[]
+            ))?
+            .is_some()
+    );
+    assert_eq!(
+        model.graph_stats().captures,
+        captures + 1,
+        "retired shape must recapture"
+    );
+    let replays = model.graph_stats().replays;
+    assert!(
+        model
+            .with_matched_prefix(&[64, 64], &[64], |m| {
+                m.readout_window(&input, None, Some(&mut state), &[], &[])
+            })?
+            .is_some()
+    );
+    assert_eq!(model.graph_stats().replays, replays + 1);
+    assert_eq!(
+        model.graph_stats().captures,
+        captures + 1,
+        "same shape must replay after recapture"
+    );
+    Ok(())
+}

@@ -13,6 +13,7 @@
 //! once and every branch from the state after it (see `SharedPrompts`).
 
 mod matched;
+mod window_graph;
 
 use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
@@ -695,14 +696,19 @@ pub struct PrefixState {
     len: usize,
     /// Tokens the buffers hold; `forward_shared` reuses a state for shorter prefixes.
     cap: usize,
+    buffers: Arc<PrefixBuffers>,
+    /// Total device bytes, for cache-budget accounting by the caller.
+    bytes: usize,
+}
+
+/// Shared ownership keeps captured device addresses alive until Graph retirement.
+struct PrefixBuffers {
     /// Post-prep K [len, Hk*Dh] and raw V [len, Hk*Dh] rows per full-attention layer.
     attn_kv: Vec<(DeviceBuffer, DeviceBuffer)>,
     /// Float32 [H, K, V] recurrent states, one per Gated DeltaNet layer.
     gdn_state: Vec<DeviceBuffer>,
     /// Three pre-conv projection columns [3, gdn_in width], one per Gated DeltaNet layer.
     conv_tail: Vec<DeviceBuffer>,
-    /// Total device bytes, for cache-budget accounting by the caller.
-    bytes: usize,
 }
 
 /// A packed suffix batch uses one freshly captured prefix and original algorithm.
@@ -867,6 +873,7 @@ pub struct Model {
     graph_stats: GraphStats,
     graphs: VecDeque<(Vec<usize>, cuda::Graph)>,
     mm_graphs: VecDeque<(Vec<usize>, cuda::Graph)>,
+    window_graphs: VecDeque<window_graph::Entry>,
     // The stream retires after every model allocation, including adapter resources.
     _stream_owner: ModelStream,
 }
@@ -889,6 +896,7 @@ impl Drop for Model {
         let _ = cuda::synchronize(self.stream);
         self.graphs.clear();
         self.mm_graphs.clear();
+        self.window_graphs.clear();
         self.scratch = None;
         self.shared = [None, None];
         // Retire the FP32 cuBLAS context while its last stream is still valid.
@@ -1043,6 +1051,7 @@ impl Model {
             graphs: VecDeque::new(),
             _stream_owner: stream_owner,
             mm_graphs: VecDeque::new(),
+            window_graphs: VecDeque::new(),
         };
         Ok(model)
     }
@@ -1050,7 +1059,7 @@ impl Model {
     pub fn graph_stats(&self) -> GraphStats {
         GraphStats {
             enabled: self.graph_enabled,
-            cached_shapes: self.graphs.len() + self.mm_graphs.len(),
+            cached_shapes: self.graphs.len() + self.mm_graphs.len() + self.window_graphs.len(),
             ..self.graph_stats
         }
     }
@@ -1332,11 +1341,15 @@ impl Model {
         .next_multiple_of(1024);
         if self.scratch.as_ref().is_none_or(|s| capacity > s.cap) {
             cuda::synchronize(self.stream)?;
-            if !self.graphs.is_empty() || !self.mm_graphs.is_empty() {
+            if !self.graphs.is_empty()
+                || !self.mm_graphs.is_empty()
+                || !self.window_graphs.is_empty()
+            {
                 self.graph_stats.invalidations += 1;
             }
             self.graphs.clear();
             self.mm_graphs.clear();
+            self.window_graphs.clear();
             self.scratch = None;
             self.scratch = Some(Scratch::new(
                 &self.cfg,
@@ -1686,6 +1699,13 @@ impl Model {
         self.upload_positions(s, input.position_ids)?;
         self.embed_tokens(s, input.token_ids)?;
         self.overwrite_image_rows(s, input, 0)?;
+        self.run_multimodal(t)
+    }
+
+    /// Inputs are staged in owned scratch before capture; producer addresses
+    /// never enter the graph, so host and device inputs can share a capture.
+    fn run_multimodal(&mut self, t: usize) -> Result<Vec<f32>> {
+        let s = self.scratch.as_ref().unwrap();
         if self.graph_enabled {
             if let Some((_, graph)) = self
                 .mm_graphs
@@ -1753,6 +1773,7 @@ impl Model {
                 self.graph_enabled = false;
                 self.graphs.clear();
                 self.mm_graphs.clear();
+                self.window_graphs.clear();
             }
         }
         Ok(())
@@ -1794,11 +1815,42 @@ impl Model {
         targets: &[(usize, u32)],
     ) -> Result<Readout> {
         self.ensure_fixed_profile()?;
-        let result = self.run_readout_window(window, prefix, capture, rows, targets);
+        let result = self.run_readout_window(window, prefix, capture, rows, targets, None);
         if result.is_err() {
             // Work already queued may still use the buffers.
             let _ = cuda::synchronize(self.stream);
         }
+        result
+    }
+
+    /// Window readout from checked borrowed device rows. Current input is copied
+    /// into model scratch before capture/replay; producer addresses are never
+    /// recorded. Every exit drains consumer work before the borrow is released.
+    pub fn readout_window_device(
+        &mut self,
+        window: &DeviceMultimodalInput<'_>,
+        prefix: Option<&PrefixState>,
+        capture: Option<&mut PrefixState>,
+        rows: &[usize],
+        targets: &[(usize, u32)],
+    ) -> Result<Readout> {
+        self.ensure_fixed_profile()?;
+        let host = MultimodalInput {
+            token_ids: window.token_ids,
+            image_token_indices: window.image_token_indices,
+            image_embeddings: &[],
+            position_ids: window.position_ids,
+        };
+        let result = self.run_readout_window(
+            &host,
+            prefix,
+            capture,
+            rows,
+            targets,
+            Some(window.image_embeddings),
+        );
+        let synced = self.synchronize();
+        synced?;
         result
     }
 
@@ -1809,13 +1861,31 @@ impl Model {
         mut capture: Option<&mut PrefixState>,
         rows: &[usize],
         targets: &[(usize, u32)],
+        device: Option<cuda::DeviceBf16Matrix<'_>>,
     ) -> Result<Readout> {
         let image_token = self
             .cfg
             .image_token_id
             .context("checkpoint has no image_token_id")?;
         let vocab = self.embed.shape[0];
-        window.validate(self.cfg.hidden, vocab, image_token, self.cfg.max_positions)?;
+        if let Some(features) = device {
+            DeviceMultimodalInput {
+                token_ids: window.token_ids,
+                image_token_indices: window.image_token_indices,
+                image_embeddings: features,
+                position_ids: window.position_ids,
+            }
+            .validate(
+                self.cfg.hidden,
+                vocab,
+                image_token,
+                self.cfg.max_positions,
+                0,
+            )?;
+            features.validate_finite(self.stream)?;
+        } else {
+            window.validate(self.cfg.hidden, vocab, image_token, self.cfg.max_positions)?;
+        }
         if let Some(pre) = prefix {
             ensure!(
                 Arc::ptr_eq(&self.prefix_owner, &pre.owner),
@@ -1824,7 +1894,9 @@ impl Model {
             ensure!(pre.initialized, "prefix state has not completed capture");
         }
         let qb = prefix.map_or(0, |pre| pre.len);
-        let tend = qb + window.token_ids.len();
+        let tend = qb
+            .checked_add(window.token_ids.len())
+            .context("window length overflow")?;
         ensure!(
             tend <= self.cfg.max_positions,
             "prompt exceeds the configured maximum length"
@@ -1851,24 +1923,21 @@ impl Model {
         let s = self.scratch.as_ref().unwrap();
         self.upload_positions(s, window.position_ids)?;
         self.embed_tokens_at(s, window.token_ids, qb)?;
-        self.overwrite_image_rows(s, window, qb)?;
+        if let Some(features) = device {
+            self.overwrite_device_rows(s, window.image_token_indices, features, qb)?;
+        } else {
+            self.overwrite_image_rows(s, window, qb)?;
+        }
         if let Some(cap) = capture.as_deref_mut() {
             cap.initialized = false;
             cap.len = tend;
         }
-        self.run_window(
-            s,
-            qb,
-            tend,
-            true,
-            capture.as_deref_mut(),
-            prefix,
-            gemm,
-            None,
-        )?;
+        self.run_window_graph(qb, tend, capture.as_deref_mut(), prefix, gemm)?;
+
         if let Some(cap) = capture {
             cap.initialized = true;
         }
+        let s = self.scratch.as_ref().unwrap();
         let hidden = rows
             .iter()
             .map(|&r| self.hidden_row(s, r))
@@ -1946,7 +2015,7 @@ impl Model {
         Ok(logprobs)
     }
 
-    /// Eager multimodal execution using borrowed device-resident image rows.
+    /// Multimodal execution using borrowed device-resident image rows.
     /// The producer must finish writes before entry. All queued consumer work is
     /// completed on every exit path, before the external allocation can be reused.
     pub fn forward_multimodal_device(
@@ -1972,32 +2041,41 @@ impl Model {
             let s = self.scratch.as_ref().unwrap();
             self.upload_positions(s, input.position_ids)?;
             self.embed_tokens(s, input.token_ids)?;
-            let indices = input.image_token_indices;
-            let row_bytes = self.cfg.hidden * BF16;
-            let mut begin = 0;
-            while begin < indices.len() {
-                let mut end = begin + 1;
-                while end < indices.len() && indices[end] == indices[end - 1] + 1 {
-                    end += 1;
-                }
-                // SAFETY: metadata validates source rows, device and allocation
-                // extent and indices exactly match placeholders inside s.res.
-                unsafe {
-                    cuda::copy_dd(
-                        s.at(s.res + indices[begin] * row_bytes),
-                        input.image_embeddings.at(begin * row_bytes),
-                        (end - begin) * row_bytes,
-                        self.stream,
-                    )?;
-                }
-                begin = end;
-            }
-            self.run(s, &[t], true, false)?;
-            self.last_hidden(s, t)
+            self.overwrite_device_rows(s, input.image_token_indices, input.image_embeddings, 0)?;
+            self.run_multimodal(t)
         })();
         let synced = self.synchronize();
         synced?;
         result
+    }
+
+    fn overwrite_device_rows(
+        &self,
+        s: &Scratch,
+        indices: &[usize],
+        features: cuda::DeviceBf16Matrix<'_>,
+        qb: usize,
+    ) -> Result<()> {
+        let row_bytes = self.cfg.hidden * BF16;
+        let mut begin = 0;
+        while begin < indices.len() {
+            let mut end = begin + 1;
+            while end < indices.len() && indices[end] == indices[end - 1] + 1 {
+                end += 1;
+            }
+            // SAFETY: validated metadata binds the source row extent, device and
+            // ordered placeholders, with qb+indices inside owned scratch.
+            unsafe {
+                cuda::copy_dd(
+                    s.at(s.res + (qb + indices[begin]) * row_bytes),
+                    features.at(begin * row_bytes),
+                    (end - begin) * row_bytes,
+                    self.stream,
+                )?;
+            }
+            begin = end;
+        }
+        Ok(())
     }
 
     fn upload_positions(&self, s: &Scratch, positions: [&[i64]; 3]) -> Result<()> {
@@ -2090,9 +2168,11 @@ impl Model {
             initialized: false,
             len,
             cap: len,
-            attn_kv,
-            gdn_state,
-            conv_tail,
+            buffers: Arc::new(PrefixBuffers {
+                attn_kv,
+                gdn_state,
+                conv_tail,
+            }),
             bytes: self.prefix_bytes(len),
         })
     }
@@ -2863,7 +2943,7 @@ impl Model {
                                 if let Some(suffix) = suffix {
                                     (suffix.ops.conv)(
                                         p(s.gdn_in + offset * w.gdn_in * BF16),
-                                        suffix.prefix.conv_tail[linear_index].at(0),
+                                        suffix.prefix.buffers.conv_tail[linear_index].at(0),
                                         ld,
                                         la.conv.ptr,
                                         p(s.lq + offset * kd * BF16),
@@ -2921,7 +3001,7 @@ impl Model {
                                         hv as i32,
                                         cfg.lin_k_heads as i32,
                                         (cfg.lin_k_dim as f32).powf(-0.5),
-                                        suffix.prefix.gdn_state[linear_index].at(0),
+                                        suffix.prefix.buffers.gdn_state[linear_index].at(0),
                                         std::ptr::null_mut(),
                                         st,
                                     ),
@@ -3050,8 +3130,8 @@ impl Model {
                                         ld,
                                         p(s.agate + offset * cfg.heads * cfg.head_dim * BF16),
                                         p(s.ao + offset * cfg.heads * cfg.head_dim * BF16),
-                                        suffix.prefix.attn_kv[attention_index].0.at(0),
-                                        suffix.prefix.attn_kv[attention_index].1.at(0),
+                                        suffix.prefix.buffers.attn_kv[attention_index].0.at(0),
+                                        suffix.prefix.buffers.attn_kv[attention_index].1.at(0),
                                         length,
                                         suffix.prefix.len as i32,
                                         hq,
@@ -3309,15 +3389,16 @@ impl Model {
                     let b = z + vd * BF16;
                     let a = b + hv * BF16;
                     let s_in: *const c_void =
-                        prefix.map_or(std::ptr::null(), |pre| pre.gdn_state[la_i].at(0));
-                    let s_out: *mut c_void = capture
-                        .as_deref()
-                        .map_or(std::ptr::null_mut(), |cap| cap.gdn_state[la_i].at(0));
+                        prefix.map_or(std::ptr::null(), |pre| pre.buffers.gdn_state[la_i].at(0));
+                    let s_out: *mut c_void =
+                        capture.as_deref().map_or(std::ptr::null_mut(), |cap| {
+                            cap.buffers.gdn_state[la_i].at(0)
+                        });
                     unsafe {
                         if qb > 0 {
                             cuda::copy_dd(
                                 p(s.gdn_in + (qb - 3) * ldbb),
-                                prefix.unwrap().conv_tail[la_i].at(0),
+                                prefix.unwrap().buffers.conv_tail[la_i].at(0),
                                 3 * ldbb,
                                 st,
                             )?;
@@ -3326,7 +3407,7 @@ impl Model {
                             // conv window tail: the last three pre-conv columns, which
                             // include restored prefix columns for a window under three rows.
                             cuda::copy_dd(
-                                cap.conv_tail[la_i].at(0),
+                                cap.buffers.conv_tail[la_i].at(0),
                                 p(s.gdn_in + (tend - 3) * ldbb),
                                 3 * ldbb,
                                 st,
@@ -3435,8 +3516,21 @@ impl Model {
                             let pre = prefix.unwrap();
                             // Restore the prefix V columns and post-prep K rows in place;
                             // the windowed flash then sees the identical k/v layout.
-                            cuda::copy2d(p(v), ab, pre.attn_kv[fa_i].1.at(0), kvb, kvb, qb, st)?;
-                            cuda::copy_dd(p(s.ak), pre.attn_kv[fa_i].0.at(0), qb * kvb, st)?;
+                            cuda::copy2d(
+                                p(v),
+                                ab,
+                                pre.buffers.attn_kv[fa_i].1.at(0),
+                                kvb,
+                                kvb,
+                                qb,
+                                st,
+                            )?;
+                            cuda::copy_dd(
+                                p(s.ak),
+                                pre.buffers.attn_kv[fa_i].0.at(0),
+                                qb * kvb,
+                                st,
+                            )?;
                         }
                         check(
                             (self
@@ -3464,8 +3558,21 @@ impl Model {
                         )?;
                         if let Some(cap) = capture.as_deref() {
                             // K must be post-prep (normed + rotary); V is the raw column.
-                            cuda::copy_dd(cap.attn_kv[fa_i].0.at(0), p(s.ak), tend * kvb, st)?;
-                            cuda::copy2d(cap.attn_kv[fa_i].1.at(0), kvb, p(v), ab, kvb, tend, st)?;
+                            cuda::copy_dd(
+                                cap.buffers.attn_kv[fa_i].0.at(0),
+                                p(s.ak),
+                                tend * kvb,
+                                st,
+                            )?;
+                            cuda::copy2d(
+                                cap.buffers.attn_kv[fa_i].1.at(0),
+                                kvb,
+                                p(v),
+                                ab,
+                                kvb,
+                                tend,
+                                st,
+                            )?;
                         }
                         check(
                             (cuda::api().cs1_attention_gated_prefix)(
