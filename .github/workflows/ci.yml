@@ -49,6 +49,11 @@ jobs:
         run: |
           python -m pip install pytest
           PYTHONPATH=src python -m pytest tests/clef -q
+      - name: Vela worker tests
+        # Gate, worker wiring and the frozen oracle fixtures; torch-free
+        # (the pinned runtime is imported lazily), so only pytest is
+        # needed beyond the job's base install.
+        run: PYTHONPATH=src python -m pytest tests/vela -q
 
   cuda-contract:
     # The CUDA backend contract and its checker. No CUDA toolkit and no GPU: both

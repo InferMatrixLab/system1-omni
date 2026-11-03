@@ -1,4 +1,4 @@
-"""Tests for the Vela 2.0 0.8B hybrid member: gate, worker dispatch, response finishing.
+"""Tests for the Vela 2.0 hybrid members (0.8B/4B/9B): gate, worker dispatch, response finishing.
 
 Gate tests mirror test_engine_manifest: temp directories with an
 injectable pin table and recomputed hashes — no weights, no torch, no
@@ -25,10 +25,12 @@ from models.vela.hybrid import (
     EXPECTED_MAX_LENGTH,
     EXPECTED_MODEL_NAME,
     EXPECTED_MODEL_TYPE,
-    EXPECTED_WEIGHTS_BYTES,
+    HYBRID_MEMBER,
     HYBRID_REPO,
     HYBRID_REVISION,
+    MEMBERS,
     PINNED_FILES_SHA256,
+    SHARED_RUNTIME_FILES_SHA256,
     WEIGHTS_NAME,
     Vela2HybridExecutor,
     verify_config,
@@ -73,10 +75,42 @@ def build_package(root: Path, files: dict[str, bytes], config: dict | None = Non
         json.dumps(config if config is not None else CONFIG), encoding="utf-8"
     )
     with (root / WEIGHTS_NAME).open("wb") as stream:
-        stream.truncate(EXPECTED_WEIGHTS_BYTES)
+        stream.truncate(HYBRID_MEMBER.weights_shards[WEIGHTS_NAME])
     files = dict(files)
     files["config.json"] = (root / "config.json").read_bytes()
     return table_of(files)
+
+
+def build_member_package(root: Path, member, extra: dict[str, bytes] | None = None):
+    """A fake package for any pinned member: files, config, exact-size shards.
+
+    Returns the recomputed pin table for injection; `extra` writes
+    additional non-pinned files, standing in for the 4B/9B-only
+    package files (MODEL_MANIFEST.json, docs, license texts).
+    """
+
+    files = small_files()
+    for name, content in files.items():
+        (root / name).write_bytes(content)
+    for name, content in (extra or {}).items():
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    (root / "config.json").write_text(
+        json.dumps(
+            {
+                "model_type": EXPECTED_MODEL_TYPE,
+                "architectures": [EXPECTED_ARCHITECTURE],
+                "max_length": member.max_length,
+                "model_name": member.model_name,
+            }
+        ),
+        encoding="utf-8",
+    )
+    for name, size in member.weights_shards.items():
+        with (root / name).open("wb") as stream:
+            stream.truncate(size)
+    return table_of({**files, "config.json": (root / "config.json").read_bytes()})
 
 
 def hybrid_body():
@@ -130,6 +164,59 @@ def test_the_checked_in_hybrid_pin_table_shape_is_locked():
         assert re.fullmatch(r"[0-9a-f]{64}", digest)
 
 
+def test_the_member_registry_covers_the_three_decoder_members():
+    assert [m.label for m in MEMBERS.values()] == ["Vela-2.0-0.8B", "Vela-2.0-4B", "Vela-2.0-9B"]
+    member = MEMBERS["vllm-sr/Vela-2.0-4B"]
+    assert member.revision == "d692394127f6f87fc581d8634c9558fe4776efce"
+    assert member.max_length == 16384
+    assert len(member.weights_shards) == 3
+    assert all(re.fullmatch(r"model-\d{5}-of-00003\.safetensors", n) for n in member.weights_shards)
+    assert MEMBERS["vllm-sr/Vela-2.0-9B"].revision == "068425bb145c05884a98b870c219047da22d9aea"
+    assert len(MEMBERS["vllm-sr/Vela-2.0-9B"].weights_shards) == 5
+    for member in MEMBERS.values():
+        # One runtime program shared by every member, pinned identically;
+        # per-member pins are the identity files, not the code.
+        assert set(SHARED_RUNTIME_FILES_SHA256) <= set(member.pinned_files)
+        for name, digest in SHARED_RUNTIME_FILES_SHA256.items():
+            assert member.pinned_files[name] == digest
+        for digest in member.pinned_files.values():
+            assert re.fullmatch(r"[0-9a-f]{64}", digest)
+
+
+@pytest.mark.parametrize("label", ["Vela-2.0-4B", "Vela-2.0-9B"])
+def test_every_pinned_member_passes_its_own_gate(tmp_path, label):
+    member = next(m for m in MEMBERS.values() if m.label == label)
+    root = tmp_path / label
+    root.mkdir()
+    # The 4B/9B packages carry non-runtime files the gate must ignore.
+    table = build_member_package(
+        root, member,
+        extra={
+            "MODEL_MANIFEST.json": b'{"manifest": "stub"}',
+            "pii_calibration_fit.json": b'{"fit": "stub"}',
+            "PARITY.md": b"parity doc stub\n",
+            "LICENSES/Qwen3.5-4B-Base-LICENSE.txt": b"license stub\n",
+        },
+    )
+    assert verify_files(root, table) == sorted(table)
+    verify_config(root)
+    verify_weights(root)
+    verify_package(root, table)
+
+
+@pytest.mark.parametrize("label", ["Vela-2.0-4B", "Vela-2.0-9B"])
+def test_a_truncated_extra_shard_is_refused_for_every_member(tmp_path, label):
+    member = next(m for m in MEMBERS.values() if m.label == label)
+    root = tmp_path / label
+    root.mkdir()
+    build_member_package(root, member)
+    last = sorted(member.weights_shards)[-1]
+    with (root / last).open("wb") as stream:
+        stream.truncate(member.weights_shards[last] - 1)
+    with pytest.raises(ValueError, match=f"{last} is \\d+ bytes; the pinned revision's file is"):
+        verify_weights(root)
+
+
 def test_verification_accepts_a_package_matching_its_table(tmp_path):
     table = build_package(tmp_path, small_files())
     assert verify_files(tmp_path, table) == sorted(table)
@@ -143,7 +230,7 @@ def test_a_unified_package_is_refused_with_its_own_name(tmp_path):
         tmp_path, small_files(),
         config={**CONFIG, "model_type": "vela2-unified"},
     )
-    with pytest.raises(ValueError, match="vela2-unified.*only serves the vela2-decoder member"):
+    with pytest.raises(ValueError, match="vela2-unified.*only serves the vela2-decoder members"):
         verify_config(tmp_path)
 
 
@@ -152,7 +239,7 @@ def test_a_unified_package_is_refused_with_its_own_name(tmp_path):
     [
         ({"architectures": ["OtherModel"]}, "architectures"),
         ({"max_length": 8192}, "max_length"),
-        ({"model_name": "vllm-sr/Vela-2.0-4B"}, "needs its own pinned executor"),
+        ({"model_name": "vllm-sr/Vela-2.0-1.7B"}, "is not a pinned member"),
     ],
 )
 def test_foreign_config_structures_are_refused(tmp_path, override, fragment):
@@ -189,8 +276,9 @@ def test_weights_are_checked_by_exact_pinned_size(tmp_path):
     build_package(tmp_path, small_files())
     verify_weights(tmp_path)
 
+    size = HYBRID_MEMBER.weights_shards[WEIGHTS_NAME]
     with (tmp_path / WEIGHTS_NAME).open("wb") as stream:
-        stream.truncate(EXPECTED_WEIGHTS_BYTES - 1)
+        stream.truncate(size - 1)
     with pytest.raises(ValueError, match="is 2022189487 bytes"):
         verify_weights(tmp_path)
 
@@ -208,12 +296,39 @@ def test_detect_member_routes_each_declared_member(tmp_path):
     (unified / "config.json").write_text(json.dumps({"model_type": "vela2-unified"}))
     decoder = tmp_path / "decoder"
     decoder.mkdir()
-    (decoder / "config.json").write_text(json.dumps({"model_type": "vela2-decoder"}))
+    (decoder / "config.json").write_text(
+        json.dumps({"model_type": "vela2-decoder", "model_name": EXPECTED_MODEL_NAME})
+    )
 
     cls, name = detect_member(unified)
     assert cls is Vela2Executor and name == "vllm-sr/Vela-2.0-0.3B"
     cls, name = detect_member(decoder)
     assert cls is Vela2HybridExecutor and name == EXPECTED_MODEL_NAME
+
+
+@pytest.mark.parametrize(
+    "model_name",
+    ["vllm-sr/Vela-2.0-0.8B", "vllm-sr/Vela-2.0-4B", "vllm-sr/Vela-2.0-9B"],
+)
+def test_detect_member_routes_decoder_members_by_name(tmp_path, model_name):
+    # One shared model_type; config.json model_name picks the member.
+    package = tmp_path / model_name.rsplit("/", 1)[-1]
+    package.mkdir()
+    (package / "config.json").write_text(
+        json.dumps({"model_type": "vela2-decoder", "model_name": model_name})
+    )
+    cls, name = detect_member(package)
+    assert cls is Vela2HybridExecutor and name == model_name
+
+
+def test_detect_member_refuses_an_unpinned_decoder_member(tmp_path):
+    package = tmp_path / "foreign-decoder"
+    package.mkdir()
+    (package / "config.json").write_text(
+        json.dumps({"model_type": "vela2-decoder", "model_name": "vllm-sr/Vela-2.0-1.7B"})
+    )
+    with pytest.raises(ValueError, match="declares model_name.*this worker serves the decoder"):
+        detect_member(package)
 
 
 def test_detect_member_refuses_packages_without_a_usable_config(tmp_path):

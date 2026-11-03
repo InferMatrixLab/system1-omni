@@ -1354,6 +1354,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "omni-vela-native"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libm",
+ "omni-qwen3-5-native",
+ "onig",
+ "safetensors 0.8.0",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tokenizers 0.22.2",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
