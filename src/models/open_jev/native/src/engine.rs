@@ -106,7 +106,7 @@ impl Engine {
         };
         let mut engine = Self::load_with_packing(dir, library, prefix, pack).await?;
         if let Some(enabled) = exact {
-            engine.executor.set_exact_prefix(enabled);
+            engine.executor.set_exact_prefix(enabled)?;
         }
         Ok(engine)
     }
@@ -121,6 +121,7 @@ impl Engine {
 
     /// Explicit per-engine packing choice; does not read OPEN_JEV_PACK/PREFIX.
     /// `pack=false` restores the eager, per-candidate 9B execution path.
+    /// `pack=true` permits 9B packing only on a validated device/library profile.
     pub async fn load_with_packing(
         dir: &Path,
         library: &Path,
@@ -161,11 +162,11 @@ impl Engine {
         let head = DecisionHead::load(dir, &manifest, checkpoint)?;
         let mut processor =
             Processor::load(dir, checkpoint, prefix, suffix, temperature, max_length)?;
-        if !pack {
-            processor.disable_parallel_tokenization();
-        }
         let executor =
             Executor::load(dir, library, head, checkpoint, prefix_mode, graph, pack).await?;
+        if !executor.packing_enabled() {
+            processor.disable_parallel_tokenization();
+        }
         let scheduler = executor.scheduler(checkpoint)?;
         Ok(Self {
             checkpoint,

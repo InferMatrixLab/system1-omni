@@ -12,6 +12,10 @@ async fn packed_candidates_preserve_isolation_order_and_graph_shapes() {
     let model = PathBuf::from(std::env::var_os("OPEN_JEV_MODEL").unwrap());
     let library = PathBuf::from(std::env::var_os("OPEN_JEV_CUDA_LIB").unwrap());
     let engine = Engine::load(&model, &library).await.unwrap();
+    assert!(
+        engine.executor.packing_enabled(),
+        "requires a validated packing profile"
+    );
     let request = json!({
         "state": "Refunds require a receipt. This customer has no receipt.",
         "questions": {

@@ -409,7 +409,22 @@ candidate projections. The check includes each original batch's total row count.
 Any mismatch declines the entire sharing attempt before computation and retains
 the original candidate packing. Other prefix modes and the 27B policy are unchanged.
 
-### 9B packing rollback
+### 9B packing compatibility and rollback
+
+9B packing is enabled only on the validated NVIDIA L20X / SM90 / 132-SM /
+cuBLASLt 130101 profile. Other devices/library versions, including SM89, and
+older CUDA libraries without the optional profile check automatically use the
+serial eager path described below. This guard covers candidate packing itself,
+cross-request batching, packed kernels and CUDA Graphs, not only relaxed
+projection tiles. The worker logs its effective mode at startup;
+`engine.executor.packing_enabled()` exposes it to embedded callers.
+
+This is a conservative compatibility restriction: packing changed full-model
+9B outputs on SM89 even with relaxed tiles disabled. The underlying numerical
+cause is not isolated, and a passing kernel microtest is insufficient to add a
+device to the validated profile. Automatic fallback rejects explicitly enabled
+fixed/shared/auto and exact-prefix modes rather than silently ignoring them.
+27B retains its existing execution policy.
 
 `OPEN_JEV_PACK=0` is a startup escape hatch for Open-Jev-9B. It restores serial
 tokenization and request scheduling, then runs each candidate through the eager
@@ -426,11 +441,12 @@ OPEN_JEV_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
   target/release/omni-open-jev-native
 ```
 
-The default is `OPEN_JEV_PACK=1`. Values other than `0`/`1`, a 27B rollback,
+The default is `OPEN_JEV_PACK=1`, which permits packing only after the device
+check; it does not force packing on an unsupported profile. Values other than `0`/`1`, a 27B rollback,
 or combining rollback with fixed/shared/auto or enabled exact-prefix reuse fail
 at startup. Prefix options may also be unset. `Engine::load` reads this switch;
 embedded callers can use `Engine::load_with_packing(..., PrefixMode::Off, false)`.
-The existing explicit `load_with_prefix` API keeps packing enabled.
+The explicit `load_with_prefix` API applies the same device check.
 
 The frozen original-native oracle also covers the rollback route. Inside a GPU
 reservation, with the pinned 9B export (8192-token capacity) and matching library,
@@ -445,6 +461,13 @@ OPEN_JEV_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so CUA_S1_GRAPH=1 \
   -- --ignored --test-threads=1
 ```
 
+To compare the default mode with explicit rollback on the **same device**, run
+`default_matches_explicit_serial_on_same_device` from the same `--lib` test
+target with `CUA_S1_GRAPH=0` and `1`. It checks all 18 cases / 94 logits bit for
+bit without assuming that another architecture reproduces the frozen SM90
+oracle. It reports the effective packing mode; a fallback pass does not validate
+packing on that device.
+
 CPU tests check configuration rejection, tokenization equivalence, device-profile
 gating and worker failure health responses. They do not substitute for this GPU
 oracle check. An unavailable batch executor or poisoned model mutex makes
@@ -454,7 +477,7 @@ after permanent failure. This endpoint does not probe CUDA on each request.
 
 ### Cross-request batching
 
-The 9B default execution path batches already queued requests through the shared
+On a validated profile, the 9B default execution path batches already queued requests through the shared
 runtime, up to 16 candidates and 8192 tokens per GPU dispatch, without an added
 batching timer. Original candidate batches remain atomic: input/gate-up projection
 algorithms are selected at their original batch row counts, while output/down

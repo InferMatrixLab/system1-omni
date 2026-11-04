@@ -56,7 +56,10 @@ PR_CHECKOUT="$PWD"
 ORIGINAL=22b7717c9710de5ac5c6ccba51a6d6686dae90d9
 mkdir -p "$REPLAY_DIR"
 git worktree add --detach "$REPLAY_DIR/original" "$ORIGINAL"
-cp tests/open_jev/packing_parity.rs "$REPLAY_DIR/original/tests/open_jev/"
+# Pin the original-compatible recording harness. The current verifier also
+# checks the effective device-gated mode, an API absent from the old worker.
+git show 9152ee46b2f8a2589d64f8f193919d8916b96618:tests/open_jev/packing_parity.rs \
+  > "$REPLAY_DIR/original/tests/open_jev/packing_parity.rs"
 cp tests/open_jev/data/packing_{cases,original}.json \
   "$REPLAY_DIR/original/tests/open_jev/data/"
 cat >> "$REPLAY_DIR/original/src/models/open_jev/native/Cargo.toml" <<'EOF'

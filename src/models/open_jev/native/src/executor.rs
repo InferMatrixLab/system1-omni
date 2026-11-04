@@ -144,17 +144,29 @@ impl Executor {
     ) -> Result<Self> {
         let (d, lib) = (dir.to_path_buf(), library.to_path_buf());
         let sharing = matches!(prefix, PrefixMode::Shared | PrefixMode::Auto);
-        let pack = pack && checkpoint.pack_candidates;
-        let batch_gdn = pack;
-        let equivalent_tiles = pack && checkpoint.alias == "open-jev-9b";
-        let model = tokio::task::spawn_blocking(move || {
+        let mut pack = pack && checkpoint.pack_candidates;
+        let validate_packing = pack && checkpoint.alias == "open-jev-9b";
+        let (model, pack) = tokio::task::spawn_blocking(move || {
             let mut model = Model::load_with_graph(&d, &lib, graph)?;
-            if batch_gdn {
+            // Packing itself can change 9B logits on unvalidated devices, even
+            // when relaxed projection tiles are disabled (observed on SM89).
+            // Resolve the effective mode before enabling any batched operations.
+            if validate_packing {
+                pack = model.enable_equivalent_projection_tiles()?;
+                if pack {
+                    eprintln!("Open-Jev-9B: validated packing profile enabled");
+                } else {
+                    ensure!(
+                        prefix == PrefixMode::Off,
+                        "OPEN_JEV_PREFIX/OPEN_JEV_FIXED require a validated packing profile; use the default serial mode on this device/library"
+                    );
+                    model.disable_graphs()?;
+                    eprintln!("Open-Jev-9B: unvalidated device/library; using eager serial candidates (OPEN_JEV_PACK=0 behavior)");
+                }
+            }
+            if pack {
                 model.enable_batched_gdn()?;
                 model.enable_packed_projections()?;
-            }
-            if equivalent_tiles && model.enable_equivalent_projection_tiles()? {
-                eprintln!("Open-Jev-9B: validated device profile projection tiles enabled");
             }
             // Shared prefixes reproduce the fixed rows only where rows do not depend on M.
             if sharing {
@@ -162,7 +174,7 @@ impl Executor {
                     .check_fixed_rows()
                     .context("OPEN_JEV_PREFIX startup check failed")?;
             }
-            Ok::<_, anyhow::Error>(model)
+            Ok::<_, anyhow::Error>((model, pack))
         })
         .await??;
         Ok(Self {
@@ -189,9 +201,19 @@ impl Executor {
         !self.model.is_poisoned()
     }
 
+    /// Effective execution mode after checking backend/device compatibility.
+    pub fn packing_enabled(&self) -> bool {
+        self.pack
+    }
+
     /// Configure exact within-question reuse before the engine admits requests.
-    pub(crate) fn set_exact_prefix(&mut self, enabled: bool) {
+    pub(crate) fn set_exact_prefix(&mut self, enabled: bool) -> Result<()> {
+        ensure!(
+            !enabled || self.pack,
+            "OPEN_JEV_EXACT_PREFIX requires a validated packing profile; leave it unset or use 0 for serial execution"
+        );
         self.share_packed_prefix = enabled;
+        Ok(())
     }
 
     /// Inputs and outputs are grouped by question, then candidate, in prepared order.
@@ -328,3 +350,7 @@ mod tests;
 #[cfg(test)]
 #[path = "../../../../../tests/open_jev/rollback.rs"]
 mod rollback_tests;
+
+#[cfg(all(test, unix))]
+#[path = "../../../../../tests/open_jev/packing_profile.rs"]
+mod packing_profile_tests;

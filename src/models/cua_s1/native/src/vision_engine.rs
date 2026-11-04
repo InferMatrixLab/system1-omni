@@ -217,28 +217,62 @@ impl VisionEngine {
             );
             if self.prefix_mode == prefix::Mode::Matched {
                 let (lengths, windows) = prefix::matched_windows(&prepared.prompts)?;
-                let features = self.vision.forward(&prepared.image)?;
-                let result = self
-                    .language
-                    .with_matched_prefix(&lengths, &windows, |model| {
-                        prefix::execute(
-                            model,
-                            &self.letters,
-                            prepared,
-                            &features,
-                            prefix::Mode::Shared,
-                            &mut self.prefix_storage,
-                        )
-                    })?;
-                if let Some(logits) = result {
-                    Ok(logits)
+                if self.device_features {
+                    let features = self.vision.forward_device(&prepared.image)?;
+                    let result =
+                        self.language
+                            .with_matched_prefix(&lengths, &windows, |model| {
+                                prefix::execute_device(
+                                    model,
+                                    &self.letters,
+                                    prepared,
+                                    features,
+                                    &mut self.prefix_storage,
+                                )
+                            })?;
+                    if let Some(logits) = result {
+                        Ok(logits)
+                    } else {
+                        prepared
+                            .prompts
+                            .iter()
+                            .zip(counts)
+                            .map(|(p, n)| {
+                                Self::raw_score_device(
+                                    &mut self.language,
+                                    &self.letters,
+                                    p,
+                                    &features,
+                                    n,
+                                )
+                                .map(|(_, logits)| logits)
+                            })
+                            .collect()
+                    }
                 } else {
-                    prepared
-                        .prompts
-                        .iter()
-                        .zip(counts)
-                        .map(|(p, n)| self.raw_score(p, &features, n).map(|(_, logits)| logits))
-                        .collect()
+                    let features = self.vision.forward(&prepared.image)?;
+                    let result =
+                        self.language
+                            .with_matched_prefix(&lengths, &windows, |model| {
+                                prefix::execute(
+                                    model,
+                                    &self.letters,
+                                    prepared,
+                                    &features,
+                                    prefix::Mode::Shared,
+                                    &mut self.prefix_storage,
+                                )
+                            })?;
+                    if let Some(logits) = result {
+                        Ok(logits)
+                    } else {
+                        prepared
+                            .prompts
+                            .iter()
+                            .zip(counts)
+                            .map(|(p, n)| self.raw_score(p, &features, n).map(|(_, logits)| logits))
+                            .collect()
+                    }
                 }
             } else if self.prefix_mode != prefix::Mode::Off {
                 let features = self.vision.forward(&prepared.image)?;

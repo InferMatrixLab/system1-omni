@@ -79,7 +79,7 @@ async fn replay(original: bool) -> Value {
         .await
         .unwrap();
     assert_eq!(engine.checkpoint.alias, "open-jev-9b");
-    assert_eq!(engine.checkpoint.pack_candidates, !original);
+    assert_eq!(engine.executor.packing_enabled(), !original);
     let manifest: Value = serde_json::from_str(MANIFEST).unwrap();
     let mut records = Vec::new();
     for case in manifest["cases"].as_array().unwrap() {
@@ -103,7 +103,7 @@ async fn replay(original: bool) -> Value {
             .map(|r| r.iter().map(|x| x.to_bits()).collect())
             .collect();
         let record = json!({"id":case["id"], "lengths":lengths,
-            "policy_groups":groups, "packing_enabled":engine.checkpoint.pack_candidates,
+            "policy_groups":groups, "packing_enabled":engine.executor.packing_enabled(),
             "scores":scores, "score_bits":bits});
         println!("PACKING_RECORD {record}");
         records.push(record);

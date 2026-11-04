@@ -51,12 +51,22 @@ fn state_only_capture_matches_complete_prefix_state_bytes() {
             }
             assert!(want == got, "prefix={prefix} seed={seed} buffer={label}");
         };
-        for ((ka, va), (kb, vb)) in complete.attn_kv.iter().zip(&state_only.attn_kv) {
+        for ((ka, va), (kb, vb)) in complete
+            .buffers
+            .attn_kv
+            .iter()
+            .zip(&state_only.buffers.attn_kv)
+        {
             let bytes = prefix * model.cfg.kv_heads * model.cfg.head_dim * BF16;
             compare(ka, kb, bytes, "K");
             compare(va, vb, bytes, "V");
         }
-        for (a, b) in complete.gdn_state.iter().zip(&state_only.gdn_state) {
+        for (a, b) in complete
+            .buffers
+            .gdn_state
+            .iter()
+            .zip(&state_only.buffers.gdn_state)
+        {
             compare(
                 a,
                 b,
@@ -64,7 +74,12 @@ fn state_only_capture_matches_complete_prefix_state_bytes() {
                 "GDN state",
             );
         }
-        for (a, b) in complete.conv_tail.iter().zip(&state_only.conv_tail) {
+        for (a, b) in complete
+            .buffers
+            .conv_tail
+            .iter()
+            .zip(&state_only.buffers.conv_tail)
+        {
             compare(
                 a,
                 b,

@@ -17,13 +17,48 @@ async fn rollback_uses_serial_candidates_and_matches_original_logits() {
     assert!(!engine.executor.share_packed_inputs);
     assert!(!engine.executor.model.lock().unwrap().graph_stats().enabled);
     assert!(engine.is_available());
+    let bits = replay_bits(&engine).await;
     let oracle: Value = serde_json::from_str(include_str!("data/packing_original.json")).unwrap();
-    for (case, expected) in oracle["manifest"]["cases"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .zip(oracle["records"].as_array().unwrap())
-    {
+    for (actual, expected) in bits.iter().zip(oracle["records"].as_array().unwrap()) {
+        assert_eq!(*actual, expected["score_bits"], "{}", expected["id"]);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "needs pinned 9B, matching CUDA library and a reserved GPU; run eager and graph"]
+async fn default_matches_explicit_serial_on_same_device() {
+    use omni_qwen3_5_native::prefix::PrefixMode;
+    let model = PathBuf::from(std::env::var_os("OPEN_JEV_MODEL").unwrap());
+    let library = PathBuf::from(std::env::var_os("OPEN_JEV_CUDA_LIB").unwrap());
+    let serial = Engine::load_with_packing(&model, &library, PrefixMode::Off, false)
+        .await
+        .unwrap();
+    let expected = replay_bits(&serial).await;
+    drop(serial);
+    let default = Engine::load_with_prefix(&model, &library, PrefixMode::Off)
+        .await
+        .unwrap();
+    eprintln!(
+        "same-device parity: effective packing={}",
+        default.executor.packing_enabled()
+    );
+    if !default.executor.packing_enabled() {
+        assert!(matches!(default.scheduler.0, SchedulerKind::Serial(_)));
+        assert!(!default.executor.share_packed_prefix);
+        assert!(!default.executor.share_packed_inputs);
+        assert!(!default.executor.model.lock().unwrap().graph_stats().enabled);
+    }
+    let actual = replay_bits(&default).await;
+    assert_eq!(
+        actual, expected,
+        "default versus explicit serial on this device"
+    );
+}
+
+async fn replay_bits(engine: &Engine) -> Vec<Value> {
+    let mut records = Vec::new();
+    let oracle: Value = serde_json::from_str(include_str!("data/packing_original.json")).unwrap();
+    for case in oracle["manifest"]["cases"].as_array().unwrap().iter() {
         let candidates: Vec<Vec<u32>> = case["candidates"]
             .as_array()
             .unwrap()
@@ -58,11 +93,7 @@ async fn rollback_uses_serial_candidates_and_matches_original_logits() {
             .iter()
             .map(|r| r.iter().map(|x| x.to_bits()).collect())
             .collect();
-        assert_eq!(
-            serde_json::json!(bits),
-            expected["score_bits"],
-            "{}",
-            case["id"]
-        );
+        records.push(serde_json::json!(bits));
     }
+    records
 }
