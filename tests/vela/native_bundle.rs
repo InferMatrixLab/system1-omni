@@ -65,17 +65,21 @@ fn write_bundle(dir: &std::path::Path) -> Vec<(String, String)> {
         std::fs::write(dir.join(name), content).expect("write");
         hashes.insert(name.to_string(), json!(sha256(content)));
     }
-    let pins = ["calibration.json", "tokenizer.json", "tokenizer_config.json"]
-        .iter()
-        .map(|name| {
-            let content = files
-                .iter()
-                .find(|(file, _)| file == name)
-                .expect("runtime file")
-                .1;
-            ((*name).to_string(), sha256(content))
-        })
-        .collect();
+    let pins = [
+        "calibration.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+    ]
+    .iter()
+    .map(|name| {
+        let content = files
+            .iter()
+            .find(|(file, _)| file == name)
+            .expect("runtime file")
+            .1;
+        ((*name).to_string(), sha256(content))
+    })
+    .collect();
     let manifest = json!({
         "format": bundle::FORMAT,
         "model_id": bundle::MODEL_ID,
