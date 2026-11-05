@@ -321,9 +321,10 @@ mod tests {
     fn tensor_rejects_a_shape_that_only_matches_when_flattened() {
         let raw = f32_tensor("head.weight", vec![4], &[0.0; 4]);
         let file = SafeTensors::deserialize(&raw).expect("safetensors");
-        let error = linear(&file, "head", false, 2, 2)
-            .err()
-            .expect("wrong rank must fail");
+        let error = match linear(&file, "head", false, 2, 2) {
+            Ok(_) => panic!("wrong rank must fail"),
+            Err(error) => error,
+        };
         assert!(error.to_string().contains("head.weight has shape"));
     }
 
@@ -331,9 +332,7 @@ mod tests {
     fn tensor_rejects_non_finite_values() {
         let raw = f32_tensor("head.weight", vec![1], &[f32::NAN]);
         let file = SafeTensors::deserialize(&raw).expect("safetensors");
-        let error = tensor(&file, "head.weight", &[1])
-            .err()
-            .expect("non-finite tensor must fail");
+        let error = tensor(&file, "head.weight", &[1]).expect_err("non-finite tensor must fail");
         assert!(error.to_string().contains("non-finite"));
     }
 }
