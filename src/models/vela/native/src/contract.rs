@@ -13,6 +13,20 @@
 
 use serde_json::{Map, Value, json};
 
+/// Python `str.strip`'s blank set: Rust whitespace plus the C0
+/// file/group/record/unit separators (`\u{1c}`–`\u{1f}`) that Python's
+/// `str.isspace` also counts — the reference's `not value.strip()`
+/// blank checks therefore treat them as blank, and `str::trim` does
+/// not.
+pub(crate) fn py_trim(text: &str) -> &str {
+    text.trim_matches(|c: char| c.is_whitespace() || matches!(c, '\u{1c}'..='\u{1f}'))
+}
+
+/// `not text.strip()` on the reference.
+pub(crate) fn py_is_blank(text: &str) -> bool {
+    py_trim(text).is_empty()
+}
+
 /// Slice-scoped transport cap, as on the reference worker.
 pub const MAX_BODY: usize = 8 * 1024 * 1024;
 /// The envelope fields, in upstream's missing-field check order.
@@ -101,7 +115,7 @@ pub fn admit_request(body: &Map<String, Value>, served: &str) -> Result<(), Requ
         ));
     }
     let model = body["model"].as_str().unwrap_or("");
-    if model.trim().is_empty() {
+    if py_is_blank(model) {
         return Err(RequestError::envelope(
             &["model"],
             "model must not be empty or whitespace",
