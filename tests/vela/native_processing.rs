@@ -100,6 +100,33 @@ fn a_set_label_collision_is_rejected_after_the_walk() {
     );
 }
 
+#[test]
+fn a_multi_part_span_is_rejected_before_rendering() {
+    let state = system_one_state(&serde_json::json!({
+        "request": "user text",
+        "source": "context text",
+    }))
+    .expect("state");
+    let questions = serde_json::json!({
+        "spans": {
+            "type": "span",
+            "instructions": "which spans?",
+            "criteria": {"PERSON": "a person"},
+            "over": ["request", "source"],
+        }
+    });
+
+    let error = system_one_to_predict(state, questions.as_object().unwrap()).unwrap_err();
+    assert_eq!(
+        error.body,
+        serde_json::json!({"detail": [{
+            "loc": ["body", "questions", "spans", "over"],
+            "msg": "multi-part span over is not supported by the native path yet",
+            "type": "value_error"
+        }]})
+    );
+}
+
 // ------------------------------------------------- full render (opt-in)
 
 fn bundle_dir() -> PathBuf {

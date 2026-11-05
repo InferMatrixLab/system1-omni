@@ -252,6 +252,12 @@ pub fn system_one_to_predict(
             }
             Some(over) => resolve_over(over, &state_parts, &loc)?,
         };
+        if kind == "span" && target_part.as_array().is_some_and(|parts| parts.len() > 1) {
+            return Err(qerror(
+                &[loc[0], loc[1], "over"],
+                "multi-part span over is not supported by the native path yet",
+            ));
+        }
         let mut predict_question = PredictQuestion {
             id: qid.clone(),
             kind: kind.to_string(),
