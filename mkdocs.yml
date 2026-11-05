@@ -86,6 +86,7 @@ nav:
       - LFM2.5-350M choice worker: recipe/lfm2/README.md
       - D3 reference worker: recipe/d3/reference.md
       - Vela 2.0 reference workers: recipe/vela/reference.md
+      - Vela 2.0 0.8B native library: recipe/vela/native.md
       - Clef reference worker: recipe/clef/reference.md
       - pplx-decider reference worker: recipe/pplx_decider/README.md
   - Contributing: CONTRIBUTING.md
