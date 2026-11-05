@@ -154,6 +154,10 @@ fn the_heads_reproduce_the_reference_logits_and_the_scoring_the_answers() {
         // Drive every recorded head call through the Rust heads.
         let mut q_calls_by_row: HashMap<usize, Vec<Value>> = HashMap::new();
         let mut span_calls_by_row: HashMap<usize, RowSpanCalls> = HashMap::new();
+        // Recorded span-call rows consumed by the row assembly below;
+        // the case must end with every recorded row consumed, so a
+        // dropped window cannot pass silently.
+        let mut consumed_span_rows: Vec<usize> = Vec::new();
         let mut worst_logit = 0.0f64;
         for call in fixture["head_calls"].as_array().expect("head calls") {
             let row = call["row"].as_u64().expect("row") as usize;
@@ -286,15 +290,43 @@ fn the_heads_reproduce_the_reference_logits_and_the_scoring_the_answers() {
                     .unwrap_or_default();
                 let over = row["span_over"].as_str().unwrap_or("user").to_string();
                 let n_tokens = row["seg_lens"][&over].as_u64().unwrap_or(0) as usize;
-                // Windowed rows: the full render is skipped (the first
-                // call) and the windows aggregate in order; else the
+                // Windowed rows: the parent row's own call is the full
+                // render the reference skips, and every window was
+                // recorded as its own row after the main rows — so the
+                // windows are attributed by their recorded row, not by
+                // their position after the parent's call. Else the
                 // single call is the answer's logits.
                 let (which, logits) = if window_rows.is_empty() {
+                    consumed_span_rows.push(row_index);
                     row_span_calls.last().expect("span call").clone()
                 } else {
+                    assert_eq!(
+                        row_span_calls.len(),
+                        1,
+                        "{case}: a windowed row records exactly one span call"
+                    );
                     let which = row_span_calls[0].0.clone();
-                    let window_logits: Vec<Vec<Vec<f32>>> =
-                        row_span_calls[1..].iter().map(|(_, l)| l.clone()).collect();
+                    consumed_span_rows.push(row_index);
+                    let n_rows = plan["rows"].as_array().expect("rows").len();
+                    let window_logits: Vec<Vec<Vec<f32>>> = window_rows
+                        .iter()
+                        .enumerate()
+                        .map(|(j, _)| {
+                            let recorded = n_rows + j;
+                            let calls = span_calls_by_row.get(&recorded).unwrap_or_else(|| {
+                                panic!(
+                                    "{case}: window {j} has no recorded span call at row {recorded}"
+                                )
+                            });
+                            assert_eq!(
+                                calls.len(),
+                                1,
+                                "{case}: window {j} must record exactly one span call"
+                            );
+                            consumed_span_rows.push(recorded);
+                            calls[0].1.clone()
+                        })
+                        .collect();
                     let window_offs: Vec<Vec<(usize, usize)>> = window_rows
                         .iter()
                         .map(|w| {
@@ -397,6 +429,19 @@ fn the_heads_reproduce_the_reference_logits_and_the_scoring_the_answers() {
                 }
             }
         }
+        // Every recorded span call must have been consumed by the row
+        // assembly: the empty-window regression leaves the recorded
+        // window rows unconsumed, so this cannot pass with empty
+        // aggregation.
+        let mut recorded_rows: Vec<usize> = span_calls_by_row.keys().copied().collect();
+        recorded_rows.sort_unstable();
+        let mut consumed_rows = consumed_span_rows.clone();
+        consumed_rows.sort_unstable();
+        consumed_rows.dedup();
+        assert_eq!(
+            consumed_rows, recorded_rows,
+            "{case}: every recorded span-call row must be consumed"
+        );
         println!("{case}: logit drift {worst_logit:.3e}, answer drift {drift:.3e}");
     }
 }
