@@ -6,7 +6,7 @@
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-use crate::contract::RequestError;
+use crate::contract::{RequestError, py_is_blank, py_trim};
 
 /// `json.dumps(ensure_ascii=False, sort_keys=True, separators=(",", ":"))`
 /// — key-sorted compact JSON, non-ASCII literal.
@@ -30,6 +30,19 @@ pub fn canonical(value: &Value) -> String {
         Value::Array(items) => {
             let parts: Vec<String> = items.iter().map(canonical).collect();
             format!("[{}]", parts.join(","))
+        }
+        other => scalar(other),
+    }
+}
+
+/// Scalars as Python `json.dumps` renders them: integers in range
+/// verbatim, floats through the shared Python-parity formatter
+/// (`1e+20`, `1.5e-07` — `serde_json` prints `1e20`, `1.5e-7`).
+fn scalar(value: &Value) -> String {
+    match value {
+        Value::Number(number) if number.is_i64() || number.is_u64() => number.to_string(),
+        Value::Number(number) => {
+            omni_qwen3_5_native::json::float_repr(number.as_f64().expect("a JSON number"))
         }
         other => serde_json::to_string(other).unwrap(),
     }
@@ -91,7 +104,9 @@ pub fn system_one_state(state: &Value) -> Result<StateParts, RequestError> {
     // A string holding a JSON object is read as that object.
     let state = match state {
         Value::String(text) => {
-            let stripped = text.trim_start();
+            // The reference strips (Python blank set) before sniffing
+            // the JSON-object form and before parsing it.
+            let stripped = py_trim(text);
             if stripped.starts_with('{') {
                 if let Value::Object(object) =
                     serde_json::from_str::<Value>(stripped).unwrap_or(Value::Null)
@@ -108,7 +123,7 @@ pub fn system_one_state(state: &Value) -> Result<StateParts, RequestError> {
     };
     match &state {
         Value::String(text) => {
-            if text.trim().is_empty() {
+            if py_is_blank(text) {
                 return Err(state_error("state must not be empty or whitespace"));
             }
             let mut fields = BTreeMap::new();
@@ -216,7 +231,7 @@ pub fn system_one_state(state: &Value) -> Result<StateParts, RequestError> {
                         text.push_str(&rendered);
                     }
                 }
-                if text.trim().is_empty() {
+                if py_is_blank(&text) {
                     return Err(state_error(&format!(
                         "the {role} part of the state is empty"
                     )));
@@ -231,5 +246,47 @@ pub fn system_one_state(state: &Value) -> Result<StateParts, RequestError> {
         _ => Err(state_error(
             "state must be a non-empty string, JSON object or JSON array",
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The review probe: `serde_json`'s float forms (`1e20`, `1e-7`)
+    /// differ from the pinned runtime's `json.dumps` forms
+    /// (`1e+20`, `1e-07`) and change the token stream (15 vs 17 ids).
+    #[test]
+    fn canonical_renders_floats_like_python_json_dumps() {
+        let value: Value = serde_json::from_str(r#"{"small":1e-7,"large":1e20}"#).unwrap();
+        assert_eq!(canonical(&value), r#"{"large":1e+20,"small":1e-07}"#);
+    }
+
+    /// Scalar rendering tracks Python `repr` per json.dumps: the
+    /// exponent is always signed with at least two digits, decimal
+    /// notation runs down to 1e-4, integral floats keep their `.0`,
+    /// integers stay bare.
+    #[test]
+    fn canonical_scalar_cases_track_the_python_repr() {
+        let cases = [
+            ("1.5e-7", "1.5e-07"),
+            ("1e-5", "1e-05"),
+            ("0.0001", "0.0001"),
+            ("42.0", "42.0"),
+            ("42", "42"),
+            ("-0.0", "-0.0"),
+        ];
+        for (input, expected) in cases {
+            let value: Value = serde_json::from_str(input).unwrap();
+            assert_eq!(canonical(&value), expected, "input {input}");
+        }
+    }
+
+    #[test]
+    fn state_parts_carry_the_canonical_probe_text() {
+        let state: Value =
+            serde_json::from_str(r#"{"request":{"small":1e-7,"large":1e20}}"#).unwrap();
+        let parts = system_one_state(&state).unwrap();
+        assert_eq!(parts.parts[0].text, r#"{"large":1e+20,"small":1e-07}"#);
     }
 }

@@ -147,3 +147,32 @@ fn the_rendered_rows_match_every_fixture() {
         );
     }
 }
+
+// --------------------------------------------- structured state (opt-in)
+
+#[test]
+#[ignore = "requires VELA_NATIVE_BUNDLE at an exported bundle; CPU only"]
+fn the_structured_state_tokenizes_like_the_pinned_runtime() {
+    let bundle = bundle_dir();
+    let encoder = omni_vela_native::render::Encoder::load(&bundle.join("tokenizer.json"))
+        .expect("the pinned tokenizer loads");
+    // The review probe: serde_json's float forms ("1e20", "1e-7") change
+    // the token stream against the pinned runtime's json.dumps forms
+    // ("1e+20", "1e-07") — 15 vs 17 ids on this state.
+    let state: Value = serde_json::from_str(r#"{"request":{"small":1e-7,"large":1e20}}"#).unwrap();
+    let parts = omni_vela_native::state::system_one_state(&state).expect("state maps");
+    assert_eq!(
+        parts.parts[0].text, r#"{"large":1e+20,"small":1e-07}"#,
+        "the state text must render exactly as Python's json.dumps does"
+    );
+    let ids = encoder
+        .ids(&parts.parts[0].text)
+        .expect("part text encodes");
+    assert_eq!(
+        ids,
+        vec![
+            4754u32, 16275, 763, 16, 68, 10, 17, 15, 1288, 8732, 763, 16, 68, 12, 15, 22, 92
+        ],
+        "the state text must tokenize exactly as the pinned runtime's tokenizer does"
+    );
+}

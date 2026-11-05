@@ -5,7 +5,7 @@
 
 use serde_json::{Map, Value};
 
-use crate::contract::RequestError;
+use crate::contract::{RequestError, py_is_blank};
 use crate::state::{Part, StateParts, content_text};
 
 /// The `questions` container rejection shared by the mapping and the
@@ -76,7 +76,7 @@ fn qerror(loc: &[&str], msg: &str) -> RequestError {
 
 fn nonblank(value: &Value) -> bool {
     match value {
-        Value::String(text) => !text.trim().is_empty(),
+        Value::String(text) => !py_is_blank(text),
         _ => true,
     }
 }
@@ -178,7 +178,7 @@ pub fn system_one_to_predict(
     let mut predict = Vec::new();
     let mut plan = Vec::new();
     for (qid, question) in questions {
-        if qid.trim().is_empty() {
+        if py_is_blank(qid) {
             return Err(qerror(
                 &["questions"],
                 "question IDs must not be empty or whitespace",
@@ -317,7 +317,7 @@ pub fn system_one_to_predict(
                 }
                 let mut named = Vec::new();
                 for (name, value) in map {
-                    if name.trim().is_empty() || !nonblank(value) {
+                    if py_is_blank(name) || !nonblank(value) {
                         return Err(qerror(
                             &[loc[0], loc[1], "criteria", name],
                             "option names and descriptions must not be empty or whitespace",
