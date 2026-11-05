@@ -4,7 +4,9 @@
 //! predict-level answers. Parity target: the `head-input-*.json`
 //! fixtures' `predict.answers`.
 
-use serde_json::Value;
+use anyhow::{Context, Result, bail, ensure};
+use serde_json::{Map, Value};
+use std::collections::{HashMap, HashSet};
 
 /// The package's `calibration.json` as typed lookup.
 pub struct Calibration {
@@ -434,6 +436,296 @@ pub struct SpanOut {
     pub n_tokens: usize,
 }
 
+fn required_string<'a>(value: Option<&'a Value>, path: &str) -> Result<&'a str> {
+    let value = value.with_context(|| format!("{path} is missing"))?;
+    let text = value
+        .as_str()
+        .with_context(|| format!("{path} must be a string"))?;
+    ensure!(!text.is_empty(), "{path} must not be empty");
+    Ok(text)
+}
+
+fn required_object<'a>(value: Option<&'a Value>, path: &str) -> Result<&'a Map<String, Value>> {
+    value
+        .and_then(Value::as_object)
+        .with_context(|| format!("{path} must be an object"))
+}
+
+fn required_array<'a>(value: Option<&'a Value>, path: &str) -> Result<&'a Vec<Value>> {
+    value
+        .and_then(Value::as_array)
+        .with_context(|| format!("{path} must be an array"))
+}
+
+fn finite_value<'a>(value: Option<&'a Value>, path: &str) -> Result<&'a Value> {
+    let value = value.with_context(|| format!("{path} is missing"))?;
+    let number = value
+        .as_f64()
+        .with_context(|| format!("{path} must be a number"))?;
+    ensure!(number.is_finite(), "{path} must be finite");
+    Ok(value)
+}
+
+fn required_finite_f64(value: Option<&Value>, path: &str) -> Result<f64> {
+    let value = value.with_context(|| format!("{path} is missing"))?;
+    let number = value
+        .as_f64()
+        .with_context(|| format!("{path} must be a number"))?;
+    ensure!(number.is_finite(), "{path} must be finite");
+    Ok(number)
+}
+
+fn required_usize(value: Option<&Value>, path: &str) -> Result<usize> {
+    let value = value.with_context(|| format!("{path} is missing"))?;
+    let number = value
+        .as_u64()
+        .with_context(|| format!("{path} must be a non-negative integer"))?;
+    usize::try_from(number).with_context(|| format!("{path} is too large"))
+}
+
+fn range_bounds(value: &Value, path: &str) -> Result<(usize, usize)> {
+    let range = required_array(Some(value), path)?;
+    ensure!(range.len() == 2, "{path} must contain [start, end]");
+    let start = required_usize(range.first(), &format!("{path}[0]"))?;
+    let end = required_usize(range.get(1), &format!("{path}[1]"))?;
+    ensure!(start <= end, "{path} start must not exceed end");
+    Ok((start, end))
+}
+
+fn validate_probability_keys(
+    probabilities: &Map<String, Value>,
+    expected: &[String],
+    path: &str,
+) -> Result<()> {
+    let actual: HashSet<&str> = probabilities.keys().map(String::as_str).collect();
+    let expected_keys: HashSet<&str> = expected.iter().map(String::as_str).collect();
+    ensure!(
+        actual.len() == expected.len() && actual == expected_keys,
+        "{path} keys do not match the plan criteria"
+    );
+    Ok(())
+}
+
+fn plan_fields(entry: &Value, index: usize) -> Result<(&str, &str)> {
+    let path = format!("plan[{index}]");
+    let object = required_object(Some(entry), &path)?;
+    let qid = required_string(object.get("qid"), &format!("{path}.qid"))?;
+    let kind = required_string(object.get("type"), &format!("{path}.type"))?;
+    ensure!(
+        matches!(kind, "noul" | "choice" | "score" | "span" | "set"),
+        "{path}.type is not a supported question type"
+    );
+    Ok((qid, kind))
+}
+
+fn criteria_names(entry: &Value, kind: &str, index: usize) -> Result<Vec<String>> {
+    let path = format!("plan[{index}].criteria");
+    if kind == "score" {
+        return required_array(entry.get("criteria"), &path).map(|levels| {
+            levels
+                .iter()
+                .map(|level| match level {
+                    Value::String(text) => text.clone(),
+                    other => crate::state::canonical(other),
+                })
+                .collect()
+        });
+    }
+    Ok(required_object(entry.get("criteria"), &path)?
+        .keys()
+        .cloned()
+        .collect())
+}
+
+fn validate_plan_entry(entry: &Value, index: usize) -> Result<()> {
+    let (qid, kind) = plan_fields(entry, index)?;
+    let path = format!("plan[{index}]");
+    let names = criteria_names(entry, kind, index)?;
+    if kind != "noul" {
+        ensure!(!names.is_empty(), "{path}.criteria must not be empty");
+    }
+    if kind == "span" {
+        match entry.get("part") {
+            Some(Value::String(part)) if !part.is_empty() => {}
+            Some(Value::Array(_)) => {
+                bail!(
+                    "{path} contains a multi-part span, which native finishing does not support yet"
+                )
+            }
+            _ => bail!("{path}.part is missing or is not a single part name"),
+        }
+        let range = entry
+            .get("range")
+            .with_context(|| format!("{path}.range is missing"))?;
+        if !range.is_null() {
+            range_bounds(range, &format!("{path}.range"))?;
+        }
+    }
+    let _ = qid;
+    Ok(())
+}
+
+fn validate_span_items(spans: &[Value], path: &str) -> Result<()> {
+    for (index, item) in spans.iter().enumerate() {
+        let item_path = format!("{path}[{index}]");
+        let object = required_object(Some(item), &item_path)?;
+        required_string(object.get("label"), &format!("{item_path}.label"))?;
+        let start = required_usize(object.get("start"), &format!("{item_path}.start"))?;
+        let end = required_usize(object.get("end"), &format!("{item_path}.end"))?;
+        ensure!(start <= end, "{item_path}.start must not exceed end");
+        required_string(object.get("text"), &format!("{item_path}.text"))?;
+        finite_value(
+            object.get("probability"),
+            &format!("{item_path}.probability"),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_prediction(entry: &Value, index: usize, answer: &Value) -> Result<()> {
+    let (qid, kind) = plan_fields(entry, index)?;
+    let answer_path = format!("prediction[{qid}]");
+    let object = required_object(Some(answer), &answer_path)?;
+    let answer_type = required_string(object.get("type"), &format!("{answer_path}.type"))?;
+    let expected_type = if kind == "noul" { "choice" } else { kind };
+    ensure!(
+        answer_type == expected_type,
+        "{answer_path}.type must be {expected_type:?}"
+    );
+    match kind {
+        "noul" => {
+            required_string(object.get("answer"), &format!("{answer_path}.answer"))?;
+            let probabilities = required_object(
+                object.get("probabilities"),
+                &format!("{answer_path}.probabilities"),
+            )?;
+            validate_probability_keys(
+                probabilities,
+                &["no".to_string(), "yes".to_string()],
+                &format!("{answer_path}.probabilities"),
+            )?;
+            for name in ["no", "yes"] {
+                finite_value(
+                    probabilities.get(name),
+                    &format!("{answer_path}.probabilities.{name}"),
+                )?;
+            }
+        }
+        "choice" => {
+            required_string(object.get("answer"), &format!("{answer_path}.answer"))?;
+            let probabilities = required_object(
+                object.get("probabilities"),
+                &format!("{answer_path}.probabilities"),
+            )?;
+            let names = criteria_names(entry, kind, index)?;
+            validate_probability_keys(
+                probabilities,
+                &names,
+                &format!("{answer_path}.probabilities"),
+            )?;
+            for name in names {
+                finite_value(
+                    probabilities.get(&name),
+                    &format!("{answer_path}.probabilities.{name}"),
+                )?;
+            }
+        }
+        "score" => {
+            required_string(object.get("answer"), &format!("{answer_path}.answer"))?;
+            let probabilities = required_object(
+                object.get("probabilities"),
+                &format!("{answer_path}.probabilities"),
+            )?;
+            let names = criteria_names(entry, kind, index)?;
+            validate_probability_keys(
+                probabilities,
+                &names,
+                &format!("{answer_path}.probabilities"),
+            )?;
+            for name in names {
+                finite_value(
+                    probabilities.get(&name),
+                    &format!("{answer_path}.probabilities.{name}"),
+                )?;
+            }
+        }
+        "set" => {
+            required_array(object.get("answer"), &format!("{answer_path}.answer"))?;
+            let probabilities = required_object(
+                object.get("probabilities"),
+                &format!("{answer_path}.probabilities"),
+            )?;
+            let names = criteria_names(entry, kind, index)?;
+            validate_probability_keys(
+                probabilities,
+                &names,
+                &format!("{answer_path}.probabilities"),
+            )?;
+            for name in names {
+                finite_value(
+                    probabilities.get(&name),
+                    &format!("{answer_path}.probabilities.{name}"),
+                )?;
+            }
+            finite_value(object.get("threshold"), &format!("{answer_path}.threshold"))?;
+        }
+        "span" => {
+            let spans = required_array(object.get("spans"), &format!("{answer_path}.spans"))?;
+            validate_span_items(spans, &format!("{answer_path}.spans"))?;
+            finite_value(object.get("threshold"), &format!("{answer_path}.threshold"))?;
+            required_string(object.get("head"), &format!("{answer_path}.head"))?;
+            required_string(
+                object.get("target_part"),
+                &format!("{answer_path}.target_part"),
+            )?;
+        }
+        _ => unreachable!("plan_fields validates the question type"),
+    }
+    Ok(())
+}
+
+fn validate_plan_and_predictions<'a>(
+    plan: &[Value],
+    predict_answers: &'a [Value],
+) -> Result<HashMap<String, &'a Value>> {
+    ensure!(!plan.is_empty(), "response plan must not be empty");
+    let mut plan_ids = HashSet::new();
+    for (index, entry) in plan.iter().enumerate() {
+        let (qid, _) = plan_fields(entry, index)?;
+        ensure!(
+            plan_ids.insert(qid.to_owned()),
+            "duplicate plan question ID {qid:?}"
+        );
+        validate_plan_entry(entry, index)?;
+    }
+
+    let mut by_id = HashMap::new();
+    for (index, answer) in predict_answers.iter().enumerate() {
+        let object = required_object(Some(answer), &format!("prediction[{index}]"))?;
+        let id = required_string(object.get("id"), &format!("prediction[{index}].id"))?;
+        ensure!(
+            by_id.insert(id.to_owned(), answer).is_none(),
+            "duplicate prediction ID {id:?}"
+        );
+    }
+    for id in by_id.keys() {
+        ensure!(plan_ids.contains(id), "unexpected prediction ID {id:?}");
+    }
+    for (index, entry) in plan.iter().enumerate() {
+        let (qid, _) = plan_fields(entry, index)?;
+        let answer = by_id
+            .get(qid)
+            .copied()
+            .with_context(|| format!("missing prediction for plan question {qid:?}"))?;
+        validate_prediction(entry, index, answer)?;
+    }
+    ensure!(
+        by_id.len() == plan_ids.len(),
+        "prediction IDs do not match the response plan"
+    );
+    Ok(by_id)
+}
+
 /// `calibrated` for one row: logits -> predict-level answers.
 pub fn row_answers(
     cal: &Calibration,
@@ -638,6 +930,150 @@ pub fn aggregate_windows(
         .collect()
 }
 
+fn expected_answer_keys(plan: &[Value]) -> Result<Vec<String>> {
+    let mut expected = Vec::new();
+    for (index, entry) in plan.iter().enumerate() {
+        let (qid, kind) = plan_fields(entry, index)?;
+        if kind == "set" {
+            for name in criteria_names(entry, kind, index)? {
+                expected.push(format!("{qid}.{name}"));
+            }
+        } else {
+            expected.push(qid.to_owned());
+        }
+    }
+    Ok(expected)
+}
+
+fn ids_for_kind(plan: &[Value], kinds: &[&str]) -> Result<Vec<String>> {
+    let mut ids = Vec::new();
+    for (index, entry) in plan.iter().enumerate() {
+        let (qid, kind) = plan_fields(entry, index)?;
+        if kinds.contains(&kind) {
+            ids.push(qid.to_owned());
+        }
+    }
+    Ok(ids)
+}
+
+fn validate_ordered_object<'a>(
+    response: &'a Map<String, Value>,
+    field: &str,
+    expected: &[String],
+) -> Result<Option<&'a Map<String, Value>>> {
+    let value = response.get(field);
+    if expected.is_empty() {
+        ensure!(
+            value.is_none(),
+            "response returned {field} without matching plan questions"
+        );
+        return Ok(None);
+    }
+    let object = required_object(value, &format!("response.{field}"))?;
+    let actual: Vec<String> = object.keys().cloned().collect();
+    ensure!(
+        actual == expected,
+        "response.{field} keys do not match the plan order"
+    );
+    Ok(Some(object))
+}
+
+fn validate_finished_response(response: &Value, plan: &[Value]) -> Result<()> {
+    let response = response
+        .as_object()
+        .with_context(|| "finished response must be an object")?;
+    for key in response.keys() {
+        ensure!(
+            matches!(
+                key.as_str(),
+                "model" | "answers" | "usage" | "spans" | "span_heads" | "sets" | "thresholds"
+            ),
+            "finished response contains unexpected field {key:?}"
+        );
+    }
+    required_string(response.get("model"), "response.model")?;
+
+    let expected_answers = expected_answer_keys(plan)?;
+    let answers = required_object(response.get("answers"), "response.answers")?;
+    let actual_answers: Vec<String> = answers.keys().cloned().collect();
+    ensure!(
+        actual_answers == expected_answers,
+        "response.answers keys do not match the plan and set-view order"
+    );
+    for (name, answer) in answers {
+        let answer = required_object(Some(answer), &format!("response.answers.{name}"))?;
+        let answer_type =
+            required_string(answer.get("type"), &format!("response.answers.{name}.type"))?;
+        if answer_type == "noul" {
+            ensure!(
+                answer.len() == 2 && answer.contains_key("noul"),
+                "response.answers.{name} Noul view contains unexpected fields"
+            );
+            required_finite_f64(answer.get("noul"), &format!("response.answers.{name}.noul"))?;
+        }
+    }
+
+    let span_ids = ids_for_kind(plan, &["span"])?;
+    let set_ids = ids_for_kind(plan, &["set"])?;
+    let threshold_ids = ids_for_kind(plan, &["span", "set"])?;
+    let span_map = validate_ordered_object(response, "spans", &span_ids)?;
+    let span_head_map = validate_ordered_object(response, "span_heads", &span_ids)?;
+    let set_map = validate_ordered_object(response, "sets", &set_ids)?;
+    let threshold_map = validate_ordered_object(response, "thresholds", &threshold_ids)?;
+
+    if let Some(spans) = span_map {
+        for (qid, value) in spans {
+            let items = required_array(Some(value), &format!("response.spans.{qid}"))?;
+            validate_span_items(items, &format!("response.spans.{qid}"))?;
+        }
+    }
+    if let Some(span_heads) = span_head_map {
+        for (qid, value) in span_heads {
+            required_string(Some(value), &format!("response.span_heads.{qid}"))?;
+        }
+    }
+    if let Some(sets) = set_map {
+        for (qid, value) in sets {
+            let object = required_object(Some(value), &format!("response.sets.{qid}"))?;
+            required_array(
+                object.get("selected"),
+                &format!("response.sets.{qid}.selected"),
+            )?;
+            let probabilities = required_object(
+                object.get("probabilities"),
+                &format!("response.sets.{qid}.probabilities"),
+            )?;
+            for (label, probability) in probabilities {
+                required_finite_f64(
+                    Some(probability),
+                    &format!("response.sets.{qid}.probabilities.{label}"),
+                )?;
+            }
+        }
+    }
+    if let Some(thresholds) = threshold_map {
+        for (qid, value) in thresholds {
+            required_finite_f64(Some(value), &format!("response.thresholds.{qid}"))?;
+        }
+    }
+
+    let usage = required_object(response.get("usage"), "response.usage")?;
+    let usage_keys: Vec<String> = usage.keys().cloned().collect();
+    ensure!(
+        usage_keys == ["input_tokens".to_string(), "output_tokens".to_string()],
+        "response.usage must contain exactly input_tokens and output_tokens"
+    );
+    ensure!(
+        usage.get("input_tokens").and_then(Value::as_u64).is_some(),
+        "response.usage.input_tokens must be a non-negative integer"
+    );
+    ensure!(
+        usage.get("output_tokens").and_then(Value::as_u64) == Some(0),
+        "response.usage.output_tokens must be zero"
+    );
+    Ok(())
+}
+
 // ---------------------------------------------------- SystemOne finishing
 
 /// `system_one_response`: predict answers + the response plan -> the
@@ -652,70 +1088,94 @@ pub fn system_one_response(
     span_word_probabilities: &std::collections::HashMap<String, Vec<f32>>,
     part_texts: &std::collections::HashMap<String, String>,
     input_tokens: usize,
-) -> Value {
-    let by_id: std::collections::HashMap<&str, &Value> = predict_answers
-        .iter()
-        .map(|a| (a["id"].as_str().unwrap_or(""), a))
-        .collect();
+) -> Result<Value> {
+    let by_id = validate_plan_and_predictions(plan, predict_answers)?;
     let mut answers = serde_json::Map::new();
     let mut spans = serde_json::Map::new();
     let mut span_heads = serde_json::Map::new();
     let mut sets = serde_json::Map::new();
     let mut thresholds = serde_json::Map::new();
-    for entry in plan {
-        let qid = entry["qid"].as_str().unwrap_or("");
-        let Some(answer) = by_id.get(qid) else {
-            continue;
-        };
-        match entry["type"].as_str().unwrap_or("") {
+    for (index, entry) in plan.iter().enumerate() {
+        let (qid, kind) = plan_fields(entry, index)?;
+        let answer = by_id
+            .get(qid)
+            .copied()
+            .with_context(|| format!("missing prediction for plan question {qid:?}"))?;
+        let answer_object = required_object(Some(answer), &format!("prediction[{qid}]"))?;
+        match kind {
             "noul" => {
+                let probabilities = required_object(
+                    answer_object.get("probabilities"),
+                    &format!("prediction[{qid}].probabilities"),
+                )?;
+                let yes = finite_value(
+                    probabilities.get("yes"),
+                    &format!("prediction[{qid}].probabilities.yes"),
+                )?;
                 answers.insert(
-                    qid.to_string(),
-                    serde_json::json!({"type": "noul", "noul": answer["probabilities"]["yes"]}),
+                    qid.to_owned(),
+                    serde_json::json!({"type": "noul", "noul": yes}),
                 );
             }
             "choice" => {
-                let names: Vec<&str> = entry["criteria"]
-                    .as_object()
-                    .map(|c| c.keys().map(String::as_str).collect())
-                    .unwrap_or_default();
+                let names = criteria_names(entry, kind, index)?;
+                let raw_probabilities = required_object(
+                    answer_object.get("probabilities"),
+                    &format!("prediction[{qid}].probabilities"),
+                )?;
                 let probabilities: serde_json::Map<String, Value> = names
                     .iter()
-                    .map(|name| (name.to_string(), answer["probabilities"][*name].clone()))
-                    .collect();
+                    .map(|name| {
+                        finite_value(
+                            raw_probabilities.get(name),
+                            &format!("prediction[{qid}].probabilities.{name}"),
+                        )
+                        .map(|value| (name.clone(), value.clone()))
+                    })
+                    .collect::<Result<_>>()?;
                 let values: Vec<f64> = names
                     .iter()
-                    .map(|name| answer["probabilities"][*name].as_f64().unwrap_or(0.0))
-                    .collect();
+                    .map(|name| {
+                        required_finite_f64(
+                            probabilities.get(name),
+                            &format!("prediction[{qid}].probabilities.{name}"),
+                        )
+                    })
+                    .collect::<Result<_>>()?;
+                let choice = required_string(
+                    answer_object.get("answer"),
+                    &format!("prediction[{qid}].answer"),
+                )?;
                 answers.insert(
-                    qid.to_string(),
+                    qid.to_owned(),
                     serde_json::json!({
                         "type": "choice",
-                        "choice": answer["answer"],
+                        "choice": choice,
                         "confidence": json_f64(choice_confidence(&values)),
                         "probabilities": probabilities,
                     }),
                 );
             }
             "score" => {
-                let levels: Vec<Value> = entry["criteria"].as_array().cloned().unwrap_or_default();
+                let levels =
+                    required_array(entry.get("criteria"), &format!("plan[{index}].criteria"))?
+                        .clone();
                 // The predict answer keys probabilities by the level's
                 // rendered name (content_text), not by index.
-                let names: Vec<String> = levels
-                    .iter()
-                    .map(|level| match level {
-                        Value::String(text) => text.clone(),
-                        other => crate::state::canonical(other),
-                    })
-                    .collect();
+                let names = criteria_names(entry, kind, index)?;
+                let raw_probabilities = required_object(
+                    answer_object.get("probabilities"),
+                    &format!("prediction[{qid}].probabilities"),
+                )?;
                 let values: Vec<f64> = names
                     .iter()
                     .map(|name| {
-                        answer["probabilities"][name.as_str()]
-                            .as_f64()
-                            .unwrap_or(0.0)
+                        required_finite_f64(
+                            raw_probabilities.get(name),
+                            &format!("prediction[{qid}].probabilities.{name}"),
+                        )
                     })
-                    .collect();
+                    .collect::<Result<_>>()?;
                 let expected: f64 = values.iter().enumerate().map(|(i, v)| i as f64 * v).sum();
                 let legend: serde_json::Map<String, Value> = levels
                     .iter()
@@ -728,7 +1188,7 @@ pub fn system_one_response(
                     .map(|(i, v)| (i.to_string(), json_f64(*v)))
                     .collect();
                 answers.insert(
-                    qid.to_string(),
+                    qid.to_owned(),
                     serde_json::json!({
                         "type": "score",
                         "score": json_f64(expected),
@@ -739,65 +1199,144 @@ pub fn system_one_response(
                 );
             }
             "set" => {
-                let selected: Vec<Value> = answer["answer"].as_array().cloned().unwrap_or_default();
+                let selected = required_array(
+                    answer_object.get("answer"),
+                    &format!("prediction[{qid}].answer"),
+                )?
+                .clone();
+                let raw_probabilities = required_object(
+                    answer_object.get("probabilities"),
+                    &format!("prediction[{qid}].probabilities"),
+                )?;
+                let names = criteria_names(entry, kind, index)?;
+                let probabilities: serde_json::Map<String, Value> = names
+                    .iter()
+                    .map(|name| {
+                        finite_value(
+                            raw_probabilities.get(name),
+                            &format!("prediction[{qid}].probabilities.{name}"),
+                        )
+                        .map(|value| (name.clone(), value.clone()))
+                    })
+                    .collect::<Result<_>>()?;
+                let threshold = finite_value(
+                    answer_object.get("threshold"),
+                    &format!("prediction[{qid}].threshold"),
+                )?
+                .clone();
                 sets.insert(
-                    qid.to_string(),
+                    qid.to_owned(),
                     serde_json::json!({
                         "selected": selected,
-                        "probabilities": answer["probabilities"],
+                        "probabilities": probabilities,
                     }),
                 );
-                thresholds.insert(qid.to_string(), answer["threshold"].clone());
-                for (label, value) in answer["probabilities"]
-                    .as_object()
-                    .unwrap_or(&serde_json::Map::new())
-                {
+                thresholds.insert(qid.to_owned(), threshold);
+                for name in names {
+                    let value = probabilities
+                        .get(&name)
+                        .cloned()
+                        .with_context(|| format!("missing set probability for {qid}.{name}"))?;
                     answers.insert(
-                        format!("{qid}.{label}"),
+                        format!("{qid}.{name}"),
                         serde_json::json!({"type": "noul", "noul": value}),
                     );
                 }
             }
             "span" => {
                 // clip to the plan's field range and re-trim.
-                let part = entry["part"].as_str().unwrap_or("user");
-                let text = part_texts.get(part).cloned().unwrap_or_default();
+                let part = required_string(
+                    required_object(Some(entry), &format!("plan[{index}]"))?.get("part"),
+                    &format!("plan[{index}].part"),
+                )?;
+                let target_part = required_string(
+                    answer_object.get("target_part"),
+                    &format!("prediction[{qid}].target_part"),
+                )?;
+                ensure!(
+                    target_part == part,
+                    "prediction[{qid}].target_part does not match plan part {part:?}"
+                );
+                let text = part_texts
+                    .get(part)
+                    .with_context(|| format!("missing text for span part {part:?}"))?;
                 let chars: Vec<char> = text.chars().collect();
+                let raw_spans = required_array(
+                    answer_object.get("spans"),
+                    &format!("prediction[{qid}].spans"),
+                )?;
+                let threshold = finite_value(
+                    answer_object.get("threshold"),
+                    &format!("prediction[{qid}].threshold"),
+                )?
+                .clone();
+                let head = required_string(
+                    answer_object.get("head"),
+                    &format!("prediction[{qid}].head"),
+                )?
+                .to_owned();
                 let mut out = Vec::new();
-                match entry["range"].as_array() {
-                    Some(range) if range.len() == 2 => {
-                        let (lo, hi) = (
-                            range[0].as_u64().unwrap_or(0) as usize,
-                            range[1].as_u64().unwrap_or(0) as usize,
-                        );
-                        for z in answer["spans"].as_array().unwrap_or(&vec![]) {
-                            let s = z["start"].as_u64().unwrap_or(0) as usize;
-                            let e = z["end"].as_u64().unwrap_or(0) as usize;
+                let range = entry
+                    .get("range")
+                    .with_context(|| format!("plan[{index}].range is missing"))?;
+                match range {
+                    Value::Array(_) => {
+                        let (lo, hi) = range_bounds(range, &format!("plan[{index}].range"))?;
+                        ensure!(hi <= chars.len(), "plan[{index}].range exceeds text length");
+                        for (span_index, z) in raw_spans.iter().enumerate() {
+                            let span_path = format!("prediction[{qid}].spans[{span_index}]");
+                            let span = required_object(Some(z), &span_path)?;
+                            let s =
+                                required_usize(span.get("start"), &format!("{span_path}.start"))?;
+                            let e = required_usize(span.get("end"), &format!("{span_path}.end"))?;
+                            ensure!(e <= chars.len(), "{span_path}.end exceeds text length");
                             let (s, e) = trim(&chars, s.max(lo), e.min(hi));
                             if e > s {
                                 out.push(serde_json::json!({
-                                    "label": z["label"],
+                                    "label": span["label"],
                                     "start": s - lo,
                                     "end": e - lo,
                                     "text": chars[s..e].iter().collect::<String>(),
-                                    "probability": z["probability"],
+                                    "probability": span["probability"],
                                 }));
                             }
                         }
                     }
-                    _ => {
-                        out = answer["spans"].as_array().cloned().unwrap_or_default();
+                    Value::Null => {
+                        for (span_index, z) in raw_spans.iter().enumerate() {
+                            let span_path = format!("prediction[{qid}].spans[{span_index}]");
+                            let span = required_object(Some(z), &span_path)?;
+                            let end = required_usize(span.get("end"), &format!("{span_path}.end"))?;
+                            ensure!(end <= chars.len(), "{span_path}.end exceeds text length");
+                        }
                     }
+                    _ => bail!("plan[{index}].range must be null or [start, end]"),
                 }
-                spans.insert(qid.to_string(), Value::Array(out));
-                span_heads.insert(qid.to_string(), answer["head"].clone());
-                thresholds.insert(qid.to_string(), answer["threshold"].clone());
+                if matches!(range, Value::Null) {
+                    out = raw_spans.clone();
+                }
+                spans.insert(qid.to_owned(), Value::Array(out));
+                span_heads.insert(qid.to_owned(), Value::String(head));
+                thresholds.insert(qid.to_owned(), threshold);
                 let max = span_word_probabilities
                     .get(qid)
-                    .map(|probs| probs.iter().cloned().fold(0.0f32, f32::max))
-                    .unwrap_or(0.0);
+                    .with_context(|| {
+                        format!("missing span word probabilities for question {qid:?}")
+                    })?
+                    .iter()
+                    .copied()
+                    .map(|probability| {
+                        ensure!(
+                            probability.is_finite(),
+                            "span word probability for {qid:?} must be finite"
+                        );
+                        Ok::<f32, anyhow::Error>(probability)
+                    })
+                    .collect::<Result<Vec<_>>>()?
+                    .into_iter()
+                    .fold(0.0f32, f32::max);
                 answers.insert(
-                    qid.to_string(),
+                    qid.to_owned(),
                     serde_json::json!({"type": "noul", "noul": json_f64(max as f64)}),
                 );
             }
@@ -821,7 +1360,9 @@ pub fn system_one_response(
     if !thresholds.is_empty() {
         response.insert("thresholds".into(), Value::Object(thresholds));
     }
-    Value::Object(response)
+    let response = Value::Object(response);
+    validate_finished_response(&response, plan)?;
+    Ok(response)
 }
 
 /// The top-two probability margin (the reference's `_choice_confidence`).
@@ -847,4 +1388,32 @@ pub fn score_confidence(values: &[f64]) -> f64 {
         .map(|(i, v)| v * (i as f64 - mean).powi(2))
         .sum();
     (1.0 - var / ((n * n - 1) as f64 / 12.0)).clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod response_tests {
+    use super::validate_finished_response;
+    use serde_json::json;
+
+    #[test]
+    fn final_response_rejects_an_extra_answer_key() {
+        let plan = vec![json!({
+            "qid": "q",
+            "type": "noul",
+            "criteria": {},
+            "range": null,
+            "part": "user",
+        })];
+        let response = json!({
+            "model": "m",
+            "answers": {
+                "q": {"type": "noul", "noul": 0.5},
+                "extra": {"type": "noul", "noul": 0.1},
+            },
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        });
+        let error = validate_finished_response(&response, &plan)
+            .expect_err("an extra answer key must not pass the envelope gate");
+        assert!(error.to_string().contains("answers"), "{error}");
+    }
 }

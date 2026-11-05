@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use omni_vela_native::scoring::{Calibration, SpanOut, row_answers, system_one_response};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 const CASES: [&str; 4] = [
     "example-request",
@@ -299,7 +299,8 @@ fn the_systemone_finishing_matches_the_frozen_oracles() {
             &span_probs,
             &part_texts,
             input_tokens,
-        );
+        )
+        .expect("response finishing");
         let want = &oracle["system_one"];
         let drift = max_drift(&response, want);
         assert!(
@@ -353,4 +354,221 @@ fn max_drift(a: &Value, b: &Value) -> f64 {
         (_, _) if a == b => 0.0,
         _ => 1.0,
     }
+}
+
+fn noul_plan(qid: &str) -> Value {
+    json!({
+        "qid": qid,
+        "type": "noul",
+        "criteria": {},
+        "range": null,
+        "part": "user",
+    })
+}
+
+fn noul_prediction(qid: &str) -> Value {
+    json!({
+        "id": qid,
+        "type": "choice",
+        "answer": "yes",
+        "probabilities": {"no": 0.25, "yes": 0.75},
+    })
+}
+
+#[test]
+fn response_finishing_rejects_a_missing_prediction() {
+    let error = system_one_response(
+        "m",
+        &[noul_plan("q")],
+        &[],
+        &HashMap::new(),
+        &HashMap::new(),
+        0,
+    )
+    .expect_err("a missing prediction must not produce a response");
+    assert!(error.to_string().contains("missing prediction"), "{error}");
+}
+
+#[test]
+fn response_finishing_rejects_duplicate_and_extra_prediction_ids() {
+    let duplicate = system_one_response(
+        "m",
+        &[noul_plan("q")],
+        &[noul_prediction("q"), noul_prediction("q")],
+        &HashMap::new(),
+        &HashMap::new(),
+        0,
+    )
+    .expect_err("duplicate prediction IDs must not overwrite each other");
+    assert!(
+        duplicate.to_string().contains("duplicate prediction ID"),
+        "{duplicate}"
+    );
+
+    let extra = system_one_response(
+        "m",
+        &[noul_plan("q")],
+        &[noul_prediction("q"), noul_prediction("other")],
+        &HashMap::new(),
+        &HashMap::new(),
+        0,
+    )
+    .expect_err("an answer for an unknown question must be rejected");
+    assert!(
+        extra.to_string().contains("unexpected prediction ID"),
+        "{extra}"
+    );
+}
+
+#[test]
+fn response_finishing_rejects_missing_set_and_span_fields() {
+    let set_plan = json!({
+        "qid": "labels",
+        "type": "set",
+        "criteria": {"a": "A"},
+        "range": null,
+        "part": "user",
+    });
+    let missing_threshold = system_one_response(
+        "m",
+        &[set_plan],
+        &[json!({
+            "id": "labels",
+            "type": "set",
+            "answer": [],
+            "probabilities": {"a": 0.25},
+        })],
+        &HashMap::new(),
+        &HashMap::new(),
+        0,
+    )
+    .expect_err("set threshold is part of the prediction contract");
+    assert!(
+        missing_threshold.to_string().contains("threshold"),
+        "{missing_threshold}"
+    );
+
+    let span_plan = json!({
+        "qid": "spans",
+        "type": "span",
+        "criteria": {"PERSON": "a person"},
+        "range": null,
+        "part": "user",
+    });
+    let missing_spans = system_one_response(
+        "m",
+        &[span_plan],
+        &[json!({
+            "id": "spans",
+            "type": "span",
+            "threshold": 0.5,
+            "head": "router",
+        })],
+        &HashMap::from([(String::from("spans"), vec![0.8])]),
+        &HashMap::from([(String::from("user"), String::from("Alice"))]),
+        0,
+    )
+    .expect_err("span output without spans must be rejected");
+    assert!(
+        missing_spans.to_string().contains("spans"),
+        "{missing_spans}"
+    );
+}
+
+#[test]
+fn response_finishing_rejects_a_multi_part_span_until_it_is_implemented() {
+    let plan = json!({
+        "qid": "spans",
+        "type": "span",
+        "criteria": {"PERSON": "a person"},
+        "range": null,
+        "part": ["user", "context"],
+    });
+    let error = system_one_response(
+        "m",
+        &[plan],
+        &[json!({
+            "id": "spans",
+            "type": "span",
+            "spans": [],
+            "threshold": 0.5,
+            "head": "router",
+        })],
+        &HashMap::from([(String::from("spans"), vec![0.8])]),
+        &HashMap::new(),
+        0,
+    )
+    .expect_err("multi-part span must not fall back to user");
+    assert!(error.to_string().contains("multi-part span"), "{error}");
+}
+
+#[test]
+fn response_finishing_emits_extension_keys_in_plan_order() {
+    let plan = vec![
+        noul_plan("n"),
+        json!({
+            "qid": "labels",
+            "type": "set",
+            "criteria": {"a": "A", "b": "B"},
+            "range": null,
+            "part": "user",
+        }),
+        json!({
+            "qid": "spans",
+            "type": "span",
+            "criteria": {"PERSON": "a person"},
+            "range": null,
+            "part": "user",
+        }),
+    ];
+    let response = system_one_response(
+        "m",
+        &plan,
+        &[
+            json!({
+                "id": "spans",
+                "type": "span",
+                "spans": [],
+                "threshold": 0.5,
+                "head": "router",
+                "target_part": "user",
+            }),
+            json!({
+                "id": "labels",
+                "type": "set",
+                "answer": ["a"],
+                "probabilities": {"a": 0.75, "b": 0.25},
+                "threshold": 0.5,
+            }),
+            noul_prediction("n"),
+        ],
+        &HashMap::from([(String::from("spans"), vec![0.8])]),
+        &HashMap::from([(String::from("user"), String::from("Alice"))]),
+        7,
+    )
+    .expect("complete predictions should finish");
+    assert_eq!(
+        response["answers"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["n", "labels.a", "labels.b", "spans"]
+    );
+    assert_eq!(
+        response["sets"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["labels"]
+    );
+    assert_eq!(
+        response["thresholds"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["labels", "spans"]
+    );
 }

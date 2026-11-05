@@ -171,7 +171,7 @@ pub struct Heads {
     pub broad: SpanHead,
 }
 
-fn tensor<'a>(file: &'a SafeTensors<'a>, name: &str) -> Result<Vec<f32>> {
+fn tensor<'a>(file: &'a SafeTensors<'a>, name: &str, expected_shape: &[usize]) -> Result<Vec<f32>> {
     let view = file
         .tensor(name)
         .with_context(|| format!("heads.safetensors is missing {name}"))?;
@@ -179,26 +179,40 @@ fn tensor<'a>(file: &'a SafeTensors<'a>, name: &str) -> Result<Vec<f32>> {
         view.dtype() == safetensors::Dtype::F32,
         "{name} must be F32"
     );
-    Ok(view
-        .data()
-        .as_chunks::<4>()
-        .0
+    ensure!(
+        view.shape() == expected_shape,
+        "{name} has shape {:?}, expected {:?}",
+        view.shape(),
+        expected_shape
+    );
+    let (chunks, remainder) = view.data().as_chunks::<4>();
+    ensure!(
+        remainder.is_empty(),
+        "{name} has an invalid F32 byte length"
+    );
+    let values: Vec<f32> = chunks
         .iter()
         .map(|chunk| f32::from_le_bytes(*chunk))
-        .collect())
+        .collect();
+    ensure!(
+        values.iter().all(|value| value.is_finite()),
+        "{name} contains non-finite values"
+    );
+    Ok(values)
 }
 
-fn linear(file: &SafeTensors, prefix: &str, bias: bool, input: usize) -> Result<Linear> {
-    let weight = tensor(file, &format!("{prefix}.weight"))?;
-    let out = weight.len() / input;
-    ensure!(
-        weight.len() % input == 0 && out > 0,
-        "{prefix}.weight shape"
-    );
+fn linear(
+    file: &SafeTensors,
+    prefix: &str,
+    bias: bool,
+    input: usize,
+    out: usize,
+) -> Result<Linear> {
+    let weight = tensor(file, &format!("{prefix}.weight"), &[out, input])?;
     Ok(Linear {
         weight,
         bias: if bias {
-            Some(tensor(file, &format!("{prefix}.bias"))?)
+            Some(tensor(file, &format!("{prefix}.bias"), &[out])?)
         } else {
             None
         },
@@ -209,24 +223,24 @@ fn linear(file: &SafeTensors, prefix: &str, bias: bool, input: usize) -> Result<
 
 fn norm(file: &SafeTensors, prefix: &str) -> Result<LayerNorm> {
     Ok(LayerNorm {
-        weight: tensor(file, &format!("{prefix}.weight"))?,
-        bias: tensor(file, &format!("{prefix}.bias"))?,
+        weight: tensor(file, &format!("{prefix}.weight"), &[HIDDEN])?,
+        bias: tensor(file, &format!("{prefix}.bias"), &[HIDDEN])?,
     })
 }
 
 fn span_head(file: &SafeTensors, prefix: &str, d: usize, slots: usize) -> Result<SpanHead> {
-    let slot = tensor(file, &format!("{prefix}.slot.weight"))?;
+    let slot = tensor(file, &format!("{prefix}.slot.weight"), &[slots, HIDDEN])?;
     Ok(SpanHead {
         word_norm: norm(file, &format!("{prefix}.wn"))?,
         label_norm: norm(file, &format!("{prefix}.ln"))?,
         slots,
         slot,
         d,
-        k: linear(file, &format!("{prefix}.K"), false, HIDDEN)?,
-        q: linear(file, &format!("{prefix}.Q"), false, HIDDEN)?,
-        m: linear(file, &format!("{prefix}.M"), true, HIDDEN)?,
-        n: linear(file, &format!("{prefix}.N"), false, HIDDEN)?,
-        v: linear(file, &format!("{prefix}.v"), false, HEAD_DIM)?,
+        k: linear(file, &format!("{prefix}.K"), false, HIDDEN, d)?,
+        q: linear(file, &format!("{prefix}.Q"), false, HIDDEN, d)?,
+        m: linear(file, &format!("{prefix}.M"), true, HIDDEN, HEAD_DIM)?,
+        n: linear(file, &format!("{prefix}.N"), false, HIDDEN, HEAD_DIM)?,
+        v: linear(file, &format!("{prefix}.v"), false, HEAD_DIM, 1)?,
     })
 }
 
@@ -239,18 +253,17 @@ impl Heads {
         crate::bundle::Bundle::load(bundle, pinned_manifest_sha256)?;
         let raw = std::fs::read(bundle.join("heads.safetensors")).context("heads.safetensors")?;
         let file = SafeTensors::deserialize(&raw).context("heads.safetensors must parse")?;
-        let set_bias = tensor(&file, "set_bias")?;
-        ensure!(set_bias.len() == 1, "set_bias is a scalar");
+        let set_bias = tensor(&file, "set_bias", &[1])?;
         // The span-head geometry ships in the manifest's calibration
         // (d 256, slots 64 for this member).
         Ok(Self {
             candidate_norm: norm(&file, "head.candidate_norm")?,
             query_norm: norm(&file, "head.query_norm")?,
-            key: linear(&file, "head.key", false, HIDDEN)?,
-            query: linear(&file, "head.query", false, HIDDEN)?,
-            candidate_mlp: linear(&file, "head.candidate_mlp", true, HIDDEN)?,
-            query_mlp: linear(&file, "head.query_mlp", false, HIDDEN)?,
-            scalar: linear(&file, "head.scalar", false, HEAD_DIM)?,
+            key: linear(&file, "head.key", false, HIDDEN, HEAD_DIM)?,
+            query: linear(&file, "head.query", false, HIDDEN, HEAD_DIM)?,
+            candidate_mlp: linear(&file, "head.candidate_mlp", true, HIDDEN, HEAD_DIM)?,
+            query_mlp: linear(&file, "head.query_mlp", false, HIDDEN, HEAD_DIM)?,
+            scalar: linear(&file, "head.scalar", false, HEAD_DIM, 1)?,
             set_bias: set_bias[0],
             router: span_head(&file, "span2", HEAD_DIM, 64)?,
             broad: span_head(&file, "span_broad", HEAD_DIM, 64)?,
@@ -287,5 +300,40 @@ impl Heads {
                 bilinear + nonlinear
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{linear, tensor};
+    use safetensors::{Dtype, SafeTensors, tensor::TensorView};
+
+    fn f32_tensor(name: &str, shape: Vec<usize>, values: &[f32]) -> Vec<u8> {
+        let bytes: Vec<u8> = values
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect();
+        let view = TensorView::new(Dtype::F32, shape, &bytes).expect("tensor view");
+        safetensors::tensor::serialize([(name, view)], None).expect("serialize")
+    }
+
+    #[test]
+    fn tensor_rejects_a_shape_that_only_matches_when_flattened() {
+        let raw = f32_tensor("head.weight", vec![4], &[0.0; 4]);
+        let file = SafeTensors::deserialize(&raw).expect("safetensors");
+        let error = linear(&file, "head", false, 2, 2)
+            .err()
+            .expect("wrong rank must fail");
+        assert!(error.to_string().contains("head.weight has shape"));
+    }
+
+    #[test]
+    fn tensor_rejects_non_finite_values() {
+        let raw = f32_tensor("head.weight", vec![1], &[f32::NAN]);
+        let file = SafeTensors::deserialize(&raw).expect("safetensors");
+        let error = tensor(&file, "head.weight", &[1])
+            .err()
+            .expect("non-finite tensor must fail");
+        assert!(error.to_string().contains("non-finite"));
     }
 }
