@@ -129,7 +129,17 @@ The executor check above is the first recorded execution of the shared
 qwen3_5 CUDA kernels on sm_120 (RTX 5060 Laptop, CUDA 13.1; build with
 `src/backends/cuda/qwen3_5/build.sh <out> 120`). The bf16 backbone
 takes about 3 GB of GPU memory; the executor check runs the four small
-frozen cases in about three minutes on that device.
+frozen cases in under a minute on that device, worst logit drift
+0.2845 (CJK 0.2845, the threshold and score cases 0.0066).
+
+Hardware boundary: an independent review on sm_89 (RTX 4090 24 GB,
+CUDA 13.0.88) reproduced a full-path divergence on the same four
+frozen cases — the CJK case drifted 0.3912 against the unchanged 0.35
+gate while every selected kernel check passed on the same build — so
+sm_89 stays outside the validated boundary until a passing replay
+there. The gate and the ceilings are unchanged; the CJK case runs
+close to the gate on sm_120 as well, so the boundary is not a large
+margin either way.
 
 ## Scope and limits
 
