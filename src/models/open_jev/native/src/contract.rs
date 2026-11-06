@@ -16,10 +16,12 @@ pub struct Checkpoint {
     pub alias: &'static str,
     /// Hidden, intermediate, layers, attention, KV, linear key and linear value heads.
     pub backbone: (usize, usize, usize, usize, usize, usize, usize),
-    /// Pack a request's candidates for shared GEMMs. Packing was validated against
-    /// per-candidate execution on 27B only, so 9B runs candidates one at a time.
+    /// Pack a request's independent candidates for shared GEMMs.
     pub pack_candidates: bool,
-    /// Parallel preparation has exact-token coverage for the pinned 27B tokenizer.
+    /// Preserve the 27B default path's long-prefix reuse independently of packing.
+    /// 9B keeps prefix reuse opt-in through OPEN_JEV_PREFIX.
+    pub share_packed_prefix: bool,
+    /// Parallel preparation has exact-token coverage for both pinned tokenizers.
     pub parallel_tokenization: bool,
 }
 
@@ -32,6 +34,7 @@ pub static CHECKPOINTS: [Checkpoint; 2] = [
         alias: "open-jev-27b-v1.1",
         backbone: (5120, 17408, 64, 24, 4, 16, 48),
         pack_candidates: true,
+        share_packed_prefix: true,
         parallel_tokenization: true,
     },
     Checkpoint {
@@ -41,8 +44,9 @@ pub static CHECKPOINTS: [Checkpoint; 2] = [
         checkpoint_revision: "47e966881e489511c0c7f5633a9e1960a676a551",
         alias: "open-jev-9b",
         backbone: (4096, 12288, 32, 16, 4, 16, 32),
-        pack_candidates: false,
-        parallel_tokenization: false,
+        pack_candidates: true,
+        share_packed_prefix: false,
+        parallel_tokenization: true,
     },
 ];
 

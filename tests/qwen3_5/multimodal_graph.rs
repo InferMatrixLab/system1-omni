@@ -332,7 +332,7 @@ fn graph_recording_failure_keeps_eager_result_and_disables_both_modes() -> Resul
                 .contains("injected record failure"),
             "must exercise the actual recording-error path"
         );
-        model.cache_graph(&[text.len()], multimodal, captured)?;
+        model.cache_graph(&[text.len()], multimodal, text.len(), captured)?;
         assert_hidden_eq(
             &model.last_hidden(model.scratch.as_ref().unwrap(), text.len())?,
             &prior_eager,
@@ -451,7 +451,7 @@ fn device_multimodal_graph_uses_current_rows_and_releases_external_storage() -> 
         anyhow::bail!("injected device record failure")
     });
     assert!(failed.is_err());
-    model.cache_graph(&[4], true, failed)?;
+    model.cache_graph(&[4], true, 4, failed)?;
     assert!(!model.graph_enabled);
     assert!(model.mm_graphs.is_empty());
     assert_hidden_eq(

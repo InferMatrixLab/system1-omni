@@ -80,6 +80,19 @@ int cs1_attention_gated_shared(const void* q, const void* k, const void* v, int 
                                const void* prefix_v, int suffix, int prefix, int Hq,
                                int Hk, int Dh, float scale, void* stream);
 
+// Optional batch of 1..16 contiguous suffix sequences sharing immutable prefix KV.
+// Lengths are host values consumed before return; launch descriptors are by value.
+int cs1_attention_gated_shared_batch(const void* q, const void* k, const void* v, int ldv,
+                                     const void* gate, void* out, const void* prefix_k,
+                                     const void* prefix_v, const size_t* lengths, size_t count,
+                                     int prefix, int Hq, int Hk, int Dh, float scale, void* stream);
+
+// Optional independent full-sequence causal attention, same concatenated layouts.
+// Candidate lengths are host values copied into by-value launch descriptors.
+int cs1_attention_gated_batch(const void* q, const void* k, const void* v, int ldv,
+                               const void* gate, void* out, const size_t* lengths,
+                               size_t count, int Hq, int Hk, int Dh, float scale, void* stream);
+
 // beta = sigmoid(b) (bfloat16) and g = -exp(A_log) * softplus(a + dt_bias) (float32), [T, H];
 // b and a are [T, H] in rows of ld.
 int cs1_gdn_gates(const void* b, const void* a, int ld, const void* A_log, const void* dt_bias,
@@ -92,6 +105,10 @@ size_t cs1_gdn_batch_workspace_floats(int tokens, int H, int count);
 int cs1_gdn_prefill_batch(const void* q, const void* k, const void* v, const float* g,
                          const void* beta, void* o, float* workspace, size_t workspace_bytes,
                          const size_t* lengths, size_t count, int H, int HK, float scale, void* stream);
+// Optional: every suffix reads the same immutable FP32 [H,128,128] prefix state.
+int cs1_gdn_prefill_batch_shared(const void* q, const void* k, const void* v, const float* g,
+                         const void* beta, void* o, float* workspace, size_t workspace_bytes,
+                         const size_t* lengths, size_t count, int H, int HK, float scale, const void* state, void* stream);
 size_t cs1_gdn_workspace_floats(int T, int H);
 // Optional no-FLA text precision mode: FP32 normalized Q/K and recurrent state,
 // BF16 output. Context and scratch remain model-owned; prefix continuation is unsupported.
@@ -171,6 +188,11 @@ void* cs1_gemm_create_fixed(size_t workspace_bytes, int reference_m);
 void* cs1_gemm_create_matched(size_t workspace_bytes, int reference_m);
 int cs1_gemm_compatible(void* ordinary, void* matched, int M, int N, int K);
 void cs1_gemm_destroy(void* gemm);
+// Optional prefill tile equivalence; 1 enabled, 0 unsupported, negative error.
+// Select on an ordinary handle before its first plan. Ordinary packing accepts
+// tested512..4096-row profiles; retained reuse additionally accepts64..511 rows.
+// Outside those profiles keep opaque equality; split-K is never relaxed.
+int cs1_gemm_enable_equivalent_tiles(void* gemm);
 int cs1_gemm(void* gemm, const void* x, const void* w, void* y, int M, int N, int K, int ldy,
              void* stream);
 
@@ -178,7 +200,8 @@ int cs1_gemm(void* gemm, const void* x, const void* w, void* y, int M, int N, in
 int cs1_gemm_packed(void* gemm, const void* x, const void* w, void* y,
                     const size_t* lengths, size_t count, int N, int K, void* stream);
 
-// Optional retained-algorithm projections. Check returns 0 if compatible, -1 if
+// Optional retained-arithmetic projections. Opted-in compatible profiles may select
+// the actual-row algorithm after validating the original. Check returns 0 if compatible, -1 if
 // unsupported; other values are errors. Check all windows before computing any.
 int cs1_gemm_reuse_check(void* gemm, const size_t* original_rows, size_t originals,
                         const size_t* target_rows, size_t targets, int N, int K);

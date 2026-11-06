@@ -19,7 +19,17 @@ impl Model {
     ) -> Result<()> {
         let s = self.scratch.as_ref().unwrap();
         if !self.graph_enabled {
-            return self.run_window(s, begin, end, true, capture, prefix, gemm, None);
+            return self.run_window(
+                s,
+                begin,
+                end,
+                true,
+                capture,
+                prefix,
+                gemm,
+                None,
+                WindowReadout::Hidden,
+            );
         }
         let states = [
             prefix.map(|p| Arc::clone(&p.buffers)),
@@ -47,10 +57,21 @@ impl Model {
             prefix,
             gemm,
             None,
+            WindowReadout::Hidden,
         )?;
         cuda::synchronize(self.stream)?;
         let recorded = cuda::Graph::capture(self.stream, || {
-            self.run_window(s, begin, end, true, capture, prefix, gemm, None)
+            self.run_window(
+                s,
+                begin,
+                end,
+                true,
+                capture,
+                prefix,
+                gemm,
+                None,
+                WindowReadout::Hidden,
+            )
         });
         self.cache_window_graph(key, states, recorded)
     }
@@ -81,7 +102,7 @@ impl Model {
             Err(error) => {
                 // Existing retirement path drains, disables all language Graph
                 // modes and retains the already computed eager miss result.
-                self.cache_graph(&[begin, end], true, Err(error))?;
+                self.cache_graph(&[begin, end], true, end, Err(error))?;
             }
         }
         Ok(())
