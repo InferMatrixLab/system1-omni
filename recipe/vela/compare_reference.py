@@ -16,11 +16,14 @@ Both paths execute the same verified runtime, and the worker delegates
 response construction to the same pinned code — so the criterion is
 reference parity: exact match, including JSON key order, with
 rejections agreeing on status and body (``{"detail": [{"loc", "msg",
-"type"}]}``). ``--export`` additionally freezes the oracle fixture —
-request, SystemOne response and the predict()-level answers — for the
-future native encoder slices, and writes it only after a passing,
-non-rejected comparison. Requires the pinned package, the reference
-dependencies, and fastapi+uvicorn+httpx; see recipe/vela/reference.md.
+"type"}]}``). The run also compares the worker's verbatim endpoint
+bodies (``/health``, ``/ready``, ``/v1/models`` and the unauthorized
+401) against the live reference app. ``--export`` additionally freezes
+the oracle fixture — request, SystemOne response, the predict()-level
+answers and the generating run's provenance — for the future native
+encoder slices, and writes it only after a passing, non-rejected
+comparison. Requires the pinned package, the reference dependencies,
+and fastapi+uvicorn+httpx; see recipe/vela/reference.md.
 
 The default fixture set is the recipe's four example requests plus
 five synthetic rejections: an invalid span question (whole-request
@@ -237,17 +240,56 @@ def compare_case(name, worker, reference):
     return lines, False
 
 
+def endpoint_parity(client, gated, worker_endpoints, unauthorized_body, probe_body):
+    """Compare the worker's verbatim endpoint bodies with the live reference app.
+
+    ``worker_endpoints`` maps the reference app's GET routes to the exact
+    bodies the worker serves; ``gated`` is a reference app built with an
+    API key, so an unauthorized POST must answer the worker's 401 body.
+    A drift in either direction fails the run. Returns report lines and
+    the failure count.
+    """
+
+    lines = []
+    failures = 0
+    for path, expected in worker_endpoints:
+        response = client.get(path)
+        observed = response.json()
+        if response.status_code != 200 or observed != expected:
+            failures += 1
+            lines.append(
+                f"endpoint {path}: FAIL: HTTP {response.status_code} "
+                f"{json.dumps(observed, ensure_ascii=False)[:160]} != the worker's "
+                f"{json.dumps(expected, ensure_ascii=False)[:160]}"
+            )
+        else:
+            lines.append(f"endpoint {path}: HTTP 200, exact body match: PASS")
+    response = gated.post("/v1/systemone", json=probe_body)
+    observed = response.json()
+    if response.status_code != 401 or observed != unauthorized_body:
+        failures += 1
+        lines.append(
+            f"unauthorized POST: FAIL: HTTP {response.status_code} "
+            f"{json.dumps(observed, ensure_ascii=False)[:160]} != the worker's "
+            f"{json.dumps(unauthorized_body, ensure_ascii=False)[:160]}"
+        )
+    else:
+        lines.append("unauthorized POST: 401, exact body match: PASS")
+    return lines, failures
+
+
 def export_allowed(ok, worker):
     """The oracle freezes served 200 responses, never a rejection."""
 
     return ok and worker[0] == 200
 
 
-def export_oracle(name, body, response, predict, path):
+def export_oracle(name, body, response, predict, path, source):
     """Freeze one passing case for the future native encoder slices."""
 
     oracle = {
         "case": name,
+        "source": source,
         "request": body,
         "system_one": response,
         "predict": predict,
@@ -276,8 +318,25 @@ def main(argv=None):
     finally:
         sys.dont_write_bytecode = previous_dont_write_bytecode
 
+    from frontend.vela import HEALTH_BODY, MODELS_ENTRY, READY_BODY, UNAUTHORIZED_BODY
+
     app = vela2_serve.create_app(executor.engine, model_name=executor.model_name, api_key=None)
     client = TestClient(app)
+    gated = TestClient(
+        vela2_serve.create_app(executor.engine, model_name=executor.model_name, api_key="parity-key")
+    )
+    source = {
+        "model": executor.model_name,
+        "device": args.device,
+        "generator": "recipe/vela/compare_reference.py --export",
+    }
+    # A well-formed probe body: any answer other than the worker's 401
+    # means the reference's key gate drifted, not the probe itself.
+    unauthorized_probe = {
+        "model": executor.model_name,
+        "state": "short",
+        "questions": {"q": {"type": "noul", "instructions": "any?"}},
+    }
     served = executor.model_name
     # The hybrid member's oracle fixtures get their own prefix so both
     # members' frozen baselines can live in one directory.
@@ -286,6 +345,21 @@ def main(argv=None):
     exported = 0
     failed = 0
     try:
+        endpoint_lines, endpoint_failures = endpoint_parity(
+            client,
+            gated,
+            [
+                ("/health", HEALTH_BODY),
+                ("/ready", READY_BODY),
+                ("/v1/models", {"models": [{**MODELS_ENTRY, "name": executor.model_name}]}),
+            ],
+            UNAUTHORIZED_BODY,
+            unauthorized_probe,
+        )
+        print("endpoint parity:")
+        print("\n".join(endpoint_lines))
+        print()
+        failed += endpoint_failures
         for name, body in load_cases(args.fixture, served):
             raw = json.dumps(body).encode("utf-8")
             worker = worker_response(raw, executor, decide)
@@ -299,7 +373,7 @@ def main(argv=None):
                 target = Path(args.export)
                 if target.is_dir():
                     target = target / f"{prefix}{name}.json"
-                export_oracle(name, body, worker[1], executor.engine.predict(req), target)
+                export_oracle(name, body, worker[1], executor.engine.predict(req), target, source)
                 exported += 1
             print()
     finally:

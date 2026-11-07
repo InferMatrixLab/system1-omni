@@ -32,12 +32,12 @@ pub fn validate_bundle(checkpoint: &Path, bundle: &Path) -> Result<()> {
     let build: serde_json::Value =
         serde_json::from_slice(&fs::read(bundle.join("build-manifest.json"))?)?;
     ensure!(
-        tables["abi"] == 1
+        tables["abi"] == 2
             && tables["laya"] == "0.3.20"
             && tables["hidden_size"] == 1024
             && tables["head_dim"] == 64
             && tables["max_len"] == 512
-            && build["abi"] == 1
+            && build["abi"] == 2
             && build["arch"] == "sm_90a",
         "unsupported CUDA bundle"
     );

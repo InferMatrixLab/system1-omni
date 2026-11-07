@@ -2,6 +2,10 @@
 
 This directory contains the System1-Omni integration slices for
 [Vela 2.0 0.3B](https://huggingface.co/vllm-sr/Vela-2.0-0.3B)
+# Vela 2.0 reference contracts (0.3B, 0.8B hybrid)
+
+This directory contains the System1-Omni integration slices for
+[Vela 2.0 0.3B](https://huggingface.co/vllm-sr/Vela-2.0-0.3B)
 (`vela2-unified`) and
 [Vela 2.0 0.8B](https://huggingface.co/vllm-sr/Vela-2.0-0.8B)
 (`vela2-decoder`, the first hybrid member): a Python worker that runs
@@ -10,7 +14,11 @@ question kinds (`choice`, `noul`, `score`, `span`, `set`) on
 `/v1/systemone`, one pinned member per worker process. The 0.3B
 worker's contract freezes the text/token_ids input, the
 position-level final-hidden readout contract, the error/length
-boundaries and the parity baseline.
+boundaries and the parity baseline for later ModernBERT-profile work;
+the CPU half of that native route — the 0.3B ModernBERT profile
+registration, the checkpoint census and the YaRN tables — lives in
+[`native/`](native/README.md), whose `cuda`-gated executor runs the
+encoder on the regenerated bundle.
 
 The shared Vela 2.0 wire module is deliberately shaped for the family:
 the envelope admission (`protocol`), the pinned-runtime error mapping
@@ -31,7 +39,7 @@ implemented.
 | Runtime | the checkpoint's own flat files: `vela2_inference.py`, `modeling_vela2.py`, `configuration_vela2.py`, `vela2_serve.py` | the same four modules, decoder-specific |
 | Calibration | the package's own `calibration.json` (never cross-copied between members — shipped thresholds differ) | same rule; the side-loaded broad head needs its `broad_head` block |
 | License | Apache-2.0; the inherited tokenizer material carries Gemma Terms of Use | Apache-2.0; Qwen3.5-0.8B lineage notices ship in the package |
-| Runtime dependencies | [recipe/vela/requirements.txt](../../recipe/vela/requirements.txt) (torch, transformers, safetensors, tokenizers, numpy) | same |
+| Runtime dependencies | [recipe/vela/requirements.txt](../../../recipe/vela/requirements.txt) (torch, transformers, safetensors, tokenizers, numpy) | same |
 
 The 0.3B package ships no manifest, so its gate checks the config's
 structural identity (model type, architecture, `max_length` 8,192, the
@@ -224,4 +232,4 @@ the shared worker-contract issue, and nothing is posted upstream.
   flash-linear-attention) is the oracle setting; GPU bf16-autocast is
   a deployment option outside these slices' evidence.
 - The serving procedure, hardware requirements and the recorded
-  evidence pointer are [recipe/vela/reference.md](../../recipe/vela/reference.md).
+  evidence pointer are [recipe/vela/reference.md](../../../recipe/vela/reference.md).

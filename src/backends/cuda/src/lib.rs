@@ -156,7 +156,7 @@ impl Cuda {
     /// Buffers must belong to this context and stay alive until synchronization or graph destruction.
     pub unsafe fn launch(&self, name: &str, args: &[Ptr], b: usize, l: usize) -> Result<()> {
         ensure!(
-            b > 0 && b <= 16 && l > 0 && l <= 512 && l.is_multiple_of(16),
+            b > 0 && b <= 16 && l > 0 && l <= 8192 && l.is_multiple_of(16),
             "invalid CUDA shape"
         );
         let k = self
@@ -354,7 +354,7 @@ impl Kernel {
     /// or destruction of any graph that captures the launch.
     pub unsafe fn launch(&self, args: &[Ptr], b: usize, l: usize) -> Result<()> {
         ensure!(
-            b > 0 && b <= 16 && l > 0 && l <= 512 && l.is_multiple_of(16),
+            b > 0 && b <= 16 && l > 0 && l <= 8192 && l.is_multiple_of(16),
             "invalid CUDA shape"
         );
         self.ctx.check(unsafe {

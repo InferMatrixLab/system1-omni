@@ -140,8 +140,22 @@ def test_finish_response_matches_span_and_set_key_sets():
         lambda r: r.update(usage={"input_tokens": 5}),
         lambda r: r.update(usage={"input_tokens": -1, "output_tokens": 0}),
         lambda r: r.update(usage={"input_tokens": 10, "output_tokens": 3}),
-        # Answer-shape violations.
+        # Answer-shape violations: foreign fields, missing fields, and
+        # unknown kinds — exact key sets per answer kind.
         lambda r: r["answers"]["billing"].update(probabilities={"yes": 0.75}),
+        lambda r: r["answers"]["billing"].pop("noul"),
+        lambda r: r["answers"]["area"].pop("probabilities"),
+        lambda r: r["answers"]["area"].update(extra=1),
+        lambda r: r["answers"]["severity"].pop("legend"),
+        lambda r: r["answers"]["severity"].update(confidence2=0.5),
+        lambda r: r["answers"].update({"billing": {"type": "abstain"}}),
+        # Payload-shape violations.
+        lambda r: r["sets"]["issues"].update(threshold=0.3),
+        lambda r: r["sets"]["issues"].pop("selected"),
+        lambda r: r["spans"]["pii"].append({"label": "PERSON", "start": 0}),
+        lambda r: r["spans"]["pii"][0].update(weight=1.0),
+        lambda r: r["thresholds"].update({"pii": "0.75"}),
+        lambda r: r["thresholds"].update({"pii": True}),
     ],
 )
 def test_finish_response_rejects_contract_violations(mutate):

@@ -59,7 +59,7 @@ def main():
     (args.bundle / "build-command.json").write_text(json.dumps(commands, indent=2))
 
     build_manifest = {
-        "abi": 1,
+        "abi": 2,
         "arch": "sm_90a",
         "nvcc": subprocess.check_output([nvcc, "--version"], text=True),
         "sources": sources,
