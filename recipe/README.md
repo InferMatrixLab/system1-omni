@@ -52,6 +52,7 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   verify its runtime manifest, and serve `choice`/`noul`/`score` decisions over
   text, image and video state through the Python worker and the Rust frontend
   (text serving and parity validated on A100; media budgets and caps in the recipe).
+- [D3 turbo reference profile](d3/turbo.md): pinned `vllm-sr/d3-turbo` through the existing D3 worker, with text/JSON or one PNG/JPEG, official state-once and typed errors; separate from the legacy profile and native execution.
 - [Vela 2.0 reference workers (0.3B and the 0.8B hybrid)](vela/reference.md): download the pinned
   vllm-sr/Vela-2.0-0.3B package, pass its full-hash package gate, and serve all
   five SystemOne question kinds (`choice`/`noul`/`score` plus the `span`/`set`
