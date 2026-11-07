@@ -1,8 +1,12 @@
 # Card-tested stack for Cloudflare/clef-flash and Cloudflare/clef:
 # torch 2.11 and transformers 5.10.2. This file is not a resolved lock;
-# this environment did not install or import that stack.
-torch>=2.11
+# serving validation records the resolved environment separately.
+torch==2.11.0
+# AutoProcessor instantiates the shared video processor even for text inputs.
+torchvision==0.26.0
 transformers==5.10.2
+# The pinned loader passes device_map to from_pretrained.
+accelerate==1.15.0
 safetensors>=0.6
 huggingface_hub>=1.0
 tokenizers>=0.22
@@ -24,11 +28,8 @@ pillow>=10
 # FlashInfer has no measured forward and no answer parity against the FLA
 # path. That parity run is the follow-up blocker before the flag is default.
 # vLLM's separate CuteDSL prefill backend, CUDA graphs, and torch.compile
-# are not selected. The recorded L20X-labeled C1 primary is tip 594528a9
-# on the FLA chunk: warmup 5, concurrency 1, stock Public231 with
-# thinking.enabled false, metric successful_latency, p50 164.969 ms,
-# p95 216.755 ms, 231/231. Versus 9030065 run1: Δp50 −82.549 ms
-# (−33.35%), Δp95 −196.270 ms (−47.52%).
-causal-conv1d>=1.5
+# are not selected. Keep the default FLA environment reproducible.
+causal-conv1d==1.7.0
 flash-linear-attention==0.5.2
-flashinfer-python==0.6.16.post3
+# Optional, unvalidated prefill path: install flashinfer-python==0.6.16.post3
+# separately before requesting --gdn-prefill flashinfer. Not needed for FLA.
