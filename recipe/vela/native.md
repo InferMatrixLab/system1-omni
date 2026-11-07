@@ -92,7 +92,7 @@ VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
   cargo test -p omni-vela-native --test vela_native_executor -- --ignored --nocapture
 ~~~
 
-50 tests run everywhere with no weights and no GPU: the wire contract
+58 tests run everywhere with no weights and no GPU: the wire contract
 against the pinned runtime's 422/400 bodies (one known residual: a
 non-finite JSON number answers the generic 400 message, where the
 Python worker names the value), the bundle manifest gate (including
