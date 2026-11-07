@@ -1,0 +1,17 @@
+[package]
+name = "omni-kev-native"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Kev pointer head; native worker integration pending"
+
+[dependencies]
+anyhow = "1.0.100"
+safetensors = "0.8.0"
+
+[dev-dependencies]
+serde_json = "1.0.149"
+
+[[test]]
+name = "head"
+path = "../../../../tests/kev/head.rs"
