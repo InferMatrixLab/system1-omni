@@ -419,7 +419,35 @@ pub type GatedAttention = unsafe extern "C" fn(
     Stream,
 ) -> c_int;
 
+/// Full-row prefix-bidirectional attention; `state` follows the row length.
+pub type PrefixGatedAttention = unsafe extern "C" fn(
+    *const c_void,
+    *const c_void,
+    *const c_void,
+    c_int,
+    *const c_void,
+    *mut c_void,
+    c_int,
+    c_int,
+    c_int,
+    c_int,
+    c_int,
+    f32,
+    Stream,
+) -> c_int;
+
 impl Api {
+    /// Optional ABI-9 capability; older libraries continue serving causal users.
+    pub fn attention_gated_prefix_bidirectional(&self) -> Result<PrefixGatedAttention> {
+        // SAFETY: ops.h declares this signature; Api retains the loaded library.
+        unsafe {
+            self._lib
+                .get::<PrefixGatedAttention>(b"cs1_attention_gated_prefix_bidirectional\0")
+                .map(|symbol| *symbol)
+                .context("libqwen3_5_cuda.so has no cs1_attention_gated_prefix_bidirectional; rebuild src/backends/cuda/qwen3_5 (optional ABI 9 capability)")
+        }
+    }
+
     pub fn matched_create(&self) -> Result<unsafe extern "C" fn(usize, i32) -> *mut c_void> {
         unsafe { Ok(*self._lib.get(b"cs1_gemm_create_matched\0")?) }
     }

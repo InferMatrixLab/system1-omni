@@ -143,6 +143,14 @@ int cs1_attention_gated_bidirectional(const void* q, const void* k, const void* 
                                       const void* gate, void* out, int T, int Hq, int Hk, int Dh,
                                       float scale, void* stream);
 
+// Optional additive ABI 9 symbol. One unpadded state+question row, 0 < state < T.
+// State queries see only state keys; question queries see all keys in this row.
+// Eager correctness baseline: full bidirectional pass, then state-only overwrite.
+// Buffers must be disjoint inputs/output; launches use the caller's stream.
+int cs1_attention_gated_prefix_bidirectional(const void* q, const void* k, const void* v, int ldv,
+                                            const void* gate, void* out, int T, int state,
+                                            int Hq, int Hk, int Dh, float scale, void* stream);
+
 // Windowed variant for the cached prefix: k and v cover rows [0, T) (the cached
 // prefix must already be in place); q, gate and out cover rows [q_base, T) only.
 // q_base must be a multiple of 64; q_base = 0 reduces to cs1_attention_gated.

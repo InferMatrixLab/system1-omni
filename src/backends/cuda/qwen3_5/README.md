@@ -26,6 +26,36 @@ missing. Rebuild this library before starting that worker. This tree does not
 claim that the causal specialization's SASS is bit-identical to the previous
 build; GPU revalidation of Cua-S1 and Open-Jev was not run with this change.
 
+## Full-row prefix-bidirectional baseline
+
+`Model::forward_prompt_prefix_bidirectional(ids, state_tokens)` executes one
+complete, unpadded text row with `0 < state_tokens < ids.len()`. The state
+queries attend only to the complete state; the question queries attend to the
+state and their own complete question. GDN remains causal. The caller supplies
+the exact semantic split: no 64-token rounding and no prefix continuation.
+
+The optional additive ABI-9 symbol
+`cs1_attention_gated_prefix_bidirectional` composes existing bidirectional
+launches on the caller's stream: a complete-row pass followed by a state-only
+pass that overwrites the state outputs before the next layer. It does extra
+state work and makes no acceleration claim. Existing attention templates and
+causal entry points are unchanged. Inputs and output must be disjoint, with
+the complete BF16 row/stride geometry in `ops.h`.
+
+The Rust entry is eager and merged; it rejects Graph, LoRA and reference
+numerics. Call `require_prompt_prefix_bidirectional` during adapter load before
+readiness. An old ABI-9 library still loads for existing callers and returns
+an actionable rebuild error when the new capability is requested. Rebuild the
+CUDA library to opt in. This primitive does not add a D3 worker, FP32 answer
+head, media path, state-once reuse or batching. Full-model reference parity
+requires a separate model-specific acceptance campaign.
+
+[Root regression instructions](../../../../tests/qwen3_5/README.md#prefix-bidirectional-full-row-baseline)
+cover the independent dense FP64 mask, two-layer state isolation and a tiny
+Transformers hybrid model with two full-attention layers and causal GDN.
+
+## Existing numerical profiles
+
 HF Qwen3.5 folders store `linear_attn.A_log` and `linear_attn.norm.weight` as
 FP32. The shared loader rounds those two suffixes to BF16 at upload because the
 kernels consume BF16. Other non-BF16 language tensors still fail. That rounding
