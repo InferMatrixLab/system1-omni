@@ -26,6 +26,18 @@ missing. Rebuild this library before starting that worker. This tree does not
 claim that the causal specialization's SASS is bit-identical to the previous
 build; GPU revalidation of Cua-S1 and Open-Jev was not run with this change.
 
+On sm_89 and sm_120 the full pass (causal or bidirectional) and 128-aligned
+causal prefix windows of at least 640 query rows use a 128-query, 256-thread
+block instead of 64 queries and 128 threads: eight warps per SM instead of four,
+one K/V read per 128 queries, and byte-identical results. Measured through
+`cs1_attention_gated` (24/4 heads, head dim 256), old -> new: L20 0.986 -> 0.900
+ms at 2,048 rows and 12.03 -> 10.44 at 8,192; RTX 5060 Laptop 1.048 -> 0.828 at
+640 and 87.17 -> 71.54 at 8,192. `compute-sanitizer` reported no errors on
+either device. `H200`/sm_90, the shared prefix kernel and end-to-end serving are
+unverified, so the wider block is limited to the two measured capabilities.
+Protocol and results:
+[benchmarks/attention-wide](../../../../benchmarks/attention-wide/README.md).
+
 HF Qwen3.5 folders store `linear_attn.A_log` and `linear_attn.norm.weight` as
 FP32. The shared loader rounds those two suffixes to BF16 at upload because the
 kernels consume BF16. Other non-BF16 language tensors still fail. That rounding
