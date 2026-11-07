@@ -77,7 +77,7 @@ impl Calibration {
                 )
             })
             .collect();
-        points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        points.sort_by(|a, b| a.0.total_cmp(&b.0));
         let x = (n_tokens.max(1) as f64).ln();
         let (xs, ys): (Vec<f64>, Vec<f64>) = points.into_iter().unzip();
         interp(&xs, &ys, x).exp()
@@ -1368,7 +1368,7 @@ pub fn system_one_response(
 /// The top-two probability margin (the reference's `_choice_confidence`).
 pub fn choice_confidence(values: &[f64]) -> f64 {
     let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    sorted.sort_by(|a, b| b.total_cmp(a));
     if sorted.len() == 1 {
         return 1.0;
     }
