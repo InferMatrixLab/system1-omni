@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import sys
 import threading
 import time
@@ -60,6 +61,19 @@ def main() -> None:
         if opcode != OPCODE_DECIDE:
             write_response(protocol, 400, {"detail": "unknown worker opcode"})
             continue
+        if trace := os.environ.get("CLEF_FAKE_TRACE"):
+            state = json.loads(payload)["state"]
+            with open(trace, "a") as events:
+                events.write(f"start {state}\n")
+            if state in ("block", "crash", "malformed"):
+                while not Path(trace + ".release").exists():
+                    time.sleep(0.005)
+            if state == "crash":
+                os._exit(7)
+            if state == "malformed":
+                protocol.write(b"\x00\x00\x00\x01x")
+                protocol.flush()
+                continue
         time.sleep(delay)
         if fail:
             write_response(protocol, 500, {"detail": "inference failed"})
@@ -76,6 +90,9 @@ def main() -> None:
         if not isinstance(request, dict):
             write_response(protocol, 400, {"detail": "request must be a JSON object"})
             continue
+        if trace:
+            with open(trace, "a") as events:
+                events.write(f"finish {state}\n")
         write_response(
             protocol,
             200,
