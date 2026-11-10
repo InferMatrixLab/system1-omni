@@ -72,6 +72,46 @@ __global__ void __launch_bounds__(NORM_THREADS)
     }
 }
 
+// Vectorize memory traffic for 4096-wide rows while retaining the scalar
+// kernel's FP32 reduction order. The shared transpose gives each thread its
+// original strided elements; rounded BF16 values remain in registers for output.
+__global__ void __launch_bounds__(NORM_THREADS)
+    add_rms_norm_vector_4096_kernel(Pack8* __restrict__ residual, const Pack8* __restrict__ delta,
+                                    const Pack8* __restrict__ w, Pack8* __restrict__ out, float eps) {
+    constexpr int D = 4096, PACKS = D / (8 * NORM_THREADS);
+    __shared__ float scratch[32];
+    __shared__ __align__(16) bf16 shared_values[D];
+    const size_t base = (size_t)blockIdx.x * (D / 8);
+    Pack8 values[PACKS];
+#pragma unroll
+    for (int i = 0; i < PACKS; ++i) {
+        const int col = threadIdx.x + i * NORM_THREADS;
+        const Pack8 a = residual[base + col], b = delta[base + col];
+#pragma unroll
+        for (int e = 0; e < 8; ++e) values[i].v[e] = to_bf16(f32(a.v[e]) + f32(b.v[e]));
+        residual[base + col] = values[i];
+        reinterpret_cast<Pack8*>(shared_values)[col] = values[i];
+    }
+    __syncthreads();
+    float ss = 0.f;
+#pragma unroll
+    for (int i = 0; i < D / NORM_THREADS; ++i) {
+        const float v = f32(shared_values[threadIdx.x + i * NORM_THREADS]);
+        ss += v * v;
+    }
+    const float inv = rsqrtf(block_sum(ss, scratch) / D + eps);
+#pragma unroll
+    for (int i = 0; i < PACKS; ++i) {
+        const int col = threadIdx.x + i * NORM_THREADS;
+        const Pack8 weight = w[col];
+        Pack8 result;
+#pragma unroll
+        for (int e = 0; e < 8; ++e)
+            result.v[e] = to_bf16(f32(values[i].v[e]) * inv * (1.f + f32(weight.v[e])));
+        out[base + col] = result;
+    }
+}
+
 // Qwen3_5RMSNormGated with D = 128, one warp per row: the normalized value is
 // rounded to bfloat16, multiplied by w in bfloat16, then by silu(z) in float32.
 __global__ void gated_rms_norm_kernel(const bf16* __restrict__ x, const bf16* __restrict__ z, int ldz,
@@ -113,6 +153,13 @@ extern "C" int cs1_rms_norm(const void* x, const void* w, void* out, int rows, i
 extern "C" int cs1_add_rms_norm(void* residual, const void* delta, const void* w, void* out, int rows, int D,
                                 float eps, void* stream) {
     if (rows <= 0) return cudaSuccess;
+    if (D == 4096 && ((reinterpret_cast<uintptr_t>(residual) | reinterpret_cast<uintptr_t>(delta) |
+                       reinterpret_cast<uintptr_t>(w) | reinterpret_cast<uintptr_t>(out)) & 15) == 0) {
+        add_rms_norm_vector_4096_kernel<<<rows, NORM_THREADS, 0, static_cast<cudaStream_t>(stream)>>>(
+            static_cast<Pack8*>(residual), static_cast<const Pack8*>(delta), static_cast<const Pack8*>(w),
+            static_cast<Pack8*>(out), eps);
+        return cudaGetLastError();
+    }
     switch (D) {
 #define CACHED_NORM(width) \
     case width: \
