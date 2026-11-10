@@ -38,7 +38,9 @@ The health timeout and response limit must be positive integers.
 ## HTTP interface
 
 - `POST /v1/systemone` forwards the `model`, `state` and `questions` envelope
-  unchanged. Workers return `choice`, `score` or `noul` decisions; see the
+  unchanged. Workers return `choice`, `score`, `noul`, `set` and `span`
+  decisions (the Vela 2.0 worker adds the `set` and `span` kinds with
+  their Noul views); see the
   [Jev API reference](https://docs.typesafe.ai/api).
 - `GET /health` returns the worker's health response, including unhealthy status codes.
 - Authorization and other end-to-end headers are forwarded. Response status,

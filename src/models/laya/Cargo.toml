@@ -14,6 +14,7 @@ serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision
 tokenizers = { version = "0.23.2", default-features = false, features = ["fancy-regex"] }
 sha2 = "0.10"
 omni-cuda = { path = "../../backends/cuda", optional = true }
+omni-modernbert = { path = "../modernbert" }
 omni-runtime = { path = "../../runtime", optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync"], optional = true }
 axum = { version = "0.8", optional = true }
@@ -48,3 +49,11 @@ path = "../../../tests/laya/decision.rs"
 [[test]]
 name = "batch"
 path = "../../../tests/laya/batch.rs"
+
+[[test]]
+name = "plan"
+path = "../../../tests/laya/plan.rs"
+
+[[test]]
+name = "profile"
+path = "../../../tests/laya/profile.rs"

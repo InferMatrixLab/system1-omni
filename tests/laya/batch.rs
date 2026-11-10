@@ -23,7 +23,7 @@ fn prepared(n: usize) -> Prepared {
 #[test]
 fn padding_preserves_order_lengths_and_markers() {
     let prepared = prepared(3);
-    let batch = pack(&prepared).unwrap();
+    let batch = pack(&prepared, 50368).unwrap();
     assert_eq!((batch.b, batch.l), (4, 16));
     assert_eq!(batch.lens, [3, 3, 3, 0]);
     assert_eq!(batch.qtypes, [2, 2, 2, 0]);
@@ -37,17 +37,17 @@ fn padding_preserves_order_lengths_and_markers() {
 
 #[test]
 fn rejects_executor_capacity_and_invalid_markers() {
-    assert!(pack(&prepared(17)).is_err());
+    assert!(pack(&prepared(17), 50368).is_err());
     let mut input = prepared(1);
     input.questions[0].markers.push(3);
-    assert!(pack(&input).is_err());
+    assert!(pack(&input, 50368).is_err());
     input.questions[0].markers = vec![1; 2049];
-    assert!(pack(&input).is_err());
+    assert!(pack(&input, 50368).is_err());
 }
 
 #[test]
 fn empty_request_needs_no_device_rows() {
-    let batch = pack(&prepared(0)).unwrap();
+    let batch = pack(&prepared(0), 50368).unwrap();
     assert_eq!((batch.b, batch.l), (0, 0));
     assert!(batch.markers.is_empty());
 }
@@ -56,7 +56,7 @@ fn empty_request_needs_no_device_rows() {
 fn padding_matches_native_sequence_alignment() {
     let mut input = prepared(3);
     input.questions[1].ids = vec![7; 257];
-    let batch = pack(&input).unwrap();
+    let batch = pack(&input, 50368).unwrap();
     assert_eq!((batch.b, batch.l), (4, 320));
     assert_eq!(batch.lens, [3, 257, 3, 0]);
     assert!(batch.input_ids[3..257].iter().all(|id| *id == 50283));

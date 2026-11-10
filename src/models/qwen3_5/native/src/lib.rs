@@ -5,6 +5,7 @@ pub mod json;
 pub mod model;
 pub mod prefix;
 pub mod prefix_cache;
+pub mod structure;
 
 pub mod inputs;
 

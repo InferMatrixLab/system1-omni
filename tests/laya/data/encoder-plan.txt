@@ -1,0 +1,251 @@
+launch embed ids encoder.embeddings.tok_embeddings.weight encoder.embeddings.norm.weight x y
+dump embedding x 0
+launch qkv y encoder.layers.0.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_full_cos rope_full_sin
+launch attn_full qkv lens o
+launch out o encoder.layers.0.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.0.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.0.mlp.Wi.weight g
+launch down g encoder.layers.0.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.1.attn_norm.weight zeros.1024 y
+dump encoder0_residual x 0
+dump encoder0_normalized y 1
+launch qkv y encoder.layers.1.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.1.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.1.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.1.mlp.Wi.weight g
+launch down g encoder.layers.1.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.2.attn_norm.weight zeros.1024 y
+dump encoder1_residual x 0
+dump encoder1_normalized y 1
+launch qkv y encoder.layers.2.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.2.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.2.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.2.mlp.Wi.weight g
+launch down g encoder.layers.2.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.3.attn_norm.weight zeros.1024 y
+dump encoder2_residual x 0
+dump encoder2_normalized y 1
+launch qkv y encoder.layers.3.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_full_cos rope_full_sin
+launch attn_full qkv lens o
+launch out o encoder.layers.3.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.3.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.3.mlp.Wi.weight g
+launch down g encoder.layers.3.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.4.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.4.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.4.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.4.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.4.mlp.Wi.weight g
+launch down g encoder.layers.4.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.5.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.5.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.5.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.5.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.5.mlp.Wi.weight g
+launch down g encoder.layers.5.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.6.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.6.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_full_cos rope_full_sin
+launch attn_full qkv lens o
+launch out o encoder.layers.6.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.6.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.6.mlp.Wi.weight g
+launch down g encoder.layers.6.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.7.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.7.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.7.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.7.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.7.mlp.Wi.weight g
+launch down g encoder.layers.7.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.8.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.8.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.8.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.8.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.8.mlp.Wi.weight g
+launch down g encoder.layers.8.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.9.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.9.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_full_cos rope_full_sin
+launch attn_full qkv lens o
+launch out o encoder.layers.9.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.9.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.9.mlp.Wi.weight g
+launch down g encoder.layers.9.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.10.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.10.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.10.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.10.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.10.mlp.Wi.weight g
+launch down g encoder.layers.10.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.11.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.11.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.11.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.11.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.11.mlp.Wi.weight g
+launch down g encoder.layers.11.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.12.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.12.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_full_cos rope_full_sin
+launch attn_full qkv lens o
+launch out o encoder.layers.12.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.12.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.12.mlp.Wi.weight g
+launch down g encoder.layers.12.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.13.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.13.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.13.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.13.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.13.mlp.Wi.weight g
+launch down g encoder.layers.13.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.14.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.14.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.14.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.14.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.14.mlp.Wi.weight g
+launch down g encoder.layers.14.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.15.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.15.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_full_cos rope_full_sin
+launch attn_full qkv lens o
+launch out o encoder.layers.15.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.15.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.15.mlp.Wi.weight g
+launch down g encoder.layers.15.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.16.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.16.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.16.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.16.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.16.mlp.Wi.weight g
+launch down g encoder.layers.16.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.17.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.17.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.17.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.17.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.17.mlp.Wi.weight g
+launch down g encoder.layers.17.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.18.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.18.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_full_cos rope_full_sin
+launch attn_full qkv lens o
+launch out o encoder.layers.18.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.18.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.18.mlp.Wi.weight g
+launch down g encoder.layers.18.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.19.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.19.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.19.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.19.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.19.mlp.Wi.weight g
+launch down g encoder.layers.19.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.20.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.20.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.20.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.20.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.20.mlp.Wi.weight g
+launch down g encoder.layers.20.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.21.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.21.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_full_cos rope_full_sin
+launch attn_full qkv lens o
+launch out o encoder.layers.21.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.21.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.21.mlp.Wi.weight g
+launch down g encoder.layers.21.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.22.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.22.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.22.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.22.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.22.mlp.Wi.weight g
+launch down g encoder.layers.22.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.23.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.23.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.23.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.23.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.23.mlp.Wi.weight g
+launch down g encoder.layers.23.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.24.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.24.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_full_cos rope_full_sin
+launch attn_full qkv lens o
+launch out o encoder.layers.24.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.24.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.24.mlp.Wi.weight g
+launch down g encoder.layers.24.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.25.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.25.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.25.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.25.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.25.mlp.Wi.weight g
+launch down g encoder.layers.25.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.26.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.26.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_local_cos rope_local_sin
+launch attn_local qkv lens o
+launch out o encoder.layers.26.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.26.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.26.mlp.Wi.weight g
+launch down g encoder.layers.26.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.27.attn_norm.weight zeros.1024 y
+launch qkv y encoder.layers.27.attn.Wqkv.weight zeros.3072 qkv
+launch rope qkv rope_full_cos rope_full_sin
+launch attn_full qkv lens o
+launch out o encoder.layers.27.attn.Wo.weight zeros.1024 y
+launch addln x y encoder.layers.27.mlp_norm.weight zeros.1024 y
+launch geglu y encoder.layers.27.mlp.Wi.weight g
+launch down g encoder.layers.27.mlp.Wo.weight zeros.1024 y
+launch addln x y encoder.final_norm.weight zeros.1024 y
+dump encoder27_residual x 0
+dump encoder27_normalized y 1
+launch type y type_emb.weight types x
+launch ln_bias x y head.layers.0.norm1.weight head.layers.0.norm1.bias y
+launch head_in y head.layers.0.self_attn.in_proj_weight head.layers.0.self_attn.in_proj_bias qkv
+launch attn_full qkv lens o
+launch head_out o head.layers.0.self_attn.out_proj.weight head.layers.0.self_attn.out_proj.bias y
+launch addln_bias x y head.layers.0.norm2.weight head.layers.0.norm2.bias y
+launch ffn1 y head.layers.0.linear1.weight head.layers.0.linear1.bias ff
+launch ffn2 ff head.layers.0.linear2.weight head.layers.0.linear2.bias y
+launch residual x y
+launch ln_bias x y head.layers.1.norm1.weight head.layers.1.norm1.bias y
+launch head_in y head.layers.1.self_attn.in_proj_weight head.layers.1.self_attn.in_proj_bias qkv
+launch attn_full qkv lens o
+launch head_out o head.layers.1.self_attn.out_proj.weight head.layers.1.self_attn.out_proj.bias y
+launch addln_bias x y head.layers.1.norm2.weight head.layers.1.norm2.bias y
+launch ffn1 y head.layers.1.linear1.weight head.layers.1.linear1.bias ff
+launch ffn2 ff head.layers.1.linear2.weight head.layers.1.linear2.bias y
+launch residual x y

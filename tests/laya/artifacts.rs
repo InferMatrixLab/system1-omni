@@ -49,7 +49,7 @@ impl Fixture {
             );
         }
         let table_manifest = json!({
-            "abi": 1,
+            "abi": 2,
             "laya": "0.3.20",
             "hidden_size": 1024,
             "head_dim": 64,
@@ -64,7 +64,7 @@ impl Fixture {
         .unwrap();
         fs::write(bundle.join("liblaya_cuda.so"), b"not loaded in CPU test").unwrap();
         let build_manifest = json!({
-            "abi": 1,
+            "abi": 2,
             "arch": "sm_90a",
             "library_sha256": format!("{:x}", Sha256::digest(b"not loaded in CPU test")),
         });

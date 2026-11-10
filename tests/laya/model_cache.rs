@@ -1,5 +1,12 @@
 use super::*;
 
+fn structure() -> omni_modernbert::structure::ModernBertStructure {
+    crate::profile::laya_0_3_20().structure
+}
+fn limits() -> omni_modernbert::gate::BackendLimits {
+    crate::profile::laya_0_3_20().limits
+}
+
 fn batch_for(b: usize, l: usize, value: i64) -> Batch {
     Batch {
         b,
@@ -16,8 +23,8 @@ fn cache_limits_evict_before_allocation_and_allow_exact_fits() {
     let fixture = fixture::Fixture::new(&[]);
     let mut model = fixture_model_at(false, fixture.path());
     model.graphs = true;
-    let a = Workspace::required_bytes(1, 16).unwrap();
-    let b = Workspace::required_bytes(1, 32).unwrap();
+    let a = Workspace::required_bytes(1, 16, &structure(), &limits()).unwrap();
+    let b = Workspace::required_bytes(1, 32, &structure(), &limits()).unwrap();
     model.cache_config = CacheConfig {
         max_shapes: 1,
         max_bytes: a.max(b),
@@ -73,8 +80,8 @@ fn byte_budget_lru_and_disabled_or_oversized_fallback_reuse() {
     let fixture = fixture::Fixture::new(&[]);
     let mut model = fixture_model_at(false, fixture.path());
     model.graphs = true;
-    let a = Workspace::required_bytes(1, 16).unwrap();
-    let b = Workspace::required_bytes(1, 32).unwrap();
+    let a = Workspace::required_bytes(1, 16, &structure(), &limits()).unwrap();
+    let b = Workspace::required_bytes(1, 32, &structure(), &limits()).unwrap();
     model.cache_config = CacheConfig {
         max_shapes: 8,
         max_bytes: a + b,
@@ -141,10 +148,10 @@ fn workspace_estimate_matches_allocation_for_all_supported_shapes() {
     let weights = unsafe { live() };
     for b in [1, 2, 4, 8, 16] {
         for l in (16..=512).step_by(16) {
-            let workspace = Workspace::new(&model.cuda, b, l).unwrap();
+            let workspace = Workspace::new(&model.cuda, b, l, &structure(), &limits()).unwrap();
             let allocated = unsafe { live() } - weights;
             assert_eq!(
-                Workspace::required_bytes(b, l).unwrap(),
+                Workspace::required_bytes(b, l, &structure(), &limits()).unwrap(),
                 allocated,
                 "B={b}, L={l}"
             );
@@ -154,7 +161,7 @@ fn workspace_estimate_matches_allocation_for_all_supported_shapes() {
         }
     }
     for (b, l) in [(0, 16), (3, 16), (32, 16), (1, 0), (1, 17), (1, 528)] {
-        assert!(Workspace::required_bytes(b, l).is_err());
+        assert!(Workspace::required_bytes(b, l, &structure(), &limits()).is_err());
     }
 }
 
@@ -165,7 +172,7 @@ fn clear_releases_graph_and_eager_workspaces_and_allows_reuse() {
     model.graphs = true;
     model.cache_config = CacheConfig {
         max_shapes: 1,
-        max_bytes: Workspace::required_bytes(1, 16).unwrap(),
+        max_bytes: Workspace::required_bytes(1, 16, &structure(), &limits()).unwrap(),
     };
     let live = unsafe {
         model
@@ -222,6 +229,6 @@ fn failed_capture_admission_releases_partial_workspace_and_can_retry() {
     assert_eq!(model.cache.len(), 1);
     assert_eq!(
         model.cached_bytes,
-        Workspace::required_bytes(1, 16).unwrap()
+        Workspace::required_bytes(1, 16, &structure(), &limits()).unwrap()
     );
 }

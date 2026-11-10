@@ -1,8 +1,14 @@
 //! Single-GPU Laya executor. All CUDA buffers and graphs remain on the owning worker thread.
-use crate::{config::Config, packing::Batch, weights::Weights};
+use crate::config::Config;
+use crate::packing::Batch;
+use crate::plan::{PlannedArg, PlannedStep, Scratch, plan_encoder};
+use crate::weights::Weights;
 use anyhow::{Context, Result, ensure};
 use half::bf16;
 use omni_cuda::{Buffer, Cuda, Graph, Kernel, Ptr};
+use omni_modernbert::gate::BackendLimits;
+use omni_modernbert::geometry::EncoderScratch;
+use omni_modernbert::structure::ModernBertStructure;
 use std::{
     collections::{HashMap, VecDeque},
     fs,
@@ -134,22 +140,25 @@ struct Workspace {
     actions: Buffer,
 }
 impl Workspace {
-    fn sizes(b: usize, l: usize) -> Result<[usize; 17]> {
-        ensure!(
-            b.is_power_of_two() && b <= 16 && (16..=512).contains(&l) && l.is_multiple_of(16),
-            "invalid workspace shape"
-        );
+    fn sizes(
+        b: usize,
+        l: usize,
+        structure: &ModernBertStructure,
+        limits: &BackendLimits,
+    ) -> Result<[usize; 17]> {
+        limits.check_request(b, l)?;
         let m = b * l;
+        let encoder = EncoderScratch::new(b, l, structure);
         Ok([
-            m * 8,
-            b * 4,
+            encoder.ids,
+            encoder.lens,
             b * 8,
-            m * D * 4,
-            m * D * 2,
-            m * D * 6,
-            m * D * 2,
-            m * 2624 * 2,
-            m * 4096 * 2,
+            encoder.x,
+            encoder.y,
+            encoder.qkv,
+            encoder.o,
+            encoder.gate,
+            m * 4 * D * 2,
             2048 * 4,
             17 * 4,
             2048 * D * 2,
@@ -160,11 +169,22 @@ impl Workspace {
             16 * 2 * 2,
         ])
     }
-    fn required_bytes(b: usize, l: usize) -> Result<usize> {
-        Ok(Self::sizes(b, l)?.iter().sum())
+    fn required_bytes(
+        b: usize,
+        l: usize,
+        structure: &ModernBertStructure,
+        limits: &BackendLimits,
+    ) -> Result<usize> {
+        Ok(Self::sizes(b, l, structure, limits)?.iter().sum())
     }
-    fn new(c: &Cuda, b: usize, l: usize) -> Result<Self> {
-        let sizes = Self::sizes(b, l)?;
+    fn new(
+        c: &Cuda,
+        b: usize,
+        l: usize,
+        structure: &ModernBertStructure,
+        limits: &BackendLimits,
+    ) -> Result<Self> {
+        let sizes = Self::sizes(b, l, structure, limits)?;
         let bytes = sizes.iter().sum();
         let mut sizes = sizes.into_iter();
         let mut alloc = || c.alloc(sizes.next().expect("workspace buffer layout"));
@@ -212,18 +232,6 @@ impl Default for CacheConfig {
     }
 }
 
-#[derive(Clone, Copy)]
-enum Scratch {
-    Ids,
-    Lens,
-    Types,
-    X,
-    Y,
-    Qkv,
-    O,
-    G,
-    Ff,
-}
 impl Scratch {
     fn buffer(self, s: &Workspace) -> &Buffer {
         match self {
@@ -300,216 +308,45 @@ enum Step {
     },
 }
 
+fn resolve_step(
+    cuda: &Cuda,
+    weights: &HashMap<String, Buffer>,
+    planned: &PlannedStep,
+) -> Result<Step> {
+    match planned {
+        PlannedStep::Launch { kernel, args } => {
+            ensure!(args.len() <= 5, "encoder argument count");
+            let mut resolved = [Argument::Weight(std::ptr::null_mut()); 5];
+            for (slot, arg) in resolved.iter_mut().zip(args) {
+                *slot = match arg {
+                    PlannedArg::Weight(name) => Argument::Weight(weights[name].ptr()),
+                    PlannedArg::Scratch(s) => Argument::Scratch(*s),
+                };
+            }
+            Ok(Step::Launch {
+                kernel: SelectedKernel::resolve(cuda, kernel)?,
+                args: resolved,
+                count: args.len(),
+            })
+        }
+        PlannedStep::Dump { name, slot, bf } => Ok(Step::Dump {
+            name: name.clone(),
+            slot: *slot,
+            bf: *bf,
+        }),
+    }
+}
+
 fn prepare_encoder(
     cuda: &Cuda,
     weights: &HashMap<String, Buffer>,
+    structure: &ModernBertStructure,
     original_rope: bool,
 ) -> Result<Vec<Step>> {
-    let steps = std::cell::RefCell::new(Vec::new());
-    let weight = |name: &str| Argument::Weight(weights[name].ptr());
-    let call = |name: &str, args: &[Argument]| -> Result<()> {
-        ensure!(args.len() <= 5, "encoder argument count");
-        let mut resolved = [Argument::Weight(std::ptr::null_mut()); 5];
-        resolved[..args.len()].copy_from_slice(args);
-        steps.borrow_mut().push(Step::Launch {
-            kernel: SelectedKernel::resolve(cuda, name)?,
-            args: resolved,
-            count: args.len(),
-        });
-        Ok(())
-    };
-    let dump = |name: &str, slot: Scratch, bf: bool| {
-        steps.borrow_mut().push(Step::Dump {
-            name: name.to_owned(),
-            slot,
-            bf,
-        });
-        Ok::<_, anyhow::Error>(())
-    };
-    let z = weight("zeros.1024");
-    let attention = |label: &str| format!("attn_{label}");
-    call(
-        "embed",
-        &[
-            Argument::Scratch(Scratch::Ids),
-            weight("encoder.embeddings.tok_embeddings.weight"),
-            weight("encoder.embeddings.norm.weight"),
-            Argument::Scratch(Scratch::X),
-            Argument::Scratch(Scratch::Y),
-        ],
-    )?;
-    dump("embedding", Scratch::X, false)?;
-    for i in 0..28 {
-        let p = format!("encoder.layers.{i}");
-        let w = |n: &str| weight(&format!("{p}.{n}"));
-        call(
-            "qkv",
-            &[
-                Argument::Scratch(Scratch::Y),
-                w("attn.Wqkv.weight"),
-                weight("zeros.3072"),
-                Argument::Scratch(Scratch::Qkv),
-            ],
-        )?;
-        let kind = if i % 3 == 0 { "full" } else { "local" };
-        call(
-            if original_rope {
-                "rope_original"
-            } else {
-                "rope"
-            },
-            &[
-                Argument::Scratch(Scratch::Qkv),
-                weight(&format!("rope_{kind}_cos")),
-                weight(&format!("rope_{kind}_sin")),
-            ],
-        )?;
-        call(
-            &attention(if i % 3 == 0 { "full" } else { "local" }),
-            &[
-                Argument::Scratch(Scratch::Qkv),
-                Argument::Scratch(Scratch::Lens),
-                Argument::Scratch(Scratch::O),
-            ],
-        )?;
-        call(
-            "out",
-            &[
-                Argument::Scratch(Scratch::O),
-                w("attn.Wo.weight"),
-                z,
-                Argument::Scratch(Scratch::Y),
-            ],
-        )?;
-        call(
-            "addln",
-            &[
-                Argument::Scratch(Scratch::X),
-                Argument::Scratch(Scratch::Y),
-                w("mlp_norm.weight"),
-                z,
-                Argument::Scratch(Scratch::Y),
-            ],
-        )?;
-        call(
-            "geglu",
-            &[
-                Argument::Scratch(Scratch::Y),
-                w("mlp.Wi.weight"),
-                Argument::Scratch(Scratch::G),
-            ],
-        )?;
-        call(
-            "down",
-            &[
-                Argument::Scratch(Scratch::G),
-                w("mlp.Wo.weight"),
-                z,
-                Argument::Scratch(Scratch::Y),
-            ],
-        )?;
-        let next = if i < 27 {
-            weight(&format!("encoder.layers.{}.attn_norm.weight", i + 1))
-        } else {
-            weight("encoder.final_norm.weight")
-        };
-        call(
-            "addln",
-            &[
-                Argument::Scratch(Scratch::X),
-                Argument::Scratch(Scratch::Y),
-                next,
-                z,
-                Argument::Scratch(Scratch::Y),
-            ],
-        )?;
-        if [0, 1, 2, 27].contains(&i) {
-            dump(&format!("encoder{i}_residual"), Scratch::X, false)?;
-            dump(&format!("encoder{i}_normalized"), Scratch::Y, true)?;
-        }
-    }
-    call(
-        "type",
-        &[
-            Argument::Scratch(Scratch::Y),
-            weight("type_emb.weight"),
-            Argument::Scratch(Scratch::Types),
-            Argument::Scratch(Scratch::X),
-        ],
-    )?;
-    for i in 0..2 {
-        let p = format!("head.layers.{i}");
-        let w = |n: &str| weight(&format!("{p}.{n}"));
-        call(
-            "ln_bias",
-            &[
-                Argument::Scratch(Scratch::X),
-                Argument::Scratch(Scratch::Y),
-                w("norm1.weight"),
-                w("norm1.bias"),
-                Argument::Scratch(Scratch::Y),
-            ],
-        )?;
-        call(
-            "head_in",
-            &[
-                Argument::Scratch(Scratch::Y),
-                w("self_attn.in_proj_weight"),
-                w("self_attn.in_proj_bias"),
-                Argument::Scratch(Scratch::Qkv),
-            ],
-        )?;
-        call(
-            &attention("full"),
-            &[
-                Argument::Scratch(Scratch::Qkv),
-                Argument::Scratch(Scratch::Lens),
-                Argument::Scratch(Scratch::O),
-            ],
-        )?;
-        call(
-            "head_out",
-            &[
-                Argument::Scratch(Scratch::O),
-                w("self_attn.out_proj.weight"),
-                w("self_attn.out_proj.bias"),
-                Argument::Scratch(Scratch::Y),
-            ],
-        )?;
-        call(
-            "addln_bias",
-            &[
-                Argument::Scratch(Scratch::X),
-                Argument::Scratch(Scratch::Y),
-                w("norm2.weight"),
-                w("norm2.bias"),
-                Argument::Scratch(Scratch::Y),
-            ],
-        )?;
-        call(
-            "ffn1",
-            &[
-                Argument::Scratch(Scratch::Y),
-                w("linear1.weight"),
-                w("linear1.bias"),
-                Argument::Scratch(Scratch::Ff),
-            ],
-        )?;
-        call(
-            "ffn2",
-            &[
-                Argument::Scratch(Scratch::Ff),
-                w("linear2.weight"),
-                w("linear2.bias"),
-                Argument::Scratch(Scratch::Y),
-            ],
-        )?;
-        call(
-            "residual",
-            &[Argument::Scratch(Scratch::X), Argument::Scratch(Scratch::Y)],
-        )?;
-    }
-    Ok(steps.into_inner())
+    plan_encoder(structure, original_rope)
+        .iter()
+        .map(|planned| resolve_step(cuda, weights, planned))
+        .collect()
 }
 
 pub struct Model {
@@ -601,11 +438,12 @@ impl Model {
             let key = format!("zeros.{n}");
             weights.insert(key.clone(), upload(&key, &vec![0; n * 4])?);
         }
+        let table_bytes = omni_modernbert::geometry::rope_table_bytes(&config.structure);
         for kind in ["full", "local"] {
             for part in ["cos", "sin"] {
                 let key = format!("rope_{kind}_{part}");
                 let data = fs::read(bundle.join(format!("{key}.f32")))?;
-                ensure!(data.len() == 512 * 32 * 4, "invalid rotary table size");
+                ensure!(data.len() == table_bytes, "invalid rotary table size");
                 weights.insert(key.clone(), upload(&key, &data)?);
             }
         }
@@ -615,7 +453,7 @@ impl Model {
                 weights.len()
             );
         }
-        let plan = prepare_encoder(&cuda, &weights, original_rope)?;
+        let plan = prepare_encoder(&cuda, &weights, &config.structure, original_rope)?;
         Ok(Self {
             config,
             cuda,
@@ -676,7 +514,10 @@ impl Model {
         ensure!(
             batch.b <= 16
                 && batch.l <= 512
-                && batch.input_ids.iter().all(|i| *i >= 0 && *i < 50368),
+                && batch
+                    .input_ids
+                    .iter()
+                    .all(|i| *i >= 0 && (*i as usize) < self.config.structure.vocab_size),
             "invalid packed input"
         );
         let n = batch.markers.len();
@@ -707,7 +548,12 @@ impl Model {
             batch.markers.iter().map(Vec::len).sum::<usize>() <= 2048,
             "too many markers"
         );
-        let bytes = Workspace::required_bytes(batch.b, batch.l)?;
+        let bytes = Workspace::required_bytes(
+            batch.b,
+            batch.l,
+            &self.config.structure,
+            &self.config.limits,
+        )?;
         let cacheable = self.cache_config.max_shapes > 0 && bytes <= self.cache_config.max_bytes;
         let mut s = if cacheable {
             self.eager = None;
@@ -729,7 +575,13 @@ impl Model {
                     self.cached_bytes -= evicted.bytes;
                     drop(evicted);
                 }
-                Workspace::new(&self.cuda, batch.b, batch.l)?
+                Workspace::new(
+                    &self.cuda,
+                    batch.b,
+                    batch.l,
+                    &self.config.structure,
+                    &self.config.limits,
+                )?
             }
         } else {
             let eager = self
@@ -739,7 +591,13 @@ impl Model {
             // A different fallback shape is dropped before replacement allocation.
             match eager {
                 Some(workspace) => workspace,
-                None => Workspace::new(&self.cuda, batch.b, batch.l)?,
+                None => Workspace::new(
+                    &self.cuda,
+                    batch.b,
+                    batch.l,
+                    &self.config.structure,
+                    &self.config.limits,
+                )?,
             }
         };
         let (ids, rest) = s.staging.split_at_mut(batch.input_ids.len() * 8);

@@ -83,7 +83,7 @@ def parse_body(raw: bytes) -> dict[str, Any]:
     """Decode a bounded JSON body and reject ambiguous JSON values."""
 
     if len(raw) > MAX_BODY:
-        raise RequestError("request body exceeds 8 MiB", 413)
+        raise RequestError("request exceeds the 8 MiB body limit", 413)
     try:
         value = json.loads(
             raw.decode("utf-8"),
