@@ -160,6 +160,26 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
     }
     for graph in [false, true] {
         let mut model = Model::load_with_graph(&directory, &library, graph).unwrap();
+        // Older ABI-9 libraries must still load for causal callers. The new
+        // capability fails before scratch allocation, with an actionable error.
+        let error = model.require_prompt_prefix_bidirectional().unwrap_err();
+        let detail = format!("{error:#}");
+        assert!(
+            detail.contains(if graph { "eager" } else { "rebuild" }),
+            "{detail}"
+        );
+        for (ids, state) in [
+            (&[][..], 0),
+            (&[0, 1][..], 0),
+            (&[0, 1][..], 2),
+            (&[0, 4][..], 1),
+        ] {
+            assert!(
+                model
+                    .forward_prompt_prefix_bidirectional(ids, state)
+                    .is_err()
+            );
+        }
         assert_eq!(model.graph_stats().requested, graph);
         assert_eq!(model.graph_stats().enabled, graph);
         // The fake has no arithmetic kernels. The fixed handle and scratch are
@@ -300,6 +320,13 @@ fn explicit_graph_mode_and_adapter_models_retire_the_stream_once_after_allocatio
         );
     }
     let mut model = Model::load_with_lora(&directory, &library, &adapter, 2.0).unwrap();
+    assert!(
+        model
+            .require_prompt_prefix_bidirectional()
+            .unwrap_err()
+            .to_string()
+            .contains("merged")
+    );
     assert_eq!(
         model.graph_stats().requested,
         std::env::var("CUA_S1_GRAPH").as_deref() == Ok("1")

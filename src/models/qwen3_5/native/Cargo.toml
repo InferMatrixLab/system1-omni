@@ -1,6 +1,6 @@
 [package]
 name = "omni-qwen3-5-native"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 publish = false
 description = "Shared Qwen3.5/3.8 prefill implementation for native decision workers"
@@ -47,3 +47,7 @@ path = "../../../../tests/qwen3_5/graph_loading.rs"
 [[test]]
 name = "device_features"
 path = "../../../../tests/qwen3_5/device_features.rs"
+
+[[test]]
+name = "prefix_bidir"
+path = "../../../../tests/qwen3_5/prefix_bidir.rs"

@@ -360,6 +360,20 @@ extern "C" int cs1_attention_gated_bidirectional(const void* q, const void* k, c
     return flash::launch<true, true>(q, k, v, ldv, gate, out, T, Hq, Hk, Dh, scale, 0, stream);
 }
 
+// A correctness-first composition of the existing kernel, without modifying its
+// causal or whole-prompt specializations. Question outputs from the first pass
+// already read exactly their own row; overwrite the state outputs before any
+// downstream layer can observe them. The split is semantic, not tile-aligned.
+extern "C" int cs1_attention_gated_prefix_bidirectional(const void* q, const void* k, const void* v, int ldv,
+                                                        const void* gate, void* out, int T, int state,
+                                                        int Hq, int Hk, int Dh, float scale, void* stream) {
+    if (state <= 0 || state >= T || q == nullptr || k == nullptr || v == nullptr
+        || gate == nullptr || out == nullptr) return cudaErrorInvalidValue;
+    const int status = flash::launch<true, true>(q, k, v, ldv, gate, out, T, Hq, Hk, Dh, scale, 0, stream);
+    if (status != cudaSuccess) return status;
+    return flash::launch<true, true>(q, k, v, ldv, gate, out, state, Hq, Hk, Dh, scale, 0, stream);
+}
+
 // Same layout contract as the full pass; only the covered query rows differ:
 // q_base is a multiple of 64 and rows below it keep whatever was already in k/v.
 extern "C" int cs1_attention_gated_prefix(const void* q, const void* k, const void* v, int ldv, const void* gate,

@@ -105,6 +105,13 @@ process runs the checkpoint's joint schema head on its main thread, which is
 the thread that initialized CUDA. The joint head is still that Python module.
 Clef does not use the shared Qwen CUDA executor.
 
+The shared Qwen executor also exposes a single-row eager
+`forward_prompt_prefix_bidirectional` prerequisite: state queries read state
+keys, question queries read their complete row, and GDN remains causal. The
+model supplies an exact split, with no chunk rounding. This is not state-once
+continuation or a D3 native worker; it rejects Graph, LoRA and reference
+numerics. See the [backend capability](../src/backends/cuda/qwen3_5/README.md#full-row-prefix-bidirectional-baseline).
+
 The Qwen executor's `forward_shared` takes a request prefix, group prefixes and
 branches, ends each prefix at its last multiple of 64 tokens, and returns one final
 hidden state per branch in order

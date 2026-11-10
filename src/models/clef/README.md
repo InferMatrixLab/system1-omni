@@ -45,8 +45,8 @@ Shared file SHA-256 values, identical at both revisions:
 
 Weight shards are not hashed by the worker. Download the snapshot at the
 revision above so the shards belong to the same commit as the hashed files.
-The card names torch 2.11 and transformers 5.10.2. Those packages were not
-imported in this change.
+The card names torch 2.11 and transformers 5.10.2. The [flash acceptance](../../../recipe/clef/reference.md#controlled-migration-acceptance)
+uses the complete pinned stack in the recipe; 27B remains unverified.
 
 Workers AI model names (`@cf/cloudflare/clef`, `@cf/cloudflare/clef-flash`)
 are a hosted API. This worker does not call them.
@@ -141,91 +141,37 @@ PYTHONPATH=src python recipe/clef/export_prompt_fixture.py \
   --check
 ```
 
-No weight was loaded in this environment. The operator-reported Public231
-concurrency-1 campaign below was not re-run here. The measurement steps are
-in the [recipe](../../../recipe/clef/reference.md).
-
-## Latency
-
-Operator-reported Public231 concurrency 1 on NVIDIA L20X, compute capability
-8.9, Clef-flash, worker HEAD
-`903006530fb7772bb668bbf192ee4278e273e583`, warmup 5. Stock Public231 carries
-a `thinking` field and that HEAD returned HTTP 422 `Unknown request fields`.
-The measured file was `public231-no-thinking.jsonl` (the `thinking` key
-stripped). Its SHA-256 was not reported. Do not cite the leaderboard export
-hash `00d1f10ca1142499a598b5f1c6602d329cce1cef04c961c46fc0318daa2c67d3` as
-the hash of that file. Driver, CUDA version and hostname were not reported.
-Do not read the H800 Public231 board as a result for this worker, and do not
-label this run as H200. Percentiles are not averaged across rounds.
-
-| Round | p50 (ms) | p95 (ms) | Successful |
-| --- | --- | --- | --- |
-| run1, primary L20X round | 247.518 | 413.025 | 231/231 |
-| run2 | 247.404 | 426.231 | 231/231 |
-| run3 | 242.421 | 410.369 | 231/231 |
-
-The `thinking.enabled: false` admission strips that field before encoding.
-These L20X rounds do not include a measured p50 or p95 for that admission.
-The operator named the
-metric `successful_latency` and the clock
-`post_to_body_json_and_schema_validation`. Answer parity against another
-implementation was not part of this report.
-
-`causal-conv1d>=1.5`, `flash-linear-attention==0.5.2`, and
-`flashinfer-python==0.6.16.post3` are installed by the recipe. The worker
-imports `causal_conv1d` and `fla.ops.gated_delta_rule` before Transformers
-binds Qwen3.5. The default prefill is the FLA chunk. `--gdn-prefill
-flashinfer` replaces the chunk global, with `use_cp` false, only when that
-flag is set, the reported capability major is 9, 10, or 12, and that
-package loads. A reported 8.9, including the lab name `NVIDIA L20X`, keeps
-the FLA chunk and still becomes ready. Startup does not require the name
-`NVIDIA H200`. `/health` `linear_attention` is `fla+causal_conv1d` by
-default, or `flashinfer+fla+causal_conv1d` when the opt-in flag bound.
-The process runs one text forward before it binds, so `/health` is not
-served until that forward returns.
-`torch_chunk_gated_delta_rule` and `F.conv1d` are not served.
-
-Operator-reported Public231 C1 remeasure of worker
-`594528a9f9c1ca38ce0dbb58a549191dfbde5bf3` on the L20X-labeled lab host.
-The paste states warmup 5, concurrency 1, stock Public231 with
-`thinking.enabled` false, and metric `successful_latency`. 231/231, p50
-164.969 ms, p95 216.755 ms, `/health` `linear_attention`
-`fla+causal_conv1d`. Against `9030065` run1: Δp50 −82.549 ms (−33.35%),
-Δp95 −196.270 ms (−47.52%). Not re-run here. The paste does not restate
-the clock name, manifest hash, driver, or CUDA version. Answer parity
-was not reported. The measured bind is the FLA chunk. This pair is the
-primary a later tip has to beat.
-
-| Id | Change | Expected effect | Measured result |
-| --- | --- | --- | --- |
-| H1 | One `encode_record` per request, then the pinned forward. The handler does not tokenize the schema again before that encode. | Removes a second BPE pass from the critical path. Prefill and the joint head still dominate. | Included in HEAD `9030065`. Isolated delta unknown |
-| H2 | Fuse the joint head's per-question Python loop. | Fewer small launches after prefill. Needs a forked head and numerical parity against the pinned module. | Not implemented. No measured H200 delta |
-| H3 | `torch.compile` or CUDA graphs on the Qwen3.5 backbone. | Uncertain on the linear-attention layers. | Not implemented. No measured H200 delta |
-| H4 | Bind `flash-linear-attention` 0.5.2 and `causal-conv1d` >= 1.5 before the Qwen3.5 layers copy the chunk global. The default prefill is that FLA chunk. `--gdn-prefill flashinfer` uses FlashInfer GDN prefill 0.6.16.post3 with `use_cp` false only when the flag is set, the package loads, and the reported capability major is 9, 10, or 12. Reported 8.9, including nvidia-smi name `NVIDIA L20X`, stays on the FLA chunk and still starts. Startup is not ready on `torch_chunk` or `F.conv1d`. vLLM CuteDSL, CUDA graphs, and `torch.compile` are not used. | Replaces the PyTorch chunk loop. `/health` names the bind that started. | Tip `594528a9`, L20X-labeled host, warmup 5, concurrency 1, stock Public231 with `thinking.enabled` false, metric `successful_latency`, `/health` `fla+causal_conv1d`: p50 164.969 ms, p95 216.755 ms, 231/231. Versus `9030065` run1: Δp50 −82.549 ms (−33.35%), Δp95 −196.270 ms (−47.52%). This is the primary. FlashInfer has no forward and no answer parity against it |
-
-`omni-clef` removes the `ThreadingHTTPServer` path. An operator diagnosis on
-the L20X-labeled host put the first CUDA touch on a fresh HTTP thread near
-110 ms: HTTP about 162–175 ms, the same executor on a persistent thread
-about 48–65 ms. That diagnosis is not a Public231 paste. Against
-the vLLM p50 cited with that diagnosis (~32 ms), a persistent-thread serve
-of ~48–65 ms would leave about 1.55×. That remainder is unverified here.
-The primary to beat remains tip `594528a9`. Operator-reported Public231 C1
-of `omni-clef` tip `f9127a03b732aaf6e88c99a0212e02acfdb01880` on that host,
-not re-run here: smoke 4/4, `/health` `fla+causal_conv1d`, R1 p50 169.605 ms
-and p95 220.003 ms (231/231), R2 53.580 / 97.031, R3 52.950 / 97.608,
-quality `choice_acc=0.8417`, `noul_acc=0.7973`, `score_mae=0.2488` (matches
-the `594528a9` baseline). This is a serve-path measurement, not a latency
-KEEP. R1 does not pass the dual gate against 164.969 / 216.755. R2 and R3
-are not a new primary. Start the binary with `CLEF_PYTHON` set to the
-recipe venv; the command is in the recipe. System `python3` lacks
-`causal-conv1d` and the executor dies before the port opens.
+The flash checkpoint was loaded in the recorded 2026-10-27 run on one NVIDIA
+L20X reporting PyTorch capability 9.0 (nvidia-smi reports 8.9). Both HTTP paths
+completed three Public231 C1 rounds, 231/231 each, with exact parity under identical
+frozen FLA autotune choices. Startup, first/repeated requests, concurrency,
+TCP disconnect recovery and child exit were exercised. The
+[recipe](../../../recipe/clef/reference.md#controlled-migration-acceptance)
+records the six latency results, controls, failed initial cache experiment
+and limitations; its historical section retains the earlier operator reports.
+The contributor confirmed the raw evidence and frozen cache were lost after a
+host restart. These historical GPU results cannot currently be independently
+verified; a new campaign with durable artifacts is needed for acceptance.
+CPU coverage is 18 Rust lifecycle/serving tests and 36 Python contract tests. The
+fixed tokenizer fixture also matches the pinned loader.
 
 ## Status
 
 | Path | Clef-flash | Clef |
 | --- | --- | --- |
-| Text `choice` / `noul` / `score`, non-thinking prompt | Contract tested. Kept primary is the previous `ThreadingHTTPServer` worker: `9030065` run1 p50 247.518 ms, p95 413.025 ms; tip `594528a9` p50 164.969 ms, p95 216.755 ms, 231/231, `/health` `fla+causal_conv1d`, Δp50 −82.549 ms, Δp95 −196.270 ms. `omni-clef` `f9127a0` is recorded above and is not a KEEP | Same loader pin; the recorded latency campaigns were flash only |
+| Text `choice` / `noul` / `score`, non-thinking prompt | Historical GPU run recorded 693 exact paired responses; raw evidence lost, new acceptance pending; see recipe | Same loader interface; no 27B inference run |
 | Image and video | Rejected | Rejected |
-| Rust HTTP + persistent Python executor | Default serve path. CPU tests, plus the operator `f9127a0` paste above (not a KEEP). `CLEF_PYTHON` must be the recipe venv | Same server, `--variant clef` |
+| Rust HTTP + persistent Python executor | Default serve path with CPU lifecycle regression tests; previous GPU checks are recorded, but their raw evidence is lost | Same server, `--variant clef`; GPU unverified |
 | Joint-head native CUDA | Not implemented | Not implemented |
 | Workers AI proxy | Out of scope | Out of scope |
+
+### Failure and cancellation ownership
+
+The Rust `Executor` owns child liveness and publishes IPC errors or unwinding
+exchange panics while its
+scheduled blocking exchange still holds admission. This keeps failure state
+correct even after the HTTP caller is cancelled. Health checks reap an exited
+idle child and return unavailable instead of serving stale ready data. The
+scheduler owns FIFO admission; its closure retains the executor until the full
+response has been read. See the [service lifecycle checks](../../../recipe/clef/reference.md#service-lifecycle-acceptance)
+for error statuses, cancellation boundaries and remaining queue/deadline limits.
