@@ -182,7 +182,7 @@ def test_a_missing_broad_head_is_rejected(tmp_path):
 def test_a_later_self_consistent_snapshot_is_refused_by_the_checked_in_pin(tmp_path):
     build_package(tmp_path, small_files())
     with pytest.raises(ValueError, match="SHA-256 differs from the pin"):
-        verify_files(tmp_path, PINNED_FILES_SHA256)
+        verify_files(tmp_path, PINNED_FILES_SHA256, HYBRID_REVISION)
 
 
 def test_weights_are_checked_by_exact_pinned_size(tmp_path):

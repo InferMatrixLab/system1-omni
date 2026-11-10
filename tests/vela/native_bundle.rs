@@ -35,14 +35,28 @@ fn edit_manifest(dir: &std::path::Path, edit: impl FnOnce(&mut serde_json::Value
     std::fs::write(&manifest_path, serde_json::to_vec(&manifest).expect("json")).expect("write");
 }
 
+/// Load with the pin table [`write_bundle`] reports for its synthetic
+/// runtime files, anchored on the manifest as it currently sits on
+/// disk (the production path pins the repository's table).
+fn load_with_pins(dir: &std::path::Path, pins: &[(String, String)]) -> anyhow::Result<Bundle> {
+    Bundle::load_with_runtime_pins(dir, &manifest_sha(dir), &pins_refs(pins))
+}
+
+fn pins_refs(pins: &[(String, String)]) -> Vec<(&str, &str)> {
+    pins.iter()
+        .map(|(name, digest)| (name.as_str(), digest.as_str()))
+        .collect()
+}
+
 /// The minimal manifest of a correctly exported member; `files` are the
-/// bundle files the gate hashes.
-fn write_bundle(dir: &std::path::Path) {
+/// bundle files the gate hashes. Returns the digests the repository
+/// pin table would carry for the three verbatim runtime files.
+fn write_bundle(dir: &std::path::Path) -> Vec<(String, String)> {
     let files: [(&str, &[u8]); 6] = [
         ("backbone.safetensors", b"backbone tensors"),
         ("heads.safetensors", b"head tensors"),
         ("config.json", b"{}"),
-        ("calibration.json", b"{}"),
+        ("calibration.json", b"{\"K\": 1}"),
         ("tokenizer.json", b"{}"),
         ("tokenizer_config.json", b"{}"),
     ];
@@ -51,6 +65,21 @@ fn write_bundle(dir: &std::path::Path) {
         std::fs::write(dir.join(name), content).expect("write");
         hashes.insert(name.to_string(), json!(sha256(content)));
     }
+    let pins = [
+        "calibration.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+    ]
+    .iter()
+    .map(|name| {
+        let content = files
+            .iter()
+            .find(|(file, _)| file == name)
+            .expect("runtime file")
+            .1;
+        ((*name).to_string(), sha256(content))
+    })
+    .collect();
     let manifest = json!({
         "format": bundle::FORMAT,
         "model_id": bundle::MODEL_ID,
@@ -66,13 +95,14 @@ fn write_bundle(dir: &std::path::Path) {
         serde_json::to_vec(&manifest).expect("manifest"),
     )
     .expect("write");
+    pins
 }
 
 #[test]
 fn a_matching_bundle_loads_and_exposes_the_member() {
     let dir = temp_dir("ok");
-    write_bundle(&dir);
-    let loaded = Bundle::load(&dir, &manifest_sha(&dir)).expect("loads");
+    let pins = write_bundle(&dir);
+    let loaded = load_with_pins(&dir, &pins).expect("loads");
     assert_eq!(loaded.model_name(), "vllm-sr/Vela-2.0-0.8B");
     assert_eq!(loaded.max_length(), 16384);
     let _ = std::fs::remove_dir_all(&dir);
@@ -81,9 +111,9 @@ fn a_matching_bundle_loads_and_exposes_the_member() {
 #[test]
 fn a_tampered_file_fails_its_hash() {
     let dir = temp_dir("tampered");
-    write_bundle(&dir);
+    let pins = write_bundle(&dir);
     std::fs::write(dir.join("calibration.json"), b"{\"tampered\": true}").expect("write");
-    let error = Bundle::load(&dir, &manifest_sha(&dir)).unwrap_err();
+    let error = load_with_pins(&dir, &pins).unwrap_err();
     assert!(error.to_string().contains("calibration.json"), "{error}");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -94,14 +124,14 @@ fn a_rewritten_manifest_fails_the_anchor() {
     // the gate: the manifest now has to match an anchor fixed outside
     // the bundle directory, so the rewrite itself is refused.
     let dir = temp_dir("rewritten");
-    write_bundle(&dir);
+    let pins = write_bundle(&dir);
     let anchor = manifest_sha(&dir);
     edit_manifest(&dir, |manifest| {
         manifest["files_sha256"]["calibration.json"] =
             json!(sha256(b"{\"swapped\": true}").as_str());
     });
     std::fs::write(dir.join("calibration.json"), b"{\"swapped\": true}").expect("write");
-    let error = Bundle::load(&dir, &anchor).unwrap_err();
+    let error = Bundle::load_with_runtime_pins(&dir, &anchor, &pins_refs(&pins)).unwrap_err();
     assert!(
         error.to_string().contains("pinned SHA-256 anchor"),
         "{error}"
@@ -110,13 +140,62 @@ fn a_rewritten_manifest_fails_the_anchor() {
 }
 
 #[test]
+fn a_self_consistent_rewrite_fails_the_repository_pin() {
+    let dir = temp_dir("self-consistent");
+    let pins = write_bundle(&dir);
+    // Rewrite a verbatim runtime file and regenerate its manifest
+    // digest: the manifest's own table is satisfied, the repository
+    // pin is not.
+    std::fs::write(dir.join("calibration.json"), b"{\"rewritten\": true}").expect("write");
+    edit_manifest(&dir, |manifest| {
+        manifest["files_sha256"]["calibration.json"] =
+            json!(sha256(b"{\"rewritten\": true}").as_str());
+    });
+    let error = load_with_pins(&dir, &pins).unwrap_err();
+    assert!(error.to_string().contains("repository pin"), "{error}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_pinned_bf16_directory_loads() {
+    let dir = temp_dir("bf16-ok");
+    let pins = write_bundle(&dir);
+    std::fs::create_dir(dir.join("bf16")).expect("dir");
+    std::fs::write(dir.join("bf16/model.safetensors"), b"bf16 backbone").expect("write");
+    std::fs::write(dir.join("bf16/config.json"), b"{}").expect("write");
+    edit_manifest(&dir, |manifest| {
+        manifest["files_sha256"]["bf16/model.safetensors"] =
+            json!(sha256(b"bf16 backbone").as_str());
+        manifest["files_sha256"]["bf16/config.json"] = json!(sha256(b"{}").as_str());
+    });
+    load_with_pins(&dir, &pins).expect("loads");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_stray_file_inside_the_pinned_directory_fails_the_gate() {
+    let dir = temp_dir("bf16-stray");
+    let pins = write_bundle(&dir);
+    std::fs::create_dir(dir.join("bf16")).expect("dir");
+    std::fs::write(dir.join("bf16/model.safetensors"), b"bf16 backbone").expect("write");
+    std::fs::write(dir.join("bf16/stray.bin"), b"stray").expect("write");
+    edit_manifest(&dir, |manifest| {
+        manifest["files_sha256"]["bf16/model.safetensors"] =
+            json!(sha256(b"bf16 backbone").as_str());
+    });
+    let error = load_with_pins(&dir, &pins).unwrap_err();
+    assert!(error.to_string().contains("bf16/stray.bin"), "{error}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn a_foreign_revision_is_refused() {
     let dir = temp_dir("foreign");
-    write_bundle(&dir);
+    let pins = write_bundle(&dir);
     edit_manifest(&dir, |manifest| {
         manifest["source"]["revision"] = json!("d692394127f6f87fc581d8634c9558fe4776efce");
     });
-    let error = Bundle::load(&dir, &manifest_sha(&dir)).unwrap_err();
+    let error = load_with_pins(&dir, &pins).unwrap_err();
     assert!(error.to_string().contains("pinned"), "{error}");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -124,12 +203,12 @@ fn a_foreign_revision_is_refused() {
 #[test]
 fn an_unexpected_inventory_is_refused() {
     let dir = temp_dir("inventory");
-    write_bundle(&dir);
+    let pins = write_bundle(&dir);
     edit_manifest(&dir, |manifest| {
         manifest["backbone"]["bf16"] = json!(320);
         manifest["backbone"]["fp32"] = json!(0);
     });
-    let error = Bundle::load(&dir, &manifest_sha(&dir)).unwrap_err();
+    let error = load_with_pins(&dir, &pins).unwrap_err();
     assert!(error.to_string().contains("inventory"), "{error}");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -137,9 +216,9 @@ fn an_unexpected_inventory_is_refused() {
 #[test]
 fn an_extra_unlisted_file_fails_the_gate() {
     let dir = temp_dir("extra");
-    write_bundle(&dir);
+    let pins = write_bundle(&dir);
     std::fs::write(dir.join("extra.bin"), b"not in the manifest").expect("write");
-    let error = Bundle::load(&dir, &manifest_sha(&dir)).unwrap_err();
+    let error = load_with_pins(&dir, &pins).unwrap_err();
     assert!(error.to_string().contains("extra.bin"), "{error}");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -147,11 +226,11 @@ fn an_extra_unlisted_file_fails_the_gate() {
 #[test]
 fn an_absolute_files_key_is_refused() {
     let dir = temp_dir("absolute-key");
-    write_bundle(&dir);
+    let pins = write_bundle(&dir);
     edit_manifest(&dir, |manifest| {
         manifest["files_sha256"]["/etc/passwd"] = json!(sha256(b""));
     });
-    let error = Bundle::load(&dir, &manifest_sha(&dir)).unwrap_err();
+    let error = load_with_pins(&dir, &pins).unwrap_err();
     assert!(error.to_string().contains("plain relative name"), "{error}");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -159,11 +238,11 @@ fn an_absolute_files_key_is_refused() {
 #[test]
 fn a_parent_escaping_files_key_is_refused() {
     let dir = temp_dir("parent-key");
-    write_bundle(&dir);
+    let pins = write_bundle(&dir);
     edit_manifest(&dir, |manifest| {
         manifest["files_sha256"]["../outside.bin"] = json!(sha256(b""));
     });
-    let error = Bundle::load(&dir, &manifest_sha(&dir)).unwrap_err();
+    let error = load_with_pins(&dir, &pins).unwrap_err();
     assert!(error.to_string().contains("plain relative name"), "{error}");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -171,7 +250,7 @@ fn a_parent_escaping_files_key_is_refused() {
 #[test]
 fn a_symlinked_files_key_is_refused() {
     let dir = temp_dir("symlink-key");
-    write_bundle(&dir);
+    let pins = write_bundle(&dir);
     let outside = temp_dir("symlink-outside");
     std::fs::write(outside.join("secret.bin"), b"outside the bundle").expect("write");
     std::os::unix::fs::symlink(outside.join("secret.bin"), dir.join("linked.safetensors"))
@@ -179,20 +258,33 @@ fn a_symlinked_files_key_is_refused() {
     edit_manifest(&dir, |manifest| {
         manifest["files_sha256"]["linked.safetensors"] = json!(sha256(b"outside the bundle"));
     });
-    let error = Bundle::load(&dir, &manifest_sha(&dir)).unwrap_err();
+    let error = load_with_pins(&dir, &pins).unwrap_err();
     assert!(error.to_string().contains("symlink"), "{error}");
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&outside);
 }
 
 #[test]
+#[cfg(unix)]
+fn a_symlinked_pinned_file_fails_the_gate() {
+    let dir = temp_dir("symlink-entry");
+    let pins = write_bundle(&dir);
+    let target = dir.join("tokenizer.json");
+    std::fs::rename(&target, dir.join("tokenizer.real")).expect("rename");
+    std::os::unix::fs::symlink(dir.join("tokenizer.real"), &target).expect("symlink");
+    let error = load_with_pins(&dir, &pins).unwrap_err();
+    assert!(error.to_string().contains("symlink"), "{error}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn an_empty_files_map_fails_the_gate() {
     let dir = temp_dir("empty-files");
-    write_bundle(&dir);
+    let pins = write_bundle(&dir);
     edit_manifest(&dir, |manifest| {
         manifest["files_sha256"] = json!({});
     });
-    let error = Bundle::load(&dir, &manifest_sha(&dir)).unwrap_err();
+    let error = load_with_pins(&dir, &pins).unwrap_err();
     assert!(error.to_string().contains("files_sha256"), "{error}");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -201,7 +293,7 @@ fn an_empty_files_map_fails_the_gate() {
 fn a_missing_manifest_names_the_export_step() {
     let dir = temp_dir("empty");
     std::fs::create_dir_all(&dir).expect("tempdir");
-    let error = Bundle::load(&dir, &sha256(b"any anchor")).unwrap_err();
+    let error = Bundle::load_with_runtime_pins(&dir, "any anchor", &[]).unwrap_err();
     assert!(error.to_string().contains("export_native.py"), "{error}");
     let _ = std::fs::remove_dir_all(&dir);
 }

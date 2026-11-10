@@ -3,8 +3,7 @@
 //! The mapping tests (state → parts, SystemOne → predict, plan) run
 //! everywhere with no tokenizer and no weights. The full render parity
 //! — rows and window rows byte-for-byte against the fixtures — needs
-//! the exported bundle's tokenizer and is `#[ignore]`d, opt-in with
-//! `-- --ignored`:
+//! the exported bundle's tokenizer and is opt-in:
 //!
 //!     VELA_NATIVE_BUNDLE=weights/vela-2.0-0.8b-native \
 //!       VELA_NATIVE_MANIFEST_SHA256=<the digest the exporter prints> \
@@ -131,14 +130,9 @@ fn a_multi_part_span_is_rejected_before_rendering() {
 
 fn bundle_dir() -> PathBuf {
     let path = PathBuf::from(
-        std::env::var("VELA_NATIVE_BUNDLE")
-            .expect("set VELA_NATIVE_BUNDLE to the export directory"),
+        std::env::var("VELA_NATIVE_BUNDLE").expect("set VELA_NATIVE_BUNDLE to an exported bundle"),
     );
-    assert!(
-        path.is_dir(),
-        "VELA_NATIVE_BUNDLE is not a directory: {}",
-        path.display()
-    );
+    assert!(path.is_dir(), "{} is not a directory", path.display());
     path
 }
 

@@ -10,15 +10,15 @@ question kinds (`choice`, `noul`, `score`, `span`, `set`) on
 `/v1/systemone`, one pinned member per worker process. The 0.3B
 worker's contract freezes the text/token_ids input, the
 position-level final-hidden readout contract, the error/length
-boundaries and the parity baseline.
+boundaries and the parity baseline; see [Native path](#native-path-08b)
+for the native library.
 
 The shared Vela 2.0 wire module is deliberately shaped for the family:
 the envelope admission (`protocol`), the pinned-runtime error mapping
 (`preprocess`) and response finishing (`postprocess`) are member-neutral;
 this directory ships the 0.3B pinned executor (`engine`) and the 0.8B
 hybrid executor (`hybrid`). The worker picks the executor from the
-package's declared `model_type`. The 4B/9B members are not
-implemented.
+package's declared `model_type`. The 4B/9B members are not implemented.
 
 ## Pinned artifacts
 
@@ -112,8 +112,11 @@ The response envelope is the pinned runtime's, passed through verbatim
   value. Tie-breaking inside a question is insertion order (argmax over
   raw logits).
 - Thresholds come from the package's own `calibration.json` by question
-  id (`set:*` 0.3, PII length rule + sparse gate, `span:halu` 0.55,
-  `span:toxic` 0.1, …) unless the question's own `threshold` overrides
+  id, which ships different digits per member — the 0.3B's are
+  `set:*` 0.3, `span:halu` 0.55, `span:toxic` 0.1 plus the PII length
+  rule and sparse gate; the 0.8B hybrid's are `set:*` 0.2,
+  `span:halu` 0.35, `span:toxic` 0.05 — unless the question's own
+  `threshold` overrides
   them, in which case the applied value is echoed (`rule "given"` is
   the pinned predict-level marker on overridden span answers; set
   answers echo the value without a rule field). Serving-time
@@ -166,11 +169,15 @@ from the "no silent truncation" convention this repository's other
 text workers use. The pinned truncation order (quoted from the runtime's
 `assemble`): if the assembled sequence exceeds `max_length`, the part no
 question is `over` is cut first (never below 64 tokens, then never below
-1), then the protected (targeted) parts are cut the same way, and only
+1), then the protected (targeted) parts are cut straight toward the
+1-token floor (no 64 stop), and only
 when the questions plus schema alone still do not fit does the request
-413. Windowing then re-covers a cut labelled part (windows of the part's
-kept length, overlap up to 512 tokens, per-type aggregation: choice/score
-mean, set max, span word-logit mean; uncovered words score −30).
+413. Windowing then re-covers a labelled target longer than 2,048
+tokens in windows of the part's full token list (the runtime windows
+the un-truncated part; each window row renders within its own budget):
+windows of ≤1,800 tokens at stride 1,536 (overlap 264), with per-type
+aggregation — choice/score
+mean, set max, span word-logit mean; uncovered words score −30.
 **Known risk, kept deliberately**: a guardrail consumer can silently
 miss text beyond the truncation point — an injection payload hidden
 past the cut still evaluates against the truncated state. Tightening to
@@ -240,12 +247,17 @@ The native implementation lives in [`native/`](native/) as the
   `backbone_config` at the config root, calibration and tokenizer
   copied, and a manifest pinning the source revision, the worker
   gate's own file table, the tensor inventory and every bundle file's
-  SHA-256.
+  SHA-256. `--bf16-out` additionally writes the uniform-BF16 backbone
+  the shared qwen3_5 loader consumes.
 - `native/src/bundle.rs` re-verifies that manifest (revision,
-  inventory counts, per-file hashes) before anything loads it.
+  inventory counts, per-file hashes, the three verbatim runtime files
+  additionally against the repository's own pin table) before anything
+  loads it.
 - `native/src/contract.rs` is the wire admission, mirroring
   `protocol.py` and the pinned runtime's preamble with byte-equal
-  422/400 bodies.
+  422/400 bodies (one known residual: a non-finite JSON number answers
+  the generic 400 message here, where the Python worker names the
+  value).
 - `native/src/{state,questions,words,render,processing}.rs` are the
   token-level processing: the state → parts mapping, the SystemOne →
   predict mapping with the pinned runtime's validation triples (Noul
@@ -257,18 +269,37 @@ The native implementation lives in [`native/`](native/) as the
   word positions, the truncation budget, the 16,384-window 413) and
   the long-target window rows. All five frozen token plans
   (`tests/vela/fixtures/native-plan-*.json`) match field-for-field.
-
 - `native/src/{heads,scoring}.rs` are the F32 heads and the scoring
   path: CandidateHead, both SpanHeadV2 heads, `set_bias`, the
   per-type temperatures, set thresholds, the PII length rule and
   sparse gate, `span_decode_r4` (word units, unit vote, fill,
   edge/URL trimming), label aliasing, score normalization and the
-  window aggregation. Replaying the recorded head-input fixtures
+  window aggregation — then `system_one_response` finishes the
+  SystemOne envelope (Noul views with the range-filtered max word
+  probability and set fan-out, span clipping to the plan's field
+  ranges with re-trim, `span_heads`, thresholds, confidence formulas,
+  usage). Replaying the recorded head-input fixtures
   (`tests/vela/fixtures/head-input-*`): head-logit drift ≤ 3.8e-5,
-  predict-answer drift ≤ 7.3e-7, discrete picks and span structures
-  equal on all five cases.
+  predict-answer drift ≤ 7.3e-7, and the finished responses match the
+  frozen oracles within 1.5e-6 on four cases. The windowed long-span
+  fixture's reference answer carries no spans, so its drift comparison
+  covers the per-window head logits and the empty result, not the
+  window-aggregation arithmetic itself; a windowed fixture whose
+  reference answer has spans would close that gap.
+- `native/src/executor.rs` runs the backbone on CUDA through the
+  shared qwen3_5 crate: the family `Model` exposes only last-position
+  hidden states, so every readout position runs as its own full
+  sequence — `[parts .. position]` — which causality makes identical
+  to the reference's in-tree readout, packed into `forward_batch`.
+  The backbone runs from the uniform-BF16 export (the shared loader's
+  format); the heads stay F32 on the faithful tensors. Recorded
+  execution on sm_120 (RTX 5060, CUDA 13.1): the four small frozen
+  cases replay the recorded reference logits with a worst drift of
+  0.285 — the bf16-vs-FP32-reference scale (gate 0.35).
 
-Backbone execution and an HTTP worker are not implemented. Checks:
-`cargo test -p omni-vela-native` (27 tests, no weights, no GPU;
-render and head parity opt-in with `VELA_NATIVE_BUNDLE`; see
-[recipe/vela/native.md](../../recipe/vela/native.md)).
+The crate is a library; the HTTP worker around `Processor` +
+`Executor` is not part of it. Long-span GPU parity and measured
+latency are not recorded. Checks: `cargo test -p omni-vela-native`
+(58 tests, no weights, no GPU; render, head and response parity are
+opt-in with `VELA_NATIVE_BUNDLE`, executor parity additionally with
+`VELA_CUDA_LIB`; see [recipe/vela/native.md](../../recipe/vela/native.md)).

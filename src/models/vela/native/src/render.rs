@@ -799,3 +799,7 @@ fn block_len(block: &Block) -> usize {
         Block::Span { ids, .. } => ids.len(),
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../../tests/vela/native_render_unit.rs"]
+mod tests;
