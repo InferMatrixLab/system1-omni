@@ -50,6 +50,19 @@ fn a_string_holding_a_json_object_is_read_as_that_object() {
     assert_eq!(parts.fields["request"].end, 4);
 }
 
+#[test]
+fn structured_float_state_uses_python_exponent_spelling() {
+    let parts = system_one_state(&json!({
+        "request": {"small": 1e-7, "large": 1e20},
+    }))
+    .expect("state maps");
+
+    assert_eq!(
+        parts.parts[0].text, r#"{"large":1e+20,"small":1e-07}"#,
+        "state rendering must match Python json.dumps before tokenization"
+    );
+}
+
 // ------------------------------------------------------------- words
 
 #[test]
