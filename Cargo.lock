@@ -1359,7 +1359,7 @@ dependencies = [
  "safetensors 0.8.0",
  "serde_json",
  "tokenizers 0.22.2",
-"tokio",
+ "tokio",
 ]
 
 [[package]]
@@ -1371,7 +1371,7 @@ dependencies = [
  "onig",
  "serde",
  "serde_json",
- "sha2 0.11.1",
+ "sha2 0.11.0",
  "tokenizers 0.22.2",
 ]
 
