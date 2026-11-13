@@ -171,7 +171,10 @@ pub struct Heads {
     pub broad: SpanHead,
 }
 
-fn tensor<'a>(file: &'a SafeTensors<'a>, name: &str, expected_shape: &[usize]) -> Result<Vec<f32>> {
+fn f32_tensor<'a>(
+    file: &'a SafeTensors<'a>,
+    name: &str,
+) -> Result<safetensors::tensor::TensorView<'a>> {
     let view = file
         .tensor(name)
         .with_context(|| format!("heads.safetensors is missing {name}"))?;
@@ -179,12 +182,10 @@ fn tensor<'a>(file: &'a SafeTensors<'a>, name: &str, expected_shape: &[usize]) -
         view.dtype() == safetensors::Dtype::F32,
         "{name} must be F32"
     );
-    ensure!(
-        view.shape() == expected_shape,
-        "{name} has shape {:?}, expected {:?}",
-        view.shape(),
-        expected_shape
-    );
+    Ok(view)
+}
+
+fn tensor_values(view: safetensors::tensor::TensorView<'_>, name: &str) -> Result<Vec<f32>> {
     let (chunks, remainder) = view.data().as_chunks::<4>();
     ensure!(
         remainder.is_empty(),
@@ -199,6 +200,30 @@ fn tensor<'a>(file: &'a SafeTensors<'a>, name: &str, expected_shape: &[usize]) -
         "{name} contains non-finite values"
     );
     Ok(values)
+}
+
+fn tensor<'a>(file: &'a SafeTensors<'a>, name: &str, expected_shape: &[usize]) -> Result<Vec<f32>> {
+    let view = f32_tensor(file, name)?;
+    ensure!(
+        view.shape() == expected_shape,
+        "{name} has shape {:?}, expected {:?}",
+        view.shape(),
+        expected_shape
+    );
+    tensor_values(view, name)
+}
+
+/// The pinned checkpoint stores `set_bias` as a 0-dim scalar and the
+/// exporter passes it through verbatim, so accept that form (and a
+/// length-1 vector) while every other tensor keeps its exact shape.
+fn scalar_tensor<'a>(file: &'a SafeTensors<'a>, name: &str) -> Result<Vec<f32>> {
+    let view = f32_tensor(file, name)?;
+    ensure!(
+        view.shape().is_empty() || view.shape() == [1],
+        "{name} has shape {:?}, expected [] or [1]",
+        view.shape()
+    );
+    tensor_values(view, name)
 }
 
 fn linear(
@@ -253,7 +278,7 @@ impl Heads {
         crate::bundle::Bundle::load(bundle, pinned_manifest_sha256)?;
         let raw = std::fs::read(bundle.join("heads.safetensors")).context("heads.safetensors")?;
         let file = SafeTensors::deserialize(&raw).context("heads.safetensors must parse")?;
-        let set_bias = tensor(&file, "set_bias", &[1])?;
+        let set_bias = scalar_tensor(&file, "set_bias")?;
         // The span-head geometry ships in the manifest's calibration
         // (d 256, slots 64 for this member).
         Ok(Self {
@@ -305,7 +330,7 @@ impl Heads {
 
 #[cfg(test)]
 mod tests {
-    use super::{linear, tensor};
+    use super::{linear, scalar_tensor, tensor};
     use safetensors::{Dtype, SafeTensors, tensor::TensorView};
 
     fn f32_tensor(name: &str, shape: Vec<usize>, values: &[f32]) -> Vec<u8> {
@@ -334,5 +359,13 @@ mod tests {
         let file = SafeTensors::deserialize(&raw).expect("safetensors");
         let error = tensor(&file, "head.weight", &[1]).expect_err("non-finite tensor must fail");
         assert!(error.to_string().contains("non-finite"));
+    }
+
+    #[test]
+    fn scalar_tensor_accepts_the_checkpoint_rank_zero_shape() {
+        let raw = f32_tensor("set_bias", vec![], &[0.25]);
+        let file = SafeTensors::deserialize(&raw).expect("safetensors");
+        let values = scalar_tensor(&file, "set_bias").expect("rank-0 scalar");
+        assert_eq!(values, [0.25]);
     }
 }

@@ -83,7 +83,7 @@ VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
   cargo test -p omni-vela-native --test vela_native_heads -- --ignored --nocapture
 ~~~
 
-31 tests run everywhere with no weights and no GPU: the wire contract
+The default test suite runs everywhere with no weights and no GPU: the wire contract
 against the pinned runtime's 422/400 bodies, the bundle manifest gate,
 and the predict-mapping/plan parity on every frozen fixture. The
 `#[ignore]`d opt-in checks (run them with `-- --ignored`, as above)
