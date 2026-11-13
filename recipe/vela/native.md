@@ -92,7 +92,7 @@ VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
   cargo test -p omni-vela-native --test vela_native_executor -- --ignored --nocapture
 ~~~
 
-58 tests run everywhere with no weights and no GPU: the wire contract
+The default test suite runs everywhere with no weights and no GPU: the wire contract
 against the pinned runtime's 422/400 bodies (one known residual: a
 non-finite JSON number answers the generic 400 message, where the
 Python worker names the value), the bundle manifest gate (including
@@ -133,21 +133,20 @@ frozen cases in under a minute on that device, worst logit drift
 0.2845 (CJK 0.2845, the threshold and score cases 0.0066).
 
 Follow-up SM89 evidence is profile-specific: on an RTX 4090 with
-49,140 MiB, driver 610.57.04 and CUDA 13.2, the fixed-GEMM executor
-replayed all four 0.8B cases and passed the unchanged 0.35 gate. The
-worst drift was 0.3297 on CJK (example 0.1487, set-threshold 0.0152,
-score 0.0158). The earlier independent RTX 4090 24 GB / CUDA 13.0.88
-replay at the pre-fix head had CJK drift 0.3912; that exact 24 GB
-profile has not been rerun after the fixed-GEMM change, so this does
-not generalize the qualification to every SM89 setup. The gate and
-ceilings remain unchanged.
+driver 595.71.05 and nvcc 13.0.88, the fixed-GEMM executor replayed
+all four 0.8B cases without a threshold override and passed the
+unchanged 0.35 gate (example 0.1487, set-threshold 0.0152, CJK 0.3297,
+score 0.0158). This closes the executor finding for that profile only;
+broader hardware coverage and the windowed long-input GPU case remain
+unverified.
 
 ## Scope and limits
 
 - Implemented: bundle export + manifest gate, wire admission,
   token-level processing, F32 heads, scoring and span decoding, the
   SystemOne response finishing, and backbone execution through the
-  shared crate (full-sequence per readout position, packed batches).
+  shared crate (one full-sequence `forward_fixed` call per readout
+  position).
 - Not implemented: the HTTP worker around the library, long-span GPU
   parity on the windowed case, and measured serving latency. No
   performance claims are made.

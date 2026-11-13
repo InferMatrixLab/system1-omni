@@ -330,7 +330,7 @@ impl Heads {
 
 #[cfg(test)]
 mod tests {
-    use super::{linear, tensor};
+    use super::{linear, scalar_tensor, tensor};
     use safetensors::{Dtype, SafeTensors, tensor::TensorView};
 
     fn f32_tensor(name: &str, shape: Vec<usize>, values: &[f32]) -> Vec<u8> {
@@ -359,5 +359,13 @@ mod tests {
         let file = SafeTensors::deserialize(&raw).expect("safetensors");
         let error = tensor(&file, "head.weight", &[1]).expect_err("non-finite tensor must fail");
         assert!(error.to_string().contains("non-finite"));
+    }
+
+    #[test]
+    fn scalar_tensor_accepts_the_checkpoint_rank_zero_shape() {
+        let raw = f32_tensor("set_bias", vec![], &[0.25]);
+        let file = SafeTensors::deserialize(&raw).expect("safetensors");
+        let values = scalar_tensor(&file, "set_bias").expect("rank-0 scalar");
+        assert_eq!(values, [0.25]);
     }
 }

@@ -3,6 +3,7 @@
 //! byte-equal to the pinned runtime's rejections.
 
 use omni_vela_native::contract::{self, RequestError};
+use omni_vela_native::state::system_one_state;
 use serde_json::json;
 
 fn body(raw: &str) -> serde_json::Map<String, serde_json::Value> {
@@ -123,4 +124,19 @@ fn a_non_object_body_is_rejected() {
 fn compile_admits_and_returns_the_body() {
     let parsed = contract::compile(raw_body().as_bytes(), SERVED).expect("admitted");
     assert!(parsed.contains_key("questions"));
+}
+
+#[test]
+fn integers_larger_than_u64_reach_state_rendering_without_precision_loss() {
+    let parsed = contract::parse_body(
+        br#"{"model":"vllm-sr/Vela-2.0-0.8B","state":{"request":{"nested":18446744073709551617}},"questions":{}}"#,
+    )
+    .expect("valid body");
+
+    assert_eq!(
+        parsed["state"]["request"]["nested"].to_string(),
+        "18446744073709551617"
+    );
+    let parts = system_one_state(&parsed["state"]).expect("state maps");
+    assert_eq!(parts.parts[0].text, r#"{"nested":18446744073709551617}"#);
 }

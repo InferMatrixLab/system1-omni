@@ -3,7 +3,8 @@
 //! states, so every readout position runs as its own full sequence —
 //! `[parts .. position]` — and causality makes that hidden identical
 //! to the in-sequence one the reference reads inside its tree forward.
-//! Sequences pack into `forward_batch`.
+//! Each sequence runs independently through `forward_fixed`; this is
+//! the fixed-M path validated for the varying readout lengths on SM89.
 //!
 //! The backbone runs from the bundle's uniform-BF16 export — the
 //! shared loader's format — while the Vela heads stay F32 on the
@@ -217,10 +218,9 @@ impl Executor {
     fn run_all(&mut self, readouts: &[Readout]) -> Result<Vec<Vec<f32>>> {
         let mut hiddens = Vec::with_capacity(readouts.len());
         const CHUNK: usize = 16;
-        // A readout's rounding depends on which readouts share its
-        // packed chunk (the input-projection GEMM runs over the packed
-        // token count), so the recorded GPU evidence and CHUNK must
-        // move together.
+        // Bound host-side bookkeeping without changing the execution
+        // contract: every sequence still receives its own forward_fixed
+        // call and therefore does not share a packed backbone batch.
         for chunk in readouts.chunks(CHUNK) {
             let inputs: Vec<&[u32]> = chunk.iter().map(|r| r.ids.as_slice()).collect();
             // SM89's shape-dependent cuBLASLt choice changes the span

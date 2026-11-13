@@ -35,17 +35,12 @@ pub fn canonical(value: &Value) -> String {
     }
 }
 
-/// Scalars as Python `json.dumps` renders them: integers in range
-/// verbatim, floats through the shared Python-parity formatter
-/// (`1e+20`, `1.5e-07` — `serde_json` prints `1e20`, `1.5e-7`).
+/// Scalars as Python `json.dumps` renders them: integers verbatim, including
+/// arbitrary-precision request integers, and floats through the shared
+/// Python-parity formatter (`1e+20`, `1.5e-07` — `serde_json` prints
+/// `1e20`, `1.5e-7`).
 fn scalar(value: &Value) -> String {
-    match value {
-        Value::Number(number) if number.is_i64() || number.is_u64() => number.to_string(),
-        Value::Number(number) => {
-            omni_qwen3_5_native::json::float_repr(number.as_f64().expect("a JSON number"))
-        }
-        other => serde_json::to_string(other).unwrap(),
-    }
+    omni_qwen3_5_native::json::dumps(value)
 }
 
 /// JSON content → model text: strings as they are, anything else as
