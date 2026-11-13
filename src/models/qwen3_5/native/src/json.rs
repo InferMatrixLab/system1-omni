@@ -1,8 +1,9 @@
 //! Request JSON, on serde_json.
 //!
-//! - [`parse`] rejects what the contract rejects with a 400: invalid JSON or UTF-8,
-//!   `NaN`/`Infinity`, numbers out of range, lone surrogates and nesting deeper than
-//!   serde_json's limit (all serde_json errors), and keys repeated in an object.
+//! - [`parse`] and [`parse_preserving_integers`] reject what the contract rejects
+//!   with a 400: invalid JSON or UTF-8, `NaN`/`Infinity`, numbers out of range,
+//!   lone surrogates and nesting deeper than serde_json's limit (all serde_json
+//!   errors), and keys repeated in an object.
 //! - [`dumps`] writes `json.dumps(value, ensure_ascii=False)`: separators `, ` and
 //!   `: `, key order kept, floats as Python's `repr`.
 
@@ -16,8 +17,24 @@ use serde_json::{Map, Number, Value};
 
 /// Decode a request body into its top-level object; the error is the 400 message.
 pub fn parse(raw: &[u8]) -> Result<Map<String, Value>, String> {
+    parse_with_integer_mode(raw, false)
+}
+
+/// Decode a request while keeping integer literals outside `i64`/`u64` exact.
+///
+/// Floats still take the binary64 path used by Python's `json.loads`, including
+/// its range checks. This is deliberately a separate entry point so callers whose
+/// contracts reject or normalize oversized integers keep [`parse`]'s behavior.
+pub fn parse_preserving_integers(raw: &[u8]) -> Result<Map<String, Value>, String> {
+    parse_with_integer_mode(raw, true)
+}
+
+fn parse_with_integer_mode(
+    raw: &[u8],
+    preserve_large_integers: bool,
+) -> Result<Map<String, Value>, String> {
     let value = serde_json::from_slice::<Box<RawValue>>(raw)
-        .and_then(|raw| parse_value(&raw, 0))
+        .and_then(|raw| parse_value(&raw, 0, preserve_large_integers))
         .map_err(|e| format!("request body is not valid JSON: {e}"))?;
     match value {
         Value::Object(map) => Ok(map),
@@ -27,12 +44,19 @@ pub fn parse(raw: &[u8]) -> Result<Map<String, Value>, String> {
 
 // Read containers as raw JSON so feature unification with arbitrary_precision
 // cannot confuse numeric values or legitimate private-marker object keys.
-fn parse_value(raw: &RawValue, depth: usize) -> serde_json::Result<Value> {
+fn parse_value(
+    raw: &RawValue,
+    depth: usize,
+    preserve_large_integers: bool,
+) -> serde_json::Result<Value> {
     let text = raw.get();
     if !matches!(text.as_bytes()[0], b'{' | b'[') {
         let value: Value = serde_json::from_str(text)?;
         return if let Value::Number(n) = value {
-            if n.is_i64() || n.is_u64() {
+            if n.is_i64()
+                || n.is_u64()
+                || (preserve_large_integers && !text.contains(['.', 'e', 'E']))
+            {
                 Ok(Value::Number(n))
             } else {
                 n.as_f64()
@@ -47,7 +71,10 @@ fn parse_value(raw: &RawValue, depth: usize) -> serde_json::Result<Value> {
     if depth >= 127 {
         return Err(de::Error::custom("recursion limit exceeded"));
     }
-    struct Container(usize);
+    struct Container {
+        depth: usize,
+        preserve_large_integers: bool,
+    }
     impl<'de> Visitor<'de> for Container {
         type Value = Value;
         fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -56,7 +83,10 @@ fn parse_value(raw: &RawValue, depth: usize) -> serde_json::Result<Value> {
         fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
             let mut items = Vec::new();
             while let Some(raw) = seq.next_element::<Box<RawValue>>()? {
-                items.push(parse_value(&raw, self.0 + 1).map_err(de::Error::custom)?);
+                items.push(
+                    parse_value(&raw, self.depth + 1, self.preserve_large_integers)
+                        .map_err(de::Error::custom)?,
+                );
             }
             Ok(Value::Array(items))
         }
@@ -71,13 +101,17 @@ fn parse_value(raw: &RawValue, depth: usize) -> serde_json::Result<Value> {
                 }
                 obj.insert(
                     key,
-                    parse_value(&raw, self.0 + 1).map_err(de::Error::custom)?,
+                    parse_value(&raw, self.depth + 1, self.preserve_large_integers)
+                        .map_err(de::Error::custom)?,
                 );
             }
             Ok(Value::Object(obj))
         }
     }
-    serde_json::Deserializer::from_str(text).deserialize_any(Container(depth))
+    serde_json::Deserializer::from_str(text).deserialize_any(Container {
+        depth,
+        preserve_large_integers,
+    })
 }
 
 /// A string as a JSON literal, which is also how error messages quote names.
