@@ -63,8 +63,8 @@ pub fn parse_body(raw: &[u8]) -> Result<Map<String, Value>, RequestError> {
     if raw.len() > MAX_BODY {
         return Err(RequestError::detail(413, "request body exceeds 8 MiB"));
     }
-    let message =
-        omni_qwen3_5_native::json::parse(raw).map_err(|error| normalize_parse_error(&error))?;
+    let message = omni_qwen3_5_native::json::parse_preserving_integers(raw)
+        .map_err(|error| normalize_parse_error(&error))?;
     Ok(message)
 }
 
