@@ -165,7 +165,9 @@ worker, or a native Rust/CUDA worker on Hopper. The Cua-S1 4B 0.2 `text` adapter
 runs as a Python worker or as a native worker on CUDA. Open-Jev-27B-v1.1
 and Open-Jev-9B run on the same native Rust/CUDA worker. Cua-S1 also has a
 Python screenshot worker, Valen-Preview-0923 has a Python reference worker for
-text and one-image state, CLM has a stub-encoder contract recipe, and OmniJev-4B
+text and one-image state, Valen-Decision-1.5 has a separate Python reference
+worker on the released checkpoints' own runtime, CLM has a stub-encoder
+contract recipe, and OmniJev-4B
 v1.1 runs on a native Rust/CUDA worker. D3
 (Decision 3.0) has a Python reference worker that runs the checkpoint's own
 pinned runtime for text, image and video state, and the Vela 2.0 members (0.3B and the 0.8B
@@ -184,6 +186,7 @@ checkpoint. Public231 concurrency-1 latency for heads `1ba07d1`, `f968e576`,
 | Cua-S1 4B 0.2 (`multimodal` adapter) | [Python CUDA reference](src/frontend/cua_s1.py) and [native Rust/CUDA screenshot worker](recipe/cua_s1/native_screenshot.md); one PNG/JPEG image, `choice`; scoped RTX 4090 validation |
 | JEMM (Qwen3.8-27B) | [Native Rust/CUDA worker](recipe/jemm/README.md); [text and 1–4-image frozen-corpus parity on A800](src/models/jemm/README.md#validation) |
 | Valen-Preview-0923 | [Python reference worker](recipe/valen/reference.md); text state or one inline PNG/JPEG image, `choice`/`noul`/`score`; author-run on RTX 5060 Laptop GPU (sm_120, WSL2), owner: community |
+| Valen-Decision-1.5 | [Python reference worker](recipe/valen_decision_1_5/reference.md) on the released checkpoint's own runtime; text state or one inline PNG/JPEG image, `choice`/`noul`/`score`, no `bbox`; author-run on one NVIDIA H200 for 0.8B and 2B, owner: community |
 | Open-Jev-27B-v1.1 | [Native Rust/CUDA worker](recipe/open_jev/native.md); eager text decisions with within-request candidate optimizations; [historical H200 validation](recipe/open_jev/validation.md) |
 | Open-Jev-9B | The same [native Rust/CUDA worker](recipe/open_jev/native.md); eager independent text candidates; [reference comparison on sm_89](recipe/open_jev/validation-9b.md) |
 | StartLux-Decision v1.1 4B Instant | [Native Rust/CUDA text worker](recipe/startlux/README.md); `choice` / `noul` / `score`; weights CC BY-NC 4.0; Instant only (no AutoThink, no 27B); GPU parity unverified; [L20X latency recipe](recipe/startlux/latency.md) |
