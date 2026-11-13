@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use omni_vela_native::scoring::{
     Calibration, SpanOut, aggregate_windows, row_answers, system_one_response,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// The member's full model id (`vllm-sr/Vela-2.0-…`) from the selected
 /// bundle's manifest, else the 0.8B baseline.
@@ -413,7 +413,8 @@ fn the_systemone_finishing_matches_the_frozen_oracles() {
             &span_probs,
             &part_texts,
             input_tokens,
-        );
+        )
+        .expect("complete predictions should finish");
         let want = &oracle["system_one"];
         let drift = assert_response_parity(case, &response, want, gate);
         println!("{case}: response drift {drift:.3e}");
@@ -426,6 +427,70 @@ fn sigmoid_f32(row: &[f32], temperature: f64) -> f32 {
     row.iter()
         .map(|v| (1.0 / (1.0 + (-(*v as f64) / temperature).exp())) as f32)
         .fold(0.0f32, |a, b| a.max(b))
+}
+
+fn noul_plan(qid: &str) -> Value {
+    json!({
+        "qid": qid,
+        "type": "noul",
+        "criteria": {},
+        "range": null,
+        "part": "user",
+    })
+}
+
+fn noul_prediction(qid: &str) -> Value {
+    json!({
+        "id": qid,
+        "type": "choice",
+        "answer": "yes",
+        "probabilities": {"no": 0.25, "yes": 0.75},
+    })
+}
+
+#[test]
+fn response_finishing_rejects_a_missing_prediction() {
+    let error = system_one_response(
+        "m",
+        &[noul_plan("q")],
+        &[],
+        &HashMap::new(),
+        &HashMap::new(),
+        0,
+    )
+    .expect_err("a missing prediction must not produce a response");
+    assert!(error.to_string().contains("missing prediction"), "{error}");
+}
+
+#[test]
+fn response_finishing_rejects_duplicate_and_extra_prediction_ids() {
+    let duplicate = system_one_response(
+        "m",
+        &[noul_plan("q")],
+        &[noul_prediction("q"), noul_prediction("q")],
+        &HashMap::new(),
+        &HashMap::new(),
+        0,
+    )
+    .expect_err("duplicate prediction IDs must not overwrite each other");
+    assert!(
+        duplicate.to_string().contains("duplicate prediction ID"),
+        "{duplicate}"
+    );
+
+    let extra = system_one_response(
+        "m",
+        &[noul_plan("q")],
+        &[noul_prediction("q"), noul_prediction("other")],
+        &HashMap::new(),
+        &HashMap::new(),
+        0,
+    )
+    .expect_err("an answer for an unknown question must be rejected");
+    assert!(
+        extra.to_string().contains("unexpected prediction ID"),
+        "{extra}"
+    );
 }
 
 /// Structural (order- and float-insensitive) view of a spans array:

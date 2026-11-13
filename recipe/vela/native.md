@@ -100,13 +100,14 @@ predict mapping, the per-row decomposition, the rendered `p_ids`,
 blocks and readout positions, truncation, a windowed long-span case).
 The example-request token plan totals 1,041 tokens, matching the
 oracle fixture's `usage.input_tokens`. The head inputs record the
-hidden states the F32 heads consume, the heads' logits and the
-calibrated predict answers. Both recorders run the worker's own
-`verify_package()` gate before the package is imported, so the frozen
-fixtures always come from the pinned package. Both exporters import
-and initialize the runtime with bytecode writing off, so the verified
-package stays reusable: a later `verify_files()` gate run or worker
-startup is not poisoned by a `__pycache__` an export wrote.
+hidden states the F32 heads consume, the heads' logits, the actual
+row composition of each runtime batch and the calibrated predict
+answers from one `_predict` execution. Both recorders run the worker's
+own `verify_package()` gate before the package is imported, so the
+frozen fixtures always come from the pinned package. Both exporters
+import and initialize the runtime with bytecode writing off, so the
+verified package stays reusable: a later `verify_files()` gate run or
+worker startup is not poisoned by a `__pycache__` an export wrote.
 
 ## Checks
 
@@ -124,7 +125,7 @@ VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
   cargo test -p omni-vela-native --test vela_native_executor -- --ignored --nocapture
 ~~~
 
-56 tests run everywhere with no weights and no GPU: the wire
+The default test suite runs everywhere with no weights and no GPU: the wire
 contract against the pinned runtime's 422/400 bodies (one known
 residual: a non-finite JSON number answers the generic 400 message,
 where the Python worker names the value), the bundle manifest gate

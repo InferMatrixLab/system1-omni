@@ -4,7 +4,9 @@
 //! predict-level answers. Parity target: the `head-input-*.json`
 //! fixtures' `predict.answers`.
 
+use anyhow::{Context, Result, ensure};
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
 
 /// The package's `calibration.json` as typed lookup.
 pub struct Calibration {
@@ -647,6 +649,48 @@ pub fn aggregate_windows(
 
 // ---------------------------------------------------- SystemOne finishing
 
+fn validate_prediction_coverage<'a>(
+    plan: &[Value],
+    predict_answers: &'a [Value],
+) -> Result<HashMap<String, &'a Value>> {
+    let mut plan_ids = HashSet::with_capacity(plan.len());
+    for (index, entry) in plan.iter().enumerate() {
+        let qid = entry
+            .get("qid")
+            .and_then(Value::as_str)
+            .with_context(|| format!("plan[{index}].qid must be a string"))?;
+        ensure!(!qid.is_empty(), "plan[{index}].qid must not be empty");
+        ensure!(
+            plan_ids.insert(qid.to_owned()),
+            "duplicate plan question ID {qid:?}"
+        );
+    }
+
+    let mut by_id = HashMap::with_capacity(predict_answers.len());
+    for (index, answer) in predict_answers.iter().enumerate() {
+        let id = answer
+            .get("id")
+            .and_then(Value::as_str)
+            .with_context(|| format!("prediction[{index}].id must be a string"))?;
+        ensure!(!id.is_empty(), "prediction[{index}].id must not be empty");
+        ensure!(
+            by_id.insert(id.to_owned(), answer).is_none(),
+            "duplicate prediction ID {id:?}"
+        );
+    }
+
+    for id in by_id.keys() {
+        ensure!(plan_ids.contains(id), "unexpected prediction ID {id:?}");
+    }
+    for id in &plan_ids {
+        ensure!(
+            by_id.contains_key(id),
+            "missing prediction for plan question {id:?}"
+        );
+    }
+    Ok(by_id)
+}
+
 /// `system_one_response`: predict answers + the response plan -> the
 /// SystemOne envelope (model, answers, usage, spans/span_heads,
 /// sets, thresholds), with the span Noul view = the max word
@@ -659,11 +703,8 @@ pub fn system_one_response(
     span_word_probabilities: &std::collections::HashMap<String, Vec<f32>>,
     part_texts: &std::collections::HashMap<String, String>,
     input_tokens: usize,
-) -> Value {
-    let by_id: std::collections::HashMap<&str, &Value> = predict_answers
-        .iter()
-        .map(|a| (a["id"].as_str().unwrap_or(""), a))
-        .collect();
+) -> Result<Value> {
+    let by_id = validate_prediction_coverage(plan, predict_answers)?;
     let mut answers = serde_json::Map::new();
     let mut spans = serde_json::Map::new();
     let mut span_heads = serde_json::Map::new();
@@ -671,9 +712,10 @@ pub fn system_one_response(
     let mut thresholds = serde_json::Map::new();
     for entry in plan {
         let qid = entry["qid"].as_str().unwrap_or("");
-        let Some(answer) = by_id.get(qid) else {
-            continue;
-        };
+        let answer = by_id
+            .get(qid)
+            .copied()
+            .with_context(|| format!("missing prediction for plan question {qid:?}"))?;
         match entry["type"].as_str().unwrap_or("") {
             "noul" => {
                 answers.insert(
@@ -828,7 +870,7 @@ pub fn system_one_response(
     if !thresholds.is_empty() {
         response.insert("thresholds".into(), Value::Object(thresholds));
     }
-    Value::Object(response)
+    Ok(Value::Object(response))
 }
 
 /// The top-two probability margin (the reference's `_choice_confidence`).
