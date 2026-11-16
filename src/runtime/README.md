@@ -1,13 +1,13 @@
 # Native execution runtime
 
-`omni-runtime` provides `SerialScheduler` for the Cua-S1, Open-Jev, Laya,
-Decider, and Clef workers. Cua-S1, Open-Jev, Laya, and Decider assemble a
+`omni-runtime` provides `SerialScheduler` for native workers and `BatchScheduler`
+for Open-Jev-9B default execution. Cua-S1, Open-Jev, Laya, and Decider assemble a
 processor, one scheduler for the loaded executor, and the executor. HTTP
 handlers still coordinate `prepare` → `execute` → `finish`. Clef uses the
 same scheduler. Its admitted closure is the frame RPC to its Python
 executor and does not call CUDA.
 
-The scheduler owns FIFO admission and blocking dispatch. A caller waits
+The serial scheduler owns FIFO admission and blocking dispatch. A caller waits
 asynchronously for one execution permit before entering Tokio's blocking pool.
 Cloning a scheduler shares that admission queue; separate loaded executors have
 separate queues. The model mutex remains a guard for Rust's mutable executor
@@ -16,14 +16,15 @@ state. Waiting requests no longer occupy blocking threads waiting for that mutex
 | Worker | Admitted unit | Work outside admission |
 | --- | --- | --- |
 | Cua-S1 | One question's unpadded Qwen forward. Release before admitting its next question. | Request preparation, CPU letter projection and response finishing. |
-| Open-Jev | One complete request's independent candidate forwards and CPU scalar heads. | Request preparation and calibrated response finishing. |
+| Open-Jev | 9B default: original candidate batches or one exclusive exact-prefix request through `BatchScheduler`; other modes: one complete request through `SerialScheduler`. | Request preparation and calibrated response finishing. |
 | Laya | One complete padded request, including GPU scorer/action head and copyback. | Request preparation/padding and calibrated response finishing. |
 | Decider | One complete request's independent rows, including within-request packing and LM-head projection. | Request preparation and calibrated response finishing. An optional request reservation covers both; token reservation begins after preparation. |
 | Clef | One complete text request. The closure writes one frame and waits for that same executor process. | HTTP body reads and the cached health response. CUDA stays on the executor process main thread, including the warmup that runs before the port opens. |
 
 Models retain weights, heads, device state, scratch buffers and graph caches.
-The scheduler takes an owned closure and returns its result; it does not know
-model identifiers, question/candidate mappings, tensor layouts or backend APIs.
+Serial scheduling takes an owned closure; batch scheduling takes owned items and
+one executor callback. Neither scheduler knows model identifiers,
+question/candidate mappings, tensor layouts or backend APIs.
 The existing numerical, ordering, whole-request failure and readiness contracts
 remain in the processors, executors and worker handlers.
 
@@ -74,14 +75,44 @@ See the [Decider recipe](../../recipe/decider/README.md) for configuration,
 health fields and overload/deadline responses. Other workers keep their current
 admission behavior unless they explicitly opt in.
 
-Shared processing orchestration, compatibility grouping, cross-request dynamic
-batching and a shared worker drain lifecycle remain planned. Models may pack
-supported inputs within one request; this scheduler does not assemble GPU batches.
-The Qwen executor supports single prompts, bounded packed prefill (Open-Jev
-candidates or Decider complete rows), and request-local shared prefixes
-(Decider opt-in). Graph, fixed and shared execution retain the same complete
-request admission unit and context lifetime; the scheduler does not construct
-GPU batches or coordinate separately running workers.
+## Cross-request batching for Open-Jev-9B
+
+`BatchScheduler` owns a FIFO queue and one execution thread per loaded executor.
+An idle worker runs immediately. It combines work already in the queue without a
+batching delay. Each item declares an item count, a cost and whether it must run
+alone; the generic scheduler enforces the configured budgets. An oversized atomic
+item runs alone, without truncation. Queue admission itself is not capacity-limited.
+
+The 9B adapter preserves its original batches of at most 16 candidates and 4096
+tokens as atomic items. A GPU dispatch may combine these items up to 16 candidates
+and 8192 tokens. Input/gate-up projections retain the original batch row counts;
+output/down projections retain individual candidate lengths. Compatible GEMMs can
+share a call, and incompatible ones keep separate calls. Prefix reuse is an
+exclusive item using the existing request-local state path. Other Open-Jev modes
+and checkpoints keep serial execution. Complete request outputs are reconstructed
+before per-question calibration.
+
+Cancellation before the first item dispatch discards that queued request. Once
+any item starts, all remaining items and resources stay alive through completion,
+even when the caller disconnects. Errors fail affected complete requests; unrelated
+queued requests remain ordered. The model callback synchronizes partially submitted
+GPU work on errors or panics, and a panic closes the execution queue. The callback
+and its model resources remain owned by the worker until it finishes. Dropping all
+scheduler handles closes admission and joins the execution thread, waiting for
+dispatched work and callback resources to retire before the owner exits.
+
+`BatchScheduler::is_available()` reports worker liveness shared by all clones.
+The worker marks itself unavailable before returning an executor-panic error and
+also on thread exit. Subsequent requests fail, including empty requests. Ordinary
+callback errors fail their requests but leave the worker available. Availability
+does not measure queue capacity or probe GPU health. Open-Jev combines this state
+with model-mutex poisoning in `/health`: HTTP 200 / `ready` while available and
+HTTP 503 / `failed` after permanent failure. It requires a process restart; it
+does not rebuild possibly corrupted model state automatically.
+
+Shared processing orchestration and cross-worker coordination remain planned.
+Batch layout keys include both candidate lengths and original input projection
+groups, so CUDA Graph replay cannot conflate different numerical layouts.
 
 CPU tests cover FIFO serialization, queued cancellation, retention of admission
 and resources after dispatched cancellation, errors/panics, independent loaded
