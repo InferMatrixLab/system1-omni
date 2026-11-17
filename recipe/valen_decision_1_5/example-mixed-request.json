@@ -1,0 +1,30 @@
+{
+  "model": "valen-decision-1.5-0.8b",
+  "state": {
+    "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAx0lEQVR42u3aPQ6AIAyAUSTeg4FzeHrP4cBJcHAxAvJjUiB+HQWaPmoiGhfvvZo5tJo8AAAAAAAAAAAAAAAAAABAr1hTA4cxX/Ja56rmm+0IL7rdtgPEIlr6feidsY5ZejlDD159dr6eovqXVXqW6lNreQ4Ibn80Ax2Q3f4wDx0AAADAjwAl5/vaPHRAvAmPDHRAtgnh2j4daDNEV3W7hWoNqfk9X+qvmrJH1HG/SmQZJV1a+NkDAAAAAAAAAAAAAAAAAAC0xQlazzyDRRN7tQAAAABJRU5ErkJggg=="
+  },
+  "questions": {
+    "color": {
+      "type": "choice",
+      "instructions": "What color is the circle?",
+      "criteria": {
+        "red": "The circle is red.",
+        "blue": "The circle is blue.",
+        "green": "The circle is green."
+      }
+    },
+    "square": {
+      "type": "noul",
+      "instructions": "The image contains a red rectangle."
+    },
+    "shapes": {
+      "type": "score",
+      "instructions": "How many shapes are in the image?",
+      "criteria": [
+        "There are no shapes.",
+        "There is exactly one shape.",
+        "There are two or more shapes."
+      ]
+    }
+  }
+}

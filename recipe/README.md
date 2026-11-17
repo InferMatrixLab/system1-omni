@@ -17,6 +17,10 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
 - [Valen-Preview-0923 checkpoint export](valen/export.md): export the pinned
   checkpoint and base to a manifest-described safetensors artifact set and run
   the export regression.
+- [Valen-Decision-1.5 reference worker](valen_decision_1_5/reference.md): verify a
+  pinned released checkpoint (0.8B to 27B), start the text-or-image
+  `choice`/`noul`/`score` worker on the checkpoint's own runtime and verify the
+  frontend; GPU parity is recorded for 0.8B and 2B.
 - [Cua-S1 4B 0.2 native text worker](cua_s1/native.md): build the CUDA library and
   the Rust worker, export BF16 weights with the original FP32 adapter and start
   the worker.
