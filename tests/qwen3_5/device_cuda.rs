@@ -31,3 +31,47 @@ fn device_finite_scan_rejects_all_nonfinite_encodings_and_recovers() {
         (api().cs1_stream_destroy)(stream);
     }
 }
+
+#[test]
+#[ignore = "requires CUDA and CUA_S1_CUDA_LIB; run serially"]
+fn device_row_subviews_check_extent_offset_and_only_scan_selected_rows() {
+    load(&std::path::PathBuf::from(
+        std::env::var_os("CUA_S1_CUDA_LIB").unwrap(),
+    ))
+    .unwrap();
+    set_device(0).unwrap();
+    let stream = new_stream().unwrap();
+    let buffer = DeviceBuffer::new(24).unwrap();
+    let values: Vec<_> = (0..12).map(|i| half::bf16::from_f32(i as f32)).collect();
+    let bytes: Vec<_> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
+    unsafe {
+        upload(buffer.at(0), &bytes, stream).unwrap();
+    }
+    synchronize(stream).unwrap();
+    let full = buffer.bf16_matrix(4, 3).unwrap();
+    let middle = full.slice_rows(1..3).unwrap().unwrap();
+    assert_eq!(middle.download().unwrap(), values[3..9]);
+    assert_eq!(
+        middle
+            .slice_rows(1..2)
+            .unwrap()
+            .unwrap()
+            .download()
+            .unwrap(),
+        values[6..9]
+    );
+    assert!(full.slice_rows(4..4).unwrap().is_none());
+    let reversed = std::ops::Range { start: 3, end: 2 };
+    for range in [reversed, 0..5, 5..5] {
+        assert!(full.slice_rows(range).is_err());
+    }
+    unsafe {
+        upload(buffer.at(0), &half::bf16::NAN.to_le_bytes(), stream).unwrap();
+    }
+    assert!(full.validate_finite(stream).is_err());
+    middle.validate_finite(stream).unwrap();
+    synchronize(stream).unwrap();
+    unsafe {
+        (api().cs1_stream_destroy)(stream);
+    }
+}

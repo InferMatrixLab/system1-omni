@@ -370,8 +370,12 @@ async fn a_dead_executor_does_not_hang_the_next_request() {
     let (status, _) = post(running.addr, BODY);
     assert_eq!(status, 200);
     let (status, body) = post(running.addr, BODY);
-    assert_eq!(status, 500, "{}", String::from_utf8_lossy(&body));
-    assert_eq!(body, br#"{"detail": "inference failed"}"#);
+    // An exit discovered before dispatch is 503; an in-flight EOF is 500.
+    assert!(
+        status == 500 || status == 503,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
     let (status, body) = post(running.addr, BODY);
     assert_eq!(status, 503, "{}", String::from_utf8_lossy(&body));
     assert_eq!(body, br#"{"detail": "worker unavailable"}"#);
@@ -388,4 +392,160 @@ fn post_path(addr: SocketAddr, path: &str, body: &[u8]) -> (u16, Vec<u8>) {
         body.len()
     );
     exchange(addr, &head, body)
+}
+
+// File barriers put cancellation at a known execution boundary. No GPU is used.
+struct Trace(PathBuf);
+
+impl Trace {
+    fn new() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self(std::env::temp_dir().join(format!("clef-{}-{id}.trace", std::process::id())))
+    }
+
+    fn text(&self) -> String {
+        std::fs::read_to_string(&self.0).unwrap_or_default()
+    }
+
+    fn release(&self) {
+        std::fs::write(self.0.with_extension("trace.release"), b"go").unwrap();
+    }
+
+    async fn wait(&self, event: &str) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !self.text().contains(event) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("worker event");
+    }
+}
+
+impl Drop for Trace {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+        let _ = std::fs::remove_file(self.0.with_extension("trace.release"));
+    }
+}
+
+fn state_body(state: &str) -> Vec<u8> {
+    let mut body: Value = serde_json::from_slice(BODY).unwrap();
+    body["state"] = Value::String(state.into());
+    serde_json::to_vec(&body).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn health_detects_idle_executor_exit_without_an_inference() {
+    let running = boot(&[], Duration::from_secs(2)).await;
+    let (_, body) = get(running.addr, "/health");
+    let pid = json_body(&body)["pid"].as_u64().unwrap().to_string();
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &pid])
+            .status()
+            .unwrap()
+            .success()
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let (status, body) = get(running.addr, "/health");
+    assert_eq!(status, 503, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(post(running.addr, BODY).0, 503);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cancelled_exchange_failure_still_marks_executor_unavailable() {
+    let trace = Trace::new();
+    let engine = Arc::new(spawn_fake(&[("CLEF_FAKE_TRACE", trace.0.to_str().unwrap())]).unwrap());
+    let task_engine = Arc::clone(&engine);
+    let task = tokio::spawn(async move { task_engine.decide(state_body("malformed")).await });
+    trace.wait("start malformed").await;
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    trace.release();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        !engine.ready(),
+        "cancelled caller must not own failure publication"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cancellation_retains_inflight_work_and_skips_queued_work() {
+    let trace = Trace::new();
+    let engine = Arc::new(spawn_fake(&[("CLEF_FAKE_TRACE", trace.0.to_str().unwrap())]).unwrap());
+    let first_engine = Arc::clone(&engine);
+    let first = tokio::spawn(async move { first_engine.decide(state_body("block")).await });
+    trace.wait("start block").await;
+    let queued_engine = Arc::clone(&engine);
+    let queued = tokio::spawn(async move { queued_engine.decide(state_body("cancelled")).await });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    queued.abort();
+    assert!(queued.await.unwrap_err().is_cancelled());
+    first.abort();
+    assert!(first.await.unwrap_err().is_cancelled());
+    let next_engine = Arc::clone(&engine);
+    let next = tokio::spawn(async move { next_engine.decide(state_body("next")).await });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert!(!next.is_finished());
+    assert_eq!(trace.text(), "start block\n");
+    trace.release();
+    assert_eq!(next.await.unwrap().status(), 200);
+    trace.wait("finish next").await;
+    assert_eq!(
+        trace.text(),
+        "start block\nfinish block\nstart next\nfinish next\n"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn dropping_last_caller_keeps_executor_alive_until_completion() {
+    let trace = Trace::new();
+    let engine = Arc::new(spawn_fake(&[("CLEF_FAKE_TRACE", trace.0.to_str().unwrap())]).unwrap());
+    let task_engine = Arc::clone(&engine);
+    let task = tokio::spawn(async move { task_engine.decide(state_body("block")).await });
+    trace.wait("start block").await;
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    drop(engine);
+    trace.release();
+    trace.wait("finish block").await;
+}
+
+fn send_without_reading(addr: SocketAddr, body: &[u8]) -> TcpStream {
+    let mut stream = TcpStream::connect(addr).unwrap();
+    write!(stream, "POST /v1/systemone HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n", body.len()).unwrap();
+    stream.write_all(body).unwrap();
+    stream
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn http_disconnect_skips_queue_but_drains_dispatched_response() {
+    let trace = Trace::new();
+    let running = boot(
+        &[("CLEF_FAKE_TRACE", trace.0.to_str().unwrap())],
+        Duration::from_secs(2),
+    )
+    .await;
+    let first = send_without_reading(running.addr, &state_body("block"));
+    trace.wait("start block").await;
+    let queued = send_without_reading(running.addr, &state_body("cancelled"));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    queued.shutdown(std::net::Shutdown::Both).unwrap();
+    drop(queued);
+    first.shutdown(std::net::Shutdown::Both).unwrap();
+    drop(first);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let addr = running.addr;
+    let next = tokio::task::spawn_blocking(move || post(addr, &state_body("next")));
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(trace.text(), "start block\n");
+    trace.release();
+    let (status, _) = next.await.unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(
+        trace.text(),
+        "start block\nfinish block\nstart next\nfinish next\n"
+    );
 }

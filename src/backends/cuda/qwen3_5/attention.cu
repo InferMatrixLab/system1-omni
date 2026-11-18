@@ -11,6 +11,7 @@
 // rounded to bfloat16 for the P*V product, as in flash attention; the running sums
 // stay float32.
 #include <climits>
+#include <algorithm>
 #include "common.cuh"
 #include "mma.cuh"
 #include "ops.h"
@@ -92,17 +93,18 @@ constexpr int WIDE_MIN_ROWS = 640;  // measured crossover
 // q_base offsets row 0 of the q/gate/out buffers: this launch covers the window
 // [q_base, T_total) while k/v cover [0, T_total). Used by the cached-prefix
 // continuation; q_base = 0 reduces to the plain full pass.
-template <bool Gated, bool Shared, bool Bidirectional = false, int QROWS = BM, int NTHREADS = THREADS>
+template <bool Gated, bool Shared, bool Bidirectional = false, bool Batched = false, int QROWS = BM,
+          int NTHREADS = THREADS>
 __device__ __forceinline__ void flash_body(const bf16* __restrict__ q, const bf16* __restrict__ k, const bf16* __restrict__ v, int ldv,
                  const bf16* __restrict__ gate, bf16* __restrict__ out, int T, int Hq, int Hk,
                  float scale_log2, int q_base, const bf16* __restrict__ prefix_k,
-                 const bf16* __restrict__ prefix_v) {
+                 const bf16* __restrict__ prefix_v, int query_blocks = 0) {
     extern __shared__ __align__(16) unsigned char smem[];
     bf16* qs = reinterpret_cast<bf16*>(smem);
     bf16* ks = qs + QROWS * LDS;
     bf16* vs = ks + BN * LDS;
     const int h = blockIdx.y, hk = h / (Hq / Hk);
-    const int q0 = q_base + (gridDim.x - 1 - blockIdx.x) * QROWS;  // the longest blocks first
+    const int q0 = q_base + ((Batched ? static_cast<unsigned>(query_blocks) : gridDim.x) - 1 - blockIdx.x) * QROWS;  // the longest blocks first
     const int tid = threadIdx.x, warp = tid / 32, lane = tid % 32;
     const int g = lane / 4, t = lane % 4;
     const int row0 = q0 + warp * 16;  // this warp's first query
@@ -277,8 +279,8 @@ __global__ void __launch_bounds__(WIDE_THREADS)
 flash_wide_kernel(const bf16* __restrict__ q, const bf16* __restrict__ k, const bf16* __restrict__ v, int ldv,
                   const bf16* __restrict__ gate, bf16* __restrict__ out, int T, int Hq, int Hk,
                   float scale_log2, int q_base) {
-    flash_body<Gated, false, Bidirectional, WIDE_BM, WIDE_THREADS>(q, k, v, ldv, gate, out, T, Hq, Hk,
-                                                                   scale_log2, q_base, nullptr, nullptr);
+    flash_body<Gated, false, Bidirectional, false, WIDE_BM, WIDE_THREADS>(
+        q, k, v, ldv, gate, out, T, Hq, Hk, scale_log2, q_base, nullptr, nullptr);
 }
 
 __global__ void __launch_bounds__(THREADS)
@@ -289,30 +291,63 @@ flash_shared_kernel(const bf16* __restrict__ q, const bf16* __restrict__ k, cons
     flash_body<true, true>(q, k, v, ldv, gate, out, T, Hq, Hk, scale_log2, prefix, prefix_k, prefix_v);
 }
 
-// Both the decision and the shared-memory opt-in are per device, and a thread can
-// switch devices between calls, so each thread re-checks when the device changes.
-// Returns whether `device` was measured; `error` is that device's opt-in result.
-template <bool Gated, bool Bidirectional>
-bool wide_tile_ready(int device, cudaError_t& error) {
+// Host descriptors are copied into the launch, including when a graph records it.
+// Every z slice keeps its own original query tiling and online-softmax order.
+struct SharedBatch {
+    int lengths[16];
+    int offsets[16];
+};
+template <bool Shared>
+__global__ void __launch_bounds__(THREADS)
+flash_batch_kernel(const bf16* q, const bf16* k, const bf16* v, int ldv,
+                          const bf16* gate, bf16* out, SharedBatch batch, int prefix,
+                          int Hq, int Hk, float scale_log2, const bf16* prefix_k,
+                          const bf16* prefix_v) {
+    const int suffix = batch.lengths[blockIdx.z];
+    const int blocks = (suffix + BM - 1) / BM;
+    if (blockIdx.x >= blocks) return;
+    const size_t offset = batch.offsets[blockIdx.z];
+    flash_body<true, Shared, false, true>(q + offset * Hq * D, k + offset * Hk * D,
+                          v + offset * ldv, ldv, gate + offset * Hq * D,
+                          out + offset * Hq * D, prefix + suffix, Hq, Hk,
+                          scale_log2, prefix, prefix_k, prefix_v, blocks);
+}
+
+// The shared-memory opt-in belongs to the device context, so each kernel is
+// configured again when a thread's current device changes.
+template <typename Kernel>
+cudaError_t smem_opt_in(Kernel kernel, int bytes) {
     struct State {
         int device = -1;
-        bool supported = false;
-        cudaError_t configured = cudaSuccess;
+        cudaError_t error = cudaSuccess;
+    };
+    static thread_local State state;
+    int device = 0;
+    const cudaError_t device_error = cudaGetDevice(&device);
+    if (device_error != cudaSuccess) return device_error;
+    if (state.device != device) {
+        state.device = device;
+        state.error = cudaFuncSetAttribute(reinterpret_cast<const void*>(kernel),
+                                           cudaFuncAttributeMaxDynamicSharedMemorySize, bytes);
+    }
+    return state.error;
+}
+
+// True when the wide tile was measured on `device`.
+bool wide_device_measured(int device) {
+    struct State {
+        int device = -1;
+        bool measured = false;
     };
     static thread_local State state;
     if (state.device != device) {
         cudaDeviceProp prop{};
         const bool known = cudaGetDeviceProperties(&prop, device) == cudaSuccess;
         state.device = device;
-        state.supported = known &&
+        state.measured = known &&
             ((prop.major == 8 && prop.minor == 9) || (prop.major == 12 && prop.minor == 0));
-        state.configured = state.supported
-            ? cudaFuncSetAttribute(flash_wide_kernel<Gated, Bidirectional>,
-                                   cudaFuncAttributeMaxDynamicSharedMemorySize, WIDE_SMEM_BYTES)
-            : cudaSuccess;
     }
-    error = state.configured;
-    return state.supported;
+    return state.measured;
 }
 
 template <bool Gated, bool Bidirectional = false>
@@ -327,25 +362,19 @@ int launch(const void* q, const void* k, const void* v, int ldv, const void* gat
     if (Gated && gate == nullptr) return cudaErrorInvalidValue;
     constexpr float LOG2E = 1.4426950408889634f;
     const int rows = T - q_base;
-    if (q_base % WIDE_BM == 0 && rows >= WIDE_MIN_ROWS) {
-        int device = 0;
-        cudaError_t ready = cudaGetDevice(&device);
-        if (ready == cudaSuccess) {
-            if (wide_tile_ready<Gated, Bidirectional>(device, ready) && ready == cudaSuccess) {
-                flash_wide_kernel<Gated, Bidirectional>
-                    <<<dim3((rows + WIDE_BM - 1) / WIDE_BM, Hq), WIDE_THREADS, WIDE_SMEM_BYTES,
-                       static_cast<cudaStream_t>(stream)>>>(
-                        static_cast<const bf16*>(q), static_cast<const bf16*>(k),
-                        static_cast<const bf16*>(v), ldv, static_cast<const bf16*>(gate),
-                        static_cast<bf16*>(out), T, Hq, Hk, scale * LOG2E, q_base);
-                return cudaGetLastError();
-            }
-        }
+    int device = 0;
+    const cudaError_t device_error = cudaGetDevice(&device);
+    if (device_error != cudaSuccess) return device_error;
+    if (q_base % WIDE_BM == 0 && rows >= WIDE_MIN_ROWS && wide_device_measured(device)) {
+        const cudaError_t ready = smem_opt_in(flash_wide_kernel<Gated, Bidirectional>, WIDE_SMEM_BYTES);
         if (ready != cudaSuccess) return ready;
+        flash_wide_kernel<Gated, Bidirectional><<<dim3((rows + WIDE_BM - 1) / WIDE_BM, Hq), WIDE_THREADS,
+                                                 WIDE_SMEM_BYTES, static_cast<cudaStream_t>(stream)>>>(
+            static_cast<const bf16*>(q), static_cast<const bf16*>(k), static_cast<const bf16*>(v), ldv,
+            static_cast<const bf16*>(gate), static_cast<bf16*>(out), T, Hq, Hk, scale * LOG2E, q_base);
+        return cudaGetLastError();
     }
-    // Once per specialization (for the device current at the first call).
-    static const cudaError_t configured = cudaFuncSetAttribute(
-        flash_kernel<Gated, Bidirectional>, cudaFuncAttributeMaxDynamicSharedMemorySize, SMEM_BYTES);
+    const cudaError_t configured = smem_opt_in(flash_kernel<Gated, Bidirectional>, SMEM_BYTES);
     if (configured != cudaSuccess) return configured;
     flash_kernel<Gated, Bidirectional><<<dim3((rows + BM - 1) / BM, Hq), THREADS, SMEM_BYTES,
                          static_cast<cudaStream_t>(stream)>>>(
@@ -395,6 +424,20 @@ extern "C" int cs1_attention_gated_bidirectional(const void* q, const void* k, c
     return flash::launch<true, true>(q, k, v, ldv, gate, out, T, Hq, Hk, Dh, scale, 0, stream);
 }
 
+// A correctness-first composition of the existing kernel, without modifying its
+// causal or whole-prompt specializations. Question outputs from the first pass
+// already read exactly their own row; overwrite the state outputs before any
+// downstream layer can observe them. The split is semantic, not tile-aligned.
+extern "C" int cs1_attention_gated_prefix_bidirectional(const void* q, const void* k, const void* v, int ldv,
+                                                        const void* gate, void* out, int T, int state,
+                                                        int Hq, int Hk, int Dh, float scale, void* stream) {
+    if (state <= 0 || state >= T || q == nullptr || k == nullptr || v == nullptr
+        || gate == nullptr || out == nullptr) return cudaErrorInvalidValue;
+    const int status = flash::launch<true, true>(q, k, v, ldv, gate, out, T, Hq, Hk, Dh, scale, 0, stream);
+    if (status != cudaSuccess) return status;
+    return flash::launch<true, true>(q, k, v, ldv, gate, out, state, Hq, Hk, Dh, scale, 0, stream);
+}
+
 // Same layout contract as the full pass; only the covered query rows differ:
 // q_base is a multiple of 64 and rows below it keep whatever was already in k/v.
 extern "C" int cs1_attention_gated_prefix(const void* q, const void* k, const void* v, int ldv, const void* gate,
@@ -411,8 +454,7 @@ extern "C" int cs1_attention_gated_shared(const void* q, const void* k, const vo
     if (!q || !k || !v || !gate || !out || !prefix_k || !prefix_v || suffix <= 0 || prefix <= 0 ||
         prefix % flash::BM || prefix > INT_MAX - suffix || Dh != flash::D || Hq <= 0 || Hk <= 0 ||
         Hq % Hk || ldv % 8 || ldv < Hk * Dh) return cudaErrorInvalidValue;
-    static const cudaError_t configured = cudaFuncSetAttribute(
-        flash::flash_shared_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, flash::SMEM_BYTES);
+    const cudaError_t configured = flash::smem_opt_in(flash::flash_shared_kernel, flash::SMEM_BYTES);
     if (configured != cudaSuccess) return configured;
     constexpr float LOG2E = 1.4426950408889634f;
     flash::flash_shared_kernel<<<dim3((suffix + flash::BM - 1) / flash::BM, Hq), flash::THREADS,
@@ -421,4 +463,59 @@ extern "C" int cs1_attention_gated_shared(const void* q, const void* k, const vo
         static_cast<const bf16*>(gate), static_cast<bf16*>(out), prefix + suffix, Hq, Hk, scale * LOG2E,
         prefix, static_cast<const bf16*>(prefix_k), static_cast<const bf16*>(prefix_v));
     return cudaGetLastError();
+}
+
+template <bool Shared>
+static int attention_batch_launch(const void* q, const void* k, const void* v,
+                                                int ldv, const void* gate, void* out,
+                                                const void* prefix_k, const void* prefix_v,
+                                                const size_t* lengths, size_t count, int prefix,
+                                                int Hq, int Hk, int Dh, float scale, void* stream) {
+    if (!q || !k || !v || !gate || !out || !lengths ||
+        count == 0 || count > 16 || prefix < 0 || prefix > INT_MAX - flash::BM ||
+        (Shared && (!prefix_k || !prefix_v || prefix == 0 || prefix % flash::BM)) ||
+        Dh != flash::D || Hq <= 0 || Hk <= 0 || Hk > INT_MAX / Dh || Hq % Hk ||
+        ldv % 8 || ldv < Hk * Dh) return cudaErrorInvalidValue;
+    flash::SharedBatch batch{};
+    size_t rows = 0;
+    int blocks = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (!lengths[i] || lengths[i] > static_cast<size_t>(INT_MAX - flash::BM - prefix) ||
+            lengths[i] > static_cast<size_t>(INT_MAX - flash::BM) - rows)
+            return cudaErrorInvalidValue;
+        const int suffix = static_cast<int>(lengths[i]);
+        batch.lengths[i] = suffix;
+        batch.offsets[i] = static_cast<int>(rows);
+        rows += lengths[i];
+        blocks = std::max(blocks, (suffix + flash::BM - 1) / flash::BM);
+    }
+    const cudaError_t configured =
+        flash::smem_opt_in(flash::flash_batch_kernel<Shared>, flash::SMEM_BYTES);
+    if (configured != cudaSuccess) return configured;
+    constexpr float LOG2E = 1.4426950408889634f;
+    flash::flash_batch_kernel<Shared><<<dim3(blocks, Hq, count), flash::THREADS,
+                                        flash::SMEM_BYTES, static_cast<cudaStream_t>(stream)>>>(
+        static_cast<const bf16*>(q), static_cast<const bf16*>(k), static_cast<const bf16*>(v),
+        ldv, static_cast<const bf16*>(gate), static_cast<bf16*>(out), batch, prefix,
+        Hq, Hk, scale * LOG2E, static_cast<const bf16*>(prefix_k), static_cast<const bf16*>(prefix_v));
+    return cudaGetLastError();
+}
+
+// Same arithmetic as separate shared-suffix calls; candidate rows are disjoint.
+extern "C" int cs1_attention_gated_shared_batch(const void* q, const void* k, const void* v,
+                                                int ldv, const void* gate, void* out,
+                                                const void* prefix_k, const void* prefix_v,
+                                                const size_t* lengths, size_t count, int prefix,
+                                                int Hq, int Hk, int Dh, float scale, void* stream) {
+    return attention_batch_launch<true>(q, k, v, ldv, gate, out, prefix_k, prefix_v,
+                                       lengths, count, prefix, Hq, Hk, Dh, scale, stream);
+}
+
+// Independent full sequences have their own key window and positions starting at zero.
+extern "C" int cs1_attention_gated_batch(const void* q, const void* k, const void* v, int ldv,
+                                         const void* gate, void* out, const size_t* lengths,
+                                         size_t count, int Hq, int Hk, int Dh, float scale,
+                                         void* stream) {
+    return attention_batch_launch<false>(q, k, v, ldv, gate, out, nullptr, nullptr,
+                                        lengths, count, 0, Hq, Hk, Dh, scale, stream);
 }

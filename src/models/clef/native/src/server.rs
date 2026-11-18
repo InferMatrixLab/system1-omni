@@ -55,7 +55,6 @@ impl Engine {
             },
             Err(error) => {
                 eprintln!("clef executor request failed: {error:#}");
-                self.executor.fail();
                 detail(StatusCode::INTERNAL_SERVER_ERROR, "inference failed")
             }
         }

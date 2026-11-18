@@ -19,6 +19,16 @@ cargo build --release --locked -p omni-omnijev-native
 OMNIJEV_MODEL=$PWD/omnijev-export target/release/omni-omnijev-native
 ```
 
+`CUA_S1_GRAPH=1` also enables language window Graphs in this worker, through the
+shared `Model::readout_window` implementation. It defaults off. Request and
+question prefixes and option continuations can capture and replay; current token,
+position and image inputs are staged before replay. Graph entries retain their
+prefix source and capture destination allocations. The shared 128-entry FIFO and
+scratch growth drain dependent work before retiring affected Graphs; recording
+failure disables language Graphs and preserves the eager
+result. This switch does not enable vision Graphs or Cua's matched-prefix mode.
+The Cua-S1 latency measurements do not establish an OmniJev speedup.
+
 `OMNIJEV_HOST` and `OMNIJEV_PORT` default to `127.0.0.1` and `8000`. At start the
 worker checks every file of the export against its manifest, loads the weights and
 answers one request with all three question types before it listens, so `/health`
@@ -62,6 +72,22 @@ OMNIJEV_EXPORT=$PWD/omnijev-export OMNIJEV_CUDA_LIB=$PWD/target/release/libqwen3
 QWEN3_5_CHECKPOINT=$PWD/omnijev-export CUA_S1_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
     cargo test --release --locked -p omni-qwen3-5-native --test readout -- --ignored --test-threads=1
 ```
+
+The direct OmniJev window-Graph regression selects eager and Graph models without
+changing process-wide environment variables. It compares raw FP32 head bits and
+answers (excluding timing fields), requires actual capture and warm replay, and
+covers same-layout new pixels, changed questions/options, geometry and scratch
+growth, returning to an earlier request and malformed-input recovery:
+
+```sh
+OMNIJEV_EXPORT=$PWD/omnijev-export OMNIJEV_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
+    cargo test --release --locked -p omni-omnijev-native --lib window_graph_tests \
+    -- --ignored --test-threads=1 --nocapture
+```
+
+Also repeat the `--test worker` command above with `CUA_S1_GRAPH=0` and `1` to
+exercise both modes through the production loader. Qualification applies to the
+tested model, GPU and CUDA library combination; recheck parity on another stack.
 
 ## Comparison with the reference
 
