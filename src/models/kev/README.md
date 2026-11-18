@@ -113,10 +113,12 @@ checks, never run by ordinary workspace tests.
 
 Primary acceptance uses the pinned official BF16 default service, with Score
 scalar error at most 0.1 ordinal level and maximum probability error 0.01.
-The [expanded qualification](../../../recipe/kev/service-acceptance.md) currently
-passes all frozen gates after the [v3 repair](../../../recipe/kev/numerical-diagnosis.md)
+The historical [expanded qualification](../../../recipe/kev/service-acceptance.md)
+passed all frozen gates after the [v3 repair](../../../recipe/kev/numerical-diagnosis.md)
 and [v4 boundary qualification](../../../recipe/kev/noul-boundary.md): 36 Noul
-and 28 Choice boundary questions, with no decision disagreements. Contributor and maintainer review remain pending.
+and 28 Choice boundary questions, with no decision disagreements. See the
+[current qualification status](../../../recipe/kev/native.md#primary-acceptance-status)
+for the SM120 failure and pending integrated replay.
 Decision gates require Choice agreement
 for reference top-two margins above 0.02, and Noul agreement at threshold 0.5 when
 the reference distance exceeds 0.01. The comparator reports all near-boundary

@@ -115,6 +115,12 @@ tokens that remain before it, each as a continuation of the state before it
 (`Model::readout_window`). The passes use the fixed-algorithm GEMMs and split at
 multiples of 64, so every answer equals that of one plain pass per (question, option)
 row over the prefix and that row, which `Executor::execute_rows` keeps for the checks.
+The shared language executor also honors `CUA_S1_GRAPH=1` for these windows;
+it defaults off. Current inputs are staged before replay, and cached Graphs retain
+their recorded prefix allocations until synchronized retirement. See the
+[native recipe](../../../recipe/omnijev/native.md#tests) for the direct eager/Graph
+parity and capture/replay regression. Cua-S1 performance results do not qualify
+OmniJev latency.
 The passes read the final-norm hidden states at
 `zq` and `u`, which is what the reference's `hidden_states[-1]` holds, and the
 option-text tokens' log-probabilities: BF16 logits from the tied embedding over the

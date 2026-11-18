@@ -19,6 +19,10 @@ use crate::export;
 use crate::heads::{self, Heads};
 use crate::processing::{IMAGE_TOKEN, PreparedRequest, Processor, Row};
 
+#[cfg(test)]
+#[path = "../../../../../tests/omnijev/window_graph.rs"]
+mod window_graph_tests;
+
 pub struct Executor {
     vision: VisionModel,
     language: Model,

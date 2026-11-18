@@ -28,13 +28,13 @@ python3.12 -m venv .venv-kev
 
 gpu run --gpus 1 --wait 2h --timeout 30m --note 'Kev pinned CUDA export' -- \
   .venv-kev/bin/python recipe/kev/export.py \
-  --base weights/kev-base --checkpoint weights/kev-adapter --out weights/kev-native
+  --merge-device cuda --base weights/kev-base --checkpoint weights/kev-adapter --out weights/kev-native
 ```
 
-For CPU-only export/head diagnosis, add `--merge-device cpu` and choose a separate
-output directory. That artifact is deliberately not accepted by the worker:
+CPU export remains the default for pointer-head validation. Run the Python
+export command directly with `--merge-device cpu` and a separate output directory. That artifact is deliberately not accepted by the worker:
 nine BF16 weights can differ from official GPU merging despite both merges using
-FP32. `merge_numerics` records the device and exact Torch wheel. The CUDA export
+FP32. CUDA exports record the device and exact Torch wheel in `merge_numerics`. The CUDA export
 requires Torch 2.8.0+cu128 and disables TF32 for the LoRA matmul.
 
 Every required input must match its pinned SHA-256. The output directory must not

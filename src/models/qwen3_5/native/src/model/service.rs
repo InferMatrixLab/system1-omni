@@ -196,11 +196,11 @@ impl Model {
                 None,
                 self.gemm,
                 None,
-                Some(&plan),
+                WindowReadout::Service(&plan),
             )?;
             // Keep the real prefix KV, right-aligned in the continuation's key extent.
             let kb = self.cfg.kv_heads * self.cfg.head_dim * BF16;
-            for (k, v) in &state.attn_kv {
+            for (k, v) in &state.buffers.attn_kv {
                 for buffer in [k, v] {
                     // SAFETY: state buffers hold cap * kv width; scratch holds split rows.
                     unsafe {
@@ -253,7 +253,7 @@ impl Model {
                 Some(&state),
                 self.gemm,
                 None,
-                Some(&plan),
+                WindowReadout::Service(&plan),
             )?;
             let hidden = readouts
                 .iter()

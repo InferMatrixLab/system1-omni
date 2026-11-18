@@ -1,6 +1,6 @@
 # Kev Noul boundary qualification (v4)
 
-The fixed official BF16 default-service acceptance now passes all frozen gates:
+The historical v4 run passed all frozen BF16 default-service gates:
 **5,484 requests / 5,662 questions**, including **36 Noul** and **28 Choice**
 near-boundary questions (minimum 10 each). Every observed decision agrees.
 The [v3 numerical repair](numerical-diagnosis.md) and

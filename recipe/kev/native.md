@@ -75,14 +75,25 @@ see the [third-party notices](../../src/models/qwen3_5/native/THIRD_PARTY_NOTICE
 
 ## Primary acceptance status
 
-**All frozen acceptance gates pass in the author-run campaign; review pending.** The fixed
-BF16 default-service comparison over 5,484 requests / 5,662 questions has maximum probability
-error 0.0024709404 (gate 0.01), maximum Score error 0.00000305218 levels (gate 0.1),
-and no decision disagreements. Noul boundary coverage is 36/10; all 36 qualify
-again on a fresh service. The 896-task quality gates, 55 HTTP response comparisons
-and 8 error checks pass. See the [boundary report](noul-boundary.md),
-[causal diagnosis and repair](numerical-diagnosis.md) and
-[unchanged acceptance protocol](service-acceptance.md).
+**Experimental worker. Full-model qualification of the integrated revision is pending.**
+
+The [independent review of `125251c`](https://github.com/InferMatrixLab/system1-omni/pull/197#pullrequestreview-5734756179)
+ran all 5,484 requests and 5,662 questions on RTX 6000D (SM120), driver
+595.91.07, nvcc 13.2.86, using the pinned Torch 2.8.0+cu128 reference.
+The unchanged gate is a maximum absolute error of 0.01 on unrounded
+probabilities.
+
+| Native library configuration | Questions over 0.01 | Maximum absolute error |
+| --- | ---: | ---: |
+| System cuBLASLt 13.1.0 | 202 / 5,662 | 0.06253225 |
+| Torch wheel cuBLAS 12.8.4.1, diagnostic relink | 181 / 5,662 | 0.02785403 |
+
+Both runs failed qualification. The relink reduced the maximum error and
+left the cause unresolved. Operator and HTTP checks passed in that review.
+The [original author-run pass](noul-boundary.md) used the configuration
+described below and remains historical evidence. Require a fresh, archived
+full-corpus run on the intended device and toolchain before relying on
+parity for deployment. Keep the [original gates](service-acceptance.md).
 
 The processor follows the effective tokenizer loaded by the pinned Transformers
 5.17 Qwen2Tokenizer, including its split regex for Unicode marks. Merely loading

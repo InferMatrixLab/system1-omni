@@ -83,7 +83,7 @@ class ExportPathTests(unittest.TestCase):
         with patch.object(exporter, "BASE_FILES", self.hashes(self.base)), patch.object(
             exporter, "CHECKPOINT_FILES", self.hashes(self.checkpoint)
         ):
-            return exporter.export(self.base, self.checkpoint, self.out, merge_device="cpu")
+            return exporter.export(self.base, self.checkpoint, self.out)
 
     def test_complete_two_shard_export(self):
         with patch.object(exporter.os, "rename", wraps=exporter.os.rename) as rename:

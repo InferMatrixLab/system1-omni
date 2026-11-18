@@ -231,3 +231,84 @@ fn matched_prefix_preserves_default_and_original_m64_after_errors() {
     }
     assert!(admitted > 0, "all shared-window probes fell back");
 }
+
+#[test]
+#[ignore = "requires pinned CUDA Cua-S1 artifacts; run serially with vision Graph0/1"]
+fn resident_matched_windows_equal_ordinary_with_changed_requests_and_error_recovery() {
+    let mut engine = device_feature_tests::load();
+    let mut resident_admissions = 0;
+    for (width, height, seed, count) in [
+        (256, 256, 1, 2),
+        (512, 256, 2, 4),
+        (256, 512, 3, 8),
+        (1024, 1024, 4, 2),
+        (256, 256, 1, 1),
+        (256, 256, 7, 4),
+    ] {
+        let rgb: Vec<_> = (0..width * height * 3)
+            .map(|i| ((i * 17 + seed * 31) % 251) as u8)
+            .collect();
+        let questions: Vec<_> = (0..count)
+            .map(|i| {
+                let mut q = device_feature_tests::questions(seed + i).remove(i % 2);
+                q.name = format!("q{i}");
+                q
+            })
+            .collect();
+        let mut prepared = engine.prepare(width, height, &rgb, &questions).unwrap();
+        engine.prefix_mode = prefix::Mode::Off;
+        engine.device_features = false;
+        let expected = engine.execute_prepared(&prepared).unwrap();
+        let bits = |v: Vec<Vec<f32>>| {
+            v.into_iter()
+                .flatten()
+                .map(f32::to_bits)
+                .collect::<Vec<_>>()
+        };
+        engine.prefix_mode = prefix::Mode::Matched;
+        for device in [true, false, true] {
+            let had_storage = engine.prefix_storage.is_some();
+            let before = engine.language.graph_stats();
+            engine.device_features = device;
+            assert_eq!(
+                bits(engine.execute_prepared(&prepared).unwrap()),
+                bits(expected.clone())
+            );
+            if device && !had_storage && engine.prefix_storage.is_some() {
+                resident_admissions += 1;
+                if before.requested {
+                    assert!(
+                        before.enabled,
+                        "requested Graph was disabled before resident admission"
+                    );
+                    assert_eq!(before.fallbacks, 0, "unexpected prior capture failure");
+                    assert!(
+                        engine.language.graph_stats().captures > before.captures,
+                        "first admitted resident request must capture windows"
+                    );
+                    let before = engine.language.graph_stats();
+                    assert_eq!(
+                        bits(engine.execute_prepared(&prepared).unwrap()),
+                        bits(expected.clone())
+                    );
+                    assert!(
+                        engine.language.graph_stats().replays > before.replays,
+                        "same admitted resident request must replay windows"
+                    );
+                }
+            }
+        }
+        let token = *prepared.prompts[0].token_ids.last().unwrap();
+        *prepared.prompts[0].token_ids.last_mut().unwrap() = u32::MAX;
+        assert!(engine.execute_prepared(&prepared).is_err());
+        *prepared.prompts[0].token_ids.last_mut().unwrap() = token;
+        assert_eq!(
+            bits(engine.execute_prepared(&prepared).unwrap()),
+            bits(expected)
+        );
+    }
+    assert!(
+        resident_admissions > 0,
+        "resident production routing never admitted prefix reuse"
+    );
+}

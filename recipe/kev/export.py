@@ -170,7 +170,7 @@ def pointer_head(meta):
     return {name: value.contiguous() for name, value in head.items()}, temperature
 
 
-def export(base, checkpoint, out, merge_device="cuda"):
+def export(base, checkpoint, out, merge_device="cpu"):
     if out.exists():
         raise ValueError("output already exists; choose a new directory")
     verify_files(base, BASE_FILES)
@@ -231,7 +231,6 @@ def export(base, checkpoint, out, merge_device="cuda"):
         save_file(head, staging / "head.safetensors")
         manifest = {
             "format": "kev-4b-merged/1",
-            "merge_numerics": {"device": merge_device, "accumulation": "float32", "torch": torch.__version__},
             "model_id": MODEL_ID,
             "revision": REVISION,
             "base_id": BASE_ID,
@@ -247,6 +246,10 @@ def export(base, checkpoint, out, merge_device="cuda"):
             "inputs": {"base": BASE_FILES, "checkpoint": CHECKPOINT_FILES},
             "files": {p.name: sha256(p) for p in sorted(staging.iterdir())},
         }
+        if merge_device == "cuda":
+            manifest["merge_numerics"] = {
+                "device": merge_device, "accumulation": "float32", "torch": torch.__version__,
+            }
         (staging / "kev_export.json").write_text(json.dumps(manifest, indent=2) + "\n")
         os.rename(staging, out)
     finally:
@@ -260,8 +263,8 @@ def main():
     parser.add_argument("--base", required=True, type=Path)
     parser.add_argument("--checkpoint", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
-    parser.add_argument("--merge-device", choices=("cuda", "cpu"), default="cuda",
-                        help="CUDA matches the default service; CPU is diagnostic/head-only")
+    parser.add_argument("--merge-device", choices=("cuda", "cpu"), default="cpu",
+                        help="CPU prepares the FP32 head; native serving requires CUDA")
     args = parser.parse_args()
     torch.set_num_threads(8)
     manifest = export(args.base, args.checkpoint, args.out, args.merge_device)

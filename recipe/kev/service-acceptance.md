@@ -3,9 +3,9 @@
 Declared before the first v2 model run. This supplements the original FP32 eager
 diagnostics; it does not replace, discard or retroactively qualify those runs.
 The recorded outcome and the separately frozen supplemental experiment follow
-the original protocol below. **Current status: all frozen gates pass after the [v3 repair](numerical-diagnosis.md)
-and [v4 boundary qualification](noul-boundary.md), with 36 Noul boundary questions.
-The failed v2 outcomes below remain historical evidence.**
+the original protocol below. The [v3 repair](numerical-diagnosis.md) and [v4 boundary qualification](noul-boundary.md)
+describe an earlier pass with 36 Noul boundary questions. The [SM120 review replay](native.md#primary-acceptance-status)
+failed the unchanged probability gate. Qualification of the integrated revision remains pending.
 
 ## Primary reference and controls
 
