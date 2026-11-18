@@ -313,22 +313,21 @@ flash_batch_kernel(const bf16* q, const bf16* k, const bf16* v, int ldv,
                           scale_log2, prefix, prefix_k, prefix_v, blocks);
 }
 
-// The shared-memory opt-in belongs to the device context, so each kernel is
-// configured again when a thread's current device changes.
-template <typename Kernel>
-cudaError_t smem_opt_in(Kernel kernel, int bytes) {
-    struct State {
-        int device = -1;
-        cudaError_t error = cudaSuccess;
-    };
-    static thread_local State state;
+// The shared-memory opt-in belongs to the device context, so each kernel keeps
+// its own per-thread state (kernels can share a signature) and reapplies it when
+// the current device changes.
+struct SmemState {
+    int device = -1;
+    cudaError_t error = cudaSuccess;
+};
+
+cudaError_t smem_opt_in(const void* entry, int bytes, SmemState& state) {
     int device = 0;
     const cudaError_t device_error = cudaGetDevice(&device);
     if (device_error != cudaSuccess) return device_error;
     if (state.device != device) {
         state.device = device;
-        state.error = cudaFuncSetAttribute(reinterpret_cast<const void*>(kernel),
-                                           cudaFuncAttributeMaxDynamicSharedMemorySize, bytes);
+        state.error = cudaFuncSetAttribute(entry, cudaFuncAttributeMaxDynamicSharedMemorySize, bytes);
     }
     return state.error;
 }
@@ -366,7 +365,10 @@ int launch(const void* q, const void* k, const void* v, int ldv, const void* gat
     const cudaError_t device_error = cudaGetDevice(&device);
     if (device_error != cudaSuccess) return device_error;
     if (q_base % WIDE_BM == 0 && rows >= WIDE_MIN_ROWS && wide_device_measured(device)) {
-        const cudaError_t ready = smem_opt_in(flash_wide_kernel<Gated, Bidirectional>, WIDE_SMEM_BYTES);
+        static thread_local SmemState wide_state;
+        const cudaError_t ready =
+            smem_opt_in(reinterpret_cast<const void*>(flash_wide_kernel<Gated, Bidirectional>),
+                        WIDE_SMEM_BYTES, wide_state);
         if (ready != cudaSuccess) return ready;
         flash_wide_kernel<Gated, Bidirectional><<<dim3((rows + WIDE_BM - 1) / WIDE_BM, Hq), WIDE_THREADS,
                                                  WIDE_SMEM_BYTES, static_cast<cudaStream_t>(stream)>>>(
@@ -374,7 +376,9 @@ int launch(const void* q, const void* k, const void* v, int ldv, const void* gat
             static_cast<const bf16*>(gate), static_cast<bf16*>(out), T, Hq, Hk, scale * LOG2E, q_base);
         return cudaGetLastError();
     }
-    const cudaError_t configured = smem_opt_in(flash_kernel<Gated, Bidirectional>, SMEM_BYTES);
+    static thread_local SmemState narrow_state;
+    const cudaError_t configured = smem_opt_in(
+        reinterpret_cast<const void*>(flash_kernel<Gated, Bidirectional>), SMEM_BYTES, narrow_state);
     if (configured != cudaSuccess) return configured;
     flash_kernel<Gated, Bidirectional><<<dim3((rows + BM - 1) / BM, Hq), THREADS, SMEM_BYTES,
                          static_cast<cudaStream_t>(stream)>>>(
@@ -454,7 +458,10 @@ extern "C" int cs1_attention_gated_shared(const void* q, const void* k, const vo
     if (!q || !k || !v || !gate || !out || !prefix_k || !prefix_v || suffix <= 0 || prefix <= 0 ||
         prefix % flash::BM || prefix > INT_MAX - suffix || Dh != flash::D || Hq <= 0 || Hk <= 0 ||
         Hq % Hk || ldv % 8 || ldv < Hk * Dh) return cudaErrorInvalidValue;
-    const cudaError_t configured = flash::smem_opt_in(flash::flash_shared_kernel, flash::SMEM_BYTES);
+    static thread_local flash::SmemState shared_state;
+    const cudaError_t configured =
+        flash::smem_opt_in(reinterpret_cast<const void*>(flash::flash_shared_kernel), flash::SMEM_BYTES,
+                           shared_state);
     if (configured != cudaSuccess) return configured;
     constexpr float LOG2E = 1.4426950408889634f;
     flash::flash_shared_kernel<<<dim3((suffix + flash::BM - 1) / flash::BM, Hq), flash::THREADS,
@@ -489,8 +496,9 @@ static int attention_batch_launch(const void* q, const void* k, const void* v,
         rows += lengths[i];
         blocks = std::max(blocks, (suffix + flash::BM - 1) / flash::BM);
     }
-    const cudaError_t configured =
-        flash::smem_opt_in(flash::flash_batch_kernel<Shared>, flash::SMEM_BYTES);
+    static thread_local flash::SmemState batch_state;
+    const cudaError_t configured = flash::smem_opt_in(
+        reinterpret_cast<const void*>(flash::flash_batch_kernel<Shared>), flash::SMEM_BYTES, batch_state);
     if (configured != cudaSuccess) return configured;
     constexpr float LOG2E = 1.4426950408889634f;
     flash::flash_batch_kernel<Shared><<<dim3(blocks, Hq, count), flash::THREADS,

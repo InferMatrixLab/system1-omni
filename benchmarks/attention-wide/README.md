@@ -46,6 +46,10 @@ Kernel arms alone: L20 -2.2% at 640 rows to -13.8% at 8,192, and +4.9% at 512
 rows, which is why the tile is gated at 640; sm_120 -13.0% to -22.4% from 512
 rows up. Per-trial medians and delta ranges are in [`results.json`](results.json).
 
+Re-measured after merging main (#196 added batched attention), against a
+main-only build on the same sm_120 host, 4 alternating runs per length: 512 rows
++0.0%, 1,024 -21.0%, 2,048 -21.1%, 4,096 -19.1%, 8,192 -16.8%, outputs identical.
+
 ## Fidelity
 
 - Byte-identical outputs at every measured length in both trials on both
