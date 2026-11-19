@@ -31,7 +31,7 @@ implemented.
 | Runtime | the checkpoint's own flat files: `vela2_inference.py`, `modeling_vela2.py`, `configuration_vela2.py`, `vela2_serve.py` | the same four modules, decoder-specific |
 | Calibration | the package's own `calibration.json` (never cross-copied between members — shipped thresholds differ) | same rule; the side-loaded broad head needs its `broad_head` block |
 | License | Apache-2.0; the inherited tokenizer material carries Gemma Terms of Use | Apache-2.0; Qwen3.5-0.8B lineage notices ship in the package |
-| Runtime dependencies | [recipe/vela/requirements.txt](../../recipe/vela/requirements.txt) (torch, transformers, safetensors, tokenizers, numpy) | same |
+| Runtime dependencies | [recipe/vela/requirements.txt](../../../recipe/vela/requirements.txt) (torch, transformers, safetensors, tokenizers, numpy) | same |
 
 The 0.3B package ships no manifest, so its gate checks the config's
 structural identity (model type, architecture, `max_length` 8,192, the
@@ -202,9 +202,13 @@ every question kind), so answering at all means ready.
   single-flight lock, the API-key gate and orchestration.
 - The Rust frontend owns transport and forwarding, not model state.
 
-The server-side error surface and envelope semantics are recorded as
-this repository's local stance for Vela 2.0; nothing is proposed into
-the shared worker-contract issue, and nothing is posted upstream.
+The server-side error surface and envelope semantics are this repository's
+local stance for Vela 2.0. The recipe's
+[contract decisions and acceptance](../../../recipe/vela/reference.md#contract-decisions-and-acceptance)
+reconciles the older proposal with the shipped five-kind reference, including
+Unicode offsets, truncation and rendered-row token accounting. The shared
+worker-contract RFC remains open; this records Vela's policy without changing
+other workers.
 
 ## Validation
 
@@ -224,4 +228,4 @@ the shared worker-contract issue, and nothing is posted upstream.
   flash-linear-attention) is the oracle setting; GPU bf16-autocast is
   a deployment option outside these slices' evidence.
 - The serving procedure, hardware requirements and the recorded
-  evidence pointer are [recipe/vela/reference.md](../../recipe/vela/reference.md).
+  evidence pointer are [recipe/vela/reference.md](../../../recipe/vela/reference.md).

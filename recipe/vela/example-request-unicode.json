@@ -1,0 +1,46 @@
+{
+  "model": "vllm-sr/Vela-2.0-0.3B",
+  "state": {
+    "request": "😀 客户张伟，邮箱 zhang.wei@example.cn。尾部🚀",
+    "source": "订单将在三个工作日内审核。",
+    "answer": "张伟的订单已经完成。"
+  },
+  "questions": {
+    "pii": {
+      "type": "span",
+      "instructions": "Which spans are personal information?",
+      "criteria": {
+        "PERSON": "a person's name",
+        "EMAIL_ADDRESS": "an e-mail address"
+      },
+      "over": "request",
+      "threshold": 0.05
+    },
+    "topics": {
+      "type": "set",
+      "instructions": "Which topics are mentioned?",
+      "criteria": {
+        "contact": "a customer's contact information",
+        "order": "an order or its processing status"
+      },
+      "threshold": 0.5
+    },
+    "kind": {
+      "type": "choice",
+      "instructions": "What is the customer's message about?",
+      "criteria": {
+        "profile": "customer profile or contact information",
+        "billing": "an invoice or payment"
+      }
+    },
+    "tone": {
+      "type": "score",
+      "instructions": "How formal is the message?",
+      "criteria": ["casual", "neutral", "formal"]
+    },
+    "billing": {
+      "type": "noul",
+      "instructions": "Does the message concern an invoice or payment?"
+    }
+  }
+}
