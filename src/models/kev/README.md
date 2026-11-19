@@ -68,6 +68,10 @@ executor applies reference bucket padding, without truncation.
 `Engine` owns a shared `SerialScheduler` and one mutex-protected `Executor`.
 One admitted execution unit is a whole request. Questions run sequentially;
 `planning` reproduces official question groups and projection shapes.
+The opt-in shared service path retains each GDN, attention and MLP projection
+component's original M/N/K and contiguous output stride before copying into
+fused scratch. Algebraically combining weights can select different cuBLAS
+rounding and violate the probability gate.
 `Model::forward_segmented_readout` consumes text-only state/question segments
 with identical T/H/W positions and returns final-normalized readout rows. The
 executor owns CUDA weights/scratch and the FP32 pointer head; only owned logits
@@ -118,7 +122,8 @@ passed all frozen gates after the [v3 repair](../../../recipe/kev/numerical-diag
 and [v4 boundary qualification](../../../recipe/kev/noul-boundary.md): 36 Noul
 and 28 Choice boundary questions, with no decision disagreements. See the
 [current qualification status](../../../recipe/kev/native.md#primary-acceptance-status)
-for the SM120 failure and pending integrated replay.
+for the integrated L20 pass after the projection repair and the earlier SM120
+failure, which has not been rerun with that repair.
 Decision gates require Choice agreement
 for reference top-two margins above 0.02, and Noul agreement at threshold 0.5 when
 the reference distance exceeds 0.01. The comparator reports all near-boundary

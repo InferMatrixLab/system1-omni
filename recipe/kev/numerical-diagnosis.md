@@ -4,6 +4,11 @@ This records the v3 repair and its then-incomplete coverage. The subsequent
 [v4 qualification](noul-boundary.md) adds 33 Noul boundary questions and passes
 all frozen gates without changing production code or discarding these results.
 
+The [L20 projection-geometry follow-up](#l20-projection-geometry-follow-up)
+below diagnoses a later failure of the integrated worker. Historical passes do
+not qualify another source revision or device; see the
+[current acceptance status](native.md#primary-acceptance-status).
+
 The same 3,215 requests / 3,393 questions now pass the probability, Score and
 far-boundary decision gates. Maximum probability error is **0.0024709404 <=0.01**
 (`choice-255`); maximum raw Score error is **0.00000305218 <=0.1 level**
@@ -108,3 +113,46 @@ BF16 default service. Comparing the corrected native outputs with that historica
 This is separately recorded in `fp32-controls-v3.json`; the unchanged 0.1 Score
 gate applies to the primary official BF16 service. No FP32 results are relabeled
 as BF16 acceptance, and the original 0.1149 diagnostic remains preserved.
+
+## L20 projection geometry follow-up
+
+On NVIDIA L20 (`sm_89`, CUDA 12.8.61), integrated source
+`716ec4a494f6876c9675f5ec3b4a0d5b4f478979` fails 197 of the same 5,662
+questions at the original 0.01 probability gate; maximum error is
+0.0462316871. All requests and failures are retained. The pins, default BF16
+official service, FP32 head, saved temperature and three corpus hashes remain
+unchanged. This is a new reproduction, separate from the SM120 review.
+
+The actual failing case `hard-v1:hard-v1/ambiguous/development/00044` has 127
+tokens, three candidates and probability error 0.0328745842. Fresh native and
+fresh default-official requests reproduce their primary outputs exactly.
+Changing only native cuBLASLt lookup from toolkit 120803 to Torch-wheel 120804
+leaves native output identical on this case. All 426 officially loaded/merged
+backbone tensors match the export. The official GPU pointer head on native
+hidden rows agrees with native probabilities within 3e-8, locating the error
+before the head.
+
+Embeddings and the first input RMSNorm match exactly. The first divergence is
+the layer-0 GDN input projection. Native combined QKV/Z/B/A weights into one
+12,352-column output; the reference makes four GEMMs with widths 8,192, 4,096,
+32 and 32. MLP gate/up fusion similarly replaces two 9,216-column outputs with
+one 18,432-column output. Matching the row count alone is insufficient: output
+width and contiguous output stride also affect cuBLAS reduction and rounding.
+
+A controlled probe uses the same real input rows and weights. Fused GDN
+projection differs in 427,534 state and 239,232 question elements. Separate
+contiguous component GEMMs match all four official outputs element for element;
+the same probe matches both separate MLP components exactly. The repair retains
+component M/N/K and contiguous output strides in Kev's opt-in service path,
+including padded multi-question projection batches. It copies each result back
+into the existing fused scratch layout, reusing bounded call-owned workspace.
+Other numerical profiles and the CUDA ABI are unchanged.
+
+The maintained `tests/kev/data/segmented-projection.json` fixture records this
+request, reference pins and unrounded official probabilities. The full executor
+regression fails before the repair with error 0.0328745842 and passes after it
+with error 7.4505806e-8. Observed real-row boundaries through layers 0 and 3 match
+exactly after the repair in both state and question passes. Temporary observers
+are removed from the delivered source. The full-corpus result and limits are
+reported in the [native recipe](native.md#primary-acceptance-status); the
+single-case test alone is not qualification.

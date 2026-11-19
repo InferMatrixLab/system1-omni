@@ -5,7 +5,9 @@ diagnostics; it does not replace, discard or retroactively qualify those runs.
 The recorded outcome and the separately frozen supplemental experiment follow
 the original protocol below. The [v3 repair](numerical-diagnosis.md) and [v4 boundary qualification](noul-boundary.md)
 describe an earlier pass with 36 Noul boundary questions. The [SM120 review replay](native.md#primary-acceptance-status)
-failed the unchanged probability gate. Qualification of the integrated revision remains pending.
+failed the unchanged probability gate. The later
+[integrated L20 replay](native.md#primary-acceptance-status) passes after retaining
+original projection components; the repaired SM120 path remains unverified.
 
 ## Primary reference and controls
 
