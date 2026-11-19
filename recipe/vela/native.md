@@ -84,13 +84,17 @@ cargo fmt --all --check
 cargo clippy -p omni-vela-native --all-targets -- -D warnings
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
   VELA_NATIVE_MANIFEST_SHA256=<the digest the exporter prints> \
-  cargo test -p omni-vela-native --test vela_native_processing \
+  cargo test -p omni-vela-native --release --locked --test vela_native_processing \
     --test vela_native_heads --test vela_native_response -- --ignored --nocapture
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
   VELA_NATIVE_MANIFEST_SHA256=<the digest the exporter prints> \
   VELA_CUDA_LIB=/path/to/libqwen3_5_cuda.so \
-  cargo test -p omni-vela-native --test vela_native_executor -- --ignored --nocapture
+  cargo test -p omni-vela-native --release --locked --test vela_native_executor -- --ignored --nocapture
 ~~~
+
+Use release test binaries for these full-bundle replays; the ordinary suite above
+stays independent of weights and devices. Release changes the build profile,
+while every fixture, external manifest anchor and numerical gate stays fixed.
 
 The default test suite runs everywhere with no weights and no GPU: the wire contract
 against the pinned runtime's 422/400 bodies (one known residual: a
@@ -120,7 +124,8 @@ For a field-level diff of one token-plan case:
 
 ~~~sh
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
-  cargo run -p omni-vela-native --example parity -- example-request
+  VELA_NATIVE_MANIFEST_SHA256=<the digest the exporter prints> \
+  cargo run -p omni-vela-native --release --locked --example parity -- example-request
 ~~~
 
 ## Recorded hardware evidence
@@ -139,6 +144,18 @@ unchanged 0.35 gate (example 0.1487, set-threshold 0.0152, CJK 0.3297,
 score 0.0158). This closes the executor finding for that profile only;
 broader hardware coverage and the windowed long-input GPU case remain
 unverified.
+
+An independent L20 profile is recorded in
+[PR #205](https://github.com/InferMatrixLab/system1-omni/pull/205): NVIDIA L20,
+sm_89, 46,068 MiB, driver 580.178.04, nvcc 12.8.61 and Rust 1.100.0. It uses
+the unchanged executor/backend source from `55ed516`, the pinned 0.8B package
+and uniform-BF16 export, FP32 heads, and the release replay commands above.
+All original processing/head/response CPU checks and four GPU logit cases pass;
+the largest GPU drift is 0.3297 with `VELA_GPU_LOGIT_GATE` unset and the original
+0.35 ceiling. Raw command output, artifact hashes and the interrupted initial
+debug attempt are retained with that run. This is native-library validation;
+GPU end-to-end answers, long-window GPU behavior and a native HTTP worker remain
+separate acceptance work.
 
 ## Scope and limits
 
