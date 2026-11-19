@@ -19,6 +19,87 @@ pub(super) struct ProjectionShape {
 }
 
 impl Model {
+    /// Preserve each framework projection's M/N/K and contiguous output stride.
+    /// Fusing the component weights changes cuBLAS reduction/rounding choices.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn project_service(
+        &self,
+        s: &Scratch,
+        x: usize,
+        weight: &Tensor,
+        y: usize,
+        rows: usize,
+        plan: &ServiceWindow,
+        group: Option<Group>,
+        gemm: *mut c_void,
+    ) -> Result<()> {
+        if group.is_none() && plan.projection.is_none() {
+            return self.gemm_with(gemm, s, x, weight, y, rows);
+        }
+        let (n, k) = (weight.shape[0], weight.shape[1]);
+        let components = group
+            .map(|group| lora::component_rows(&self.cfg, group))
+            .transpose()?
+            .unwrap_or([n, 0, 0, 0]);
+        ensure!(
+            components.iter().sum::<usize>() == n,
+            "service component layout"
+        );
+        let (m, input, output, index) = if let Some(shape) = &plan.projection {
+            // SAFETY: both buffers hold shape.rows * maximum projection width.
+            // Only this question's rows are consumed after the full-shape GEMM.
+            unsafe {
+                check(
+                    (plan.ops.zero)(shape.input, shape.rows * k * BF16, self.stream),
+                    "zero projection padding",
+                )?;
+                cuda::copy_dd(
+                    shape.input.wrapping_byte_add(shape.index * rows * k * BF16),
+                    s.at(x),
+                    rows * k * BF16,
+                    self.stream,
+                )?;
+            }
+            (shape.rows, shape.input, shape.output, shape.index)
+        } else {
+            (rows, s.at(x), plan.workspace, 0)
+        };
+        let mut first = 0;
+        for width in components.into_iter().filter(|&width| width > 0) {
+            // SAFETY: weights are contiguous row-stacked component matrices.
+            // The service workspace holds rows * maximum component width; the
+            // batch output buffer holds m * maximum projection width. Copy only
+            // this question's contiguous result into the fused scratch layout.
+            unsafe {
+                check(
+                    (cuda::api().cs1_gemm)(
+                        gemm,
+                        input,
+                        weight.ptr.wrapping_byte_add(first * k * BF16),
+                        output,
+                        m as i32,
+                        width as i32,
+                        k as i32,
+                        width as i32,
+                        self.stream,
+                    ),
+                    "service component projection",
+                )?;
+                cuda::copy2d(
+                    s.at(y + first * BF16),
+                    n * BF16,
+                    output.wrapping_byte_add(index * rows * width * BF16),
+                    width * BF16,
+                    width * BF16,
+                    rows,
+                    self.stream,
+                )?;
+            }
+            first += width;
+        }
+        Ok(())
+    }
+
     /// Select Kev's pinned default-service arithmetic before any execution.
     /// The optional CUDA symbols leave other Qwen consumers on their old profile.
     pub fn enable_service_readout_numerics(&mut self) -> Result<()> {
@@ -136,6 +217,16 @@ impl Model {
         self.prepare_scratch(total.max(state_len))?;
         let mut state = self.alloc_prefix_storage(state_len.max(prefix_len))?;
         state.len = state_len;
+        let component_width = self
+            .cfg
+            .intermediate
+            .max(Widths::of(&self.cfg).conv)
+            .max(2 * self.cfg.heads * self.cfg.head_dim);
+        let projection_bytes = state_len
+            .max(rows)
+            .checked_mul(component_width)
+            .and_then(|n| n.checked_mul(BF16))
+            .context("service projection workspace overflow")?;
         // SAFETY: pure size queries for the checked nonempty extents.
         let size = unsafe {
             (ops.bytes)(state_len as i32, state_len as i32, self.cfg.heads as i32).max((ops.bytes)(
@@ -145,7 +236,7 @@ impl Model {
             ))
         };
         ensure!(size > 0, "invalid service workspace size");
-        let workspace = DeviceBuffer::new(size)?;
+        let workspace = DeviceBuffer::new(size.max(projection_bytes))?;
         ensure!(
             (1..=32).contains(&batch_rows) && batch_index < batch_rows,
             "invalid projection batch"

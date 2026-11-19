@@ -3795,45 +3795,8 @@ impl Model {
         let st = self.stream;
         let rows = tend - qb;
         let project = |x, weight: &Tensor, y, group| -> Result<()> {
-            if let Some(plan) = service.and_then(|p| p.projection.as_ref()) {
-                let (n, k) = (weight.shape[0], weight.shape[1]);
-                let x_offset = plan.index * rows * k * BF16;
-                let y_offset = plan.index * rows * n * BF16;
-                // SAFETY: each temporary has projection_rows * max_projection_width
-                // elements. Preserve the reference GEMM shape and this row's offset;
-                // other independent matrix rows are zero and never read back.
-                return unsafe {
-                    check(
-                        (service.unwrap().ops.zero)(plan.input, plan.rows * k * BF16, st),
-                        "zero projection padding",
-                    )?;
-                    cuda::copy_dd(
-                        plan.input.wrapping_byte_add(x_offset),
-                        s.at(x),
-                        rows * k * BF16,
-                        st,
-                    )?;
-                    check(
-                        (cuda::api().cs1_gemm)(
-                            gemm,
-                            plan.input,
-                            weight.ptr,
-                            plan.output,
-                            plan.rows as i32,
-                            n as i32,
-                            k as i32,
-                            n as i32,
-                            st,
-                        ),
-                        "service batch-shape projection",
-                    )?;
-                    cuda::copy_dd(
-                        s.at(y),
-                        plan.output.wrapping_byte_add(y_offset),
-                        rows * n * BF16,
-                        st,
-                    )
-                };
+            if let Some(plan) = service {
+                return self.project_service(s, x, weight, y, rows, plan, group, gemm);
             }
             if let Some((api, original_rows)) = reuse {
                 // SAFETY: compatibility was checked before prefix capture. Scratch

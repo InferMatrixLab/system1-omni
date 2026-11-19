@@ -3,6 +3,39 @@ use crate::{checkpoint, executor::Executor, processing::Processor};
 use serde_json::{Value, json};
 
 #[test]
+#[ignore = "requires pinned KEV_EXPORT, KEV_CUDA_LIB and a reserved CUDA GPU"]
+fn native_segmented_projection_regression() {
+    let dir = std::path::PathBuf::from(std::env::var("KEV_EXPORT").expect("KEV_EXPORT"));
+    let lib = std::path::PathBuf::from(std::env::var("KEV_CUDA_LIB").expect("KEV_CUDA_LIB"));
+    let fixture: Value =
+        serde_json::from_str(include_str!("data/segmented-projection.json")).unwrap();
+    checkpoint::verify(&dir).unwrap();
+    let processor = Processor::load(&dir).unwrap();
+    let prepared = processor
+        .prepare(fixture["request"].as_object().unwrap())
+        .unwrap();
+    assert_eq!(prepared.rows.len(), 1);
+    assert_eq!(json!(prepared.rows[0].ids.len()), fixture["input_tokens"]);
+    assert_eq!(json!(prepared.rows[0].readouts), fixture["readouts"]);
+    let mut executor = Executor::load(&dir, &lib).unwrap();
+    let logits = executor.execute(&prepared.rows).unwrap();
+    let probabilities =
+        crate::postprocess::probabilities(&logits[0], crate::contract::TEMPERATURE).unwrap();
+    let expected = fixture["probabilities"].as_array().unwrap();
+    assert_eq!(probabilities.len(), expected.len());
+    let error = probabilities
+        .iter()
+        .zip(expected)
+        .map(|(&a, e)| (f64::from(a) - e.as_f64().unwrap()).abs())
+        .fold(0.0, f64::max);
+    eprintln!("segmented projection probability error {error}: {probabilities:?}");
+    assert!(
+        error <= 0.01,
+        "segmented projection probability error {error}: {probabilities:?}"
+    );
+}
+
+#[test]
 #[ignore = "requires KEV_EXPORT, KEV_CUDA_LIB, KEV_NATIVE_OUT and a reserved CUDA GPU"]
 fn native_corpus_capture() {
     let dir = std::path::PathBuf::from(std::env::var("KEV_EXPORT").expect("KEV_EXPORT"));
