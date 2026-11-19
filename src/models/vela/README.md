@@ -105,8 +105,12 @@ The response envelope is the pinned runtime's, passed through verbatim
   formulas are mirrored as pure functions in `postprocess.py` for the
   CPU contract tests.
 - Top-level `spans: {qid: [{label, start, end, text, probability}]}`
-  with Unicode code-point offsets into the targeted field's text
-  (clipped and re-trimmed to the field when it shares a part),
+  with Unicode code-point offsets into the targeted field's text when `over`
+  is a single state-field string (clipped and re-trimmed when it shares a part).
+  Part/default targets and lists resolving to one part retain offsets into the
+  rendered part, so field headers count; `["request"]` is not a field-local
+  equivalent of `"request"` when fields share a part. Cross-part span lists
+  remain an unresolved validation/error case. The response also preserves
   `sets: {qid: {"selected", "probabilities"}}` with strict `>`
   threshold selection, and `thresholds: {qid: t}` echoing the applied
   value. Tie-breaking inside a question is insertion order (argmax over

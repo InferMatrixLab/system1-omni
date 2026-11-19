@@ -76,11 +76,12 @@ def test_upstream_validation_and_error_precedence(pinned_runtime, state, questio
     assert error.value.detail()["loc"] == ["body", *location]
 
 
-def test_upstream_span_offsets_are_codepoints_into_the_named_field(pinned_runtime):
+@pytest.mark.parametrize("over,field_relative", [("request", True), (["request"], False), ("user", False)])
+def test_upstream_span_coordinate_origin_depends_on_over(pinned_runtime, over, field_relative):
     runtime, _ = pinned_runtime
     state = {"prompt": "前文🚀", "request": "😀 张伟 来自上海"}
     questions = {"pii": {"type": "span", "instructions": "Find names.",
-                         "criteria": {"PERSON": "a person"}, "over": "request"}}
+                         "criteria": {"PERSON": "a person"}, "over": over}}
     # Two aliased fields share a user part. This expected prefix is independent
     # of system_one_state's calculated field map.
     prefix = "prompt:\n前文🚀\n\nrequest:\n"
@@ -88,16 +89,20 @@ def test_upstream_span_offsets_are_codepoints_into_the_named_field(pinned_runtim
 
     def predict(request, span_limits):
         assert request["parts"] == [{"type": "user", "text": prefix + state["request"]}]
-        assert span_limits == {"pii": (len(prefix), len(prefix) + len(state["request"]))}
+        expected_limits = {"pii": (len(prefix), len(prefix) + len(state["request"]))} if field_relative else {}
+        assert span_limits == expected_limits
         return ({"answers": [{"id": "pii", "threshold": 0.5, "spans": [
             {"label": "PERSON", "start": absolute_start, "end": absolute_start + 2,
              "text": "张伟", "probability": 0.9},
         ]}]}, {"pii": 0.95}, 37)
 
     response = runtime.system_one_response(SimpleNamespace(_predict=predict), state, questions)
+    start = 2 if field_relative else absolute_start
     assert response["spans"]["pii"] == [
-        {"label": "PERSON", "start": 2, "end": 4, "text": "张伟", "probability": 0.9},
+        {"label": "PERSON", "start": start, "end": start + 2, "text": "张伟", "probability": 0.9},
     ]
+    coordinate_text = state["request"] if field_relative else prefix + state["request"]
+    assert coordinate_text[start:start + 2] == "张伟"
     assert state["request"][2:4] == "张伟"
     assert len(state["request"][:2].encode("utf-8")) != 2
     assert len(state["request"][:2].encode("utf-16-le")) // 2 != 2

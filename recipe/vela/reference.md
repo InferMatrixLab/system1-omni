@@ -293,7 +293,7 @@ confidence or token accounting.
 | Surface | Vela policy |
 | --- | --- |
 | Question kinds | Forward all five kinds: `choice`, `noul`, `score`, `span`, `set`. Preserve the span question's Noul view and each set label's Noul view together with top-level `spans`, `sets`, `thresholds`, and the hybrid-only `span_heads`. The Rust frontend preserves the worker's status, content type and body. |
-| Span identity and offsets | The request's `over` identifies the targeted field. Keep labels, probabilities, text and half-open `[start, end)` offsets into that field's text, measured in Unicode code points. The 0.3B has no `span_heads`; hybrid router/broad identity stays in that field. |
+| Span identity and offsets | A single state-field string in `over` gives field-local half-open `[start, end)` Unicode-code-point offsets, with clipping when fields share a part. A part name, default target, or list resolving to one part preserves offsets into that rendered part, including field headers; even `["request"]` differs from `"request"` when fields share a part. Keep labels, probabilities, text and the request's target context. The 0.3B has no `span_heads`; hybrids retain their router/broad identity there. |
 | Set interpretation | Per-label probabilities are independent. Select every label whose probability is strictly greater than the applied threshold; preserve label order and threshold echoes. No cross-label softmax or single-winner conversion. |
 | Length limits | Preserve the upstream state truncation/windowing policy described above. Schema/questions that cannot fit without state return whole-request 413. A successful response does not establish that every state character was examined. |
 | Confidence | Choice: top-two probability margin. Score: one minus normalized level variance. These are reference distribution statistics. Learned `tau` / `tau_span` and inference calibration temperatures remain separate. |
@@ -305,7 +305,7 @@ non-BMP characters before a span target while exercising all five kinds. An
 acceptance run must retain a positive span after the emoji; otherwise an empty
 span list cannot distinguish code-point offsets from UTF-8 bytes or UTF-16 code
 units. For every retained span, slicing the named field at `[start:end]` must
-produce its `text`. CJK alone distinguishes bytes but does not distinguish UTF-16
+produce its `text` for this explicit field-string target. CJK alone distinguishes bytes but does not distinguish UTF-16
 code units from code points.
 
 The final acceptance has separate gates:
@@ -361,6 +361,30 @@ OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 PYTHONPATH=src \
 
 This records worker/upstream reference parity. Direct/frontend forwarding and
 native/device comparisons remain separate acceptance checks.
+
+### Pending contract decisions
+
+The following require an explicit contract decision; this slice preserves the
+existing reference and introduces no external behavior change:
+
+- Whether #61 formally adopts Vela's extension fields and model-specific
+  confidence, rendered-row usage and state truncation, and reconciles #137's old
+  rejection/no-truncation acceptance wording. Discussion favoring model-defined
+  fields is [recorded in #61](https://github.com/InferMatrixLab/system1-omni/issues/61#issuecomment-6021490614);
+  it is not a completed shared-contract decision.
+- Whether span consumers may use part-relative/list targets or the accepted
+  contract should require a single named field. The response does not add a new
+  coordinate-origin field. Cross-part span lists are not qualified by these
+  fixtures: the pinned upstream preparation raises `TypeError` before a forward,
+  so their supported scope and client-error status need resolution. This PR does
+  not turn that failure into an accepted error contract.
+- Whether the shared error envelope should replace Vela's reference `detail`
+  list and other recorded transport differences. Keep current reference errors
+  until a deliberate change is agreed and tested.
+- Final native acceptance remains separate: matching member/oracle, precision,
+  structural decisions, router/broad dispatch and declared backend tolerances
+  must be checked by the independently assigned native phase. CPU reference and
+  forwarding success do not close those gates.
 
 ## Troubleshooting and limits
 
