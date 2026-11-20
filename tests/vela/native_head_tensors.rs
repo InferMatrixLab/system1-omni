@@ -16,10 +16,11 @@ fn f32_tensor(name: &str, shape: Vec<usize>, values: &[f32]) -> Vec<u8> {
 fn tensor_rejects_a_shape_that_only_matches_when_flattened() {
     let raw = f32_tensor("head.weight", vec![4], &[0.0; 4]);
     let file = SafeTensors::deserialize(&raw).expect("safetensors");
-    let error = match Linear::from_weight(tensor(&file, "head.weight").expect("tensor"), "head.weight") {
-        Ok(_) => panic!("wrong rank must fail"),
-        Err(error) => error,
-    };
+    let error =
+        match Linear::from_weight(tensor(&file, "head.weight").expect("tensor"), "head.weight") {
+            Ok(_) => panic!("wrong rank must fail"),
+            Err(error) => error,
+        };
     assert!(error.to_string().contains("head.weight must be 2-D"));
 }
 

@@ -238,14 +238,21 @@ fn tensor<'a>(file: &'a SafeTensors<'a>, name: &str) -> Result<Tensor> {
         view.dtype() == safetensors::Dtype::F32,
         "{name} must be F32"
     );
+    let (chunks, remainder) = view.data().as_chunks::<4>();
+    ensure!(
+        remainder.is_empty(),
+        "{name} has an invalid F32 byte length"
+    );
+    let data: Vec<f32> = chunks
+        .iter()
+        .map(|chunk| f32::from_le_bytes(*chunk))
+        .collect();
+    ensure!(
+        data.iter().all(|value| value.is_finite()),
+        "{name} contains non-finite values"
+    );
     Ok(Tensor {
-        data: view
-            .data()
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|chunk| f32::from_le_bytes(*chunk))
-            .collect(),
+        data,
         shape: view.shape().to_vec(),
     })
 }
