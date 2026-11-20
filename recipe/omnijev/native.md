@@ -112,10 +112,15 @@ CUDA library, as absolute paths:
 ```sh
 cargo test --locked -p omni-omnijev-native
 OMNIJEV_EXPORT=$PWD/omnijev-export OMNIJEV_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
-    cargo test --release --locked -p omni-omnijev-native --test worker -- --ignored --test-threads=1
+    cargo test --release --locked -p omni-omnijev-native --test worker -- --ignored --test-threads=1 --skip reference
 QWEN3_5_CHECKPOINT=$PWD/omnijev-export CUA_S1_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
-    cargo test --release --locked -p omni-qwen3-5-native --test readout -- --ignored --test-threads=1
+    cargo test --release --locked -p omni-qwen3-5-native --test readout -- --ignored --test-threads=1 --skip reference
 ```
+
+These commands select the merged worker's tests. The separate unmerged one-shot
+Score library tests require their own artifact and Graph-off settings; see the
+[preparation recipe](README.md#separate-unmerged-reference-artifact). They do not
+establish a replacement HTTP worker profile.
 
 The direct OmniJev window-Graph regression selects eager and Graph models without
 changing process-wide environment variables. It compares raw FP32 head bits and

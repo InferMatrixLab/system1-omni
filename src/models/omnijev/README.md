@@ -10,6 +10,18 @@ heads, and response finishing, each checked against the pinned reference. The
 regenerates the fixtures; [the worker recipe](../../../recipe/omnijev/native.md) builds,
 runs and validates the worker.
 
+An explicit `omnijev-unmerged-reference/1` export and
+`Executor::load_one_shot_reference` / `score_one_shot` library API preserve the
+separate FP32 LoRA arithmetic for one selected Score question from a complete
+prepared request. They reuse the normal full-row Qwen reference execution and
+gather the specified final-norm hidden rows, synchronizing both streams before
+returning, including errors. The API owns no continuation state. Graphs, reuse,
+LM targets and all-question worker execution are unsupported and rejected;
+the existing merged worker/defaults remain available. See the
+[separate export and validation instructions](../../../recipe/omnijev/README.md#separate-unmerged-reference-artifact).
+This bounded library capability does not establish completion of #114's original
+all-type 280-answer numerical gate, JPEG fidelity or HTTP acceptance.
+
 ## Pinned artifacts
 
 | Artifact | Revision |

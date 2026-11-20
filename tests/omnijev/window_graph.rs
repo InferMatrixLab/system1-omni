@@ -27,6 +27,7 @@ fn language_mode(executor: Executor, dir: &Path, library: &Path, graph: bool) ->
         language,
         heads,
         calibration,
+        reference_language,
         request,
         question,
     } = executor;
@@ -36,6 +37,7 @@ fn language_mode(executor: Executor, dir: &Path, library: &Path, graph: bool) ->
         language: Model::load_with_graph(dir, library, graph).unwrap(),
         heads,
         calibration,
+        reference_language,
         request: None,
         question: None,
     }
