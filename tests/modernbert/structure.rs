@@ -51,6 +51,23 @@ fn parse(config: &Value) -> ModernBertStructure {
 }
 
 #[test]
+fn zero_attention_heads_is_rejected_without_panicking() {
+    for base in [family_config(), vela_encoder_config()] {
+        for explicit_head_dim in [false, true] {
+            let mut config = base.clone();
+            config["num_attention_heads"] = json!(0);
+            if explicit_head_dim {
+                config["head_dim"] = json!(64);
+            }
+            let error = ModernBertConfigAdapter::from_value(&config, "config.json")
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("num_attention_heads"), "{error}");
+        }
+    }
+}
+
+#[test]
 fn hf_adapter_parses_the_vela_profile_with_derived_schedule() {
     let (structure, meta) =
         ModernBertConfigAdapter::from_value(&vela_encoder_config(), "config.json#encoder_config")

@@ -77,6 +77,10 @@ fn derive_head_dim(
     config: &Json,
     provenance: &mut BTreeMap<String, FieldOrigin>,
 ) -> Result<usize> {
+    ensure!(
+        heads > 0,
+        "num_attention_heads must be positive, got {heads}"
+    );
     let head_dim = match config.get("head_dim") {
         Some(value) => value
             .as_u64()
