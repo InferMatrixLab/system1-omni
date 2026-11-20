@@ -1,6 +1,7 @@
 //! Shared admission, dispatch and the worker-side engine contract for a loaded executor.
 
 pub mod admission;
+pub mod batching;
 pub mod control;
 pub mod engine;
 

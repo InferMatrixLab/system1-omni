@@ -117,20 +117,24 @@ cargo fmt --all --check
 cargo clippy -p omni-vela-native --all-targets -- -D warnings
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
   VELA_NATIVE_MANIFEST_SHA256=<the digest the exporter prints> \
-  cargo test -p omni-vela-native --test vela_native_processing \
+  cargo test -p omni-vela-native --release --locked --test vela_native_processing \
     --test vela_native_heads --test vela_native_response -- --ignored --nocapture
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
   VELA_NATIVE_MANIFEST_SHA256=<the digest the exporter prints> \
   VELA_CUDA_LIB=/path/to/libqwen3_5_cuda.so \
-  cargo test -p omni-vela-native --test vela_native_executor -- --ignored --nocapture
+  cargo test -p omni-vela-native --release --locked --test vela_native_executor -- --ignored --nocapture
 ~~~
 
-The default test suite runs everywhere with no weights and no GPU: the wire
-contract against the pinned runtime's 422/400 bodies (one known
-residual: a non-finite JSON number answers the generic 400 message,
-where the Python worker names the value), the bundle manifest gate
-(including the repository pin for the three verbatim runtime files),
-the truncation budget, and the predict-mapping/plan parity on every
+Use release test binaries for these full-bundle replays; the ordinary suite above
+stays independent of weights and devices. Release changes the build profile,
+while every fixture, external manifest anchor and numerical gate stays fixed.
+
+The default test suite runs everywhere with no weights and no GPU: the wire contract
+against the pinned runtime's 422/400 bodies (one known residual: a
+non-finite JSON number answers the generic 400 message, where the
+Python worker names the value), the bundle manifest gate (including
+the repository pin for the three verbatim runtime files), the
+truncation budget, and the predict-mapping/plan parity on every
 frozen fixture of every member. The four
 opt-in checks (behind `-- --ignored`) replay the fixtures through the
 Rust implementation:
@@ -153,7 +157,8 @@ For a field-level diff of one token-plan case:
 
 ~~~sh
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
-  cargo run -p omni-vela-native --example parity -- example-request
+  VELA_NATIVE_MANIFEST_SHA256=<the digest the exporter prints> \
+  cargo run -p omni-vela-native --release --locked --example parity -- example-request
 ~~~
 
 ## Recorded hardware evidence
@@ -174,8 +179,42 @@ review profile (RTX 4090 24 GB, CUDA 13.0.88) failed the pre-fix path at
 CUDA 13.0 profile has not been rerun after fixed-GEMM and remains
 unqualified.
 
+An independent L20 profile is recorded in
+[PR #205](https://github.com/InferMatrixLab/system1-omni/pull/205): NVIDIA L20,
+sm_89, 46,068 MiB, driver 580.178.04, nvcc 12.8.61 and Rust 1.100.0. It uses
+the unchanged executor/backend source from `55ed516`, the pinned 0.8B package
+and uniform-BF16 export, FP32 heads, and the release replay commands above.
+All original processing/head/response CPU checks and four GPU logit cases pass;
+the largest GPU drift is 0.3297 with `VELA_GPU_LOGIT_GATE` unset and the original
+0.35 ceiling. Raw command output, artifact hashes and the interrupted initial
+debug attempt are retained with that run. This is native-library validation;
+GPU end-to-end answers, long-window GPU behavior and a native HTTP worker remain
+separate acceptance work.
+
 ## Scope and limits
 
+- Each completed ordinary row and span-window row must contain at most
+  **16,384 tokens**, after the existing state clipping and windowing.
+  Any oversized row rejects the whole request with status 413 and the
+  `too_long` detail at `body.questions`, before execution. The cap uses
+  the rendered row's `n_tokens`, including its parts and all question
+  blocks; it does not limit the request's summed `usage.input_tokens`.
+  Multiple valid rows/windows may therefore account for more than
+  16,384 input tokens together. State clipping, row ordering, window
+  overlap, and usage accounting otherwise retain the pinned behavior.
+- This is a deliberate restriction of the pinned Python runtime's
+  input domain. Its minimum assembly budget can admit a longer span
+  header: `instructions="word " * 20000`, one `PERSON` span label and
+  state `"s"` produce a 20,085-token row at the model-call boundary.
+  Native processing rejects that request with 413. Reaching that
+  reference boundary does not establish successful model inference or
+  an HTTP result. The bundle's pinned `max_length=16384` is unchanged;
+  the 0.3B member's 8,192 window and the backbone/tokenizer's 262,144
+  position metadata do not define this native admission cap.
+- Span questions must target a single part; multi-part span targets
+  are explicitly rejected with 422. Non-finite JSON is rejected with
+  the native generic 400 message rather than the Python worker's
+  value-specific wording. These existing input differences remain.
 - Implemented: bundle export + manifest gate, wire admission,
   token-level processing, F32 heads, scoring and span decoding, the
   SystemOne response finishing, and backbone execution through the

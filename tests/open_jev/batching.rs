@@ -29,3 +29,33 @@ fn shared_prefix_is_exact_aligned_and_leaves_a_suffix() {
     assert_eq!(shared_prefix(&[&a, &a[..2048]]), 0);
     assert_eq!(shared_prefix(&vec![a.as_slice(); 17]), 0);
 }
+
+#[test]
+fn packed_prefix_admits_midlength_without_changing_legacy_policy() {
+    let a = vec![42u32; 801];
+    let mut b = vec![42u32; 832];
+    b[790] = 7;
+    assert_eq!(shared_prefix(&[&a, &b]), 0);
+    assert_eq!(super::packed_shared_prefix(&[&a, &b]), 768);
+    assert_eq!(super::packed_shared_prefix(&[&a, &b[..511]]), 0);
+    assert_eq!(super::packed_shared_prefix(&[&a, &b[..512]]), 0);
+    assert_eq!(super::packed_shared_prefix(&[&a]), 0);
+    assert_eq!(super::packed_shared_prefix(&vec![a.as_slice(); 17]), 0);
+}
+
+#[test]
+fn projection_prefix_keeps_unaligned_rows_and_original_batch_bounds() {
+    let a = vec![42; 128];
+    let mut b = a.clone();
+    b[43] = 7;
+    assert_eq!(super::projection_prefix(&[&a, &b]), 43);
+    assert_eq!(super::packed_shared_prefix(&[&a, &b]), 0);
+    assert_eq!(super::projection_prefix(&[&a, &a]), 127);
+    assert_eq!(super::projection_prefix(&[&a]), 0);
+    assert_eq!(super::projection_prefix(&vec![a.as_slice(); 17]), 0);
+    assert_eq!(super::projection_prefix(&[&a, &[]]), 0);
+    let big = vec![42; 3000];
+    assert_eq!(super::projection_prefix(&[&big, &big]), 0);
+    b[15] = 8;
+    assert_eq!(super::projection_prefix(&[&a, &b]), 0);
+}

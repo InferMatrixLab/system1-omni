@@ -464,3 +464,7 @@ impl Heads {
             .collect()
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../../tests/vela/native_head_tensors.rs"]
+mod tests;

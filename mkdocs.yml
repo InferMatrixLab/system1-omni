@@ -68,6 +68,7 @@ nav:
       - Cua-S1 text numerical parity: docs/benchmarks/cua-s1-text-parity-20261013/README.md
       - Valen reference worker: recipe/valen/reference.md
       - Valen checkpoint export: recipe/valen/export.md
+      - Valen-Decision-1.5 reference worker: recipe/valen_decision_1_5/reference.md
       - Cua-S1 native screenshots: recipe/cua_s1/native_screenshot.md
       - Cua-S1 vision CUDA Graph: recipe/cua_s1/native_vision_graph.md
       - Open-Jev native text worker: recipe/open_jev/native.md
@@ -90,4 +91,5 @@ nav:
       - Vela 2.0 decoder native library: recipe/vela/native.md
       - Clef reference worker: recipe/clef/reference.md
       - pplx-decider reference worker: recipe/pplx_decider/README.md
+      - Vela 2.0 0.8B native library: recipe/vela/native.md
   - Contributing: CONTRIBUTING.md

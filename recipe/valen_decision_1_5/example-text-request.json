@@ -1,0 +1,14 @@
+{
+  "model": "valen-decision-1.5-0.8b",
+  "state": "The card was charged twice for one order.",
+  "questions": {
+    "refund": {
+      "type": "choice",
+      "instructions": "Decide the refund action.",
+      "criteria": {
+        "refund": "Refund the duplicate charge",
+        "wait": "Wait for review"
+      }
+    }
+  }
+}
