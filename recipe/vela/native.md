@@ -95,6 +95,15 @@ re-run `export_head_inputs.py` (add `--device cuda` to record the
 bf16-autocast numbers the member-calibrated gates expect) before the
 opt-in head/response/executor replays below.
 
+For an acceptance run that preserves committed fixture history, record into a
+separate output directory and use an isolated test checkout with the complete
+current JSON/tensor pairs. Freeze their hashes before native comparison. Do not
+combine freshly recorded hidden tensors with another run's JSON expectations;
+report their differences from committed history separately. The recorder's
+execution order can differ from planned row order, so attributed executor calls
+match the recorded row, kind and span head, with every call consumed exactly
+once. Missing or duplicate matches fail; numerical and shape gates stay fixed.
+
 The token plans record what the pinned runtime feeds the backbone (the
 predict mapping, the per-row decomposition, the rendered `p_ids`,
 blocks and readout positions, truncation, a windowed long-span case).

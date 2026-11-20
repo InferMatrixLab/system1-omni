@@ -297,7 +297,7 @@ every decoder member:
   hidden, bilinear dim, slot count — derived from the tensors' own
   shapes, so one implementation serves hidden 1024/2560/4096 alike;
   the executor cross-checks the backbone's hidden size against them)
-  and the scoring
+  and reject non-finite head tensor values before scoring. The scoring
   path: CandidateHead, both SpanHeadV2 heads, `set_bias`, the
   per-type temperatures, set thresholds, the PII length rule and
   sparse gate, `span_decode_r4` (word units, unit vote, fill,
@@ -306,19 +306,23 @@ every decoder member:
   SystemOne envelope (Noul views with the range-filtered max word
   probability and set fan-out, span clipping to the plan's field
   ranges with re-trim, `span_heads`, thresholds, confidence formulas,
-  usage). Replaying the recorded head-input fixtures
+  usage). The historical 0.8B replay of recorded head-input fixtures
   (`tests/vela/fixtures/head-input-*`): head-logit drift ≤ 3.8e-5,
   predict-answer drift ≤ 7.3e-7, and the finished responses match the
   frozen oracles within 1.5e-6 on four cases. The windowed long-span
   fixture's reference answer carries no spans, so its drift comparison
   covers the per-window head logits and the empty result, not the
-  window-aggregation arithmetic itself; a windowed fixture whose
-  reference answer has spans would close that gap.
+  window-aggregation arithmetic itself. The larger members have
+  separately labeled GPU-recorded fixtures: their positive long-window
+  expectations contain 76 spans for 4B and 373 for 9B. Their strict
+  head and response replays must be qualified per member and hardware
+  profile; the 0.8B measurements do not establish that qualification.
 - `native/src/executor.rs` runs the backbone on CUDA through the
   shared qwen3_5 crate: the family `Model` exposes only last-position
   hidden states, so every readout position runs as its own full
-  sequence — `[parts .. position]` — which causality makes identical
-  to the reference's in-tree readout, packed into `forward_batch`.
+  sequence — `[parts .. position]` — through an independent
+  `forward_fixed` call (fixed-M=64 GEMMs), keeping the reference's
+  causal readout positions without packing the backbone calls.
   The backbone runs from the uniform-BF16 export (the shared loader's
   format); the heads stay F32 on the faithful tensors. Recorded
   execution on sm_120 (RTX 5060, CUDA 13.1): the four small frozen
@@ -342,6 +346,6 @@ widens native support. Multi-part span targets remain an explicit native
 The crate is a library; the HTTP worker around `Processor` +
 `Executor` is not part of it. Long-span GPU parity and measured
 latency are not recorded. Checks: `cargo test -p omni-vela-native`
-(56 tests, no weights, no GPU; render, head and response parity are
+(ordinary tests need no weights or GPU; render, head and response parity are
 opt-in with `VELA_NATIVE_BUNDLE`, executor parity additionally with
 `VELA_CUDA_LIB`; see [recipe/vela/native.md](../../recipe/vela/native.md)).

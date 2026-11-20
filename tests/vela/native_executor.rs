@@ -110,7 +110,7 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
             ));
         let _file = safetensors::SafeTensors::deserialize(&raw).expect("safetensors");
 
-        // The recorded reference logits per call, in call order.
+        // The recorder's execution order can differ from planned row order.
         let calls: Vec<&Value> = head_fixture["head_calls"]
             .as_array()
             .unwrap()
@@ -118,14 +118,16 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
             .collect();
         let mut q_call_index = 0usize;
         let mut span_call_index = 0usize;
+        let mut consumed = vec![false; calls.len()];
 
         let mut worst_logit = 0.0f32;
-        for row in &planned.rows {
+        for (row_index, row) in planned.rows.iter().enumerate() {
             let readouts = executor.row_readouts(row).expect("readouts");
             // One recorded q call carries the row's question blocks
             // stacked; compare per block, matched by option count.
             if !readouts.questions.is_empty() {
-                let call = next_call(&calls, &mut q_call_index, "q");
+                let call = next_call(&calls, &mut consumed, row_index, "q", None);
+                q_call_index += 1;
                 let want: Vec<Vec<f64>> = call["logits"]
                     .as_array()
                     .unwrap()
@@ -181,7 +183,8 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
                     &executor.heads.router
                 };
                 let got = head.forward(&span.words, &span.labels);
-                let call = next_call(&calls, &mut span_call_index, "span");
+                let call = next_call(&calls, &mut consumed, row_index, "span", Some(&which));
+                span_call_index += 1;
                 let want: Vec<Vec<f64>> = call["logits"]
                     .as_array()
                     .unwrap()
@@ -213,6 +216,10 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
             calls.iter().filter(|c| c["kind"] == "span").count(),
             "{case}: span calls"
         );
+        assert!(
+            consumed.iter().all(|used| *used),
+            "{case}: unused head call"
+        );
         println!("{case}: worst logit drift {worst_logit:.4}");
         assert!(
             worst_logit as f64 <= logit_gate,
@@ -221,12 +228,101 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
     }
 }
 
-fn next_call<'a>(calls: &[&'a Value], index: &mut usize, kind: &str) -> &'a Value {
-    let call = calls
-        .iter()
-        .filter(|c| c["kind"] == kind)
-        .nth(*index)
-        .unwrap_or_else(|| panic!("recorded {kind} call"));
-    *index += 1;
-    call
+fn next_call<'a>(
+    calls: &[&'a Value],
+    consumed: &mut [bool],
+    row: usize,
+    kind: &str,
+    head: Option<&str>,
+) -> &'a Value {
+    assert_eq!(calls.len(), consumed.len());
+    let attributed = calls.iter().any(|call| call.get("row").is_some());
+    let index = if attributed {
+        assert!(
+            calls.iter().all(|call| call["row"].as_u64().is_some()),
+            "all recorded calls must carry valid row attribution"
+        );
+        let matches: Vec<usize> = calls
+            .iter()
+            .enumerate()
+            .filter(|(index, call)| {
+                !consumed[*index]
+                    && call["row"].as_u64() == Some(row as u64)
+                    && call["kind"] == kind
+                    && head.is_none_or(|head| call["head"] == head)
+            })
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(
+            matches.len(),
+            1,
+            "expected exactly one unconsumed row={row} kind={kind} head={head:?} call"
+        );
+        matches[0]
+    } else {
+        // The original CPU-recorded 0.8B fixtures predate row metadata.
+        calls
+            .iter()
+            .enumerate()
+            .position(|(index, call)| !consumed[index] && call["kind"] == kind)
+            .unwrap_or_else(|| panic!("recorded {kind} call"))
+    };
+    if let Some(head) = head {
+        assert_eq!(calls[index]["head"], head, "recorded span head");
+    }
+    consumed[index] = true;
+    calls[index]
+}
+
+#[test]
+fn attributed_calls_match_rows_when_execution_is_reordered() {
+    let first = serde_json::json!({"kind": "span", "row": 1, "head": "router", "logits": [[27.0]]});
+    let second =
+        serde_json::json!({"kind": "span", "row": 0, "head": "router", "logits": [[23.0]]});
+    let calls = [&first, &second];
+    let mut consumed = [false; 2];
+    assert_eq!(
+        next_call(&calls, &mut consumed, 0, "span", Some("router"))["logits"],
+        second["logits"]
+    );
+    assert_eq!(
+        next_call(&calls, &mut consumed, 1, "span", Some("router"))["logits"],
+        first["logits"]
+    );
+    assert!(consumed.iter().all(|used| *used));
+}
+
+#[test]
+fn legacy_unattributed_calls_keep_the_original_kind_order() {
+    let first = serde_json::json!({"kind": "span", "head": "router", "logits": [[1.0]]});
+    let second = serde_json::json!({"kind": "span", "head": "router", "logits": [[2.0]]});
+    let calls = [&first, &second];
+    let mut consumed = [false; 2];
+    assert_eq!(
+        next_call(&calls, &mut consumed, 0, "span", Some("router"))["logits"],
+        first["logits"]
+    );
+    assert_eq!(
+        next_call(&calls, &mut consumed, 1, "span", Some("router"))["logits"],
+        second["logits"]
+    );
+    assert!(consumed.iter().all(|used| *used));
+}
+
+#[test]
+fn attributed_calls_reject_missing_duplicate_and_wrong_heads() {
+    let one = serde_json::json!({"kind": "span", "row": 0, "head": "router", "logits": [[1.0]]});
+    let other_row =
+        serde_json::json!({"kind": "span", "row": 1, "head": "router", "logits": [[1.0]]});
+    let other_head =
+        serde_json::json!({"kind": "span", "row": 0, "head": "broad", "logits": [[1.0]]});
+    for calls in [vec![&other_row], vec![&one, &one], vec![&other_head]] {
+        let mut consumed = vec![false; calls.len()];
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                next_call(&calls, &mut consumed, 0, "span", Some("router"));
+            }))
+            .is_err()
+        );
+    }
 }
