@@ -1,6 +1,6 @@
 # Vela 2.0 0.3B native profile
 
-`omni-vela-native` registers the Vela 2.0 0.3B encoder as the second
+`omni-vela-encoder-native` registers the Vela 2.0 0.3B encoder as the second
 ModernBERT family profile and owns its CPU-verifiable half: bundle
 config parsing (`config`), the registered profile and its bundle
 limits (`profile`), the YaRN-scaled rotary tables (`rope`), and the

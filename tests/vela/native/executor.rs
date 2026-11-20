@@ -5,7 +5,7 @@
 //!   VELA_NATIVE_CHECKPOINT=<dir with config.json + model.safetensors>
 //!   VELA_NATIVE_LIBRARY=<path to liblaya_cuda.so>
 
-use omni_vela_native::executor::Encoder;
+use omni_vela_encoder_native::executor::Encoder;
 use std::path::PathBuf;
 
 fn gated(name: &str) -> Option<PathBuf> {

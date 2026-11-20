@@ -1377,7 +1377,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "omni-vela-native"
+name = "omni-vela-encoder-native"
 version = "0.1.0"
 dependencies = [
  "anyhow",

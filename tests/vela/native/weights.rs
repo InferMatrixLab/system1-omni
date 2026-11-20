@@ -1,4 +1,4 @@
-use omni_vela_native::{Weights, head_tensors, read_structure, storage_dtype};
+use omni_vela_encoder_native::{Weights, head_tensors, read_structure, storage_dtype};
 use serde_json::{Value, json};
 use std::fs;
 use tempfile::{TempDir, tempdir};

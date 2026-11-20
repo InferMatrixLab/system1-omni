@@ -37,7 +37,7 @@ Scope:
 Out of scope: the larger hybrid members (4B/9B), the ONNX backend of
 the 0.3B, native execution for the reference workers (the ModernBERT
 profile's own `cuda`-gated route under
-[`native/`](../../src/models/vela/native/README.md) is a separate
+[`encoder_native/`](../../src/models/vela/encoder_native/README.md) is a separate
 slice), and `noul_calibration` (off by default; documented as a
 reference-server feature only).
 

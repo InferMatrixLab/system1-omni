@@ -1,4 +1,4 @@
-use omni_vela_native::{cos_sin_tables, profile, yarn};
+use omni_vela_encoder_native::{cos_sin_tables, profile, yarn};
 use serde_json::Value;
 
 /// Reference tables dumped from the pinned runtime itself:

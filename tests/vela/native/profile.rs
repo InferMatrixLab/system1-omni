@@ -1,7 +1,7 @@
 mod common;
 
 use omni_modernbert::plan::{self, EncoderPlanOptions, PlanStep};
-use omni_vela_native::{profile, read_structure};
+use omni_vela_encoder_native::{profile, read_structure};
 use serde_json::json;
 use std::fs;
 use tempfile::tempdir;
