@@ -1,0 +1,24 @@
+{
+  "name": "hard-v1:hard-v1/ambiguous/development/00044",
+  "reference": "jaredpalmer/kev@2074cc44256200bb37540103fa4572901faa10f3",
+  "checkpoint": "jaredpalmer/kev-4b@139fdd94f1b6a6ad80cc15e08fcb99cac885a101",
+  "capture": "Default BF16 CUDA service, Torch 2.8.0+cu128, Transformers 5.17.0, PEFT 0.21.0; NVIDIA L20. Original corpus index 951, SHA256 1122e3b24847bfc68b618fc69b4608661dd6c6464def8f9642e41d97f67a1acf. One-case regression, not full qualification.",
+  "request": {
+    "model": "kev-latest",
+    "state": "MEMO\nRe: Warranty\n\nThe warranty covers manufacturing defects for 24 months from the purchase date. Accidental damage is never covered. Tomas Pajari bought a coffee machine on June 12, 2025. Tomas made a warranty claim on November 28, 2027.\n\nThe technician found a faulty heating element from the factory. Tomas registered the machine online.",
+    "questions": {
+      "decision": {
+        "type": "choice",
+        "instructions": "Decide the case.",
+        "criteria": {
+          "repair_under_warranty": "Repair under warranty",
+          "not_covered": "Not covered by the warranty",
+          "not_enough_information": "The information given is not enough to decide"
+        }
+      }
+    }
+  },
+  "input_tokens": 127,
+  "readouts": [99, 110, 125, 126],
+  "probabilities": [0.2030983418226242, 0.6112436056137085, 0.18565808236598969]
+}

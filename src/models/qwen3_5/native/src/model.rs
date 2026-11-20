@@ -13,6 +13,8 @@
 //! once and every branch from the state after it (see `SharedPrompts`).
 
 mod matched;
+mod service;
+use service::ServiceWindow;
 mod window_graph;
 
 use std::collections::{HashMap, VecDeque};
@@ -24,7 +26,9 @@ use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value as Json;
 
 use crate::cuda::{self, DeviceBuffer, Stream, check};
-use crate::inputs::{DeviceMultimodalInput, MultimodalInput, rotary_tables};
+use crate::inputs::{
+    DeviceMultimodalInput, MultimodalInput, rotary_tables, rotary_tables_with_precision,
+};
 use crate::lora::{self, Group};
 
 const ALIGN: usize = 256;
@@ -718,10 +722,10 @@ use prefix_compaction::{Compaction, Projection};
 mod prefix_tree;
 use prefix_tree::Tree;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum WindowReadout {
+enum WindowReadout<'a> {
     Hidden,
     StateOnly,
+    Service(&'a ServiceWindow),
 }
 
 /// A packed suffix batch uses one freshly captured prefix and original algorithm.
@@ -871,6 +875,7 @@ pub struct Model {
     matched_ref: usize,
     matched_handles: HashMap<usize, *mut c_void>,
     reference: Option<&'static cuda::Reference>,
+    service_ops: Option<cuda::ServiceReadout>,
     fp32_gdn: Option<cuda::Fp32Gdn>,
     batched_gdn: Option<cuda::BatchedGdn>,
     packed_gemm: Option<cuda::PackedGemm>,
@@ -1054,6 +1059,7 @@ impl Model {
             matched_ref: 0,
             matched_handles: HashMap::new(),
             reference: None,
+            service_ops: None,
             fp32_gdn: None,
             batched_gdn: None,
             packed_gemm: None,
@@ -2303,11 +2309,12 @@ impl Model {
     }
 
     fn upload_positions(&self, s: &Scratch, positions: [&[i64]; 3]) -> Result<()> {
-        let (cos, sin) = rotary_tables(
+        let (cos, sin) = rotary_tables_with_precision(
             positions,
             self.cfg.rotary_half,
             self.cfg.rope_theta,
             self.cfg.mrope_section,
+            self.service_ops.is_some(),
         );
         // SAFETY: tables contain at most s.cap rows of rotary_half BF16 values.
         unsafe {
@@ -2374,6 +2381,10 @@ impl Model {
             len <= self.cfg.max_positions,
             "cached prefix exceeds the configured maximum length"
         );
+        self.alloc_prefix_storage(len)
+    }
+
+    fn alloc_prefix_storage(&self, len: usize) -> Result<PrefixState> {
         let (kvrow, nfull, ngdn, state_bytes, tail_bytes) = self.prefix_layout();
         let mut attn_kv = Vec::with_capacity(nfull);
         for _ in 0..nfull {
@@ -3187,6 +3198,10 @@ impl Model {
         tree: Option<&Tree>,
         state_tokens: Option<usize>,
     ) -> Result<()> {
+        ensure!(
+            self.service_ops.is_none(),
+            "use segmented readout for the service profile"
+        );
         let prefix_bidir = if let Some(state) = state_tokens {
             self.require_prompt_prefix_bidirectional()?;
             ensure!(
@@ -3751,10 +3766,18 @@ impl Model {
         prefix: Option<&PrefixState>,
         gemm: *mut c_void,
         reuse: Option<(cuda::ReuseGemm, usize)>,
-        readout: WindowReadout,
+        readout: WindowReadout<'_>,
     ) -> Result<()> {
+        let service = match readout {
+            WindowReadout::Service(plan) => Some(plan),
+            _ => None,
+        };
         ensure!(
-            self.fp32_gdn.is_none(),
+            self.service_ops.is_none() || service.is_some(),
+            "use segmented readout for the service profile"
+        );
+        ensure!(
+            self.fp32_gdn.is_none() || service.is_some(),
             "FP32 GDN does not support prefix continuation"
         );
         ensure!(
@@ -3764,7 +3787,7 @@ impl Model {
             "prefix window shape"
         );
         ensure!(
-            readout != WindowReadout::StateOnly
+            !matches!(readout, WindowReadout::StateOnly)
                 || (capture.is_some() && prefix.is_none() && !custom_positions && reuse.is_some()),
             "state-only execution requires an exact text-prefix capture"
         );
@@ -3772,6 +3795,9 @@ impl Model {
         let st = self.stream;
         let rows = tend - qb;
         let project = |x, weight: &Tensor, y, group| -> Result<()> {
+            if let Some(plan) = service {
+                return self.project_service(s, x, weight, y, rows, plan, group, gemm);
+            }
             if let Some((api, original_rows)) = reuse {
                 // SAFETY: compatibility was checked before prefix capture. Scratch
                 // owns rows at the offsets passed by the unchanged layer layout.
@@ -3857,6 +3883,22 @@ impl Model {
                         s.gdn_in + qb * ldbb,
                         &[rows],
                     )?;
+                    if let Some(plan) = service {
+                        unsafe {
+                            check(
+                                (plan.ops.zero)(p(s.gdn_in + qb * ldbb), plan.leading * ldbb, st),
+                                "mask leading GDN rows",
+                            )?;
+                            check(
+                                (plan.ops.zero)(
+                                    p(s.gdn_in + (qb + plan.real_end) * ldbb),
+                                    (rows - plan.real_end) * ldbb,
+                                    st,
+                                ),
+                                "mask trailing GDN rows",
+                            )?;
+                        }
+                    }
                     let ld = ldb as i32;
                     let z = s.gdn_in + w.conv * BF16;
                     let b = z + vd * BF16;
@@ -3868,7 +3910,7 @@ impl Model {
                             cap.buffers.gdn_state[la_i].at(0)
                         });
                     unsafe {
-                        if qb > 0 {
+                        if qb > 0 && service.is_none() {
                             cuda::copy_dd(
                                 p(s.gdn_in + (qb - 3) * ldbb),
                                 prefix.unwrap().buffers.conv_tail[la_i].at(0),
@@ -3891,18 +3933,38 @@ impl Model {
                         // those three outputs so continuation rows see all taps.
                         let conv_start = qb.saturating_sub(3);
                         check(
-                            (convolution)(
-                                p(s.gdn_in + conv_start * ldbb),
-                                ld,
-                                la.conv.ptr,
-                                p(s.lq + conv_start * kb),
-                                p(s.lk + conv_start * kb),
-                                p(s.lv + conv_start * vb),
-                                (tend - conv_start) as i32,
-                                kd as i32,
-                                vd as i32,
-                                st,
-                            ),
+                            if service.is_some()
+                                && let Some(pre) = prefix
+                            {
+                                let ops =
+                                    cuda::api().shared_suffix().context("service convolution")?;
+                                (ops.conv)(
+                                    p(s.gdn_in + qb * ldbb),
+                                    pre.buffers.conv_tail[la_i].at(0),
+                                    ld,
+                                    la.conv.ptr,
+                                    p(s.lq + qb * kb),
+                                    p(s.lk + qb * kb),
+                                    p(s.lv + qb * vb),
+                                    ti,
+                                    kd as i32,
+                                    vd as i32,
+                                    st,
+                                )
+                            } else {
+                                (convolution)(
+                                    p(s.gdn_in + conv_start * ldbb),
+                                    ld,
+                                    la.conv.ptr,
+                                    p(s.lq + conv_start * kb),
+                                    p(s.lk + conv_start * kb),
+                                    p(s.lv + conv_start * vb),
+                                    (tend - conv_start) as i32,
+                                    kd as i32,
+                                    vd as i32,
+                                    st,
+                                )
+                            },
                             "gdn conv",
                         )?;
                         check(
@@ -3921,26 +3983,62 @@ impl Model {
                             "gdn gates",
                         )?;
                         check(
-                            (cuda::api().cs1_gdn_prefill_x)(
-                                p(s.lq + qb * kb),
-                                p(s.lk + qb * kb),
-                                p(s.lv + qb * vb),
-                                p(s.g + qb * hv * F32).cast(),
-                                p(s.beta + qb * hv * BF16),
-                                p(s.lo + qb * vb),
-                                p(s.workspace).cast(),
-                                ti,
-                                hv as i32,
-                                cfg.lin_k_heads as i32,
-                                (cfg.lin_k_dim as f32).powf(-0.5),
-                                s_in,
-                                s_out,
-                                st,
-                            ),
+                            if let Some(gdn) = &self.fp32_gdn {
+                                if service.is_some() {
+                                    gdn.run_state(
+                                        p(s.lq + qb * kb),
+                                        p(s.lk + qb * kb),
+                                        p(s.lv + qb * vb),
+                                        p(s.g + qb * hv * F32).cast(),
+                                        p(s.beta + qb * hv * BF16),
+                                        p(s.lo + qb * vb),
+                                        p(s.workspace).cast(),
+                                        ti,
+                                        hv as i32,
+                                        cfg.lin_k_heads as i32,
+                                        (cfg.lin_k_dim as f32).powf(-0.5),
+                                        s_in,
+                                        s_out,
+                                        st,
+                                    )
+                                } else {
+                                    gdn.run(
+                                        p(s.lq + qb * kb),
+                                        p(s.lk + qb * kb),
+                                        p(s.lv + qb * vb),
+                                        p(s.g + qb * hv * F32).cast(),
+                                        p(s.beta + qb * hv * BF16),
+                                        p(s.lo + qb * vb),
+                                        p(s.workspace).cast(),
+                                        ti,
+                                        hv as i32,
+                                        cfg.lin_k_heads as i32,
+                                        (cfg.lin_k_dim as f32).powf(-0.5),
+                                        st,
+                                    )
+                                }
+                            } else {
+                                (cuda::api().cs1_gdn_prefill_x)(
+                                    p(s.lq + qb * kb),
+                                    p(s.lk + qb * kb),
+                                    p(s.lv + qb * vb),
+                                    p(s.g + qb * hv * F32).cast(),
+                                    p(s.beta + qb * hv * BF16),
+                                    p(s.lo + qb * vb),
+                                    p(s.workspace).cast(),
+                                    ti,
+                                    hv as i32,
+                                    cfg.lin_k_heads as i32,
+                                    (cfg.lin_k_dim as f32).powf(-0.5),
+                                    s_in,
+                                    s_out,
+                                    st,
+                                )
+                            },
                             "gdn prefill",
                         )?;
                         check(
-                            (cuda::api().cs1_gated_rms_norm)(
+                            (service.map_or(cuda::api().cs1_gated_rms_norm, |p| p.ops.gated_norm))(
                                 p(s.lo + qb * vb),
                                 p(z + qb * ldbb),
                                 ld,
@@ -4046,28 +4144,50 @@ impl Model {
                                 tend,
                                 st,
                             )?;
-                            if readout == WindowReadout::StateOnly && i + 1 == self.layers.len() {
+                            if matches!(readout, WindowReadout::StateOnly)
+                                && i + 1 == self.layers.len()
+                            {
                                 // The suffix consumes K/V, not final prefix hidden rows.
                                 // The caller synchronizes these copies before publishing state.
                                 return Ok(());
                             }
                         }
                         check(
-                            (cuda::api().cs1_attention_gated_prefix)(
-                                p(s.aq),
-                                p(s.ak),
-                                p(v),
-                                w.attn_in as i32,
-                                p(s.agate),
-                                p(s.ao),
-                                t_flash,
-                                hq,
-                                hk,
-                                hd,
-                                scale,
-                                q_base,
-                                st,
-                            ),
+                            if let Some(plan) = service {
+                                (plan.ops.attention)(
+                                    p(s.aq + qb * ob),
+                                    p(s.ak),
+                                    p(v),
+                                    w.attn_in as i32,
+                                    p(s.agate + qb * ob),
+                                    p(s.ao + qb * ob),
+                                    ti,
+                                    tend as i32,
+                                    hq,
+                                    hk,
+                                    qb as i32,
+                                    plan.key_left as i32,
+                                    plan.real_end as i32,
+                                    plan.workspace,
+                                    st,
+                                )
+                            } else {
+                                (cuda::api().cs1_attention_gated_prefix)(
+                                    p(s.aq),
+                                    p(s.ak),
+                                    p(v),
+                                    w.attn_in as i32,
+                                    p(s.agate),
+                                    p(s.ao),
+                                    t_flash,
+                                    hq,
+                                    hk,
+                                    hd,
+                                    scale,
+                                    q_base,
+                                    st,
+                                )
+                            },
                             "gated attention",
                         )?;
                     }
@@ -4083,7 +4203,7 @@ impl Model {
                     fa_i += 1;
                 }
             }
-            if readout == WindowReadout::StateOnly && i + 1 == self.layers.len() {
+            if matches!(readout, WindowReadout::StateOnly) && i + 1 == self.layers.len() {
                 return Ok(());
             }
             unsafe {
@@ -4103,6 +4223,7 @@ impl Model {
                     "post-attention norm",
                 )?;
             }
+
             project(
                 s.x + qb * hb,
                 &layer.gate_up,
@@ -4144,6 +4265,7 @@ impl Model {
                 s.delta + qb * hb,
                 &[rows],
             )?;
+
             let next = self
                 .layers
                 .get(i + 1)
@@ -4166,6 +4288,7 @@ impl Model {
                 )?;
             }
         }
+
         Ok(())
     }
 }

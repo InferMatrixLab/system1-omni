@@ -1,9 +1,12 @@
-# Kev-4B preparation and pointer head
+# Kev-4B native text decisions
 
-First independent slice of [#27](https://github.com/InferMatrixLab/system1-omni/issues/27):
-a pinned CPU exporter and a Rust FP32 pointer head. **There is no Kev worker or
-end-to-end inference in this slice.** The [recipe](../../../recipe/kev/README.md)
-reproduces preparation and head validation. Other Kev sizes are not supported.
+Kev serves `choice`, `noul`, and `score` with its own processor and FP32 pointer
+head over the shared Qwen3.5 CUDA backbone. The [preparation recipe](../../../recipe/kev/README.md)
+remains independently reviewable; the [native recipe](../../../recipe/kev/native.md)
+covers the complete eager worker. Other sizes and prefix reuse are deferred.
+The historical FP32 diagnostics used a 13-request / 23-question corpus;
+[results and limits](../../../recipe/kev/native.md#historical-fp32-eager-diagnostics) include
+merge drift, hardware provenance, Score scale effects and HTTP checks.
 
 ## Pinned artifacts
 
@@ -13,7 +16,7 @@ reproduces preparation and head validation. Other Kev sizes are not supported.
 | [Qwen/Qwen3.5-4B-Base](https://huggingface.co/Qwen/Qwen3.5-4B-Base/tree/1001bb4d826a52d1f399e183466143f4da7b741b) | `1001bb4d826a52d1f399e183466143f4da7b741b` |
 | [Kev reference code](https://github.com/jaredpalmer/kev/tree/2074cc44256200bb37540103fa4572901faa10f3) | `2074cc44256200bb37540103fa4572901faa10f3` |
 
-All are Apache-2.0; the adapted head's license is retained in
+All are Apache-2.0; the adapted model/API code's license is retained in
 [`native/LICENSE.kev`](native/LICENSE.kev). No model weights are committed.
 The source hash in the fixture generator covers the complete pinned `kev/model.py`.
 
@@ -51,13 +54,44 @@ normalizes across the **whole question**. This follows the eval-mode reference;
 temperature must not be applied twice. Projection and calibration have separate
 modules even though both currently run on CPU.
 
-The future processor must reproduce `encode`/`rows_of`: Qwen's hybrid layers require
-one causal row containing state plus one question's complete options. Each option
-is read at its closing marker, and the decision is read at the final marker.
-Questions must not leak into one another's GDN state. The reference rewrites
-caller-supplied `<|name|>` to `<¦name¦>` before tokenization. No HTTP mapping,
-prompt compiler, token accounting, request budgets, scheduler or device ownership
-is implemented here. Those remain explicit requirements for the worker slice.
+## Request flow and ownership
+
+`http::decide` admits a bounded request and prepares it on a blocking CPU task.
+`contract::compile` follows the pinned `kev/api.py`: recursive text rendering,
+insertion order, Choice `name: description`, Noul `no`/`yes` candidates and ordered
+Score levels. `processing::Processor` owns the base tokenizer, rewrites caller
+`<|name|>` spellings to `<¦name¦>`, and encodes each fragment separately, without a chat template. Each
+prepared question owns one complete causal row and its candidate/decision indices.
+Question positions restart at the state length. Prepared rows are unpadded; the
+executor applies reference bucket padding, without truncation.
+
+`Engine` owns a shared `SerialScheduler` and one mutex-protected `Executor`.
+One admitted execution unit is a whole request. Questions run sequentially;
+`planning` reproduces official question groups and projection shapes.
+The opt-in shared service path retains each GDN, attention and MLP projection
+component's original M/N/K and contiguous output stride before copying into
+fused scratch. Algebraically combining weights can select different cuBLAS
+rounding and violate the probability gate.
+`Model::forward_segmented_readout` consumes text-only state/question segments
+with identical T/H/W positions and returns final-normalized readout rows. The
+executor owns CUDA weights/scratch and the FP32 pointer head; only owned logits
+leave it. Every question recomputes its state and continues from that temporary GDN/KV
+state. No prefix is retained across questions or requests. The stream is synchronized
+before execution resources and admission permits can be released, including on
+errors. Cancelled callers cannot free buffers while dispatched GPU work uses them.
+
+`ResponseContext` retains original question/candidate mapping and the tokenizer.
+Postprocessing calibrates once, normalizes across each entire question, chooses
+the first candidate on ties, and restores the reference's confidence, legends,
+four-decimal scalars, and billing token counts. State counts once in input usage;
+compute cost separately counts each complete row. The native recipe documents
+stricter context/request limits and deliberate HTTP differences.
+
+The export loader verifies every input pin in `recipe/kev/pins.json`, the complete
+merged target inventory, all seven output hashes, shard references, head dimensions
+and base tokenizer markers before CUDA loading. Startup runs all three question
+types before binding its HTTP listener. Shared Qwen/kernel/runtime code is reused
+without adding a Kev-specific backend or scheduling policy.
 
 ## Validation and remaining gates
 
@@ -75,10 +109,24 @@ before comparison. The small committed fixture contains expected outputs and
 provenance, not weights; its deterministic binary-fraction inputs are regenerated
 by the generator and Rust test.
 
-Passing export/head checks does **not** establish BF16 merge decision parity,
-backbone parity, real prompt/token parity, native serving, GPU support or a speedup.
-The worker follow-up must qualify BF16 merge versus the official unmerged/FP32
-reference, pin full runtime dependencies, reuse selected-position Qwen readouts
-(already carried in [#129](https://github.com/InferMatrixLab/system1-omni/pull/129)),
-implement model-specific processing, and validate readiness plus direct/frontend
-inference for `choice`, `score` and `noul`. Prefix reuse is a later measured change.
+The maintained `tests/kev/data/processing.json` oracle is generated by the
+hash-verified official API and `encode`/`rows_of` functions. CPU checks compare
+rendering and answers; the opt-in tokenizer check compares every token and readout,
+plus input/output usage. The native capture and HTTP harness are explicit GPU
+checks, never run by ordinary workspace tests.
+
+Primary acceptance uses the pinned official BF16 default service, with Score
+scalar error at most 0.1 ordinal level and maximum probability error 0.01.
+The historical [expanded qualification](../../../recipe/kev/service-acceptance.md)
+passed all frozen gates after the [v3 repair](../../../recipe/kev/numerical-diagnosis.md)
+and [v4 boundary qualification](../../../recipe/kev/noul-boundary.md): 36 Noul
+and 28 Choice boundary questions, with no decision disagreements. See the
+[current qualification status](../../../recipe/kev/native.md#primary-acceptance-status)
+for the integrated L20 pass after the projection repair and the earlier SM120
+failure, which has not been rerun with that repair.
+Decision gates require Choice agreement
+for reference top-two margins above 0.02, and Noul agreement at threshold 0.5 when
+the reference distance exceeds 0.01. The comparator reports all near-boundary
+flips. Diagnostic comparisons retain unmerged official FP32, exported BF16 PyTorch and
+native execution. Failure never widens these limits. See the native recipe for
+commands and current validation status. No performance claim is made.
