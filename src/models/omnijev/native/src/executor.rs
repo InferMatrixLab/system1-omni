@@ -23,6 +23,23 @@ use crate::processing::{IMAGE_TOKEN, PreparedRequest, Processor, Row};
 #[path = "../../../../../tests/omnijev/window_graph.rs"]
 mod window_graph_tests;
 
+/// Vision arithmetic only; language weights/readout and finishing are unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VisionNumerics {
+    Legacy,
+    Reference,
+}
+impl std::str::FromStr for VisionNumerics {
+    type Err = anyhow::Error;
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "legacy" => Ok(Self::Legacy),
+            "reference" => Ok(Self::Reference),
+            _ => anyhow::bail!("OMNIJEV_VISION_NUMERICS must be legacy or reference"),
+        }
+    }
+}
+
 pub struct Executor {
     vision: VisionModel,
     language: Model,
@@ -100,6 +117,20 @@ impl Executor {
     /// Check the export at `dir`, then load the processor, the vision tower, the
     /// language model and the heads.
     pub fn load(dir: &Path, library: &Path) -> Result<(Self, Processor)> {
+        let numerics = std::env::var("OMNIJEV_VISION_NUMERICS")
+            .or_else(|error| match error {
+                std::env::VarError::NotPresent => Ok("legacy".to_owned()),
+                error => Err(error),
+            })?
+            .parse()?;
+        Self::load_with_vision_numerics(dir, library, numerics)
+    }
+    /// An explicit selection for callers that do not use worker environment settings.
+    pub fn load_with_vision_numerics(
+        dir: &Path,
+        library: &Path,
+        numerics: VisionNumerics,
+    ) -> Result<(Self, Processor)> {
         let export = export::load(dir)?;
         let processor = Processor::load(dir)?;
         let language = Model::load(dir, library)?;
@@ -108,7 +139,10 @@ impl Executor {
                 && language.cfg.hidden == heads::HIDDEN,
             "export config does not match OmniJev-4B"
         );
-        let vision = VisionModel::load(dir, library)?;
+        let mut vision = VisionModel::load(dir, library)?;
+        if numerics == VisionNumerics::Reference {
+            vision.enable_omnijev_numerics()?;
+        }
         let heads = Heads::load(&dir.join("heads.safetensors"))?;
         Ok((
             Self {
