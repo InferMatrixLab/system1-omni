@@ -34,7 +34,7 @@ registry inside `hybrid.py` (repo, revision, pin table, shard layout).
 | Identity | `vela2-unified` / `Vela2Model`, 309M parameters, all FP32 | `vela2-decoder` / `Vela2DecoderModel` | same class, `model_name` `vllm-sr/Vela-2.0-4B` | same class, `model_name` `vllm-sr/Vela-2.0-9B` |
 | Weights on disk | 1,236,473,252 bytes, one file, exact size | 2,022,189,488-byte shard + hashed 4,480,172-byte broad head | 3 shards, 9,705,025,832 bytes total + hashed 11,195,580-byte broad head | 5 shards, 17,929,595,360 bytes total + hashed 17,910,972-byte broad head |
 | FP32 in memory (load) | ~1.2 GB | ~2.3 GB | ~17 GB | ~32 GB |
-| bf16-autocast GPU (backbone) | n/a (FP32 device) | ~1.1 GB + FP32 heads | ~9 GB + FP32 heads | ~18 GB + FP32 heads |
+| bf16-autocast GPU (backbone) | n/a (FP32 device) | ~1.1 GB + FP32 heads | ~9 GB + FP32 heads | ~31.8 GB FP32 parameters plus caches/workspace; [measured L20 peak reserved 45,026 MiB](../../../recipe/vela/native.md#independent-l20-9b-library-profile) |
 | Input window | 8,192 tokens | 16,384 tokens | 16,384 tokens | 16,384 tokens |
 | Runtime | the checkpoint's own flat files: `vela2_inference.py`, `modeling_vela2.py`, `configuration_vela2.py`, `vela2_serve.py` | the same four modules, shared byte-identical across the decoder members | same | same |
 | Backbone | — (unified encoder) | Qwen3.5-shape hybrid config, hidden 1024 | hidden 2560, 32 hybrid layers (Gated DeltaNet ×3 + gated GQA ×1, per group of 4) | hidden 4096, same layer structure |
