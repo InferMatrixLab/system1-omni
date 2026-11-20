@@ -1,0 +1,183 @@
+{
+ "case": "example-request",
+ "request": {
+  "model": "vllm-sr/Vela-2.0-9B",
+  "state": {
+   "request": "Hi, I'm Tom Baker (tom.baker@example.com). What is the maximum daily dose of paracetamol for an adult?",
+   "source": "For adults, the maximum dose of paracetamol is 4 grams in 24 hours, taken as 500 mg to 1 g every 4 to 6 hours.",
+   "answer": "Adults can take up to 6 grams of paracetamol in 24 hours, in doses of 500 mg to 1 g every 4 to 6 hours."
+  },
+  "questions": {
+   "pii": {
+    "type": "span",
+    "instructions": "Which spans are personal information?",
+    "criteria": {
+     "AGE": "a person's age",
+     "CREDIT_CARD": "a payment card number",
+     "DATE_TIME": "a date, time or date of birth",
+     "DOMAIN_NAME": "an internet domain name or website address",
+     "EMAIL_ADDRESS": "an e-mail address",
+     "GPE": "a country, city, state or other geopolitical place",
+     "IBAN_CODE": "an international bank account number (IBAN)",
+     "IP_ADDRESS": "an IPv4 or IPv6 address",
+     "NRP": "a nationality, religious or political group",
+     "ORGANIZATION": "the name of a company, institution or other organisation",
+     "PERSON": "a person's name",
+     "PHONE_NUMBER": "a telephone number",
+     "STREET_ADDRESS": "a street address or postal address",
+     "TITLE": "a personal or professional title such as Dr. or Mrs.",
+     "US_DRIVER_LICENSE": "a US driver's licence number",
+     "US_SSN": "a US social security number",
+     "ZIP_CODE": "a postal or ZIP code"
+    },
+    "over": "request"
+   },
+   "halu": {
+    "type": "span",
+    "instructions": "Which spans of the answer are not supported by the context?",
+    "criteria": {
+     "unsupported": "a claim not supported by the context"
+    }
+   },
+   "domain": {
+    "type": "choice",
+    "instructions": "Which subject area is this request about?",
+    "over": "request",
+    "criteria": {
+     "health": "medicine, clinical practice, nutrition, ageing or sexual health",
+     "math": "arithmetic, algebra, geometry, statistics or other mathematics",
+     "other": "a subject that fits none of the listed areas"
+    }
+   }
+  }
+ },
+ "system_one": {
+  "model": "vllm-sr/Vela-2.0-9B",
+  "answers": {
+   "pii": {
+    "type": "noul",
+    "noul": 0.9999952488450162
+   },
+   "halu": {
+    "type": "noul",
+    "noul": 0.9958075998229594
+   },
+   "domain": {
+    "type": "choice",
+    "choice": "health",
+    "confidence": 0.9767433844294829,
+    "probabilities": {
+     "health": 0.9882339134648084,
+     "math": 0.00027555749986611704,
+     "other": 0.01149052903532545
+    }
+   }
+  },
+  "usage": {
+   "input_tokens": 1041,
+   "output_tokens": 0
+  },
+  "spans": {
+   "pii": [
+    {
+     "label": "PERSON",
+     "start": 8,
+     "end": 17,
+     "text": "Tom Baker",
+     "probability": 0.998435914516449
+    },
+    {
+     "label": "EMAIL_ADDRESS",
+     "start": 19,
+     "end": 40,
+     "text": "tom.baker@example.com",
+     "probability": 0.9999926090240479
+    }
+   ],
+   "halu": [
+    {
+     "label": "unsupported",
+     "start": 22,
+     "end": 29,
+     "text": "6 grams",
+     "probability": 0.9813803434371948
+    }
+   ]
+  },
+  "span_heads": {
+   "pii": "router",
+   "halu": "router"
+  },
+  "thresholds": {
+   "pii": 0.5,
+   "halu": 0.45
+  }
+ },
+ "predict": {
+  "answers": [
+   {
+    "id": "pii",
+    "type": "span",
+    "target_part": "user",
+    "spans": [
+     {
+      "start": 8,
+      "end": 17,
+      "label": "PERSON",
+      "probability": 0.998435914516449,
+      "text": "Tom Baker"
+     },
+     {
+      "start": 19,
+      "end": 40,
+      "label": "EMAIL_ADDRESS",
+      "probability": 0.9999926090240479,
+      "text": "tom.baker@example.com"
+     }
+    ],
+    "threshold": 0.5,
+    "threshold_rule": "pii:length+sparse",
+    "head": "router",
+    "head_reason": "id"
+   },
+   {
+    "id": "halu",
+    "type": "span",
+    "target_part": "answer",
+    "spans": [
+     {
+      "start": 22,
+      "end": 29,
+      "label": "unsupported",
+      "probability": 0.9813803434371948,
+      "text": "6 grams"
+     }
+    ],
+    "threshold": 0.45,
+    "threshold_rule": "halu",
+    "head": "router",
+    "head_reason": "id"
+   },
+   {
+    "id": "domain",
+    "type": "choice",
+    "answer": "health",
+    "probabilities": {
+     "health": 0.9882339134648084,
+     "math": 0.00027555749986611704,
+     "other": 0.01149052903532545
+    },
+    "abstain_probability": 0.009854973668896734
+   }
+  ],
+  "meta": {
+   "tokens": {
+    "user": 27,
+    "context": 39,
+    "answer": 39
+   },
+   "windows": 0,
+   "sequences": 2
+  }
+ }
+}
