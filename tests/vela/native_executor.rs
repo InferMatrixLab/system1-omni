@@ -116,6 +116,7 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
             .unwrap()
             .iter()
             .collect();
+        validate_call_rows(&calls, planned.rows.len(), m != "Vela-2.0-0.8B");
         let mut q_call_index = 0usize;
         let mut span_call_index = 0usize;
         let mut consumed = vec![false; calls.len()];
@@ -228,6 +229,19 @@ fn the_gpu_backbone_replays_the_reference_readouts() {
     }
 }
 
+fn validate_call_rows(calls: &[&Value], row_count: usize, require_attribution: bool) {
+    // Only legacy 0.8B recordings may omit every row. Fresh member
+    // captures must never silently fall back to global call order.
+    if require_attribution || calls.iter().any(|call| call.get("row").is_some()) {
+        assert!(
+            calls.iter().all(|call| call["row"]
+                .as_u64()
+                .is_some_and(|row| row < row_count as u64)),
+            "all recorded calls must carry valid in-range row attribution"
+        );
+    }
+}
+
 fn next_call<'a>(
     calls: &[&'a Value],
     consumed: &mut [bool],
@@ -325,4 +339,39 @@ fn attributed_calls_reject_missing_duplicate_and_wrong_heads() {
             .is_err()
         );
     }
+}
+
+#[test]
+fn fresh_member_replays_require_every_call_to_identify_a_valid_row() {
+    let valid = serde_json::json!({"kind": "span", "head": "router", "row": 0});
+    let missing = serde_json::json!({"kind": "span", "head": "router"});
+    let invalid = [
+        serde_json::json!(null),
+        serde_json::json!(-1),
+        serde_json::json!(0.5),
+        serde_json::json!("0"),
+        serde_json::json!(1),
+    ];
+    for member in ["Vela-2.0-4B", "Vela-2.0-9B"] {
+        for calls in [vec![&missing], vec![&valid, &missing]] {
+            assert!(
+                std::panic::catch_unwind(|| validate_call_rows(
+                    &calls,
+                    1,
+                    member != "Vela-2.0-0.8B"
+                ))
+                .is_err(),
+                "{member}: missing or mixed row metadata was accepted"
+            );
+        }
+        for row in &invalid {
+            let call = serde_json::json!({"kind": "span", "head": "router", "row": row});
+            assert!(
+                std::panic::catch_unwind(|| validate_call_rows(&[&call], 1, true)).is_err(),
+                "{member}: invalid row {row} was accepted"
+            );
+        }
+        validate_call_rows(&[&valid], 1, true);
+    }
+    validate_call_rows(&[&missing], 1, false);
 }

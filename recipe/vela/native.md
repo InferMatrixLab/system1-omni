@@ -21,9 +21,11 @@ mismatching span structures and do not establish full parity. The
 was a decoding error: a rejected valid word must end the current span.
 The tests now retain all spans and require their counts, labels and
 offsets to match; logit comparisons also reject non-finite values and
-dimension mismatches. The numeric ceilings are unchanged. Full 4B/9B
-head/response replay under these assertions remains unverified until
-rerun with the corresponding exported bundles.
+dimension mismatches. The numeric ceilings are unchanged. Exact historical
+4B/9B replay requires the original paired tensors and remains unverified without
+them. Independent current-paired 4B evidence is recorded in
+[PR #210](https://github.com/InferMatrixLab/system1-omni/pull/210); the separate
+current-paired 9B L20 profile is recorded below.
 
 The current 0.8B SM89 replay uses one `forward_fixed` call per readout;
 this keeps the GEMM rounding independent of readout grouping. On the
@@ -103,6 +105,11 @@ report their differences from committed history separately. The recorder's
 execution order can differ from planned row order, so attributed executor calls
 match the recorded row, kind and span head, with every call consumed exactly
 once. Missing or duplicate matches fail; numerical and shape gates stay fixed.
+Every 4B/9B executor call must identify an integer row within the planned row
+count. Missing, mixed, invalid or out-of-range row metadata fails before any
+row readout. Only the original 0.8B recordings may omit all row metadata and
+retain their historical call order; this compatibility does not apply to a
+fresh 4B/9B capture.
 
 The token plans record what the pinned runtime feeds the backbone (the
 predict mapping, the per-row decomposition, the rendered `p_ids`,
@@ -199,6 +206,63 @@ the largest GPU drift is 0.3297 with `VELA_GPU_LOGIT_GATE` unset and the origina
 debug attempt are retained with that run. This is native-library validation;
 GPU end-to-end answers, long-window GPU behavior and a native HTTP worker remain
 separate acceptance work.
+
+### Independent L20 9B library profile
+
+The pinned 9B package `068425bb145c05884a98b870c219047da22d9aea` was
+independently exercised on one L20 (46,068 MiB, driver 580.178.04) with
+Python 3.12.13, torch 2.11.0+cu128 and transformers 5.19.0. The runtime keeps
+all 7,949,850,627 parameters in FP32 (31,799,402,508 bytes) and uses BF16
+autocast for backbone computation, with FP32 heads. Default batch size 32,
+token budget 24,576, `highest` float32 matmul precision, CUDA matmul TF32
+disabled and the Transformers torch Gated DeltaNet fallback were retained.
+
+Nine reference-server TestClient versus production Python-worker cases
+matched exactly, including status, body and key order. Five head captures each
+used one real `_predict`; JSON, tensors, batches and same-run typed oracles
+were hash-frozen before native comparison. The fresh positive long-window
+capture contains 373 spans. Historical JSON also contains 373, but some span
+positions differ; equal counts do not establish historical replay. Original
+committed fixtures remain unchanged and their exact paired-tensor replay is
+unverified because those tensors and hashes were not recovered.
+
+Across this reference run, PyTorch peak allocated memory was 44,305.62 MiB
+and peak reserved memory was 45,026 MiB. CUDA reported only 79.81 MiB free
+after the long-window capture. These allocator measurements exclude some
+driver/library allocations and are not a general capacity guarantee. The
+on-disk checkpoint size and the native uniform-BF16 export size do not describe
+the reference runtime's FP32 parameters plus autocast cache and workspace.
+Full-length reference inputs, native positive-window GPU execution, complete
+native GPU typed answers, HTTP lifecycle and performance remain unverified.
+
+The current paired native FP32 heads pass all five strict cases, including
+the 373-span positive windowed case, with maximum logit drift `3.624e-5`
+and predict-answer drift `1.311e-6` against the original `1.6e-4` / `1.2e-2`
+ceilings. Original native response finishing passes four cases at its `1.5e-2`
+ceiling (maximum drift `7.708e-7`). An additional CPU probe executes both
+native candidate and span heads from the frozen hidden inputs, then native
+finishing, saves four typed envelopes and independently sums plan usage
+(1,041 / 133 / 597 / 228 tokens); its maximum drift is `1.252e-6`. These
+CPU results use reference-backbone hidden inputs, not native GPU readouts.
+
+The native uniform-BF16 backbone / FP32-head profile, using independent
+fixed-M64 readouts on CUDA 12.8.61, passes one four-case GPU logit replay
+without retries or gate overrides:
+
+| Case | Worst logit drift (stdout) | Original gate |
+| --- | ---: | ---: |
+| example-request | 0.2521 | 0.35 |
+| set-threshold | 0.0166 | 0.35 |
+| CJK | 0.1753 | 0.35 |
+| score | 0.0177 | 0.35 |
+
+The private library SHA256 is
+`63f3f5199420a22dec2976899939e6a749ef998202bad26fcf8928545b95235b`;
+reuse followed actual source/symbol/ABI/target/profile verification. Process
+maps and executable hashes bind the run to this library on GPU1. These are
+small-case logit results; they do not replace complete GPU typed-answer or
+native HTTP acceptance. Test wall time includes repeated bundle hashing and
+is not serving latency.
 
 ## Scope and limits
 
