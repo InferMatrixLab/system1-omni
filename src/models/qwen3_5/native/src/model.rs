@@ -1926,6 +1926,55 @@ impl Model {
         self.run_multimodal(t)
     }
 
+    /// One complete unpadded multimodal row with the unmerged 4B reference
+    /// arithmetic, gathering final-norm hidden rows in caller order (including
+    /// duplicates). This uses the normal full-row layer loop and FP32 GDN;
+    /// it creates no prefix state and never enters the fixed/window path.
+    ///
+    /// Select `enable_reference_text_numerics` before calling. Graphs and LM
+    /// targets are deliberately unsupported by this initial selected-readout
+    /// contract. Work is synchronized on both success and error before scratch
+    /// can be reused by another call.
+    pub fn forward_multimodal_reference_readout(
+        &mut self,
+        input: &MultimodalInput<'_>,
+        rows: &[usize],
+        targets: &[(usize, u32)],
+    ) -> Result<Readout> {
+        ensure!(
+            self.cfg.hidden == 2560
+                && self.lora.is_some()
+                && self.reference.is_some()
+                && self.fp32_gdn.is_some(),
+            "reference readout requires unmerged 4B reference text numerics"
+        );
+        ensure!(!self.graph_enabled, "reference readout requires Graph off");
+        ensure!(
+            targets.is_empty(),
+            "reference readout does not support LM targets"
+        );
+        ensure!(
+            !rows.is_empty() && rows.iter().all(|&r| r < input.token_ids.len()),
+            "reference readout row outside the prompt or no rows selected"
+        );
+        let result = (|| {
+            // Reference/LoRA disables the last-row-only MLP optimization, so all
+            // final-norm rows remain available after this canonical forward.
+            self.forward_multimodal(input)?;
+            let s = self.scratch.as_ref().unwrap();
+            let hidden = rows
+                .iter()
+                .map(|&row| self.hidden_row(s, row))
+                .collect::<Result<Vec<_>>>()?;
+            Ok(Readout {
+                hidden,
+                logprobs: Vec::new(),
+            })
+        })();
+        self.synchronize()?;
+        result
+    }
+
     /// Inputs are staged in owned scratch before capture; producer addresses
     /// never enter the graph, so host and device inputs can share a capture.
     fn run_multimodal(&mut self, t: usize) -> Result<Vec<f32>> {

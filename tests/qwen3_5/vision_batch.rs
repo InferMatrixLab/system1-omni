@@ -218,12 +218,20 @@ fn cpu_batch_uses_aggregate_gemms_and_image_local_attention() {
         batch_scratch: VecDeque::new(),
         graph_enabled: false,
         reference: None,
+        omnijev: None,
         base,
         lora: BTreeMap::new(),
         gemm: Gemm(unsafe { (api().cs1_gemm_create)(32 << 20) }),
         stream: OwnedStream(cuda::new_stream().unwrap()),
     };
     let images = [image([1, 2, 2]), image([1, 2, 4])];
+    assert!(
+        model
+            .enable_omnijev_numerics()
+            .unwrap_err()
+            .to_string()
+            .contains("unadapted 4B")
+    );
     let result = model.forward_images(&images).unwrap();
     assert_eq!(result.len(), 3 * 5120);
     for index in 0..unsafe { count() } {
@@ -440,6 +448,18 @@ fn cpu_batch_uses_aggregate_gemms_and_image_local_attention() {
     assert!(model.transient.is_none());
     assert_eq!(unsafe { live_bytes() }, model.retained_bytes());
     assert_eq!(unsafe { unsafe_frees() }, 0);
+    model.synchronize().unwrap();
+    model.scratch.clear();
+    model.lora.clear();
+    model.cache_limits = None;
+    assert!(
+        model
+            .enable_omnijev_numerics()
+            .unwrap_err()
+            .to_string()
+            .contains("optional vision CUDA symbols")
+    );
+    assert!(model.reference.is_none() && model.omnijev.is_none());
     drop(model);
     assert_eq!(unsafe { live() }, 0);
     drop(metrics);

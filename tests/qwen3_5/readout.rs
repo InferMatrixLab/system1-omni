@@ -3,7 +3,7 @@
 //! multimodal Qwen3.5 export with `image_token_id`, such as an OmniJev export:
 //!
 //!     CUA_S1_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so QWEN3_5_CHECKPOINT=<export> \
-//!       cargo test --release -p omni-qwen3-5-native --test readout -- --ignored --test-threads=1
+//!       cargo test --release -p omni-qwen3-5-native --test readout -- --ignored --test-threads=1 --skip reference
 
 use std::fs::File;
 use std::path::PathBuf;
@@ -257,4 +257,57 @@ fn windows_with_captures_equal_one_pass() {
             .readout_window(&input, Some(&second), Some(&mut third), &[], &[])
             .is_err()
     );
+}
+
+#[test]
+#[ignore = "requires CUDA, an unmerged OmniJev export and QWEN3_5_ADAPTER; run serially with CUA_S1_GRAPH=0"]
+fn reference_selected_rows_preserve_full_row_and_recover() {
+    let library = PathBuf::from(std::env::var_os("CUA_S1_CUDA_LIB").unwrap());
+    let adapter = PathBuf::from(std::env::var_os("QWEN3_5_ADAPTER").unwrap());
+    let mut model = Model::load_with_lora(&checkpoint(), &library, &adapter, 2.).unwrap();
+    model.enable_reference_text_numerics().unwrap();
+    let original = Prompt::new(&model, 50, 75);
+    let t = original.ids.len();
+    let last = model.forward_multimodal(&original.input()).unwrap();
+    let read = model
+        .forward_multimodal_reference_readout(&original.input(), &[t - 1, 10, t - 1, 0], &[])
+        .unwrap();
+    assert_eq!(read.hidden[0], last);
+    assert_eq!(read.hidden[0], read.hidden[2]);
+    assert!(read.logprobs.is_empty());
+    assert!(
+        model
+            .forward_multimodal_reference_readout(&original.input(), &[t], &[])
+            .is_err()
+    );
+    assert!(
+        model
+            .forward_multimodal_reference_readout(&original.input(), &[], &[])
+            .is_err()
+    );
+    assert!(
+        model
+            .forward_multimodal_reference_readout(&original.input(), &[0], &[(0, 1000)])
+            .is_err()
+    );
+    // Existing fixed/window and prefix guards must still reject this arithmetic.
+    assert!(
+        model
+            .forward_multimodal_readout(&original.input(), &[0], &[])
+            .is_err()
+    );
+    assert!(model.alloc_prefix(64).is_err());
+    let grown = Prompt::new(&model, 50, 300);
+    model
+        .forward_multimodal_reference_readout(&grown.input(), &[0, grown.ids.len() - 1], &[])
+        .unwrap();
+    let again = model
+        .forward_multimodal_reference_readout(&original.input(), &[t - 1, 10, t - 1, 0], &[])
+        .unwrap();
+    assert_eq!(
+        bits(&again.hidden),
+        bits(&read.hidden),
+        "request state/scratch growth leaked into selected rows"
+    );
+    assert_eq!(model.graph_stats().captures, 0);
 }

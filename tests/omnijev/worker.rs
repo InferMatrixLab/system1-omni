@@ -3,13 +3,105 @@
 //! libqwen3_5_cuda.so, both absolute:
 //!
 //!     OMNIJEV_EXPORT=<export> OMNIJEV_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
-//!       cargo test --release -p omni-omnijev-native --test worker -- --ignored --test-threads=1
+//!       cargo test --release -p omni-omnijev-native --test worker -- --ignored --test-threads=1 --skip reference
+//! The separate reference tests below name their additional prerequisites.
 mod common;
 
 use std::path::PathBuf;
 
 use omni_omnijev_native::executor::{self, Executor};
 use serde_json::{Value, json};
+
+/// Real original #114 regression: compilation always sees all twelve questions.
+/// The externally supplied request/oracle stay private and hash-pinned by the
+/// validation recipe; no source images or checkpoint tensors are checked in.
+#[test]
+#[ignore = "requires CUDA, OMNIJEV_REFERENCE_EXPORT, OMNIJEV_CUDA_LIB, OMNIJEV_ORIGINAL_REQUEST and OMNIJEV_REFERENCE_ORACLE; CUA_S1_GRAPH=0"]
+fn unmerged_reference_original_q2_gate() {
+    use sha2::{Digest, Sha256};
+    let env_path = |key| std::path::PathBuf::from(std::env::var_os(key).expect(key));
+    let dir = env_path("OMNIJEV_REFERENCE_EXPORT");
+    let (mut executor, processor) =
+        executor::Executor::load_one_shot_reference(&dir, &env_path("OMNIJEV_CUDA_LIB")).unwrap();
+    let raw = std::fs::read(env_path("OMNIJEV_ORIGINAL_REQUEST")).unwrap();
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&raw)),
+        "a34c2d136a27d11a4c9085547feda474cb1f6e5d44fefcf9cfcd410c7ee5fab5"
+    );
+    let prepared = processor.prepare(&raw).unwrap();
+    assert_eq!(prepared.questions.len(), 12);
+    assert_eq!(prepared.layout.prefix, 581);
+    assert_eq!(prepared.layout.processed_tokens, 1214);
+    let index = prepared
+        .questions
+        .iter()
+        .position(|q| q.id == "q2")
+        .unwrap();
+    assert!(executor.execute(&prepared).is_err());
+    assert!(executor.execute_rows(&prepared).is_err());
+    assert!(
+        executor
+            .score_one_shot(&prepared, prepared.questions.len())
+            .is_err()
+    );
+    let nonscore = prepared
+        .questions
+        .iter()
+        .position(|q| q.kind != omni_omnijev_native::contract::Kind::Score)
+        .unwrap();
+    assert!(executor.score_one_shot(&prepared, nonscore).is_err());
+    let read = executor.score_one_shot(&prepared, index).unwrap();
+    let repeat = executor.score_one_shot(&prepared, index).unwrap();
+    assert_eq!(read.zq, repeat.zq);
+    assert_eq!(read.u, repeat.u);
+    assert_eq!(read.probabilities, repeat.probabilities);
+    if let Some(path) = std::env::var_os("OMNIJEV_REFERENCE_RESULT") {
+        std::fs::write(
+            path,
+            serde_json::to_vec_pretty(&json!({
+                "question_count": prepared.questions.len(), "prefix": prepared.layout.prefix,
+                "input_tokens": prepared.layout.processed_tokens, "qid": "q2",
+                "zq": read.zq, "u": read.u, "mu": read.probabilities, "answer": read.answer,
+                "repeat_exact": true, "unsupported_modes_rejected": true,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    let oracle: Value =
+        serde_json::from_slice(&std::fs::read(env_path("OMNIJEV_REFERENCE_ORACLE")).unwrap())
+            .unwrap();
+    let expected = &oracle["official_full_answer"]["q2"];
+    assert_eq!(read.answer["score"], expected["score"]);
+    let delta = (read.answer["confidence"].as_f64().unwrap()
+        - expected["confidence"].as_f64().unwrap())
+    .abs();
+    assert!(
+        delta <= 0.01,
+        "original q2 confidence delta {delta}: native={}, reference={expected}",
+        read.answer
+    );
+    for (key, p) in read.answer["probabilities"].as_object().unwrap() {
+        let e = &expected["probabilities"][key];
+        assert!(
+            (p.as_f64().unwrap() - e.as_f64().unwrap()).abs() <= 0.01,
+            "level {key}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "run with CUA_S1_GRAPH=1; verifies rejection before reading artifacts or loading CUDA"]
+fn reference_graph_is_rejected_before_loading() {
+    assert_eq!(std::env::var("CUA_S1_GRAPH").as_deref(), Ok("1"));
+    let error = Executor::load_one_shot_reference(
+        std::path::Path::new("/missing-export"),
+        std::path::Path::new("/missing-cuda-library"),
+    )
+    .err()
+    .unwrap();
+    assert!(error.to_string().contains("CUA_S1_GRAPH=0"));
+}
 
 fn executor() -> (Executor, omni_omnijev_native::processing::Processor) {
     let var =

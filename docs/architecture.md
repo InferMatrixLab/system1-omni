@@ -144,6 +144,15 @@ call.
 The Cua-S1 text worker uses it
 ([#188](https://github.com/InferMatrixLab/system1-omni/issues/188)).
 
+OmniJev's separate unmerged one-shot Score library profile uses
+`forward_multimodal_reference_readout`: one complete unpadded multimodal row,
+the existing reference norm/projection/attention and FP32 GDN layer loop, then
+selected final-norm hidden rows in caller order. It synchronizes before returning
+or reusing scratch, including error paths. It creates no prefix state and rejects
+Graph and LM targets; the fixed/window/reuse guards above remain in effect.
+This is a bounded library capability, with full worker/all-type parity unverified.
+See the [OmniJev preparation recipe](../recipe/omnijev/README.md#separate-unmerged-reference-artifact).
+
 ## Native worker boundaries
 
 The native workers separate `processing.rs` from `executor.rs`; their worker
