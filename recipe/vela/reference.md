@@ -39,11 +39,12 @@ Scope:
   continuation (decoder members),
   calibrated readouts; zero generated tokens.
 
-Out of scope: the ONNX backend of
-the 0.3B, any native Rust/CUDA executor (the decoder members' native
-library is documented separately in [native.md](native.md)), and
-`noul_calibration` (off by default; documented as a reference-server
-feature only).
+Out of scope for this reference-worker recipe: the ONNX backend of
+the 0.3B, native Rust/CUDA execution, and `noul_calibration` (off by
+default; documented as a reference-server feature only). Native work
+has separate carriers: the 0.3B ModernBERT profile is
+[`omni-vela-encoder-native`](../../src/models/vela/encoder_native/README.md),
+while the decoder members use [`omni-vela-native`](native.md).
 
 ## Architecture and ownership
 

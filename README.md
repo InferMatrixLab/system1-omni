@@ -139,7 +139,8 @@ repository root.
 | [`docs/`](docs/) | Project documentation and architecture assets. |
 
 The frontend, native runtime, the native workers, their shared Qwen3.5/3.8
-prefill implementation and the Laya CUDA backend are Cargo workspace members.
+prefill implementation, the ModernBERT family structure crate, the Vela native
+profile crate and the Laya CUDA backend are Cargo workspace members.
 Each model and backend documents its implementation and process boundary.
 
 ## Getting Started

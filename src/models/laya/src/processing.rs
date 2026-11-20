@@ -14,6 +14,7 @@ use crate::{
 pub struct Processor {
     preprocessor: Preprocessor,
     config: Arc<AgentConfig>,
+    vocab: usize,
 }
 
 pub struct PreparedRequest {
@@ -28,9 +29,11 @@ pub struct ResponseContext {
 
 impl Processor {
     pub fn load(checkpoint: &Path) -> Result<Self> {
+        let config = Config::load(checkpoint)?;
         Ok(Self {
             preprocessor: Preprocessor::load(&checkpoint.join("tokenizer/tokenizer.json"))?,
-            config: Arc::new(Config::load(checkpoint)?.agent),
+            vocab: config.structure.vocab_size,
+            config: Arc::new(config.agent),
         })
     }
 
@@ -38,7 +41,7 @@ impl Processor {
         let request = Request::from_json(std::str::from_utf8(raw)?)?;
         let prepared = self.preprocessor.prepare(&request)?;
         Ok(PreparedRequest {
-            inputs: packing::pack(&prepared)?,
+            inputs: packing::pack(&prepared, self.vocab)?,
             context: ResponseContext {
                 prepared,
                 config: self.config.clone(),

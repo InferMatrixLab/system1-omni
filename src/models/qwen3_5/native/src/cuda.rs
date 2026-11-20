@@ -13,6 +13,10 @@ pub use reference::Reference;
 
 /// `CS1_ABI_VERSION` in ops.h.
 const ABI_VERSION: u32 = 9;
+// The structure side records the same version in identity records; if
+// one bumps without the other, runtime state keyed by structure
+// identity would silently disagree with the loaded bundle.
+const _: () = assert!(ABI_VERSION == crate::structure::ABI_VERSION as u32);
 pub const LIBRARY: &str = "libqwen3_5_cuda.so";
 
 /// A `cudaStream_t`.

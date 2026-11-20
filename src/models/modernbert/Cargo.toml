@@ -1,0 +1,21 @@
+[package]
+name = "omni-modernbert"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "1"
+serde_json = "1"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[test]]
+name = "structure"
+path = "../../../tests/modernbert/structure.rs"
+
+[[test]]
+name = "plan"
+path = "../../../tests/modernbert/plan.rs"

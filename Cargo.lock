@@ -1281,6 +1281,7 @@ dependencies = [
  "half",
  "memmap2",
  "omni-cuda",
+ "omni-modernbert",
  "omni-runtime",
  "safetensors 0.6.2",
  "serde",
@@ -1289,6 +1290,16 @@ dependencies = [
  "tempfile",
  "tokenizers 0.23.2",
  "tokio",
+]
+
+[[package]]
+name = "omni-modernbert"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
 ]
 
 [[package]]
@@ -1337,6 +1348,8 @@ dependencies = [
  "safetensors 0.8.0",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
 ]
 
 [[package]]
@@ -1361,6 +1374,20 @@ dependencies = [
  "serde_json",
  "tokenizers 0.22.2",
  "tokio",
+]
+
+[[package]]
+name = "omni-vela-encoder-native"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "half",
+ "memmap2",
+ "omni-cuda",
+ "omni-modernbert",
+ "safetensors 0.8.0",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

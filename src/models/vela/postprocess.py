@@ -24,6 +24,17 @@ REQUIRED_FIELDS = ("model", "answers", "usage")
 # Emitted by the hybrid members only; a 0.3B response carrying it means
 # the wrong member's runtime answered.
 HYBRID_ONLY_FIELDS = {"span_heads"}
+# The exact answer field sets of the pinned runtime's
+# ``system_one_response``: equality, not subset — a missing field is as
+# broken as a foreign one. Set and span questions answer through their
+# top-level ``sets``/``spans``/``thresholds`` payloads plus Noul views.
+ANSWER_FIELDS = {
+    "noul": {"type", "noul"},
+    "choice": {"type", "choice", "confidence", "probabilities"},
+    "score": {"type", "score", "confidence", "legend", "probabilities"},
+}
+SET_FIELDS = {"selected", "probabilities"}
+SPAN_FIELDS = {"label", "start", "end", "text", "probability"}
 
 
 def choice_confidence(probabilities: Sequence[float]) -> float:
@@ -102,7 +113,8 @@ def finish_response(
     The pinned runtime owns every value in this response; these checks
     only refuse a response that could not be reconstructed for the
     request that produced it (wrong key set or order, a member-invented
-    field, broken usage accounting, an answer of unexpected shape).
+    field, broken usage accounting, an answer view that is not an
+    object or carries fields its kind does not allow).
     ``hybrid`` selects the member: the hybrid executor's responses carry
     ``span_heads`` alongside ``spans`` (upstream emits both together,
     keyed by the span question ids); the 0.3B member's never do.
@@ -135,6 +147,20 @@ def finish_response(
                 raise RuntimeError(f"{field} do not match the request's {field} questions")
         elif field in response:
             raise RuntimeError(f"the pinned runtime returned {field} without {field} questions")
+    for qid, payload in (response.get("sets") or {}).items():
+        if not isinstance(payload, dict) or set(payload) != SET_FIELDS:
+            raise RuntimeError(f"set {qid!r} does not carry exactly {sorted(SET_FIELDS)}")
+    for qid, spans in (response.get("spans") or {}).items():
+        if not isinstance(spans, list):
+            raise RuntimeError(f"spans {qid!r} is not a list")
+        for span in spans:
+            if not isinstance(span, dict) or set(span) != SPAN_FIELDS:
+                raise RuntimeError(
+                    f"a span of {qid!r} does not carry exactly {sorted(SPAN_FIELDS)}"
+                )
+    for qid, threshold in (response.get("thresholds") or {}).items():
+        if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+            raise RuntimeError(f"threshold {qid!r} is not a number")
     if hybrid:
         span_ids = _question_ids_of(questions, "span")
         if span_ids:
@@ -155,7 +181,13 @@ def finish_response(
     for name, answer in answers.items():
         if not isinstance(answer, dict):
             raise RuntimeError(f"answer {name!r} is not an object")
-        shape = {"type", "noul"} if answer.get("type") == "noul" else None
-        if shape is not None and not set(answer) <= shape:
-            raise RuntimeError(f"noul view {name!r} carries unexpected fields")
+        kind = answer.get("type")
+        shape = ANSWER_FIELDS.get(kind) if isinstance(kind, str) else None
+        if shape is None:
+            raise RuntimeError(f"answer {name!r} has unknown type {kind!r}")
+        if set(answer) != shape:
+            raise RuntimeError(
+                f"answer {name!r} does not carry exactly {sorted(shape)} "
+                f"(got {sorted(answer)})"
+            )
     return response
