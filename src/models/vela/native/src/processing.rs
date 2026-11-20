@@ -274,3 +274,7 @@ fn to_generic(question: &PredictQuestion) -> GenericQuestion {
         head_override: question.head.clone(),
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../../tests/vela/native_row_limits.rs"]
+mod row_limit_tests;

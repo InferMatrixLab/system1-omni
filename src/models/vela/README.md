@@ -258,7 +258,21 @@ The native implementation lives in [`native/`](native/) as the
   the long-target window rows. All five frozen token plans
   (`tests/vela/fixtures/native-plan-*.json`) match field-for-field.
 
+Native processing admits at most **16,384 tokens per completed ordinary
+or span-window row**, after the existing state clipping and windowing.
+An oversized row rejects the whole request with 413 / `too_long` before
+execution. The cap is per row, including its parts and question blocks;
+the request's summed `usage.input_tokens` may exceed it. Row order,
+clipping, window overlap, and usage otherwise retain the pinned rules.
+This deliberately narrows the pinned Python input domain: a sufficiently
+long span instruction can reach its model-call boundary with more than
+16,384 tokens. That observation does not establish a successful forward
+or HTTP response. The original manifest identity remains 16,384; neither
+the 0.3B's 8,192 window nor the backbone's 262,144 position metadata
+widens native support. Multi-part span targets remain an explicit native
+422, and non-finite JSON retains the generic native 400 wording.
+
 The F32 heads, scoring, backbone execution and an HTTP worker are not
-implemented. Checks: `cargo test -p omni-vela-native` (26 tests, no
+implemented. Checks: `cargo test -p omni-vela-native` (ordinary tests, no
 weights, no GPU; render parity opt-in with `VELA_NATIVE_BUNDLE`; see
 [recipe/vela/native.md](../../recipe/vela/native.md)).
