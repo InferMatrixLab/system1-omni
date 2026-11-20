@@ -137,3 +137,57 @@ impl Reference {
         }
     }
 }
+
+/// Optional, separately selected unadapted OmniJev-4B vision operators.
+/// Old ABI-9 libraries remain loadable; requesting this group requires a rebuild.
+pub struct OmniJevVision {
+    pub patch_create: unsafe extern "C" fn(c_int, c_int, Stream) -> *mut c_void,
+    pub norm: unsafe extern "C" fn(
+        *const c_void,
+        *const c_void,
+        *const c_void,
+        *mut c_void,
+        c_int,
+        c_int,
+        Stream,
+    ) -> c_int,
+    pub rope: unsafe extern "C" fn(
+        *const c_void,
+        *const f32,
+        *const f32,
+        *mut c_void,
+        *mut c_void,
+        c_int,
+        c_int,
+        c_int,
+        Stream,
+    ) -> c_int,
+    pub attention_workspace_floats: unsafe extern "C" fn(c_int, c_int) -> usize,
+    pub attention: unsafe extern "C" fn(
+        *const c_void,
+        *const c_void,
+        *const c_void,
+        *mut c_void,
+        c_int,
+        c_int,
+        c_int,
+        *mut c_void,
+        Stream,
+    ) -> c_int,
+}
+impl OmniJevVision {
+    pub(super) fn resolve(lib: &libloading::Library) -> Option<Self> {
+        // SAFETY: these optional signatures match ops.h. Resolve the complete group.
+        unsafe {
+            Some(Self {
+                patch_create: *lib.get(b"cs1_reference_patch_create_v2\0").ok()?,
+                norm: *lib.get(b"cs1_omnijev_vision_norm\0").ok()?,
+                rope: *lib.get(b"cs1_omnijev_vision_rope\0").ok()?,
+                attention_workspace_floats: *lib
+                    .get(b"cs1_omnijev_vision_attention_workspace_floats\0")
+                    .ok()?,
+                attention: *lib.get(b"cs1_omnijev_vision_attention\0").ok()?,
+            })
+        }
+    }
+}

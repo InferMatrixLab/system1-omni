@@ -19,6 +19,50 @@ cargo build --release --locked -p omni-omnijev-native
 OMNIJEV_MODEL=$PWD/omnijev-export target/release/omni-omnijev-native
 ```
 
+## Explicit BF16 reference vision
+
+`OMNIJEV_VISION_NUMERICS=reference` selects the unadapted OmniJev-4B vision
+arithmetic. The default, `legacy`, retains the existing worker output. Unknown
+values fail startup. The reference selection needs the optional cuDNN 9 build
+and additive OmniJev CUDA symbols; requesting it with an old library fails with
+a rebuild instruction. Build and launch it explicitly:
+
+```sh
+CUDNN_INCLUDE_DIR=/absolute/cudnn/include CUDNN_LIB_DIR=/absolute/cudnn/lib \
+    src/backends/cuda/qwen3_5/build.sh target/release 89
+OMNIJEV_VISION_NUMERICS=reference OMNIJEV_MODEL=$PWD/omnijev-export \
+    target/release/omni-omnijev-native
+```
+
+This path uses a cuDNN BF16 patch convolution, vectorized Welford LayerNorm,
+the existing framework GEMM policy with Torch's 1 MiB heuristic budget
+(including its reduction schemes), FP32
+rotary angles/trigonometry, and head-64 reference attention. It retains BF16
+operator outputs and the separate patch-bias addition. It selects vision only:
+the language weights still contain the merged LoRA, and language/readout and
+calibration arithmetic are unchanged. The official unmerged BF16 model and the
+original probability/decision gates remain the acceptance reference. Vision
+alignment alone does not establish whole-model numerical acceptance.
+
+The profile uses the existing four-grid FIFO, rejects vision adapters and
+explicit bounded-cache policies, and must be selected before the first forward.
+`CUA_S1_VISION_GRAPH=1` can capture the vision path after warmup; descriptors,
+GEMM plans and workspace are prepared before capture. Validation is specific to
+the tested GPU/library stack. See the [stage and operator regressions](../../tests/qwen3_5/README.md#omnijev-4b-reference-vision).
+
+On one L20 (sm_89), Rust 1.100/CUDA 12.8 with cuDNN 9.24 and the documented
+reference environment, the original `video.png/noul_region` case matches all
+40 vision boundaries exactly, including the 24 blocks and merger. The complete
+original 28-request/280-answer comparison still fails the unchanged acceptance
+gate: 177 answers are within 0.01, maximum returned-field drift is 0.1758,
+and three protected decisions differ (`board.jpg/q8`, `arcade.jpg/long_start`,
+`web.jpg/one_token`). All 140 PNG decisions agree, but 20 PNG answers still
+exceed 0.01. Unrounded values retain the same three protected failures. The
+JPEG failure set changes from the legacy path; do not infer a uniform
+whole-model improvement. JPEG preparation and language/LM/unmerged-LoRA
+differences still need separate controlled validation. This profile stays
+opt-in and does not complete #114. No performance result is claimed for it.
+
 `CUA_S1_GRAPH=1` also enables language window Graphs in this worker, through the
 shared `Model::readout_window` implementation. It defaults off. Request and
 question prefixes and option continuations can capture and replay; current token,
@@ -108,6 +152,7 @@ python3 recipe/omnijev/validate.py compare reference.json native.json
 options that differ in one token or share a long start, a Choice where no option fits, a
 32-option Choice, a 10-level Score, and plain and region Noul.
 
+The historical comparison and latency figures below use the legacy vision path.
 On one RTX 6000 Ada (sm_89, CUDA 13.2), with the reference's seven v1.1 demo stills and
 both question sets (140 answers), the input-token counts equal the reference's. The
 largest probability difference per answer, against the reference in float32 (`--fp32`)

@@ -16,7 +16,10 @@ use std::{
     path::Path,
 };
 
-type Trace<'a> = Option<&'a mut dyn FnMut(&str, &[bf16]) -> Result<()>>;
+type Trace<'a> = Option<(
+    Option<usize>,
+    &'a mut dyn FnMut(&str, &[bf16]) -> Result<()>,
+)>;
 
 struct OwnedStream(Stream);
 impl Drop for OwnedStream {
@@ -49,6 +52,7 @@ pub struct VisionModel {
     lora: BTreeMap<String, DeviceBuffer>,
     gemm: Gemm,
     reference: Option<&'static cuda::Reference>,
+    omnijev: Option<&'static cuda::OmniJevVision>,
     stream: OwnedStream,
 }
 #[derive(Clone, Copy)]
@@ -171,6 +175,7 @@ impl VisionModel {
             stream,
             gemm,
             reference: None,
+            omnijev: None,
         };
         for (name, tensor) in base {
             model.base.insert(
@@ -222,6 +227,41 @@ impl VisionModel {
         self.reference = Some(reference);
         Ok(())
     }
+    /// Select the unadapted OmniJev-4B BF16 vision arithmetic before any forward.
+    /// This leaves language numerics, the generic path and JEMM-27B unchanged.
+    pub fn enable_omnijev_numerics(&mut self) -> Result<()> {
+        ensure!(
+            self.config.hidden_size == 1024 && self.lora.is_empty(),
+            "OmniJev reference vision requires unadapted 4B vision"
+        );
+        ensure!(
+            self.scratch.is_empty() && self.batch_scratch.is_empty() && self.transient.is_none(),
+            "select OmniJev reference vision before the first forward"
+        );
+        ensure!(
+            self.cache_limits.is_none(),
+            "OmniJev reference vision uses the generic FIFO cache; bounded cache cannot account for opaque cuDNN workspace"
+        );
+        if self.omnijev.is_some() {
+            return Ok(());
+        }
+        let omnijev = api().omnijev_vision()?;
+        let reference = api().language_reference()?;
+        cuda::set_device(0)?;
+        self.synchronize()?;
+        // Torch's vision addmm uses a 1 MiB Lt heuristic budget. A larger budget
+        // changes split-K selection/rounding in the merger even on the same GPU.
+        // SAFETY: no plans, buffers or captures exist and the old handle is drained.
+        let gemm = Gemm(unsafe { (reference.gemm_create)(1 << 20) });
+        ensure!(
+            !gemm.0.is_null(),
+            "cannot create OmniJev reference vision GEMM handle"
+        );
+        self.gemm = gemm;
+        self.reference = Some(reference);
+        self.omnijev = Some(omnijev);
+        Ok(())
+    }
     fn upload(&self, bytes: &[u8]) -> Result<DeviceBuffer> {
         let buffer = DeviceBuffer::new(bytes.len())?;
         unsafe {
@@ -233,11 +273,13 @@ impl VisionModel {
         self.base[name].at(0)
     }
     fn norm(&self, name: &str, x: &DeviceBuffer, y: &DeviceBuffer, rows: usize) -> Result<()> {
+        let norm = self
+            .reference
+            .map_or(api().cs1_vision_norm, |r| r.vision_norm);
+        let norm = self.omnijev.map_or(norm, |r| r.norm);
         unsafe {
             check(
-                (self
-                    .reference
-                    .map_or(api().cs1_vision_norm, |r| r.vision_norm))(
+                norm(
                     x.at(0),
                     self.weight(&format!("{name}.weight")),
                     self.weight(&format!("{name}.bias")),
@@ -365,8 +407,24 @@ impl VisionModel {
         x: &DeviceBuffer,
         n: usize,
     ) -> Result<()> {
-        if let Some(callback) = callback.as_mut() {
+        if let Some((_, callback)) = callback.as_mut() {
             callback(name, &self.read(x, n)?)?;
+        }
+        Ok(())
+    }
+    fn trace_block(
+        &self,
+        callback: &mut Trace<'_>,
+        block: usize,
+        name: &str,
+        x: &DeviceBuffer,
+        n: usize,
+    ) -> Result<()> {
+        if callback
+            .as_ref()
+            .is_some_and(|(selected, _)| *selected == Some(block))
+        {
+            self.trace(callback, &format!("blocks.{block}.{name}"), x, n)?;
         }
         Ok(())
     }
@@ -485,7 +543,21 @@ impl VisionModel {
         image: &ProcessedImage,
         mut callback: impl FnMut(&str, &[bf16]) -> Result<()>,
     ) -> Result<Vec<bf16>> {
-        self.run(image, Some(&mut callback))
+        self.run(image, Some((None, &mut callback)))
+    }
+    /// The usual stages plus operator boundaries of one selected block. Eager only;
+    /// callback errors drain queued work before temporary storage can retire.
+    pub fn forward_with_block_trace(
+        &mut self,
+        image: &ProcessedImage,
+        block: usize,
+        mut callback: impl FnMut(&str, &[bf16]) -> Result<()>,
+    ) -> Result<Vec<bf16>> {
+        ensure!(
+            block < self.config.depth,
+            "vision trace block is out of range"
+        );
+        self.run(image, Some((Some(block), &mut callback)))
     }
     /// Synchronized resident merger output; the borrow prevents cache mutation/retirement.
     pub fn forward_device(&mut self, image: &ProcessedImage) -> Result<DeviceBf16Matrix<'_>> {
@@ -515,7 +587,7 @@ impl VisionModel {
                 &self.scratch_at(index).buffers.out,
                 n / 4 * self.config.out_hidden_size,
             )?;
-            if let Some(callback) = callback.as_mut() {
+            if let Some((_, callback)) = callback.as_mut() {
                 callback("merger.output", &output)?;
             } else if let (true, ScratchLocation::Retained(index)) = (capture, index) {
                 self.capture_current(index);
@@ -789,9 +861,40 @@ impl VisionModel {
         for i in 0..self.config.depth {
             let p = format!("blocks.{i}");
             self.norm(&format!("{p}.norm1"), x, norm, n)?;
+            self.trace_block(callback, i, "norm1", norm, n * h)?;
             self.linear(&format!("{p}.attn.qkv"), norm, qkv, n, h * 3, h, w)?;
+            self.trace_block(callback, i, "attn.qkv", qkv, n * h * 3)?;
             unsafe {
-                if h == 1024 {
+                if let Some(omnijev) = self.omnijev {
+                    check(
+                        (omnijev.rope)(
+                            qkv.at(0),
+                            co.at(0).cast(),
+                            si.at(0).cast(),
+                            q.at(0),
+                            k.at(0),
+                            n as i32,
+                            h as i32,
+                            self.config.head_dim() as i32,
+                            self.stream.0,
+                        ),
+                        "OmniJev vision rotary",
+                    )?;
+                    check(
+                        (omnijev.attention)(
+                            q.at(0),
+                            k.at(0),
+                            qkv.at(h * 2 * 2),
+                            attn.at(0),
+                            n as i32,
+                            self.config.num_heads as i32,
+                            self.config.head_dim() as i32,
+                            attention_workspace.at(0),
+                            self.stream.0,
+                        ),
+                        "OmniJev vision attention",
+                    )?;
+                } else if h == 1024 {
                     check(
                         (api().cs1_vision_rope)(
                             qkv.at(0),
@@ -851,14 +954,20 @@ impl VisionModel {
                     }
                 }
             }
+            self.trace_block(callback, i, "attn.q", q, n * h)?;
+            self.trace_block(callback, i, "attn.k", k, n * h)?;
+            self.trace_block(callback, i, "attn.output", attn, n * h)?;
             self.linear(&format!("{p}.attn.proj"), attn, delta, n, h, h, w)?;
+            self.trace_block(callback, i, "attn.proj", delta, n * h)?;
             unsafe {
                 check(
                     (api().cs1_vision_add)(x.at(0), delta.at(0), n * h, self.stream.0),
                     "vision attention residual",
                 )?;
             }
+            self.trace_block(callback, i, "attn.residual", x, n * h)?;
             self.norm(&format!("{p}.norm2"), x, norm, n)?;
+            self.trace_block(callback, i, "norm2", norm, n * h)?;
             self.linear(
                 &format!("{p}.mlp.linear_fc1"),
                 norm,
@@ -868,12 +977,14 @@ impl VisionModel {
                 h,
                 w,
             )?;
+            self.trace_block(callback, i, "mlp.linear_fc1", mlp, n * intermediate)?;
             unsafe {
                 check(
                     (api().cs1_vision_gelu)(mlp.at(0), n * intermediate, 0, self.stream.0),
                     "vision tanh GELU",
                 )?;
             }
+            self.trace_block(callback, i, "mlp.activation", mlp, n * intermediate)?;
             self.linear(
                 &format!("{p}.mlp.linear_fc2"),
                 mlp,
@@ -883,6 +994,7 @@ impl VisionModel {
                 intermediate,
                 w,
             )?;
+            self.trace_block(callback, i, "mlp.linear_fc2", delta, n * h)?;
             unsafe {
                 check(
                     (api().cs1_vision_add)(x.at(0), delta.at(0), n * h, self.stream.0),
@@ -1044,7 +1156,17 @@ impl Buffers {
         );
         let patch = if let Some(reference) = model.reference {
             // SAFETY: descriptors/workspace are allocated outside capture for validated rows.
-            let plan = PatchPlan(unsafe { (reference.patch_create)(n as i32, model.stream.0) });
+            let plan = PatchPlan(unsafe {
+                if let Some(omnijev) = model.omnijev {
+                    (omnijev.patch_create)(
+                        n as i32,
+                        model.config.hidden_size as i32,
+                        model.stream.0,
+                    )
+                } else {
+                    (reference.patch_create)(n as i32, model.stream.0)
+                }
+            });
             ensure!(
                 !plan.0.is_null(),
                 "cannot prepare cuDNN reference patch convolution"
@@ -1053,7 +1175,17 @@ impl Buffers {
         } else {
             None
         };
-        sizes[8] = if let Some(reference) = model.reference {
+        sizes[8] = if let Some(omnijev) = model.omnijev {
+            // SAFETY: this sizing query uses validated bounded single-image geometry.
+            let floats = unsafe {
+                (omnijev.attention_workspace_floats)(
+                    attention_rows as i32,
+                    model.config.num_heads as i32,
+                )
+            };
+            ensure!(floats > 0, "cannot size OmniJev vision attention workspace");
+            floats * 4
+        } else if let Some(reference) = model.reference {
             let floats = unsafe {
                 (reference.vision_attention_workspace_floats)(
                     attention_rows as i32,
@@ -1134,3 +1266,7 @@ mod vision_tests;
 #[cfg(test)]
 #[path = "../../../../../../tests/qwen3_5/vision_batch.rs"]
 mod batch_tests;
+
+#[cfg(test)]
+#[path = "../../../../../../tests/qwen3_5/vision_omnijev.rs"]
+mod omnijev_tests;
