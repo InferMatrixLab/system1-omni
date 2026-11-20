@@ -68,3 +68,96 @@ fn multilayer_prefix_mask_matches_frozen_reference_and_restores_causal_execution
     // a model adapter's decision/probability gates. It is fixed before replay.
     assert!(worst < 0.03, "full-row BF16 hidden gate failed: {worst}");
 }
+
+#[cfg(unix)]
+mod cpu_support;
+
+/// This checks host routing and ABI arguments, not attention numerics.
+#[cfg(unix)]
+#[test]
+fn attention_modes_dispatch_independently_on_cpu() {
+    const CHILD: &str = "QWEN_TEST_ATTENTION_DISPATCH";
+    let Ok(mode) = std::env::var(CHILD) else {
+        // The CUDA API is process-global, so each library needs its own process.
+        for mode in ["complete", "without-prefix"] {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "attention_modes_dispatch_independently_on_cpu",
+                    "--nocapture",
+                ])
+                .env(CHILD, mode)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{mode}: {}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        return;
+    };
+    let directory =
+        std::env::temp_dir().join(format!("qwen-attention-dispatch-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    cpu_support::write_tiny_checkpoint(&directory);
+    let symbol = "cs1_attention_gated_prefix_bidirectional";
+    let mut extra = include_str!("attention_dispatch_fake.c").to_owned();
+    let missing = mode == "without-prefix";
+    if missing {
+        extra = extra.replace(symbol, "omitted_prefix_attention");
+    }
+    let omitted = [symbol];
+    let library =
+        cpu_support::build_fake_library(&directory, &extra, if missing { &omitted } else { &[] });
+    // SAFETY: the library and model remain alive while these metric symbols are used.
+    let metrics = unsafe { libloading::Library::new(&library).unwrap() };
+    let metric =
+        |name: &[u8]| unsafe { metrics.get::<unsafe extern "C" fn() -> i32>(name).unwrap()() };
+    let counts = || {
+        [
+            metric(b"dispatch_causal\0"),
+            metric(b"dispatch_bidir\0"),
+            metric(b"dispatch_prefix\0"),
+            metric(b"dispatch_gdn\0"),
+        ]
+    };
+    let mut model = Model::load_with_graph(&directory, &library, false).unwrap();
+    let ids = vec![0; 129];
+    model.forward(&ids).unwrap();
+    assert_eq!(counts(), [1, 0, 0, 1]);
+    model.forward_prompt_bidirectional(&ids).unwrap();
+    assert_eq!(counts(), [1, 1, 0, 2]);
+    if missing {
+        let error = model
+            .forward_prompt_prefix_bidirectional(&ids, 65)
+            .unwrap_err();
+        let detail = format!("{error:#}");
+        assert!(
+            detail.contains(symbol) && detail.contains("rebuild"),
+            "{detail}"
+        );
+        assert_eq!(counts(), [1, 1, 0, 2]);
+    } else {
+        for (index, state) in [1, 64, 65, 128].into_iter().enumerate() {
+            model
+                .forward_prompt_prefix_bidirectional(&ids, state)
+                .unwrap();
+            assert_eq!(metric(b"dispatch_tokens\0"), 129);
+            assert_eq!(metric(b"dispatch_state\0"), state as i32);
+            assert_eq!(counts(), [1, 1, index as i32 + 1, index as i32 + 3]);
+        }
+    }
+    let before = counts();
+    model.forward_prompt_bidirectional(&ids).unwrap();
+    model.forward_batch(&[&ids[..3], &ids[..67]]).unwrap();
+    assert_eq!(
+        counts(),
+        [before[0] + 2, before[1] + 1, before[2], before[3] + 3]
+    );
+    assert_eq!(metric(b"dispatch_tokens\0"), 67);
+    drop(model);
+    drop(metrics);
+    std::fs::remove_dir_all(directory).unwrap();
+}

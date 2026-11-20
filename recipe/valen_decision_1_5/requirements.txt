@@ -1,0 +1,18 @@
+# Valen-Decision-1.5 reference worker. Install torch separately for the host CUDA
+# runtime; the recorded runs used the cu126 wheels of the versions below.
+torch==2.14.1
+# The processor's torchvision backend resizes images as in evaluation; without it
+# transformers falls back to a PIL resize.
+torchvision==0.29.1
+# The checkpoint's runtime files are loaded through trust_remote_code.
+transformers==5.20.2
+safetensors>=0.6
+numpy>=2
+# PIL decodes and validates the inline image in protocol.py.
+pillow>=10
+# tests/valen_decision_1_5 (CPU only, no weights).
+pytest>=8
+# Optional GPU kernels for the Qwen3.5 linear-attention layers; without them
+# transformers runs its PyTorch reference implementation, as in the recorded runs.
+# causal-conv1d
+# flash-linear-attention
