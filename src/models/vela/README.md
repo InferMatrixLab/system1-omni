@@ -12,7 +12,9 @@ state and all five typed question kinds (`choice`, `noul`, `score`,
 process. The 0.3B worker's contract freezes the text/token_ids input,
 the position-level final-hidden readout contract, the error/length
 boundaries and the parity baseline; see
-[Native path](#native-path-decoder-members) for the native library.
+the [0.3B encoder profile](encoder_native/README.md) and
+[decoder native library](#native-path-decoder-members) for the separate
+native carriers.
 
 The shared Vela 2.0 wire module is deliberately shaped for the family:
 the envelope admission (`protocol`), the pinned-runtime error mapping
@@ -40,7 +42,7 @@ registry inside `hybrid.py` (repo, revision, pin table, shard layout).
 | Backbone | — (unified encoder) | Qwen3.5-shape hybrid config, hidden 1024 | hidden 2560, 32 hybrid layers (Gated DeltaNet ×3 + gated GQA ×1, per group of 4) | hidden 4096, same layer structure |
 | Calibration | the package's own `calibration.json` (never cross-copied between members — shipped thresholds differ) | same rule; the side-loaded broad head needs its `broad_head` block | same | same |
 | License | Apache-2.0; the inherited tokenizer material carries Gemma Terms of Use | Apache-2.0; Qwen3.5 lineage notices ship in the package | package `LICENSE` + `LICENSES/Qwen3.5-4B-Base-LICENSE.txt` | package `LICENSE` + `LICENSES/Qwen3.5-9B-LICENSE.txt` |
-| Runtime dependencies | [recipe/vela/requirements.txt](../../recipe/vela/requirements.txt) (torch, transformers, safetensors, tokenizers, numpy) | same | same | same |
+| Runtime dependencies | [recipe/vela/requirements.txt](../../../recipe/vela/requirements.txt) (torch, transformers, safetensors, tokenizers, numpy) | same | same | same |
 
 The 4B/9B packages add non-runtime files the gate ignores the way the
 0.3B's `assets/` is ignored — `MODEL_MANIFEST.json`,
@@ -251,7 +253,25 @@ the shared worker-contract issue, and nothing is posted upstream.
   flash-linear-attention) is the oracle setting; GPU bf16-autocast is
   a deployment option outside these slices' evidence.
 - The serving procedure, hardware requirements and the recorded
-  evidence pointer are [recipe/vela/reference.md](../../recipe/vela/reference.md).
+  evidence pointer are [recipe/vela/reference.md](../../../recipe/vela/reference.md).
+
+## Native path (0.3B encoder)
+
+[`encoder_native/`](encoder_native/README.md), package
+`omni-vela-encoder-native`, owns the pinned 0.3B profile, checkpoint
+census and YaRN tables, with its encoder executor behind `cuda`.
+It reuses `omni-modernbert`, the same family core as Laya. The original
+ABI-2 bundle remains Hopper-only (`sm_90a`); CPU checks do not qualify
+it for L20 (`sm_89`). This carrier does not expose the decoder's
+`Processor` / `Executor` contract or a native HTTP worker.
+
+Both native packages are workspace members. Run their existing root
+tests together from the repository root:
+
+```sh
+cargo test --locked -p omni-vela-encoder-native -p omni-vela-native -- --list
+cargo test --locked -p omni-vela-encoder-native -p omni-vela-native
+```
 
 ## Native path (decoder members)
 
@@ -259,7 +279,7 @@ The native implementation lives in [`native/`](native/) as the
 `omni-vela-native` crate, one library around the exported bundle for
 every decoder member:
 
-- [`recipe/vela/export_native.py`](../../recipe/vela/export_native.py)
+- [`recipe/vela/export_native.py`](../../../recipe/vela/export_native.py)
   exports a pinned package into a native bundle (the member is whatever
   the package gate resolves to): the backbone tensors re-keyed
   `backbone.` → `model.` with **per-tensor dtypes preserved** (the
@@ -348,4 +368,4 @@ The crate is a library; the HTTP worker around `Processor` +
 latency are not recorded. Checks: `cargo test -p omni-vela-native`
 (ordinary tests need no weights or GPU; render, head and response parity are
 opt-in with `VELA_NATIVE_BUNDLE`, executor parity additionally with
-`VELA_CUDA_LIB`; see [recipe/vela/native.md](../../recipe/vela/native.md)).
+`VELA_CUDA_LIB`; see [recipe/vela/native.md](../../../recipe/vela/native.md)).

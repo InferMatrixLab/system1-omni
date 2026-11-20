@@ -14,7 +14,7 @@ pub struct Batch {
     pub markers: Vec<Vec<usize>>,
 }
 
-pub fn pack(prepared: &Prepared) -> Result<Batch> {
+pub fn pack(prepared: &Prepared, vocab: usize) -> Result<Batch> {
     let n = prepared.questions.len();
     ensure!(n <= 16, "at most 16 questions per CUDA request");
     ensure!(
@@ -47,7 +47,7 @@ pub fn pack(prepared: &Prepared) -> Result<Batch> {
     for (i, q) in prepared.questions.iter().enumerate() {
         ensure!(
             !q.ids.is_empty()
-                && q.ids.iter().all(|id| *id < 50368)
+                && q.ids.iter().all(|id| (*id as usize) < vocab)
                 && (0..=2).contains(&q.qtype)
                 && !q.markers.is_empty()
                 && q.markers.iter().all(|m| *m < q.ids.len()),

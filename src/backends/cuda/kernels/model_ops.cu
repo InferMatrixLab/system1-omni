@@ -22,11 +22,11 @@ __device__ Stats combine(Stats b, Stats a) {
   return {0, 0, 0};
 }
 
-template <class Load>
+template <class Load, int D>
 __device__ Stats stats(Load load, float* buf) {
   int lane = threadIdx.x, warp = threadIdx.y, t = lane + warp * 32;
   Stats wd{0, 0, 0};
-  for (int i = t; i < 256; i += 128) {
+  for (int i = t; i < D / 4; i += 128) {
     #pragma unroll
     for (int j = 0; j < 4; j++) {
       float v = load(4 * i + j), delta = v - wd.mean, count = wd.count + 1.f,
@@ -56,7 +56,7 @@ __device__ Stats stats(Load load, float* buf) {
   }
   if (lane == 0 && warp == 0) {
     buf[0] = wd.mean;
-    buf[1] = wd.var / 1024.f;
+    buf[1] = wd.var / float(D);
   }
   __syncthreads();
   return {buf[0], buf[1], 0};
@@ -76,20 +76,21 @@ struct FloatLoad {
   }
 };
 
+template <int D>
 __global__ void embed_norm(const int64_t* ids, const half* w, const float* gamma,
                            float* x, BF* y) {
   int r = blockIdx.x, t = threadIdx.x + threadIdx.y * 32;
   __shared__ float buf[6];
-  HalfLoad load{w + ids[r] * 1024};
-  Stats wd = stats(load, buf);
+  HalfLoad load{w + ids[r] * D};
+  Stats wd = stats<HalfLoad, D>(load, buf);
   float inv = rsqrtf(wd.var + 1e-5f);
-  for (int i = t; i < 256; i += 128) {
+  for (int i = t; i < D / 4; i += 128) {
     #pragma unroll
     for (int k = 0; k < 4; k++) {
       int j = 4 * i + k;
       float z = gamma[j] * (inv * (load(j) - wd.mean));
-      x[r * 1024 + j] = z;
-      y[r * 1024 + j] = __float2bfloat16_rn(z);
+      x[r * D + j] = z;
+      y[r * D + j] = __float2bfloat16_rn(z);
     }
   }
 }
@@ -113,7 +114,7 @@ __global__ void gather_norm(const float* h, const int32_t* indices,
   int r = blockIdx.x, t = threadIdx.x + threadIdx.y * 32;
   __shared__ float buf[6];
   FloatLoad load{h + indices[r] * 1024};
-  Stats wd = stats(load, buf);
+  Stats wd = stats<FloatLoad, 1024>(load, buf);
   float inv = rsqrtf(wd.var + 1e-5f);
   for (int i = t; i < 256; i += 128) {
     #pragma unroll
@@ -178,7 +179,14 @@ __global__ void action_features(const float* h, const BF* logits,
 
 extern "C" {
 int laya_embed(void** p, int B, int L, int M, cudaStream_t s) {
-  embed_norm<<<M, dim3(32, 4), 0, s>>>(
+  embed_norm<1024><<<M, dim3(32, 4), 0, s>>>(
+      (int64_t*)p[0], (half*)p[1], (float*)p[2], (float*)p[3], (BF*)p[4]);
+  return cudaGetLastError();
+}
+
+// The 768-hidden ModernBERT profile (Vela 2.0 0.3B) on the same glue op.
+int laya_embed_h768(void** p, int B, int L, int M, cudaStream_t s) {
+  embed_norm<768><<<M, dim3(32, 4), 0, s>>>(
       (int64_t*)p[0], (half*)p[1], (float*)p[2], (float*)p[3], (BF*)p[4]);
   return cudaGetLastError();
 }

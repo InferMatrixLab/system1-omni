@@ -62,22 +62,27 @@ def integer(value):
     return int(value)
 
 
-def patch_geglu_static_registers(body):
+def patch_geglu_static_registers(body, pinned=True):
     """Remove fixed register reservations only from the accepted BN32 lowering."""
-    expected = "1ed96990542c07b58dca419dafcc45c6163bb9b6fff04ffca5ecedb2a34e921c"
-    if hashlib.sha256(body.encode()).hexdigest() != expected:
-        raise ValueError("long GEGLU BN32 lowering changed")
+    if pinned:
+        expected = "1ed96990542c07b58dca419dafcc45c6163bb9b6fff04ffca5ecedb2a34e921c"
+        if hashlib.sha256(body.encode()).hexdigest() != expected:
+            raise ValueError("long GEGLU BN32 lowering changed")
     for call in (
         "    tl::warpgroup_reg_dealloc<24>();\n",
         "    tl::warpgroup_reg_alloc<240>();\n",
     ):
-        if body.count(call) != 1:
+        count = body.count(call)
+        if pinned and count != 1:
             raise ValueError("long GEGLU register calls changed")
-        body = body.replace(call, "", 1)
+        if count == 1:
+            body = body.replace(call, "", 1)
+        elif count != 0:
+            raise ValueError("unexpected GEGLU register call count")
     return body
 
 
-def export(name, kernel):
+def export(name, kernel, l_max=512):
     source = kernel.get_kernel_source()
     signature = re.search(r"void main_kernel\((.*?)\);", source, re.S)[1]
     params = [param.strip() for param in signature.split(",")]
@@ -160,8 +165,8 @@ def export(name, kernel):
     body = source[source.index('extern "C" __global__') :].replace(
         "main_kernel", symbol
     )
-    if name == "geglu":
-        body = patch_geglu_static_registers(body)
+    if name.startswith("geglu"):
+        body = patch_geglu_static_registers(body, pinned=name == "geglu")
     # TileLang reuses Q_s for O_s. Its generated wait is inside the key loop,
     # so zero-key rows can overwrite Q_s while the asynchronous Q load is live.
     # Wait before entering producer/consumer branches, including zero iterations.
@@ -197,7 +202,7 @@ def export(name, kernel):
         dispatch = "  if(B==1 && M<=64)return laya_geglu_short(p,B,L,M,stream);\n"
     wrapper_name = {"qkv": "qkv_full", "out": "out_full"}.get(name, name)
     wrapper = f"""extern "C" int laya_{wrapper_name}(void** p,int B,int L,int M,cudaStream_t stream) {{
-  if(B<1 || B>16 || L<16 || L>512 || L%16 || M!=B*L)return -1;
+  if(B<1 || B>16 || L<16 || L>{l_max} || L%16 || M!=B*L)return -1;
 {dispatch}{chr(10).join(bindings)}
 {chr(10).join(descriptors)}
   {symbol}<<<dim3({','.join(grid)}),dim3({','.join(map(str,block))}),{shared_memory},stream>>>({','.join(args)});
@@ -243,6 +248,19 @@ def main():
         "qkv_short": kernels.gemm_kernel(3072, 1024, bn=64),
         "attn_full": kernels.attn_kernel(None, None, 16, 64),
     }
+    # The second ModernBERT profile (Vela 2.0 0.3B, hidden 768, 12 heads,
+    # 1152 intermediate, requests packed to 8192 tokens). Its symbols carry
+    # an _h768 suffix so both profiles coexist in one library.
+    vela_exports = {
+        "qkv_h768": kernels.gemm_kernel(2304, 768),
+        "out_h768": kernels.gemm_kernel(768, 768),
+        "geglu_h768": kernels.gemm_geglu_kernel(1152, 768, bn=32),
+        "down_h768": kernels.gemm_kernel(768, 1152, bm=64, bn=64),
+        "addln_h768": kernels.add_ln_kernel(768),
+        "attn_full_h768": kernels.attn_kernel(None, None, 12, 64),
+        "attn_local_h768": kernels.attn_kernel(None, None, 12, 64, window=64),
+        "rope_h768": rope.build(12, 64, 1, 8),
+    }
     if not args.probe_only:
         exports.update(
             {
@@ -271,8 +289,11 @@ def main():
     bodies = []
     inits = []
     metadata = []
-    for name, kernel in exports.items():
-        preamble, body, init, details = export(name, kernel)
+    entries = [(name, kernel, 512) for name, kernel in exports.items()]
+    if not args.probe_only:
+        entries += [(name, kernel, 8192) for name, kernel in vela_exports.items()]
+    for name, kernel, l_max in entries:
+        preamble, body, init, details = export(name, kernel, l_max)
         preambles.append(preamble)
         bodies.append(body)
         inits.append(init)

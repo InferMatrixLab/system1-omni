@@ -2,8 +2,10 @@ pub mod artifacts;
 pub mod config;
 pub mod decision;
 pub mod packing;
+pub mod plan;
 pub mod preprocess;
 pub mod processing;
+pub mod profile;
 pub mod weights;
 
 #[cfg(feature = "serve")]

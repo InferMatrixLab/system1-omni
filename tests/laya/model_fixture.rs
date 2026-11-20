@@ -57,9 +57,10 @@ pub(super) fn fixture_model_at(original_rope: bool, path: &Path) -> Model {
         }
     }
     let (encoder, agent) = configs();
-    let plan = prepare_encoder(&cuda, &weights, original_rope).unwrap();
+    let config = load_config(&encoder, &agent).unwrap();
+    let plan = prepare_encoder(&cuda, &weights, &config.structure, original_rope).unwrap();
     Model {
-        config: load_config(&encoder, &agent).unwrap(),
+        config,
         blas: Blas::new(&cuda).unwrap(),
         cuda,
         weights,
