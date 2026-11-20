@@ -103,6 +103,11 @@ report their differences from committed history separately. The recorder's
 execution order can differ from planned row order, so attributed executor calls
 match the recorded row, kind and span head, with every call consumed exactly
 once. Missing or duplicate matches fail; numerical and shape gates stay fixed.
+Every 4B/9B executor call must identify an integer row within the planned row
+count. Missing, mixed, invalid or out-of-range row metadata fails before any
+row readout. Only the original 0.8B recordings may omit all row metadata and
+retain their historical call order; this compatibility does not apply to a
+fresh 4B/9B capture.
 
 The token plans record what the pinned runtime feeds the backbone (the
 predict mapping, the per-row decomposition, the rendered `p_ids`,
