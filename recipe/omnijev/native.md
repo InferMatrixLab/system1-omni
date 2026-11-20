@@ -104,6 +104,80 @@ Malformed JSON gets 400, a body over 12 MiB 413, and a request the contract refu
 at most 16, preparing, waiting or running; beyond that it answers 503 with
 `Retry-After: 1`.
 
+## Explicit unmerged one-shot profile
+
+Prepare the [separate unmerged artifact](README.md#separate-unmerged-reference-artifact),
+and build the CUDA library with the reference vision requirements above. The
+library must also provide the existing reference language/FP32 GDN operators.
+From the repository root:
+
+```sh
+cargo build --release --locked -p omni-omnijev-native -p omni-jev
+OMNIJEV_PROFILE=unmerged-reference \
+OMNIJEV_MODEL=$PWD/omnijev-unmerged-reference \
+OMNIJEV_CUDA_LIB=$PWD/target/release/libqwen3_5_cuda.so \
+CUA_S1_GRAPH=0 CUA_S1_VISION_GRAPH=0 \
+    target/release/omni-omnijev-native
+```
+
+`OMNIJEV_PROFILE` accepts `merged-fixed` (default) or `unmerged-reference`;
+unknown values fail startup. The latter requires the matching unmerged export,
+selects reference vision and language arithmetic, and supports complete
+Choice/Noul/Score requests through the existing direct-worker and Rust frontend
+interfaces. Its all-type warmup finishes before listening or reporting ready.
+Use the frontend launch and request examples above unchanged. Language Graphs
+and prefix reuse are rejected. This experimental profile has no speed claim;
+full numerical acceptance and JPEG fidelity remain separate gates.
+
+The backbone runs normal independent full rows. LM projections retain the
+official default grouping: chunks of 64 complete-request candidate rows,
+option-token rows in order, then a separate zq/first-token group. Score rows
+remain in the projection layout. Complete-request targets, including those
+unused Score targets, are limited to 16,384 and rejected during preparation
+with HTTP 422 above that bound. This is stricter than the merged profile's
+Score-exempt LM budget. All logits use the exact 248,079-entry denominator.
+Readout/window guards remain; this mode uses no continuation state.
+
+On actual original-request hidden, native grouped BF16 logits match the
+official 112-row and 31-row outputs exactly. The retained CPU FP64 reduction
+differs from official FP32 picked log-probabilities by at most 9.54e-7;
+the six features differ by at most 1.53e-5 and same-hidden heads by 2.39e-7.
+Those controls isolate the LM boundary; they do not replace the original
+branch's complete-answer 0.01 and protected-decision gate.
+
+On one L20 with the pinned BF16 unmerged weights and runtime, the complete
+original 28-request/280-answer replay remains **failed** under that unchanged
+gate. Raw values round back to the production results on every answer:
+
+| Input population | Answers within 0.01 (raw and returned) | Protected disagreements | Maximum raw field drift |
+| --- | ---: | ---: | ---: |
+| PNG | 125/140 | 0 | 0.02967435 |
+| JPEG | 54/140 | 3 | 0.18771529 |
+| Complete corpus | 179/280 | 3 | 0.18771529 |
+
+All 140 PNG decisions agree; fifteen PNG answers still exceed 0.01. The largest
+is the original complete-context `video.png/q6`. Protected JPEG disagreements
+remain `board.jpg/q8`, `arcade.jpg/long_start`, and `web.jpg/one_token`.
+The largest returned-field drift is 0.1878. This is a fresh unmerged candidate
+run, separate from the earlier merged/reference-vision result above; do not
+combine their metrics or infer a uniform improvement.
+
+For that q6 case, native zq/u equal every BF16 value in a fresh official
+plain-full-row control, while differing from the normative cached branch
+(maximum hidden delta 0.0625). Official LM/head execution on the identical
+native hidden differs from the native head by only 5.96e-8. This locates a
+remaining boundary before LM feature consumption; the first differing internal
+backbone operator has not been traced. A separate branch-topology stage is
+needed, with the original oracle and gates retained.
+
+The real worker completed all-type warmup before readiness, served the original
+complete request as its first request, and matched both the direct core replay
+and Rust frontend results exactly except timing. Malformed JSON (400), invalid
+questions/model and the reference LM budget (422), and body limit (413) matched
+through both HTTP paths; a valid request after errors retained the same result.
+These serving checks do not pass the numerical gate. Other GPUs, Metal,
+reference reuse/Graphs, and performance remain unverified.
+
 ## Tests
 
 The CPU tests need only the committed fixtures; the GPU tests need the export and the
@@ -118,9 +192,8 @@ QWEN3_5_CHECKPOINT=$PWD/omnijev-export CUA_S1_CUDA_LIB=$PWD/target/release/libqw
 ```
 
 These commands select the merged worker's tests. The separate unmerged one-shot
-Score library tests require their own artifact and Graph-off settings; see the
-[preparation recipe](README.md#separate-unmerged-reference-artifact). They do not
-establish a replacement HTTP worker profile.
+tests require their own artifact and Graph-off settings; see the
+[preparation recipe](README.md#separate-unmerged-reference-artifact).
 
 The direct OmniJev window-Graph regression selects eager and Graph models without
 changing process-wide environment variables. It compares raw FP32 head bits and

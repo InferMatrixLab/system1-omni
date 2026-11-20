@@ -144,13 +144,21 @@ call.
 The Cua-S1 text worker uses it
 ([#188](https://github.com/InferMatrixLab/system1-omni/issues/188)).
 
-OmniJev's separate unmerged one-shot Score library profile uses
+OmniJev's separate unmerged one-shot profile uses
 `forward_multimodal_reference_readout`: one complete unpadded multimodal row,
 the existing reference norm/projection/attention and FP32 GDN layer loop, then
 selected final-norm hidden rows in caller order. It synchronizes before returning
 or reusing scratch, including error paths. It creates no prefix state and rejects
 Graph and LM targets; the fixed/window/reuse guards above remain in effect.
-This is a bounded library capability, with full worker/all-type parity unverified.
+The complete-request executor owns selected BF16 hidden values independently of
+scratch and supplies explicit projection groups through `ReferenceLmTarget` /
+`reference_lm_logprobs`. OmniJev maps request chunks, candidate ownership and
+option tokens; Qwen executes each declared ordered group as one full-vocabulary
+GEMM without inferring question semantics or splitting M. It normalizes with the
+existing measured CPU FP64 reduction, an approximation to reference FP32. Both
+streams drain before releasing admission, including errors. The optional
+`OMNIJEV_PROFILE=unmerged-reference` worker uses the existing all-type warmup and
+serial scheduler. Full numerical parity remains a separate acceptance gate.
 See the [OmniJev preparation recipe](../recipe/omnijev/README.md#separate-unmerged-reference-artifact).
 
 ## Native worker boundaries

@@ -43,13 +43,17 @@ fn reference_actual_lm_groups_and_features() {
         match tensor.dtype() {
             Dtype::F32 => tensor
                 .data()
-                .chunks_exact(4)
-                .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| f32::from_le_bytes(*b))
                 .collect::<Vec<_>>(),
             Dtype::BF16 => tensor
                 .data()
-                .chunks_exact(2)
-                .map(|b| bf16::from_le_bytes(b.try_into().unwrap()).to_f32())
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| bf16::from_le_bytes(*b).to_f32())
                 .collect(),
             other => panic!("unexpected tensor dtype {other:?}"),
         }
@@ -74,8 +78,10 @@ fn reference_actual_lm_groups_and_features() {
             2560,
             tensor
                 .data()
-                .chunks_exact(2)
-                .map(|b| bf16::from_le_bytes(b.try_into().unwrap()))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| bf16::from_le_bytes(*b))
                 .collect(),
         )
         .unwrap();
