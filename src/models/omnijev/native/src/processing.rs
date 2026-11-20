@@ -106,6 +106,74 @@ pub struct Row {
     pub first: Option<u32>,
 }
 
+/// One official request-row chunk (default MSO_BRANCH_CHUNK=64). Targets name a
+/// chunk-local row, its owned selected-hidden index, and the vocabulary token.
+/// Selected-hidden order is zq, u, then every option prediction in token order.
+#[derive(Debug, PartialEq)]
+pub struct ReferenceLmChunk {
+    pub rows: std::ops::Range<usize>,
+    pub option_targets: Vec<(usize, usize, u32)>,
+    pub first_targets: Vec<(usize, u32)>,
+}
+
+/// Preserve complete-request row/token order, including Score's unused LM rows.
+/// Group normalization remains per question after all chunks have executed.
+pub fn reference_lm_chunks(rows: &[&Row]) -> Result<Vec<ReferenceLmChunk>> {
+    ensure!(!rows.is_empty(), "reference request has no rows");
+    let mut count = 0usize;
+    for row in rows {
+        ensure!(
+            row.zq < row.tokens.len()
+                && row.targets.len() <= MAX_TARGETS
+                && row.zq.checked_add(2 + row.targets.len()) == Some(row.u)
+                && row.u.checked_add(1) == Some(row.tokens.len())
+                && row.tokens.get(row.zq + 1) == Some(&OPTION_OPEN)
+                && row.tokens.get(row.u) == Some(&OPTION_CLOSE)
+                && row.first == row.targets.first().map(|t| t.1)
+                && row
+                    .targets
+                    .iter()
+                    .enumerate()
+                    .all(|(i, &(p, token))| p == row.zq + 1 + i
+                        && row.tokens.get(p + 1) == Some(&token)
+                        && token < 248_079),
+            "invalid reference option row/target layout"
+        );
+        count = count
+            .checked_add(row.targets.len() + usize::from(row.first.is_some()))
+            .context("reference target count overflow")?;
+    }
+    ensure!(
+        count <= MAX_TARGETS,
+        "reference request exceeds LM target budget"
+    );
+    Ok(rows
+        .chunks(64)
+        .enumerate()
+        .map(|(chunk, sub)| {
+            let start = chunk * 64;
+            ReferenceLmChunk {
+                rows: start..start + sub.len(),
+                option_targets: sub
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(i, row)| {
+                        row.targets
+                            .iter()
+                            .enumerate()
+                            .map(move |(j, &(_, token))| (i, j + 2, token))
+                    })
+                    .collect(),
+                first_targets: sub
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, row)| row.first.map(|t| (i, t)))
+                    .collect(),
+            }
+        })
+        .collect())
+}
+
 pub struct PreparedQuestion {
     /// The single-question sequence: prompt, image and every option block.
     pub token_ids: Vec<u32>,
@@ -196,6 +264,7 @@ pub fn layout(sequences: &[Vec<u32>], grid: [usize; 3]) -> Result<(Layout, Vec<V
 
 pub struct Processor {
     tokenizer: Tokenizer,
+    reference_lm: bool,
 }
 
 /// A request ready for execution; `questions` keeps identity and order for finishing.
@@ -224,7 +293,19 @@ impl Processor {
                 "tokenizer does not map {text} to {id}"
             );
         }
-        Ok(Self { tokenizer })
+        Ok(Self {
+            tokenizer,
+            reference_lm: false,
+        })
+    }
+
+    /// The reference profile projects Score rows too, so admit its complete LM
+    /// target budget during CPU preparation, before model work or HTTP dispatch.
+    pub fn load_one_shot_reference(dir: &Path) -> Result<Self> {
+        Ok(Self {
+            reference_lm: true,
+            ..Self::load(dir)?
+        })
     }
 
     /// The single-question sequence: the prompt's text tokens around the image's
@@ -283,6 +364,9 @@ impl Processor {
             targets <= MAX_TARGETS,
             "request reads {targets} option-text tokens, above {MAX_TARGETS}"
         );
+        if self.reference_lm {
+            reference_lm_chunks(&rows.iter().flatten().collect::<Vec<_>>())?;
+        }
         let inputs = sequences
             .into_iter()
             .zip(rows)

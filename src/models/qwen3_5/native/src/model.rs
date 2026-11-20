@@ -782,6 +782,56 @@ pub struct Readout {
     pub logprobs: Vec<f32>,
 }
 
+/// Owned CPU BF16 final-norm rows. These bytes survive subsequent forwards and
+/// scratch growth; they contain no device pointers or prefix state.
+#[derive(Debug)]
+pub struct Bf16HiddenRows {
+    width: usize,
+    values: Vec<half::bf16>,
+}
+
+impl Bf16HiddenRows {
+    pub fn new(width: usize, values: Vec<half::bf16>) -> Result<Self> {
+        ensure!(
+            width > 0 && values.len().is_multiple_of(width),
+            "hidden matrix has an invalid width or row extent"
+        );
+        ensure!(
+            values.iter().all(|v| v.is_finite()),
+            "non-finite hidden matrix"
+        );
+        Ok(Self { width, values })
+    }
+
+    pub fn rows(&self) -> usize {
+        self.values.len() / self.width
+    }
+
+    pub fn row(&self, index: usize) -> Result<&[half::bf16]> {
+        ensure!(index < self.rows(), "hidden row outside owned matrix");
+        Ok(&self.values[index * self.width..(index + 1) * self.width])
+    }
+}
+
+/// One row of a caller-declared LM projection group. The entire ordered slice is
+/// one GEMM: duplicate rows/targets are retained and it is never split at 64.
+pub struct ReferenceLmTarget<'a> {
+    pub hidden: &'a Bf16HiddenRows,
+    pub row: usize,
+    pub token: u32,
+}
+
+/// Bound one explicitly declared projection's device/host logits allocation.
+/// OmniJev's processor also bounds the complete request to this target count.
+pub const MAX_REFERENCE_LM_ROWS: usize = 16_384;
+
+struct ReferenceVocabulary {
+    capacity: usize,
+    hidden: DeviceBuffer,
+    logits: DeviceBuffer,
+    host: Vec<u8>,
+}
+
 /// log-softmax of one row of bfloat16 logits over its first `vocab` entries, at `token`:
 /// the logits as float32, their maximum, and a float64 sum of the exponentials.
 pub(crate) fn token_logprob(logits: &[u8], vocab: usize, token: u32) -> f32 {
@@ -881,6 +931,7 @@ pub struct Model {
     /// Hidden rows and logits for `forward_multimodal_readout`'s vocabulary pass, and
     /// the host copy of the logits; allocated on first use.
     vocab_buffers: Option<(DeviceBuffer, DeviceBuffer, Vec<u8>)>,
+    reference_vocab: Option<ReferenceVocabulary>,
     /// Reusable row-index storage; contains no request values.
     compaction_maps: Option<(usize, DeviceBuffer)>,
     /// One layer's FP32 recurrent state and prefix V, overwritten on every use.
@@ -1060,6 +1111,7 @@ impl Model {
             scratch: None,
             shared: [None, None],
             vocab_buffers: None,
+            reference_vocab: None,
             compaction_maps: None,
             tree_workspace: None,
             graph_enabled: graph,
@@ -1970,6 +2022,126 @@ impl Model {
                 hidden,
                 logprobs: Vec::new(),
             })
+        })();
+        self.synchronize()?;
+        result
+    }
+
+    /// Normal full-row reference execution, copying only the declared final-norm
+    /// rows into an owned BF16 matrix. The existing selected-readout guards still
+    /// apply; LM projection is a separate operation after all chunk rows exist.
+    pub fn forward_multimodal_reference_hidden(
+        &mut self,
+        input: &MultimodalInput<'_>,
+        rows: &[usize],
+    ) -> Result<Bf16HiddenRows> {
+        let read = self.forward_multimodal_reference_readout(input, rows, &[])?;
+        // BF16 -> F32 -> BF16 is value exact. The synchronized readout owns every
+        // value before this call returns, independently of normal forward scratch.
+        Bf16HiddenRows::new(
+            self.cfg.hidden,
+            read.hidden
+                .into_iter()
+                .flatten()
+                .map(half::bf16::from_f32)
+                .collect(),
+        )
+    }
+
+    /// One complete, caller-ordered full-vocabulary projection using reference
+    /// GEMM arithmetic and contiguous BF16 logits (stride equals actual vocab).
+    /// Hidden matrices are owned by the caller; no current-forward scratch is read.
+    /// Empty groups perform no device work. The existing CPU FP64 log-softmax is
+    /// reused and is approximate to the framework's FP32 reduction, not bit exact.
+    pub fn reference_lm_logprobs(&mut self, targets: &[ReferenceLmTarget<'_>]) -> Result<Vec<f32>> {
+        ensure!(
+            self.cfg.hidden == 2560
+                && self.lora.is_some()
+                && self.reference.is_some()
+                && self.fp32_gdn.is_some()
+                && !self.graph_enabled,
+            "LM projection requires eager unmerged 4B reference text numerics"
+        );
+        ensure!(
+            targets.len() <= MAX_REFERENCE_LM_ROWS,
+            "LM projection group exceeds row budget"
+        );
+        let vocab = self.embed.shape[0];
+        ensure!(
+            targets.iter().all(|t| t.hidden.width == self.cfg.hidden
+                && t.row < t.hidden.rows()
+                && (t.token as usize) < vocab),
+            "LM projection hidden width, row or token outside matrix/vocabulary"
+        );
+        if targets.is_empty() {
+            return Ok(Vec::new());
+        }
+        let m = targets.len();
+        let hb = self.cfg.hidden * BF16;
+        let lb = vocab
+            .checked_mul(BF16)
+            .context("LM vocabulary byte extent overflow")?;
+        let hidden_bytes = m
+            .checked_mul(hb)
+            .context("LM hidden byte extent overflow")?;
+        let logits_bytes = m
+            .checked_mul(lb)
+            .context("LM logits byte extent overflow")?;
+        let mut input = Vec::with_capacity(hidden_bytes);
+        for target in targets {
+            for value in target.hidden.row(target.row)? {
+                input.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        let result = (|| {
+            cuda::set_device(0)?;
+            if self.reference_vocab.as_ref().is_none_or(|v| v.capacity < m) {
+                // Finish old queued consumers before replacing allocations, even
+                // if a later allocation fails. Only a complete new set is stored.
+                self.synchronize()?;
+                self.reference_vocab = None;
+                self.reference_vocab = Some(ReferenceVocabulary {
+                    capacity: m,
+                    hidden: DeviceBuffer::new(hidden_bytes)?,
+                    logits: DeviceBuffer::new(logits_bytes)?,
+                    host: vec![0; logits_bytes],
+                });
+            }
+            let buffers = self.reference_vocab.as_mut().unwrap();
+            // SAFETY: all inputs and outputs have checked m*width extents; the
+            // tied embedding is [vocab,hidden]. No padding enters the denominator.
+            unsafe {
+                cuda::upload(buffers.hidden.at(0), &input, self.stream)?;
+                check(
+                    (cuda::api().cs1_gemm)(
+                        self.gemm,
+                        buffers.hidden.at(0),
+                        self.embed.ptr,
+                        buffers.logits.at(0),
+                        m as i32,
+                        vocab as i32,
+                        self.cfg.hidden as i32,
+                        vocab as i32,
+                        self.stream,
+                    ),
+                    "reference vocabulary gemm",
+                )?;
+                cuda::download(
+                    &mut buffers.host[..logits_bytes],
+                    buffers.logits.at(0),
+                    self.stream,
+                )?;
+            }
+            let logprobs: Vec<f32> = targets
+                .iter()
+                .enumerate()
+                .map(|(i, t)| token_logprob(&buffers.host[i * lb..(i + 1) * lb], vocab, t.token))
+                .collect();
+            ensure!(
+                logprobs.iter().all(|p| p.is_finite() && *p <= 0.0),
+                "invalid reference LM log-probability"
+            );
+            Ok(logprobs)
         })();
         self.synchronize()?;
         result

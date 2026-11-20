@@ -14,6 +14,24 @@ use omni_qwen3_5_native::model::Model;
 use safetensors::SafeTensors;
 use serde_json::Value;
 
+#[test]
+fn owned_bf16_hidden_validates_shape_and_values() {
+    use omni_qwen3_5_native::model::Bf16HiddenRows;
+    assert!(Bf16HiddenRows::new(0, vec![]).is_err());
+    assert!(Bf16HiddenRows::new(2, vec![bf16::ZERO]).is_err());
+    assert!(Bf16HiddenRows::new(1, vec![bf16::NAN]).is_err());
+    assert!(Bf16HiddenRows::new(1, vec![bf16::INFINITY]).is_err());
+    let empty = Bf16HiddenRows::new(2, vec![]).unwrap();
+    assert_eq!(empty.rows(), 0);
+    assert!(empty.row(0).is_err());
+    let values = vec![bf16::ZERO, bf16::ONE, -bf16::ONE, bf16::from_f32(2.)];
+    let owned = Bf16HiddenRows::new(2, values.clone()).unwrap();
+    assert_eq!(owned.rows(), 2);
+    assert_eq!(owned.row(0).unwrap(), &values[..2]);
+    assert_eq!(owned.row(1).unwrap(), &values[2..]);
+    assert!(owned.row(2).is_err());
+}
+
 fn checkpoint() -> PathBuf {
     PathBuf::from(std::env::var_os("QWEN3_5_CHECKPOINT").expect("set QWEN3_5_CHECKPOINT"))
 }
@@ -262,6 +280,7 @@ fn windows_with_captures_equal_one_pass() {
 #[test]
 #[ignore = "requires CUDA, an unmerged OmniJev export and QWEN3_5_ADAPTER; run serially with CUA_S1_GRAPH=0"]
 fn reference_selected_rows_preserve_full_row_and_recover() {
+    use omni_qwen3_5_native::model::{Bf16HiddenRows, MAX_REFERENCE_LM_ROWS, ReferenceLmTarget};
     let library = PathBuf::from(std::env::var_os("CUA_S1_CUDA_LIB").unwrap());
     let adapter = PathBuf::from(std::env::var_os("QWEN3_5_ADAPTER").unwrap());
     let mut model = Model::load_with_lora(&checkpoint(), &library, &adapter, 2.).unwrap();
@@ -272,6 +291,54 @@ fn reference_selected_rows_preserve_full_row_and_recover() {
     let read = model
         .forward_multimodal_reference_readout(&original.input(), &[t - 1, 10, t - 1, 0], &[])
         .unwrap();
+    let owned = model
+        .forward_multimodal_reference_hidden(&original.input(), &[t - 1, 10, t - 1, 0])
+        .unwrap();
+    let projected = model
+        .reference_lm_logprobs(&[
+            ReferenceLmTarget {
+                hidden: &owned,
+                row: 0,
+                token: 1000,
+            },
+            ReferenceLmTarget {
+                hidden: &owned,
+                row: 2,
+                token: 1000,
+            },
+        ])
+        .unwrap();
+    assert_eq!(projected[0], projected[1]);
+    assert!(model.reference_lm_logprobs(&[]).unwrap().is_empty());
+    for (row, token) in [(owned.rows(), 1000), (0, u32::MAX)] {
+        assert!(
+            model
+                .reference_lm_logprobs(&[ReferenceLmTarget {
+                    hidden: &owned,
+                    row,
+                    token
+                }])
+                .is_err()
+        );
+    }
+    let wrong = Bf16HiddenRows::new(1, vec![bf16::ZERO]).unwrap();
+    assert!(
+        model
+            .reference_lm_logprobs(&[ReferenceLmTarget {
+                hidden: &wrong,
+                row: 0,
+                token: 1000
+            }])
+            .is_err()
+    );
+    let over: Vec<_> = (0..=MAX_REFERENCE_LM_ROWS)
+        .map(|_| ReferenceLmTarget {
+            hidden: &owned,
+            row: 0,
+            token: 1000,
+        })
+        .collect();
+    assert!(model.reference_lm_logprobs(&over).is_err());
     assert_eq!(read.hidden[0], last);
     assert_eq!(read.hidden[0], read.hidden[2]);
     assert!(read.logprobs.is_empty());
@@ -304,6 +371,34 @@ fn reference_selected_rows_preserve_full_row_and_recover() {
     let again = model
         .forward_multimodal_reference_readout(&original.input(), &[t - 1, 10, t - 1, 0], &[])
         .unwrap();
+    for (i, expected) in read.hidden.iter().enumerate() {
+        assert_eq!(
+            owned
+                .row(i)
+                .unwrap()
+                .iter()
+                .map(|v| v.to_f32())
+                .collect::<Vec<_>>(),
+            *expected
+        );
+    }
+    assert_eq!(
+        projected,
+        model
+            .reference_lm_logprobs(&[
+                ReferenceLmTarget {
+                    hidden: &owned,
+                    row: 0,
+                    token: 1000
+                },
+                ReferenceLmTarget {
+                    hidden: &owned,
+                    row: 2,
+                    token: 1000
+                },
+            ])
+            .unwrap()
+    );
     assert_eq!(
         bits(&again.hidden),
         bits(&read.hidden),

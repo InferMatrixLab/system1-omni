@@ -10,14 +10,14 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, ensure};
 use omni_qwen3_5_native::inputs::{MultimodalInput, image_positions};
-use omni_qwen3_5_native::model::{Model, PrefixState};
+use omni_qwen3_5_native::model::{Model, PrefixState, ReferenceLmTarget};
 use omni_qwen3_5_native::vision::VisionModel;
 use serde_json::{Map, Value, json};
 
 use crate::contract::{self, Calibration, Kind, round4};
 use crate::export;
 use crate::heads::{self, Heads};
-use crate::processing::{IMAGE_TOKEN, PreparedRequest, Processor, Row};
+use crate::processing::{self, IMAGE_TOKEN, PreparedRequest, Processor, Row};
 
 #[cfg(test)]
 #[path = "../../../../../tests/omnijev/window_graph.rs"]
@@ -145,8 +145,8 @@ impl Executor {
     }
 
     /// Explicit, eager-only unmerged reference library profile. The existing
-    /// worker/default loader does not select it. Only `score_one_shot` is supported;
-    /// full requests, prefix reuse, Graphs and LM targets fail closed.
+    /// worker/default loader does not select it. Complete requests execute normal
+    /// independent rows and explicit request-chunk LM groups; no reuse or Graphs.
     pub fn load_one_shot_reference(dir: &Path, library: &Path) -> Result<(Self, Processor)> {
         ensure!(
             std::env::var("CUA_S1_GRAPH").as_deref() != Ok("1"),
@@ -166,7 +166,11 @@ impl Executor {
         } else {
             export::load(dir)?
         };
-        let processor = Processor::load(dir)?;
+        let processor = if reference_language {
+            Processor::load_one_shot_reference(dir)?
+        } else {
+            Processor::load(dir)?
+        };
         let mut language = if reference_language {
             Model::load_with_lora(dir, library, &dir.join(export::ADAPTER), 2.0)?
         } else {
@@ -203,7 +207,7 @@ impl Executor {
     /// `latency_total_s`: the request's preparation, its vision and language passes and
     /// its heads, over its questions and in all.
     pub fn execute(&mut self, prepared: &PreparedRequest) -> Result<Vec<Value>> {
-        self.execute_with(prepared, true)
+        self.execute_with(prepared, !self.reference_language)
     }
 
     /// `execute` with one plain pass per (question, option) row over the prefix and that
@@ -240,10 +244,14 @@ impl Executor {
         reuse: bool,
     ) -> Result<Vec<Vec<f32>>> {
         ensure!(
-            !self.reference_language,
-            "one-shot reference supports only score_one_shot; full requests/reuse/LM targets are unsupported"
+            !self.reference_language || !reuse,
+            "one-shot reference does not support prefix reuse"
         );
-        let result = self.run(prepared, reuse);
+        let result = if self.reference_language {
+            self.run_reference(prepared)
+        } else {
+            self.run(prepared, reuse)
+        };
         // Also finish queued work on an error before releasing admission.
         let vision = self.vision.synchronize();
         let language = self.language.synchronize();
@@ -251,6 +259,120 @@ impl Executor {
         vision?;
         language?;
         Ok(outputs)
+    }
+
+    fn run_reference(&mut self, prepared: &PreparedRequest) -> Result<Vec<Vec<f32>>> {
+        ensure!(
+            !prepared.questions.is_empty()
+                && prepared.questions.len() == prepared.inputs.len()
+                && prepared
+                    .questions
+                    .iter()
+                    .zip(&prepared.inputs)
+                    .all(|(q, input)| !input.rows.is_empty() && q.keys.len() == input.rows.len()),
+            "reference question/row cardinality mismatch"
+        );
+        let rows: Vec<&Row> = prepared
+            .inputs
+            .iter()
+            .flat_map(|input| &input.rows)
+            .collect();
+        let chunks = processing::reference_lm_chunks(&rows)?;
+        let prefix = prepared.inputs[0]
+            .token_ids
+            .get(..prepared.layout.prefix)
+            .context("reference prefix outside prompt")?;
+        let features = self.vision.forward(&prepared.pixels)?;
+        let mut readouts = Vec::with_capacity(rows.len());
+        for chunk in chunks {
+            let sub = &rows[chunk.rows];
+            let mut hidden = Vec::with_capacity(sub.len());
+            for row in sub {
+                let ids: Vec<u32> = prefix.iter().chain(&row.tokens).copied().collect();
+                let positions = image_positions(&ids, IMAGE_TOKEN, prepared.grid)?;
+                let images: Vec<usize> = prefix
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, &id)| (id == IMAGE_TOKEN).then_some(i))
+                    .collect();
+                let input = MultimodalInput {
+                    token_ids: &ids,
+                    image_token_indices: &images,
+                    image_embeddings: &features,
+                    position_ids: [&positions[0], &positions[1], &positions[2]],
+                };
+                let at = prefix.len();
+                let selected: Vec<usize> = [at + row.zq, at + row.u]
+                    .into_iter()
+                    .chain(row.targets.iter().map(|&(p, _)| at + p))
+                    .collect();
+                hidden.push(
+                    self.language
+                        .forward_multimodal_reference_hidden(&input, &selected)?,
+                );
+            }
+            let options: Vec<_> = chunk
+                .option_targets
+                .iter()
+                .map(|&(i, row, token)| ReferenceLmTarget {
+                    hidden: &hidden[i],
+                    row,
+                    token,
+                })
+                .collect();
+            let picked = self.language.reference_lm_logprobs(&options)?;
+            let firsts: Vec<_> = chunk
+                .first_targets
+                .iter()
+                .map(|&(i, token)| ReferenceLmTarget {
+                    hidden: &hidden[i],
+                    row: 0,
+                    token,
+                })
+                .collect();
+            let first = self.language.reference_lm_logprobs(&firsts)?;
+            let mut chunk_readouts: Vec<_> = hidden
+                .iter()
+                .map(|h| {
+                    Ok(RowReadout {
+                        zq: h.row(0)?.iter().map(|v| v.to_f32()).collect(),
+                        u: h.row(1)?.iter().map(|v| v.to_f32()).collect(),
+                        picked: Vec::new(),
+                        first: None,
+                    })
+                })
+                .collect::<Result<_>>()?;
+            for ((i, _, _), p) in chunk.option_targets.iter().zip(picked) {
+                chunk_readouts[*i].picked.push(p);
+            }
+            for ((i, _), p) in chunk.first_targets.iter().zip(first) {
+                chunk_readouts[*i].first = Some(p);
+            }
+            readouts.extend(chunk_readouts);
+        }
+        let mut at = 0;
+        prepared
+            .questions
+            .iter()
+            .zip(&prepared.inputs)
+            .map(|(q, input)| {
+                let group = &readouts[at..at + input.rows.len()];
+                at += input.rows.len();
+                let u: Vec<_> = group.iter().map(|r| r.u.clone()).collect();
+                if q.kind == Kind::Score {
+                    self.heads.ordinal(&group[0].zq, &u)
+                } else {
+                    let picked: Vec<_> = group.iter().map(|r| r.picked.clone()).collect();
+                    let first: Vec<_> = group.iter().map(|r| r.first).collect();
+                    self.heads.option_probabilities(
+                        &u,
+                        &group[0].zq,
+                        q.kind.type_id(),
+                        &heads::lm_features(&picked, &first),
+                    )
+                }
+            })
+            .collect()
     }
 
     /// Run one Score question, using the original complete request's prefix,
