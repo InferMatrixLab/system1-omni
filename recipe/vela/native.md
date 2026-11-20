@@ -1,5 +1,12 @@
 # Vela 2.0 decoder native library
 
+This recipe belongs to `omni-vela-native` at
+[`src/models/vela/native/`](../../src/models/vela/native/). The 0.3B
+encoder uses the separate
+[`omni-vela-encoder-native`](../../src/models/vela/encoder_native/README.md)
+carrier and the shared ModernBERT core. Both packages are registered in
+the same workspace; their APIs and hardware gates remain separate.
+
 The native implementation for the Vela 2.0 decoder members
 ([0.8B](https://huggingface.co/vllm-sr/Vela-2.0-0.8B), 4B, 9B — one
 program, member-parameterized): the exported-bundle gate, the wire
