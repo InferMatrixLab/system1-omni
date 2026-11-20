@@ -10,6 +10,20 @@ heads, and response finishing, each checked against the pinned reference. The
 regenerates the fixtures; [the worker recipe](../../../recipe/omnijev/native.md) builds,
 runs and validates the worker.
 
+An explicit `omnijev-unmerged-reference/1` export and
+`Executor::load_one_shot_reference` preserve separate FP32 LoRA arithmetic for
+complete Choice/Noul/Score requests. Each candidate uses normal full-row Qwen
+reference execution; selected BF16 hidden rows are independently owned until the
+complete request chunk's LM projections finish. Both streams synchronize on
+success and error. `execute` and `execute_rows` use this eager path;
+`head_outputs(prepared, true)` still rejects prefix reuse. The narrower
+`score_one_shot` diagnostic API remains. `OMNIJEV_PROFILE=unmerged-reference`
+selects this experimental worker profile; the default is `merged-fixed`.
+Language Graphs and prefix reuse remain unsupported. See the
+[separate export and validation instructions](../../../recipe/omnijev/README.md#separate-unmerged-reference-artifact).
+This capability does not establish completion of #114's original 280-answer
+numerical gate or JPEG fidelity.
+
 ## Pinned artifacts
 
 | Artifact | Revision |
@@ -104,9 +118,27 @@ marker, `zq` at the token before its option marker, and, for the LM features, ea
 option-text token with the position that predicts it. Rotary positions are Qwen3.5's
 T/H/W positions (the shared `inputs::image_positions`); after the prefix, rows continue
 from its largest position plus one. Since every row equals a plain forward over prefix
-plus row up to rounding, execution may choose its own split points.
+plus row up to rounding, the legacy fixed profile chooses its own split points.
+The reference profile preserves complete-request LM grouping, while its normal
+full-row backbone still differs numerically from the original cached branch
+topology. The original branch remains the acceptance oracle.
 
 ## Execution
+
+`OMNIJEV_VISION_NUMERICS` explicitly selects `legacy` (the unchanged default)
+or `reference`. The latter selects `VisionModel::enable_omnijev_numerics` for
+the unadapted 1024-wide, head-64 vision tower. It requires a cuDNN 9 backend
+build and the optional OmniJev symbols. Library callers can instead use
+`Executor::load_with_vision_numerics` with `VisionNumerics::Reference`.
+The [native recipe](../../../recipe/omnijev/native.md#explicit-bf16-reference-vision)
+describes the build and scope. This is a vision arithmetic selection: it does
+not replace the official unmerged BF16 reference, modify exported tensors, or
+change language/LM/LoRA execution or the original numerical gates. Whole-model
+precision remains a separate validation requirement.
+The L20 visual-stage regression is exact for the pinned protected PNG case;
+the original full 280-answer gate still fails (177 within 0.01 and three
+protected JPEG disagreements). See the recipe for the measured scope and
+remaining language/LM/LoRA and JPEG validation gaps.
 
 [`executor.rs`](native/src/executor.rs) runs the vision tower once per request, then the
 request's prefix up to its last multiple of 64 tokens once, each question's text up to the
@@ -129,6 +161,33 @@ log-probabilities, which its ordinal head does not use. The heads run on the CPU
 question state `zq` is the first row's, as in the reference.
 
 ## Heads and finishing
+
+For the explicit unmerged profile, `processing::reference_lm_chunks` maps every
+candidate in question/option order to chunks of 64 request rows, including Score
+rows whose ordinal head ignores LM features. Within each chunk it gathers every
+option token's preceding hidden row, then projects all of them in one GEMM. A
+second GEMM projects the nonempty options' zq rows for their first-token features.
+The vocabulary is exactly 248,079; no padded logit participates in normalization.
+`Bf16HiddenRows` owns CPU BF16 values beyond subsequent forwards/scratch
+growth, and `ReferenceLmTarget` declares the complete projection order. The
+generic executor interprets rows/tokens only; OmniJev owns candidate and feature
+semantics. The initial selected-readout API continues to reject inline LM targets.
+
+The existing CPU FP64 log-softmax reduction is retained as a measured
+approximation to the official FP32 operation. On actual original-request hidden,
+the 112-row option and 31-row first-token projections match official BF16 logits
+exactly; selected log-probabilities differ by at most 9.54e-7, six features by
+1.53e-5, and same-hidden head outputs by 2.39e-7. The old fixed/64-target/padded
+controls also produce exact logits on these particular inputs; this observation
+does not establish arbitrary-shape row independence. Request groups normalize
+only after all their chunk outputs exist. Empty options retain the reference's
+masked -1e4/group log-softmax policy, including feature-layer biases.
+
+This profile bounds complete-request LM targets, including unused Score rows,
+to 16,384. CPU preparation rejects an excess before dispatch (HTTP 422). A Qwen
+projection group has the same row limit and retains its complete M; it never
+silently splits a declared group. Input, device logits and host readback buffers
+grow only as needed and synchronize before replacement and on every exit.
 
 [`heads.rs`](native/src/heads.rs) runs the trained heads in FP32 on the CPU. Choice
 and Noul use `OptionScorer`: gated option and question MLPs, the LM features, a

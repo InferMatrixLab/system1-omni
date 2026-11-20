@@ -45,7 +45,9 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   image decisions; bounded H800 validation with explicit deployment limits.
 - [OmniJev-4B v1.1 preparation](omnijev/README.md): export the checkpoint and
   regenerate the CPU fixtures; [native worker](omnijev/native.md): serve it on CUDA
-  and compare it with the reference.
+  and compare it with the reference. The explicit unmerged one-shot profile
+  supports complete Choice/Noul/Score requests; full numerical acceptance remains
+  incomplete.
 - [Kev-4B preparation](kev/README.md): export all LoRA projections and validate
   the Rust FP32 pointer head on CPU; worker integration remains pending.
 - [CLM behind the frontend](clm/README.md): run CLM's own server behind the frontend on

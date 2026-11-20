@@ -1,9 +1,11 @@
 """Export OmniJev-4B v1.1 for the native worker on CPU.
 
-Merges the language LoRA into the pinned Qwen3.5-4B in BF16, restores the option
+By default merges the language LoRA into the pinned Qwen3.5-4B in BF16, restores the option
 tokens' embeddings, and writes the base vision tensors, the FP32 heads, the tokenizer
 and the calibration next to it. Use the reference environment in README.md; no GPU
-is needed. Needs about 18 GB of host RAM and writes 9 GB.
+is needed. --language unmerged-reference preserves the original BF16 base and
+separate FP32 adapter for the eager one-shot Score library API. Needs about 18 GB
+of host RAM and writes 9 GB.
 """
 
 import argparse
@@ -48,6 +50,8 @@ def main():
     parser.add_argument("--base", required=True, type=Path, help=f"{BASE_MODEL_ID} @ {BASE_REVISION}")
     parser.add_argument("--checkpoint", required=True, type=Path, help=f"{MODEL_ID} @ {CHECKPOINT_REVISION}")
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--language", choices=("merged", "unmerged-reference"), default="merged",
+                        help="unmerged-reference preserves base BF16 weights and the separate FP32 adapter")
     args = parser.parse_args()
     if args.out.exists():
         raise ValueError("output already exists; choose a new export directory")
@@ -94,7 +98,19 @@ def main():
     if model.get_output_embeddings().weight.data_ptr() != embedding.data_ptr():
         raise ValueError("expected tied input and output embeddings")
 
-    model = PeftModel.from_pretrained(model, args.checkpoint).merge_and_unload(safe_merge=True)
+    unmerged = args.language == "unmerged-reference"
+    adapter = None
+    if unmerged:
+        from safetensors.torch import load_file
+        adapter = load_file(args.checkpoint / "adapter_model.safetensors")
+        # This pinned release has 200 projection pairs, all FP32, rank32.
+        # Do not silently cast an unexpected checkpoint into the reference format.
+        if len(adapter) != 400 or any(v.dtype != torch.float32 or v.ndim != 2
+                                     or v.shape[0 if ".lora_A." in k else 1] != 32
+                                     for k, v in adapter.items()):
+            raise ValueError("expected all 400 FP32 rank32 OmniJev adapter tensors")
+    else:
+        model = PeftModel.from_pretrained(model, args.checkpoint).merge_and_unload(safe_merge=True)
     # Write next to the output and rename at the end, so a failed or killed export
     # leaves no output behind; the next run removes what it left.
     staging = args.out.with_name(f".{args.out.name}.partial")
@@ -102,6 +118,8 @@ def main():
         shutil.rmtree(staging)
     model.model.language_model.save_pretrained(staging, max_shard_size="5GB")
     model.config.to_json_file(staging / "config.json")
+    if unmerged:
+        save_file(adapter, staging / "adapter_model.safetensors")
     vision = {f"model.visual.{k}": v.contiguous() for k, v in model.model.visual.state_dict().items()}
     save_file(vision, staging / "vision.safetensors")
 
@@ -118,10 +136,12 @@ def main():
     outputs = {p.name: sha256(p) for p in sorted(staging.iterdir()) if p.is_file()}
     # Written last: the worker refuses incomplete exports.
     (staging / "omnijev_export.json").write_text(json.dumps({
-        "format": "omnijev-merged/1",
+        "format": "omnijev-unmerged-reference/1" if unmerged else "omnijev-merged/1",
         "model_id": MODEL_ID, "checkpoint_revision": CHECKPOINT_REVISION,
         "base_model_id": BASE_MODEL_ID, "base_revision": BASE_REVISION,
-        "lora": {"rank": 32, "alpha": 64, "merged": "bfloat16"},
+        "lora": ({"rank": 32, "alpha": 64, "scale": 2, "dtype": "float32",
+                  "file": "adapter_model.safetensors", "tensors": 400}
+                 if unmerged else {"rank": 32, "alpha": 64, "merged": "bfloat16"}),
         "vocabulary": VOCABULARY, "option_tokens": OPTION_TOKENS, "max_pixels": MAX_PIXELS,
         "heads": {"norm": meta["norm"], "lm_features": True, "ordinal": True},
         "calibration": {"temperatures": temperatures, "noul_bias": noul_bias},

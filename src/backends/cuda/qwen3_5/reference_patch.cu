@@ -30,9 +30,9 @@ extern "C" int cs1_reference_available() {
     return 0;
 #endif
 }
-extern "C" void* cs1_reference_patch_create(int rows,void* stream) {
+extern "C" void* cs1_reference_patch_create_v2(int rows,int hidden,void* stream) {
 #ifdef CS1_REFERENCE_CUDNN
-    if(rows<=0 || rows>65536) return nullptr;
+    if(rows<=0 || rows>65536 || (hidden!=1024 && hidden!=1152)) return nullptr;
     PatchPlan* p=new(std::nothrow) PatchPlan;
     if(!p) return nullptr;
     bool ready=false;
@@ -45,8 +45,8 @@ extern "C" void* cs1_reference_patch_create(int rows,void* stream) {
         CHECK_CUDNN(cudnnCreateFilterDescriptor(&p->filter));
         CHECK_CUDNN(cudnnCreateConvolutionDescriptor(&p->conv));
         int xs[]={rows,3,2,16,16},xt[]={1536,512,256,16,1};
-        int ys[]={rows,1152,1,1,1},yt[]={1152,1,1,1,1};
-        int ws[]={1152,3,2,16,16},pad[]={0,0,0},step[]={2,16,16},dilation[]={1,1,1};
+        int ys[]={rows,hidden,1,1,1},yt[]={hidden,1,1,1,1};
+        int ws[]={hidden,3,2,16,16},pad[]={0,0,0},step[]={2,16,16},dilation[]={1,1,1};
         CHECK_CUDNN(cudnnSetTensorNdDescriptor(p->input,CUDNN_DATA_BFLOAT16,5,xs,xt));
         CHECK_CUDNN(cudnnSetTensorNdDescriptor(p->output,CUDNN_DATA_BFLOAT16,5,ys,yt));
         CHECK_CUDNN(cudnnSetFilterNdDescriptor(p->filter,CUDNN_DATA_BFLOAT16,CUDNN_TENSOR_NCHW,5,ws));
@@ -60,8 +60,12 @@ extern "C" void* cs1_reference_patch_create(int rows,void* stream) {
     if(!ready) {delete p;return nullptr;}
     return p;
 #else
-    (void)rows;(void)stream;return nullptr;
+    (void)rows;(void)hidden;(void)stream;return nullptr;
 #endif
+}
+// Preserve the original 27B descriptor layout and symbol.
+extern "C" void* cs1_reference_patch_create(int rows,void* stream) {
+    return cs1_reference_patch_create_v2(rows,1152,stream);
 }
 extern "C" int cs1_reference_patch(void* plan,const void* x,const void* w,void* y) {
 #ifdef CS1_REFERENCE_CUDNN
