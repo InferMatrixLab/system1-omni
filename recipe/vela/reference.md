@@ -280,6 +280,112 @@ bf16-autocast numbers for the baseline. The tool rewrites the example
 files' `model` field to the served member and exports the hybrid's
 oracle fixtures under an `oracle-hybrid-` prefix.
 
+## Contract decisions and acceptance
+
+This recipe records the Vela-specific policy for
+[#169](https://github.com/InferMatrixLab/system1-omni/issues/169), following the
+reference workers merged in #151 and #174. The older #137 proposal's
+span/set rejection and no-truncation wording does not describe these workers.
+The shared contract RFC [#61](https://github.com/InferMatrixLab/system1-omni/issues/61)
+remains open; this policy does not prescribe other models' response fields,
+confidence or token accounting.
+
+| Surface | Vela policy |
+| --- | --- |
+| Question kinds | Forward all five kinds: `choice`, `noul`, `score`, `span`, `set`. Preserve the span question's Noul view and each set label's Noul view together with top-level `spans`, `sets`, `thresholds`, and the hybrid-only `span_heads`. The Rust frontend preserves the worker's status, content type and body. |
+| Span identity and offsets | A single state-field string in `over` gives field-local half-open `[start, end)` Unicode-code-point offsets, with clipping when fields share a part. A part name, default target, or list resolving to one part preserves offsets into that rendered part, including field headers; even `["request"]` differs from `"request"` when fields share a part. Keep labels, probabilities, text and the request's target context. The 0.3B has no `span_heads`; hybrids retain their router/broad identity there. |
+| Set interpretation | Per-label probabilities are independent. Select every label whose probability is strictly greater than the applied threshold; preserve label order and threshold echoes. No cross-label softmax or single-winner conversion. |
+| Length limits | Preserve the upstream state truncation/windowing policy described above. Schema/questions that cannot fit without state return whole-request 413. A successful response does not establish that every state character was examined. |
+| Confidence | Choice: top-two probability margin. Score: one minus normalized level variance. These are reference distribution statistics. Learned `tau` / `tau_span` and inference calibration temperatures remain separate. |
+| Usage | Sum tokens of every rendered sequence actually evaluated, including additional span rows and windows. Count a single sequence once when there is only one; do not deduplicate repeated state or replace this with a per-question estimate. Output tokens are always zero. |
+| Validation | Preserve whole-request errors and the pinned runtime's field and question-walk precedence. Invalid span/set, schema-only overflow and state truncation are different cases. |
+
+[`example-request-unicode.json`](example-request-unicode.json) puts CJK and
+non-BMP characters before a span target while exercising all five kinds. An
+acceptance run must retain a positive span after the emoji; otherwise an empty
+span list cannot distinguish code-point offsets from UTF-8 bytes or UTF-16 code
+units. For every retained span, slicing the named field at `[start:end]` must
+produce its `text` for this explicit field-string target. CJK alone distinguishes bytes but does not distinguish UTF-16
+code units from code points.
+
+The final acceptance has separate gates:
+
+1. Generate the 0.3B CPU FP32 oracle from the pinned package and compare the
+   worker pipeline with the upstream server. Keep package/dependency revisions,
+   complete responses and failures outside the source tree; retain only small
+   deterministic fixtures under root `tests/`.
+2. Check Unicode spans, independent set labels/thresholds, confidence and usage,
+   invalid span/set and error precedence, schema-only overflow, and the actual
+   upstream truncation boundary. The ordinary fake-worker tests establish only
+   the paths they exercise; they cannot establish the runtime's truncation or
+   model numerics.
+3. Check the same successful/error responses directly and through the Rust
+   frontend, preserving extension fields and answer order. Ignore a timing field
+   only when the model's comparison protocol explicitly names it; the Vela
+   reference responses used here have no timing-field exemption.
+4. Compare native processing, heads, response finishing and device execution
+   against the matching member's oracle separately, using its declared
+   precision/backend tolerance and identical discrete decisions/span structure.
+   A CPU reference result or a backbone-logit gate alone does not establish
+   native HTTP support or final answer parity.
+
+The hash-gated upstream contract checks are opt-in and do not execute a model
+forward. They cover invalid span/set and error precedence, named-field Unicode
+offsets with controlled head outputs, and the actual upstream 8,192-token
+assembly boundary, unprotected/protected cuts and schema-only overflow:
+
+~~~sh
+VELA_CONTRACT_PACKAGE="$VELA_PKG" PYTHONPATH=src \
+  .venv/bin/python -m pytest tests/vela/test_runtime_contract.py -q
+~~~
+
+Without that environment variable these tests skip; ordinary CPU/workspace
+checks remain independent of weights. A successful rendering/assembly check is
+separate from the real CPU FP32 oracle and native precision/backend comparisons.
+
+The small Unicode oracle under root `tests/vela/fixtures/` was exported from
+the pinned 0.3B CPU FP32 runtime, using Python 3.12.13, torch 2.11.0+cpu and the
+other recipe pins, with eight OMP/MKL threads. It retains actual predictions,
+including the partial PERSON span; it is not a task-accuracy label. Its positive
+EMAIL_ADDRESS span is `[10, 30)` after the emoji, and the set probabilities sum
+to more than one. The root fixture tests bind it to the maintained request and
+production response gate. Regenerate that one case from the repository root:
+
+~~~sh
+OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 PYTHONPATH=src \
+  .venv/bin/python recipe/vela/compare_reference.py \
+  --model "$VELA_PKG" --device cpu \
+  --fixture recipe/vela/example-request-unicode.json \
+  --export tests/vela/fixtures/oracle-example-request-unicode.json
+~~~
+
+This records worker/upstream reference parity. Direct/frontend forwarding and
+native/device comparisons remain separate acceptance checks.
+
+### Pending contract decisions
+
+The following require an explicit contract decision; this slice preserves the
+existing reference and introduces no external behavior change:
+
+- Whether #61 formally adopts Vela's extension fields and model-specific
+  confidence, rendered-row usage and state truncation, and reconciles #137's old
+  rejection/no-truncation acceptance wording. Discussion favoring model-defined
+  fields is [recorded in #61](https://github.com/InferMatrixLab/system1-omni/issues/61#issuecomment-6021490614);
+  it is not a completed shared-contract decision.
+- Whether span consumers may use part-relative/list targets or the accepted
+  contract should require a single named field. The response does not add a new
+  coordinate-origin field. Cross-part span lists are not qualified by these
+  fixtures: the pinned upstream preparation raises `TypeError` before a forward,
+  so their supported scope and client-error status need resolution. This PR does
+  not turn that failure into an accepted error contract.
+- Whether the shared error envelope should replace Vela's reference `detail`
+  list and other recorded transport differences. Keep current reference errors
+  until a deliberate change is agreed and tested.
+- Final native acceptance remains separate: matching member/oracle, precision,
+  structural decisions, router/broad dispatch and declared backend tolerances
+  must be checked by the independently assigned native phase. CPU reference and
+  forwarding success do not close those gates.
+
 ## Troubleshooting and limits
 
 - The package directory must be the pinned revision's download; the
@@ -292,9 +398,10 @@ oracle fixtures under an `oracle-hybrid-` prefix.
 - `/health` and `/ready` are upstream's minimal bodies on both
   members, not the richer shape of some other workers in this
   repository.
-- Long states are truncated (see Error behavior); if a consumer must
-  never miss tail text, check `usage.input_tokens` against the expected
-  budget or enforce limits upstream of the worker.
+- Long states are truncated (see Error behavior). `usage.input_tokens` is work
+  accounting and cannot prove that the complete state was examined, especially
+  with multiple rows/windows. Consumers requiring full-state guardrails must
+  enforce an input bound before this worker's truncation path.
 - GPU bf16-autocast serving (`--device cuda`) is untested in this
   evidence; treat it as a deployment option to validate separately.
 - GPU evidence for the supported-models table is recorded in the
