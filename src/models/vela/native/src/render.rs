@@ -671,7 +671,7 @@ impl RenderContext<'_> {
             &q_lens,
             &el_lens,
             &mut segs,
-            64.max(self.max_length - budget),
+            64.max(self.max_length.saturating_sub(budget)),
             &overs,
             shrink.as_deref(),
         )
@@ -767,6 +767,12 @@ impl RenderContext<'_> {
             });
         }
         let n_tokens = p_ids.len() + blocks.iter().map(block_len).sum::<usize>();
+        // The upstream 64-token budget floor can leave an oversized
+        // span header or repeated target. Native admission bounds each
+        // completed ordinary/window row, not the request's usage sum.
+        if n_tokens > self.max_length {
+            return Err(too_long(self.max_length));
+        }
         Ok(RenderedRow {
             p_ids,
             blocks,

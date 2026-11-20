@@ -120,6 +120,7 @@ For a field-level diff of one token-plan case:
 
 ~~~sh
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
+  VELA_NATIVE_MANIFEST_SHA256=<the digest the exporter prints> \
   cargo run -p omni-vela-native --example parity -- example-request
 ~~~
 
@@ -142,6 +143,28 @@ unverified.
 
 ## Scope and limits
 
+- Each completed ordinary row and span-window row must contain at most
+  **16,384 tokens**, after the existing state clipping and windowing.
+  Any oversized row rejects the whole request with status 413 and the
+  `too_long` detail at `body.questions`, before execution. The cap uses
+  the rendered row's `n_tokens`, including its parts and all question
+  blocks; it does not limit the request's summed `usage.input_tokens`.
+  Multiple valid rows/windows may therefore account for more than
+  16,384 input tokens together. State clipping, row ordering, window
+  overlap, and usage accounting otherwise retain the pinned behavior.
+- This is a deliberate restriction of the pinned Python runtime's
+  input domain. Its minimum assembly budget can admit a longer span
+  header: `instructions="word " * 20000`, one `PERSON` span label and
+  state `"s"` produce a 20,085-token row at the model-call boundary.
+  Native processing rejects that request with 413. Reaching that
+  reference boundary does not establish successful model inference or
+  an HTTP result. The bundle's pinned `max_length=16384` is unchanged;
+  the 0.3B member's 8,192 window and the backbone/tokenizer's 262,144
+  position metadata do not define this native admission cap.
+- Span questions must target a single part; multi-part span targets
+  are explicitly rejected with 422. Non-finite JSON is rejected with
+  the native generic 400 message rather than the Python worker's
+  value-specific wording. These existing input differences remain.
 - Implemented: bundle export + manifest gate, wire admission,
   token-level processing, F32 heads, scoring and span decoding, the
   SystemOne response finishing, and backbone execution through the

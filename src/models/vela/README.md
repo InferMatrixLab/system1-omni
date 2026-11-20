@@ -297,6 +297,20 @@ The native implementation lives in [`native/`](native/) as the
   cases replay the recorded reference logits with a worst drift of
   0.285 — the bf16-vs-FP32-reference scale (gate 0.35).
 
+Native processing admits at most **16,384 tokens per completed ordinary
+or span-window row**, after the existing state clipping and windowing.
+An oversized row rejects the whole request with 413 / `too_long` before
+execution. The cap is per row, including its parts and question blocks;
+the request's summed `usage.input_tokens` may exceed it. Row order,
+clipping, window overlap, and usage otherwise retain the pinned rules.
+This deliberately narrows the pinned Python input domain: a sufficiently
+long span instruction can reach its model-call boundary with more than
+16,384 tokens. That observation does not establish a successful forward
+or HTTP response. The original manifest identity remains 16,384; neither
+the 0.3B's 8,192 window nor the backbone's 262,144 position metadata
+widens native support. Multi-part span targets remain an explicit native
+422, and non-finite JSON retains the generic native 400 wording.
+
 The crate is a library; the HTTP worker around `Processor` +
 `Executor` is not part of it. Long-span GPU parity and measured
 latency are not recorded. Checks: `cargo test -p omni-vela-native`
