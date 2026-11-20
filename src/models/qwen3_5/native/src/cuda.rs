@@ -93,7 +93,7 @@ pub struct SharedSuffix {
     ) -> c_int,
 }
 
-/// Optional shape changes using a validated original-shape GEMM algorithm.
+/// Optional shape changes preserving a validated original-shape arithmetic profile.
 #[derive(Clone, Copy)]
 pub struct ReuseGemm {
     pub check: unsafe extern "C" fn(
@@ -128,6 +128,62 @@ pub type PackedGemm = unsafe extern "C" fn(
     usize,
     c_int,
     c_int,
+    Stream,
+) -> c_int;
+
+/// Optional causal attention over independent full sequences.
+pub type BatchedAttention = unsafe extern "C" fn(
+    *const c_void,
+    *const c_void,
+    *const c_void,
+    c_int,
+    *const c_void,
+    *mut c_void,
+    *const usize,
+    usize,
+    c_int,
+    c_int,
+    c_int,
+    f32,
+    Stream,
+) -> c_int;
+
+/// Optional attention over independent suffixes sharing immutable prefix KV.
+pub type SharedBatchedAttention = unsafe extern "C" fn(
+    *const c_void,
+    *const c_void,
+    *const c_void,
+    c_int,
+    *const c_void,
+    *mut c_void,
+    *const c_void,
+    *const c_void,
+    *const usize,
+    usize,
+    c_int,
+    c_int,
+    c_int,
+    c_int,
+    f32,
+    Stream,
+) -> c_int;
+
+/// Optional batched continuations of one immutable FP32 prefix state.
+pub type SharedBatchedGdn = unsafe extern "C" fn(
+    *const c_void,
+    *const c_void,
+    *const c_void,
+    *const f32,
+    *const c_void,
+    *mut c_void,
+    *mut f32,
+    usize,
+    *const usize,
+    usize,
+    c_int,
+    c_int,
+    f32,
+    *const c_void,
     Stream,
 ) -> c_int;
 
@@ -423,7 +479,35 @@ pub type GatedAttention = unsafe extern "C" fn(
     Stream,
 ) -> c_int;
 
+/// Full-row prefix-bidirectional attention; `state` follows the row length.
+pub type PrefixGatedAttention = unsafe extern "C" fn(
+    *const c_void,
+    *const c_void,
+    *const c_void,
+    c_int,
+    *const c_void,
+    *mut c_void,
+    c_int,
+    c_int,
+    c_int,
+    c_int,
+    c_int,
+    f32,
+    Stream,
+) -> c_int;
+
 impl Api {
+    /// Optional ABI-9 capability; older libraries continue serving causal users.
+    pub fn attention_gated_prefix_bidirectional(&self) -> Result<PrefixGatedAttention> {
+        // SAFETY: ops.h declares this signature; Api retains the loaded library.
+        unsafe {
+            self._lib
+                .get::<PrefixGatedAttention>(b"cs1_attention_gated_prefix_bidirectional\0")
+                .map(|symbol| *symbol)
+                .context("libqwen3_5_cuda.so has no cs1_attention_gated_prefix_bidirectional; rebuild src/backends/cuda/qwen3_5 (optional ABI 9 capability)")
+        }
+    }
+
     pub fn matched_create(&self) -> Result<unsafe extern "C" fn(usize, i32) -> *mut c_void> {
         unsafe { Ok(*self._lib.get(b"cs1_gemm_create_matched\0")?) }
     }
@@ -444,6 +528,18 @@ impl Api {
                 .context(
                     "libqwen3_5_cuda.so has no cs1_attention_gated_bidirectional; rebuild src/backends/cuda/qwen3_5 (ABI 9 additive symbol required by StartLux Instant)",
                 )
+        }
+    }
+
+    pub fn equivalent_tiles(&self) -> Option<unsafe extern "C" fn(*mut c_void) -> c_int> {
+        // SAFETY: optional additive signature matches ops.h; Api owns the library.
+        unsafe {
+            self._lib
+                .get::<unsafe extern "C" fn(*mut c_void) -> c_int>(
+                    b"cs1_gemm_enable_equivalent_tiles\0",
+                )
+                .ok()
+                .map(|f| *f)
         }
     }
 
@@ -496,6 +592,36 @@ impl Api {
                 .map(|f| *f)
         }
         .context("packed projections require the optional cs1_gemm_packed CUDA symbol")
+    }
+
+    pub fn batched_attention(&self) -> Option<BatchedAttention> {
+        // SAFETY: optional signature matches ops.h; this API owns the library.
+        unsafe {
+            self._lib
+                .get(b"cs1_attention_gated_batch\0")
+                .ok()
+                .map(|f| *f)
+        }
+    }
+
+    pub fn shared_batched_attention(&self) -> Option<SharedBatchedAttention> {
+        // SAFETY: optional signature matches ops.h; this API owns the library.
+        unsafe {
+            self._lib
+                .get(b"cs1_attention_gated_shared_batch\0")
+                .ok()
+                .map(|f| *f)
+        }
+    }
+
+    pub fn shared_batched_gdn(&self) -> Option<SharedBatchedGdn> {
+        // SAFETY: optional signature matches ops.h; the API owns the library.
+        unsafe {
+            self._lib
+                .get(b"cs1_gdn_prefill_batch_shared\0")
+                .ok()
+                .map(|f| *f)
+        }
     }
 
     pub fn batched_gdn(&self) -> Result<BatchedGdn> {
@@ -626,6 +752,7 @@ impl DeviceBuffer {
     /// finish writes before passing the view to a different stream.
     pub fn bf16_matrix(&self, rows: usize, columns: usize) -> Result<DeviceBf16Matrix<'_>> {
         Ok(DeviceBf16Matrix {
+            offset: 0,
             buffer: self,
             layout: DeviceFeatureLayout::new(rows, columns, self.bytes, self.device)?,
         })
@@ -678,16 +805,37 @@ impl DeviceFeatureLayout {
 /// allocation are prevented while this view is alive.
 #[derive(Clone, Copy)]
 pub struct DeviceBf16Matrix<'a> {
+    offset: usize,
     buffer: &'a DeviceBuffer,
     layout: DeviceFeatureLayout,
 }
 
 impl DeviceBf16Matrix<'_> {
+    /// Checked contiguous rows retaining the original producer borrow. Empty
+    /// ranges have no device view and are used by text-only suffix windows.
+    pub fn slice_rows(self, range: std::ops::Range<usize>) -> Result<Option<Self>> {
+        ensure!(
+            range.start <= range.end && range.end <= self.layout.rows,
+            "device row slice outside producer"
+        );
+        if range.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            buffer: self.buffer,
+            offset: self.offset + range.start * self.layout.columns * 2,
+            layout: DeviceFeatureLayout {
+                rows: range.end - range.start,
+                ..self.layout
+            },
+        }))
+    }
+
     pub fn layout(&self) -> DeviceFeatureLayout {
         self.layout
     }
     pub(crate) fn at(&self, offset: usize) -> *const c_void {
-        self.buffer.at(offset)
+        self.buffer.at(self.offset + offset)
     }
     pub(crate) fn validate_finite(&self, stream: Stream) -> Result<()> {
         let flag = DeviceBuffer::new(4)?;

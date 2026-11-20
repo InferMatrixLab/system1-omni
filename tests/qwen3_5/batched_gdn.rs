@@ -4,9 +4,24 @@ use super::*;
 #[test]
 #[ignore = "needs a GPU reservation and the optional batched GDN CUDA symbols"]
 fn batched_gdn_matches_serial_with_partial_chunks_and_graph_replay() {
+    check_batched(false);
+}
+
+#[test]
+#[ignore = "needs a GPU reservation and shared-state batched GDN CUDA symbol"]
+fn batched_gdn_shared_state_matches_serial_and_changed_state_replay() {
+    check_batched(true);
+}
+
+fn check_batched(shared: bool) {
     let stream = setup();
     let batched = api().batched_gdn().unwrap();
-    for (heads, key_heads) in [(4usize, 2usize), (48, 16)] {
+    let dimensions = if shared {
+        [(4usize, 2usize), (32, 16)]
+    } else {
+        [(4, 2), (48, 16)]
+    };
+    for (heads, key_heads) in dimensions {
         for lengths in [
             vec![1usize, 63, 64, 65, 129],
             vec![1; 16],
@@ -46,10 +61,29 @@ fn batched_gdn_matches_serial_with_partial_chunks_and_graph_replay() {
                 )
             };
             let serial_scratch = DeviceBuffer::new(serial_size * 4).unwrap();
+            let state = f32_to_device(&vec![0.0; heads * 128 * 128], stream);
             let scale = (128f32).powf(-0.5);
             let batch = || unsafe {
                 // SAFETY: packed buffers cover every length; scratch uses the API's bound.
-                check(
+                let rc = if shared {
+                    (api().shared_batched_gdn().unwrap())(
+                        q.at(0),
+                        k.at(0),
+                        v.at(0),
+                        g.at(0).cast(),
+                        beta.at(0),
+                        actual.at(0),
+                        scratch.at(0).cast(),
+                        capacity * 4,
+                        lengths.as_ptr(),
+                        lengths.len(),
+                        heads as i32,
+                        key_heads as i32,
+                        scale,
+                        state.at(0),
+                        stream,
+                    )
+                } else {
                     (batched.run)(
                         q.at(0),
                         k.at(0),
@@ -65,9 +99,9 @@ fn batched_gdn_matches_serial_with_partial_chunks_and_graph_replay() {
                         key_heads as i32,
                         scale,
                         stream,
-                    ),
-                    "batch GDN",
-                )
+                    )
+                };
+                check(rc, "batch GDN")
             };
             batch().unwrap();
             cuda::synchronize(stream).unwrap();
@@ -75,29 +109,58 @@ fn batched_gdn_matches_serial_with_partial_chunks_and_graph_replay() {
             for replay in [false, true] {
                 let changed = random(values, if replay { 87 } else { 86 }, 0.5);
                 let bytes: Vec<u8> = changed.iter().flat_map(|v| v.to_le_bytes()).collect();
+                let state_bytes: Vec<u8> =
+                    random(heads * 128 * 128, if replay { 89 } else { 88 }, 0.01)
+                        .iter()
+                        .flat_map(|v| v.to_f32().to_le_bytes())
+                        .collect();
                 unsafe {
                     // SAFETY: replace all value rows, then compare independent sequence runs.
                     cuda::upload(v.at(0), &bytes, stream).unwrap();
+                    cuda::upload(state.at(0), &state_bytes, stream).unwrap();
                     let mut offset = 0;
                     for &length in &lengths {
-                        check(
-                            (api().cs1_gdn_prefill)(
-                                q.at(offset * key_heads * 128 * 2),
-                                k.at(offset * key_heads * 128 * 2),
-                                v.at(offset * heads * 128 * 2),
-                                g.at(offset * heads * 4).cast(),
-                                beta.at(offset * heads * 2),
-                                expected.at(offset * heads * 128 * 2),
-                                serial_scratch.at(0).cast(),
-                                length as i32,
-                                heads as i32,
-                                key_heads as i32,
-                                scale,
-                                stream,
-                            ),
-                            "serial GDN",
-                        )
-                        .unwrap();
+                        if shared {
+                            check(
+                                (api().cs1_gdn_prefill_x)(
+                                    q.at(offset * key_heads * 128 * 2),
+                                    k.at(offset * key_heads * 128 * 2),
+                                    v.at(offset * heads * 128 * 2),
+                                    g.at(offset * heads * 4).cast(),
+                                    beta.at(offset * heads * 2),
+                                    expected.at(offset * heads * 128 * 2),
+                                    serial_scratch.at(0).cast(),
+                                    length as i32,
+                                    heads as i32,
+                                    key_heads as i32,
+                                    scale,
+                                    state.at(0),
+                                    std::ptr::null_mut(),
+                                    stream,
+                                ),
+                                "serial GDN",
+                            )
+                            .unwrap();
+                        } else {
+                            check(
+                                (api().cs1_gdn_prefill)(
+                                    q.at(offset * key_heads * 128 * 2),
+                                    k.at(offset * key_heads * 128 * 2),
+                                    v.at(offset * heads * 128 * 2),
+                                    g.at(offset * heads * 4).cast(),
+                                    beta.at(offset * heads * 2),
+                                    expected.at(offset * heads * 128 * 2),
+                                    serial_scratch.at(0).cast(),
+                                    length as i32,
+                                    heads as i32,
+                                    key_heads as i32,
+                                    scale,
+                                    stream,
+                                ),
+                                "serial GDN",
+                            )
+                            .unwrap();
+                        }
                         offset += length;
                     }
                 }
@@ -106,6 +169,12 @@ fn batched_gdn_matches_serial_with_partial_chunks_and_graph_replay() {
                 } else {
                     batch().unwrap();
                 }
+                let mut after = vec![0u8; state_bytes.len()];
+                // SAFETY: the full allocation is downloaded after all consumers.
+                unsafe {
+                    cuda::download(&mut after, state.at(0), stream).unwrap();
+                }
+                assert_eq!(after, state_bytes, "shared input state was modified");
                 let a = from_device(&expected, values, stream);
                 let b = from_device(&actual, values, stream);
                 let changes = a
@@ -115,7 +184,7 @@ fn batched_gdn_matches_serial_with_partial_chunks_and_graph_replay() {
                     .count();
                 assert_eq!(
                     changes, 0,
-                    "heads={heads} lengths={lengths:?} graph={replay}"
+                    "heads={heads} lengths={lengths:?} graph={replay} shared={shared}"
                 );
             }
             unsafe {

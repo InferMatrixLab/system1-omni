@@ -1,6 +1,6 @@
 [package]
 name = "omni-runtime"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 publish = false
 description = "Shared native worker execution admission and dispatch"
@@ -27,3 +27,7 @@ path = "../../tests/runtime/admission.rs"
 [[test]]
 name = "control"
 path = "../../tests/runtime/control.rs"
+
+[[test]]
+name = "batching"
+path = "../../tests/runtime/batching.rs"
