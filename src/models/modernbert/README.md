@@ -14,7 +14,7 @@ pointers, and every task head stay with the model crates that consume a
 profile. The Laya native worker runs its encoder on this core
 ([`src/models/laya`](../laya/README.md)), and the Vela 2.0 0.3B native
 profile is the second registered family member
-([`src/models/vela/native`](../vela/native/README.md)).
+([`src/models/vela/encoder_native`](../vela/encoder_native/README.md)).
 
 Structure parsing and capability admission are CPU-verifiable without a
 checkpoint or device: the tests under
