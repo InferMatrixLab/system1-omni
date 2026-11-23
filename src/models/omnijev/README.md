@@ -108,6 +108,21 @@ plus row up to rounding, execution may choose its own split points.
 
 ## Execution
 
+`OMNIJEV_VISION_NUMERICS` explicitly selects `legacy` (the unchanged default)
+or `reference`. The latter selects `VisionModel::enable_omnijev_numerics` for
+the unadapted 1024-wide, head-64 vision tower. It requires a cuDNN 9 backend
+build and the optional OmniJev symbols. Library callers can instead use
+`Executor::load_with_vision_numerics` with `VisionNumerics::Reference`.
+The [native recipe](../../../recipe/omnijev/native.md#explicit-bf16-reference-vision)
+describes the build and scope. This is a vision arithmetic selection: it does
+not replace the official unmerged BF16 reference, modify exported tensors, or
+change language/LM/LoRA execution or the original numerical gates. Whole-model
+precision remains a separate validation requirement.
+The L20 visual-stage regression is exact for the pinned protected PNG case;
+the original full 280-answer gate still fails (177 within 0.01 and three
+protected JPEG disagreements). See the recipe for the measured scope and
+remaining language/LM/LoRA and JPEG validation gaps.
+
 [`executor.rs`](native/src/executor.rs) runs the vision tower once per request, then the
 request's prefix up to its last multiple of 64 tokens once, each question's text up to the
 last multiple of 64 before its first option once, and each option's block with the
