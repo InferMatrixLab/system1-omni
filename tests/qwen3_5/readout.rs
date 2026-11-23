@@ -23,6 +23,58 @@ fn model() -> Model {
     Model::load(&checkpoint(), &library).unwrap()
 }
 
+#[test]
+#[ignore = "requires the merged Qwen3.5 4B checkpoint and sm_89 device library"]
+fn framework_text_profile_rejects_incompatible_entry_points() -> anyhow::Result<()> {
+    let library = PathBuf::from(std::env::var_os("CUA_S1_CUDA_LIB").expect("set CUA_S1_CUDA_LIB"));
+    let mut graph = Model::load_with_graph(&checkpoint(), &library, true)?;
+    assert!(graph.enable_framework_text_4b().is_err());
+    drop(graph);
+
+    let mut used = Model::load_with_graph(&checkpoint(), &library, false)?;
+    assert!(used.forward_framework_text_readout(&[1], &[0]).is_err());
+    drop(used.alloc_prefix(64)?);
+    assert!(used.enable_framework_text_4b().is_err());
+    drop(used);
+
+    let mut model = Model::load_with_graph(&checkpoint(), &library, false)?;
+    model.enable_framework_text_4b()?;
+    assert!(model.enable_framework_text_4b().is_err());
+    assert!(model.forward_framework_text_readout(&[], &[0]).is_err());
+    assert!(model.forward_framework_text_readout(&[1], &[]).is_err());
+    assert!(model.forward_framework_text_readout(&[1], &[1]).is_err());
+    assert!(
+        model
+            .forward_framework_text_readout(&[u32::MAX], &[0])
+            .is_err()
+    );
+    let image = model.cfg.image_token_id.expect("merged multimodal 4B");
+    assert!(
+        model
+            .forward_framework_text_readout(&[image], &[0])
+            .is_err()
+    );
+    let input = MultimodalInput {
+        token_ids: &[1],
+        image_token_indices: &[],
+        image_embeddings: &[],
+        position_ids: [&[0]; 3],
+    };
+    assert!(model.forward_multimodal(&input).is_err());
+    assert!(model.forward_batch(&[&[1]]).is_err());
+    assert!(model.forward_fixed(&[1]).is_err());
+    assert!(model.forward_multimodal_readout(&input, &[0], &[]).is_err());
+    assert!(model.try_forward_shared_prefix(&[&[1]], 0).is_err());
+    assert!(model.alloc_prefix(64).is_err());
+    assert!(model.require_prompt_bidirectional().is_err());
+    assert!(model.require_prompt_prefix_bidirectional().is_err());
+    assert!(model.enable_packed_projections().is_err());
+    assert!(model.enable_batched_gdn().is_err());
+    assert!(model.enable_reference_text_numerics().is_err());
+    assert!(!model.graph_stats().enabled);
+    Ok(())
+}
+
 /// Token ids in [1000, 100000) from a fixed seed.
 fn tokens(n: usize, seed: u64) -> Vec<u32> {
     let mut x = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;

@@ -15,6 +15,7 @@
 mod matched;
 mod window_graph;
 
+use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
 use std::path::Path;
@@ -857,6 +858,7 @@ fn runs(prompts: &SharedPrompts) -> Runs {
 pub struct Model {
     pub cfg: Config,
     prefix_owner: Arc<()>,
+    prefix_allocated: Cell<bool>,
     /// Allocation capacity only: state is invalidated and fully recaptured per request.
     text_prefix_workspace: Option<(usize, PrefixState)>,
     _weights: Weights,
@@ -871,6 +873,7 @@ pub struct Model {
     matched_ref: usize,
     matched_handles: HashMap<usize, *mut c_void>,
     reference: Option<&'static cuda::Reference>,
+    framework_text_4b: bool,
     fp32_gdn: Option<cuda::Fp32Gdn>,
     batched_gdn: Option<cuda::BatchedGdn>,
     packed_gemm: Option<cuda::PackedGemm>,
@@ -1042,6 +1045,7 @@ impl Model {
         let model = Self {
             cfg,
             prefix_owner: Arc::new(()),
+            prefix_allocated: Cell::new(false),
             text_prefix_workspace: None,
             _weights: weights,
             embed,
@@ -1054,6 +1058,7 @@ impl Model {
             matched_ref: 0,
             matched_handles: HashMap::new(),
             reference: None,
+            framework_text_4b: false,
             fp32_gdn: None,
             batched_gdn: None,
             packed_gemm: None,
@@ -1191,6 +1196,97 @@ impl Model {
         self.reference = Some(reference);
         self.prefix_owner = Arc::new(());
         Ok(())
+    }
+
+    /// Opt into the existing framework-style operations for eager, causal,
+    /// merged 4B text. Select at startup, before allocating any request state.
+    /// The profile does not guarantee parity with any particular framework build.
+    pub fn enable_framework_text_4b(&mut self) -> Result<()> {
+        let cfg = &self.cfg;
+        ensure!(
+            cfg.hidden == 2560
+                && cfg.intermediate == 9216
+                && cfg.heads == 16
+                && cfg.kv_heads == 4
+                && cfg.head_dim == 256
+                && cfg.lin_k_heads == 16
+                && cfg.lin_v_heads == 32
+                && cfg.lin_k_dim == 128
+                && cfg.lin_v_dim == 128
+                && cfg
+                    .full_attention
+                    .iter()
+                    .copied()
+                    .eq((0..32).map(|i| i % 4 == 3))
+                && cfg.rotary_half == 32
+                && cfg.rope_theta == 10_000_000.0
+                && cfg.mrope_section == [11, 11, 10],
+            "framework text requires the merged 4B geometry"
+        );
+        ensure!(
+            !self.graph_enabled
+                && self.scratch.is_none()
+                && !self.prefix_allocated.get()
+                && self.fixed_gemm.is_null()
+                && self.matched_handles.is_empty()
+                && self.reference.is_none()
+                && self.lora.is_none()
+                && self.fp32_gdn.is_none()
+                && self.packed_gemm.is_none()
+                && self.batched_gdn.is_none(),
+            "select framework text on an eager merged model before allocating request state"
+        );
+        cuda::set_device(0)?;
+        let reference = cuda::api().language_reference()?;
+        cuda::synchronize(self.stream)?;
+        // SAFETY: the model owns both handles, with no pending work or captures.
+        let gemm = unsafe { (reference.gemm_create)(GEMM_WORKSPACE) };
+        ensure!(!gemm.is_null(), "framework text cuBLASLt setup failed");
+        unsafe { (cuda::api().cs1_gemm_destroy)(self.gemm) };
+        self.gemm = gemm;
+        self.reference = Some(reference);
+        self.framework_text_4b = true;
+        Ok(())
+    }
+
+    /// Prefill one complete text sequence and return the requested final-norm
+    /// rows in caller order. Each owned row widens the BF16 values to f32
+    /// without changing their bits. All queued work retires before return.
+    pub fn forward_framework_text_readout(
+        &mut self,
+        ids: &[u32],
+        rows: &[usize],
+    ) -> Result<Vec<Vec<f32>>> {
+        ensure!(self.framework_text_4b, "enable framework text first");
+        ensure!(
+            !ids.is_empty()
+                && ids.len() <= self.cfg.max_positions
+                && ids.len() <= i32::MAX as usize,
+            "empty or oversized prompt"
+        );
+        ensure!(
+            ids.iter()
+                .all(|&id| (id as usize) < self.embed.shape[0]
+                    && self.cfg.image_token_id != Some(id)),
+            "token outside the text vocabulary"
+        );
+        ensure!(
+            !rows.is_empty() && rows.iter().all(|&row| row < ids.len()),
+            "readout row outside the prompt"
+        );
+        let result = (|| {
+            self.prepare_scratch(ids.len())?;
+            let scratch = self.scratch.as_ref().unwrap();
+            self.embed_tokens(scratch, ids)?;
+            self.run(scratch, &[ids.len()], false, false)?;
+            rows.iter()
+                .map(|&row| self.hidden_row(scratch, row))
+                .collect::<Result<_>>()
+        })();
+        if result.is_err() {
+            let _ = cuda::synchronize(self.stream);
+        }
+        result
     }
 
     fn gemm(&self, s: &Scratch, x: usize, w: &Tensor, y: usize, m: usize) -> Result<()> {
@@ -1550,6 +1646,7 @@ impl Model {
         inputs: &[&[u32]],
         original_rows: Option<&[usize]>,
     ) -> Result<Vec<Vec<f32>>> {
+        ensure!(!self.framework_text_4b, "use the framework text readout");
         ensure!(!inputs.is_empty(), "empty batch");
         ensure!(
             inputs
@@ -1907,6 +2004,10 @@ impl Model {
     /// explicit `[3, 1, sequence]` T/H/W positions. No vision tower runs here.
     /// Load a checkpoint with the matching multimodal language adapter merged.
     pub fn forward_multimodal(&mut self, input: &MultimodalInput<'_>) -> Result<Vec<f32>> {
+        ensure!(
+            !self.framework_text_4b,
+            "framework text does not support multimodal input"
+        );
         let image_token = self
             .cfg
             .image_token_id
@@ -2246,6 +2347,10 @@ impl Model {
         &mut self,
         input: &DeviceMultimodalInput<'_>,
     ) -> Result<Vec<f32>> {
+        ensure!(
+            !self.framework_text_4b,
+            "framework text does not support multimodal input"
+        );
         let result = (|| {
             cuda::set_device(0)?;
             let image_token = self
@@ -2359,6 +2464,10 @@ impl Model {
     /// Capture must finish successfully on this model before continuation.
     pub fn alloc_prefix(&self, len: usize) -> Result<PrefixState> {
         ensure!(
+            !self.framework_text_4b,
+            "framework text does not support prefix caching"
+        );
+        ensure!(
             self.fp32_gdn.is_none(),
             "FP32 GDN does not support prefix caching"
         );
@@ -2374,6 +2483,7 @@ impl Model {
             len <= self.cfg.max_positions,
             "cached prefix exceeds the configured maximum length"
         );
+        self.prefix_allocated.set(true);
         let (kvrow, nfull, ngdn, state_bytes, tail_bytes) = self.prefix_layout();
         let mut attn_kv = Vec::with_capacity(nfull);
         for _ in 0..nfull {
@@ -2428,6 +2538,10 @@ impl Model {
         state: &mut PrefixState,
     ) -> Result<()> {
         ensure!(
+            !self.framework_text_4b,
+            "framework text does not support prefix capture"
+        );
+        ensure!(
             Arc::ptr_eq(&self.prefix_owner, &state.owner),
             "prefix state belongs to a different model instance"
         );
@@ -2475,6 +2589,10 @@ impl Model {
         input: &MultimodalInput<'_>,
         prefix: &PrefixState,
     ) -> Result<Vec<f32>> {
+        ensure!(
+            !self.framework_text_4b,
+            "framework text does not support prefix continuation"
+        );
         ensure!(
             Arc::ptr_eq(&self.prefix_owner, &prefix.owner),
             "prefix state belongs to a different model instance"
