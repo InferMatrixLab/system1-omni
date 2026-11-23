@@ -53,9 +53,11 @@ fn decode(bytes: &[u8]) -> Result<std::borrow::Cow<'_, str>, String> {
             .map_err(|_| dec("UTF-8")),
         2 if bytes.len().is_multiple_of(2) => {
             let words: Vec<_> = bytes
-                .chunks_exact(2)
-                .map(|chunk| {
-                    let word = [chunk[0], chunk[1]];
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .copied()
+                .map(|word| {
                     if little {
                         u16::from_le_bytes(word)
                     } else {
@@ -69,8 +71,7 @@ fn decode(bytes: &[u8]) -> Result<std::borrow::Cow<'_, str>, String> {
         }
         4 if bytes.len().is_multiple_of(4) => {
             let mut output = String::new();
-            for chunk in bytes.chunks_exact(4) {
-                let word = [chunk[0], chunk[1], chunk[2], chunk[3]];
+            for &word in bytes.as_chunks::<4>().0 {
                 let scalar = if little {
                     u32::from_le_bytes(word)
                 } else {
