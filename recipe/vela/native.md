@@ -1,4 +1,4 @@
-# Vela 2.0 decoder native library
+# Vela 2.0 native decoder and 0.8B CUDA worker
 
 This recipe belongs to `omni-vela-native` at
 [`src/models/vela/native/`](../../src/models/vela/native/). The 0.3B
@@ -13,8 +13,10 @@ program, member-parameterized): the exported-bundle gate, the wire
 contract, the token-level processing, the F32 heads (widths derived
 from the tensors' shapes) and scoring, and backbone execution on CUDA
 through the shared qwen3_5 crate — all mirrored from the pinned
-runtime and checked against frozen fixtures. This is a library; the
-HTTP worker is the [reference recipe](reference.md)'s Python worker.
+runtime and checked against frozen fixtures. The Rust HTTP worker serves
+the **0.8B text model** through the same processor and CUDA executor.
+Use the [Python reference recipe](reference.md) for reference serving and
+for the other decoder members.
 The recorded fixtures and parity evidence below are the 0.8B's (CPU
 FP32 recordings). Historical 4B/9B runs on an RTX 4090 48 GB (sm_89,
 CUDA 13.2 toolkit) recorded exact-match plans and native executor
@@ -271,6 +273,71 @@ small-case logit results; they do not replace complete GPU typed-answer or
 native HTTP acceptance. Test wall time includes repeated bundle hashing and
 is not serving latency.
 
+## Serve the 0.8B native worker
+
+From the repository root, export the 0.8B bundle with `--bf16-out`, save
+the manifest digest printed by the exporter, and build the SM89 Qwen CUDA
+library as above. The worker loads the expanded export, including its
+`bf16/` directory, and keeps one CUDA model on the first visible device.
+Build and launch the Rust worker and optional pass-through frontend:
+
+```sh
+bash src/backends/cuda/qwen3_5/build.sh /absolute/path/to/worker-library 89
+cargo build --locked --release -p omni-vela-native -p omni-jev
+export VELA_NATIVE_BUNDLE=/absolute/path/to/vela08-native
+export VELA_NATIVE_MANIFEST_SHA256='paste-digest-printed-by-the-exporter'
+export VELA_CUDA_LIB=/absolute/path/to/worker-library/libqwen3_5_cuda.so
+VELA_NATIVE_BIND=127.0.0.1:8000 target/release/omni-vela-native
+```
+
+In another shell:
+
+```sh
+curl --fail http://127.0.0.1:8000/ready
+jq '.request' tests/vela/fixtures/native-plan-Vela-2.0-0.8B-example-request.json |
+  curl --fail-with-body http://127.0.0.1:8000/v1/systemone \
+  -H 'Content-Type: application/json' --data-binary @-
+
+OMNI_JEV_BIND=127.0.0.1:8080 OMNI_JEV_BACKEND_URL=http://127.0.0.1:8000 \
+  target/release/omni-jev
+# Send the same POST to http://127.0.0.1:8080/v1/systemone.
+```
+
+The worker binds after bundle verification and a real warmup. `/health`
+and `/ready` are direct worker endpoints. The Rust frontend forwards
+`/health` and `/v1/systemone`; its backend request timeout is 60 seconds.
+Keep the unauthenticated worker on a trusted interface. The native worker
+accepts JSON bodies up to 8 MiB and returns the Vela error detail envelope.
+It handles text and structured JSON state for Choice, Noul, Score, Span
+and Set. Media and requests for other model IDs are outside its envelope.
+
+All ordinary and window rows are planned before CUDA dispatch. The
+worker admits one complete request at a time. It runs the pinned BF16
+backbone per readout and computes the candidate, router and broad heads
+in FP32. Only span blocks run in the window rows. Those rows carry
+their ordinary row's question and head attribution. Span logits are
+aggregated by original word offsets before calibration and response
+finishing. Usage sums rendered ordinary and window row lengths, with
+zero generated tokens. A disconnected client cannot release an executing
+request's admission before its CUDA work returns.
+
+Run the original CPU tests and opt-in checks above separately. The
+complete GPU capture uses the same executor and finisher as HTTP:
+
+```sh
+# JSON array of [case-name, absolute-path-to-request-json] pairs
+export VELA_PIPELINE_CASES=/absolute/path/to/cases.json
+export VELA_PIPELINE_OUTPUT=/absolute/path/to/new-output-directory
+cargo test --release --locked -p omni-vela-native --test vela_native_pipeline \
+  -- --ignored --nocapture
+```
+
+Capture output includes the actual token plan, raw per-row head logits
+and complete typed response. Compare against separately frozen paired
+reference outputs. The recorded 0.35 replay gate covers raw logits.
+The existing CPU response gate covers finishing on frozen reference
+readouts. Complete GPU typed numeric acceptance needs its own criterion.
+
 ## Scope and limits
 
 - Each completed ordinary row and span-window row must contain at most
@@ -299,6 +366,6 @@ is not serving latency.
   token-level processing, F32 heads, scoring and span decoding, the
   SystemOne response finishing, and backbone execution through the
   shared crate (full-sequence per readout position, fixed-GEMM replay).
-- Not implemented: the HTTP worker around the library, long-span GPU
-  parity on the windowed case, and measured serving latency. No
-  performance claims are made.
+- The native HTTP binary supports the 0.8B text profile. No serving
+  latency, throughput, or other decoder member's native HTTP evidence
+  is claimed here.

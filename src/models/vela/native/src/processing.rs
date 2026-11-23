@@ -26,11 +26,20 @@ pub struct Processor {
     halu_desc: String,
 }
 
+pub(crate) struct SpanPlan {
+    pub qid: String,
+    pub target_tokens: usize,
+    pub offsets: Vec<(usize, usize)>,
+    pub windows: std::ops::Range<usize>,
+    pub label_alias: Option<Value>,
+}
+
 pub struct Planned {
     pub predict_request: Value,
     pub plan: Value,
     pub rows: Vec<RenderedRow>,
     pub window_rows: Vec<RenderedRow>,
+    pub(crate) spans: Vec<Option<SpanPlan>>,
 }
 
 impl Processor {
@@ -92,6 +101,10 @@ impl Processor {
         })
     }
 
+    pub(crate) fn clear_request_cache(&self) {
+        self.encoder.clear();
+    }
+
     /// The full planning path for one admitted request body.
     pub fn plan(&self, body: &Map<String, Value>) -> Result<Planned, RequestError> {
         let state = system_one_state(&body["state"])?;
@@ -137,6 +150,7 @@ impl Processor {
             spans.iter().flat_map(|q| q.over.iter().cloned()).collect();
         let mut rendered = Vec::new();
         let mut window_rows = Vec::new();
+        let mut span_plans = Vec::new();
         let mut parts_by_role = std::collections::HashMap::new();
         for part in self.prepared_parts(&state_parts, &span_roles)? {
             parts_by_role.insert(part.role.clone(), part);
@@ -159,26 +173,45 @@ impl Processor {
             // `_window_rows`: a span target beyond RMAX becomes one row
             // per window (the full-render span block stays on the row).
             let span = row.iter().find(|q| q.kind == "span");
+            let mut span_plan = None;
             if let Some(span) = span {
-                let index = parts.iter().position(|p| p.role == span.over[0]);
-                if let Some(index) = index {
-                    let part = &parts[index];
-                    let has_words = part.words.is_some();
-                    if part.ids.len() > RMAX && has_words {
-                        let (_, first_tokens) = part.words.as_ref().expect("words");
-                        for (a, b) in crate::render::span_windows(first_tokens, part.ids.len()) {
-                            let mut windowed_parts = parts.clone();
-                            windowed_parts[index] = window_part(part, a, b);
-                            let (w_adjusted, w_dispatch) = context.prepare_questions(&row)?;
-                            let mut record =
-                                context.render(&windowed_parts, &w_adjusted, &w_dispatch)?;
-                            // The runtime's window rows carry the head only.
-                            record.window = true;
-                            window_rows.push(record);
-                        }
+                let index = parts
+                    .iter()
+                    .position(|p| p.role == span.over[0])
+                    .ok_or_else(RequestError::internal)?;
+                let part = &parts[index];
+                let (offsets, first_tokens) =
+                    part.words.as_ref().ok_or_else(RequestError::internal)?;
+                let start = window_rows.len();
+                // The pinned runtime renders only the span question in each window.
+                if part.ids.len() > RMAX {
+                    let adjusted_span = &adjusted[adjusted.len() - 1..];
+                    for (a, b) in crate::render::span_windows(first_tokens, part.ids.len()) {
+                        let mut windowed_parts = parts.clone();
+                        windowed_parts[index] = window_part(part, a, b);
+                        let mut window =
+                            context.render(&windowed_parts, adjusted_span, &dispatch)?;
+                        window.window = true;
+                        window_rows.push(window);
                     }
                 }
+                let windows = start..window_rows.len();
+                let label_alias = crate::render::halu_alias(&span.names)
+                    .filter(|alias| dispatch.head == "router" && *alias != HALU_LABEL)
+                    .map(|alias| serde_json::json!({(HALU_LABEL): alias}));
+                span_plan = Some(SpanPlan {
+                    qid: span.id.clone(),
+                    target_tokens: part.ids.len(),
+                    offsets: if windows.is_empty() {
+                        record.w_offs.clone().unwrap_or_default()
+                    } else {
+                        offsets.clone()
+                    },
+                    windows,
+                    label_alias,
+                });
             }
+            span_plans.push(span_plan);
             rendered.push(record);
         }
         Ok(Planned {
@@ -186,6 +219,7 @@ impl Processor {
             plan,
             rows: rendered,
             window_rows,
+            spans: span_plans,
         })
     }
 

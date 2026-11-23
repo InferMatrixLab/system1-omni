@@ -835,7 +835,17 @@ pub fn system_one_response(
                         }
                     }
                     _ => {
-                        out = answer["spans"].as_array().cloned().unwrap_or_default();
+                        if let Some(predicted) = answer["spans"].as_array() {
+                            out.extend(predicted.iter().map(|span| {
+                                serde_json::json!({
+                                    "label": span["label"],
+                                    "start": span["start"],
+                                    "end": span["end"],
+                                    "text": span["text"],
+                                    "probability": span["probability"],
+                                })
+                            }));
+                        }
                     }
                 }
                 spans.insert(qid.to_string(), Value::Array(out));

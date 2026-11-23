@@ -161,6 +161,7 @@ and candidate identity, usage, and response metadata outside the executor.
 | Laya | One padded request: token IDs, true lengths, question types and ordered option markers; at most 16 questions, 512 tokens per row and 2048 markers. | Per-question FP32 option logits and two action logits copied back after GPU heads. | Calibrate and decode ordered `choice`, `score` and `noul` answers, usage and metadata. |
 | JEMM | Ordered token IDs, three-axis positions, candidate counts and optional shared image patches for one complete request. | Per-question selected BF16 label logits copied back as FP32. | Apply checksum-covered text/image calibration and reconstruct ordered `choice`, `score` and `noul` answers and usage. |
 | StartLux Instant 4B | One unpadded token-ID prompt per question, or per knockout group and then a final prompt, in request order. | FP32 letter logits from a CPU dot of the tied embedding rows at the last position. | Per-type temperature, none-check split, wide-choice residual, and ordered `choice`, `noul`, and `score` answers with token usage. |
+| Vela 2.0 0.8B | One rendered request, with ordinary and span-window rows, question readout positions and span word offsets. | FP32 candidate logits and router/broad word-by-label logits from CUDA backbone readouts. | Aggregate span windows by question and word offset, calibrate and assemble the five typed question kinds, extensions and rendered-row usage. |
 | Clef | The raw `systemone` body. Preparation stays in the pinned Python encoder. | One joint-schema forward on the executor process main thread. The Rust closure only exchanges a frame. | The checkpoint's `systemone_answer` object, forwarded with its HTTP status unchanged. |
 
 Cua-S1 input collections are serial work. For both Open-Jev checkpoints,
@@ -172,7 +173,7 @@ retain original batch row counts; output/down GEMMs retain candidate lengths.
 Request-local prefixes run as exclusive items. It restores question/candidate
 grouping before normalization. Laya batches questions within one request. Shared runtime
 admission precedes blocking dispatch: Cua-S1 admits one question forward at a
-time; serial Open-Jev modes, Decider, Laya, StartLux Instant, and Clef admit one complete request. Clef's admitted work is the frame exchange with its executor process. StartLux runs each prompt inside that admission one at a time. Cua-S1's CPU letter projection
+time; serial Open-Jev modes, Decider, Laya, StartLux Instant, Vela 0.8B, and Clef admit one complete request. Clef's admitted work is the frame exchange with its executor process. StartLux runs each prompt inside that admission one at a time. Cua-S1's CPU letter projection
 stays outside admission; Open-Jev's scalar heads and Laya's GPU heads and
 synchronized readback remain inside their request unit. Decider includes every
 backbone row and CUDA head projection, synchronizes both streams and retires

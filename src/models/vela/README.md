@@ -363,9 +363,14 @@ the 0.3B's 8,192 window nor the backbone's 262,144 position metadata
 widens native support. Multi-part span targets remain an explicit native
 422, and non-finite JSON retains the generic native 400 wording.
 
-The crate is a library; the HTTP worker around `Processor` +
-`Executor` is not part of it. Long-span GPU parity and measured
-latency are not recorded. Checks: `cargo test -p omni-vela-native`
+The native `omni-vela-native` worker serves the pinned 0.8B text
+bundle. `Processor` associates each span with its rendered ordinary
+row and window range. The worker owns one CUDA executor and uses the
+shared serial scheduler for one complete request. Candidate readouts
+are scored in rendered block order. Span windows contribute to their
+own question by word offset, then the finisher assembles the ordered
+typed response, calibrated extensions and usage. The HTTP socket binds
+after a successful warmup. Checks: `cargo test -p omni-vela-native`
 (ordinary tests need no weights or GPU; render, head and response parity are
 opt-in with `VELA_NATIVE_BUNDLE`, executor parity additionally with
 `VELA_CUDA_LIB`; see [recipe/vela/native.md](../../../recipe/vela/native.md)).
