@@ -178,3 +178,34 @@ fn refuses_changed_files_and_other_releases() {
         dir.error()
     );
 }
+
+#[test]
+fn unmerged_identity_is_explicit_and_profiles_cannot_be_mixed() {
+    let dir = Dir::new("cross-profile");
+    let error = format!("{:#}", export::load_reference(&dir.0).err().unwrap());
+    assert!(error.contains("format"), "{error}");
+    let mut manifest = dir.manifest();
+    manifest["format"] = json!(export::REFERENCE_FORMAT);
+    dir.write(&manifest);
+    assert!(dir.error().contains("format"));
+    assert!(
+        format!("{:#}", export::load_reference(&dir.0).err().unwrap()).contains("LoRA profile")
+    );
+    manifest["lora"] = json!({"rank": 32, "alpha": 64, "scale": 2, "dtype": "float32",
+                              "file": "adapter_model.safetensors", "tensors": 400});
+    dir.write(&manifest);
+    assert!(
+        format!("{:#}", export::load_reference(&dir.0).err().unwrap())
+            .contains("does not list adapter_model")
+    );
+    // The complete adapter must be hashed, never inherited implicitly from a
+    // sibling export. A merged directory must reject a stray adapter as well.
+    let dir = Dir::new("stray-adapter");
+    fs::write(dir.0.join(export::ADAPTER), "unmerged").unwrap();
+    assert!(dir.error().contains("unmerged adapter"));
+    let dir = Dir::new("lora-scale");
+    let mut manifest = dir.manifest();
+    manifest["lora"]["alpha"] = json!(32);
+    dir.write(&manifest);
+    assert!(dir.error().contains("LoRA profile"));
+}

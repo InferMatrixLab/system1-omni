@@ -264,6 +264,16 @@ void* cs1_reference_patch_create(int rows,void* stream);
 int cs1_reference_patch(void* plan,const void* x,const void* weight,void* out);
 void cs1_reference_patch_destroy(void* plan);
 
+// Optional OmniJev-4B vision arithmetic (additive ABI 9). Select explicitly;
+// legacy/default and JEMM symbols keep their existing layouts and policies.
+// Patch plans use the existing execute/destroy calls; width is 1024 or 1152.
+void* cs1_reference_patch_create_v2(int rows,int hidden,void* stream);
+int cs1_omnijev_vision_norm(const void* x,const void* w,const void* b,void* y,int rows,int d,void* stream);
+// co contains FP32 angles, si is unused, as in the 27B reference rotary API.
+int cs1_omnijev_vision_rope(const void* qkv,const float* co,const float* si,void* q,void* k,int n,int hidden,int head_dim,void* stream);
+size_t cs1_omnijev_vision_attention_workspace_floats(int rows,int heads);
+int cs1_omnijev_vision_attention(const void* q,const void* k,const void* v,void* out,int rows,int heads,int head_dim,void* workspace,void* stream);
+
 #ifdef __cplusplus
 }
 #endif

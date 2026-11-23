@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 use anyhow::{Context, Result, bail, ensure};
 
 mod reference;
-pub use reference::Reference;
+pub use reference::{OmniJevVision, Reference};
 
 /// `CS1_ABI_VERSION` in ops.h.
 const ABI_VERSION: u32 = 9;
@@ -258,6 +258,7 @@ macro_rules! api {
             _lib: libloading::Library,
             vision_v2: Option<VisionV2>,
             reference: Option<Reference>,
+            omnijev_vision: Option<OmniJevVision>,
             $(pub $name: unsafe extern "C" fn($($ty),*) $(-> $ret)?,)*
         }
 
@@ -275,6 +276,13 @@ macro_rules! api {
             pub fn vision_v2(&self) -> Result<&VisionV2> {
                 self.vision_v2.as_ref().context("27B vision needs additive v2 CUDA symbols; rebuild libqwen3_5_cuda.so")
             }
+            pub fn omnijev_vision(&self) -> Result<&OmniJevVision> {
+                let vision = self.omnijev_vision.as_ref().context("OmniJev-4B requires optional vision CUDA symbols; rebuild libqwen3_5_cuda.so")?;
+                let reference = self.language_reference()?;
+                // SAFETY: the capability query does no device work.
+                ensure!(unsafe { (reference.available)() } == 1, "OmniJev-4B vision requires a cuDNN 9 build; set CUDNN_INCLUDE_DIR and CUDNN_LIB_DIR");
+                Ok(vision)
+            }
             fn resolve(lib: libloading::Library) -> Result<Self> {
                 $(
                     // SAFETY: the signature is the one ops.h declares for this symbol.
@@ -288,7 +296,8 @@ macro_rules! api {
                 )*
                 let vision_v2=VisionV2::resolve(&lib);
                 let reference=Reference::resolve(&lib);
-                Ok(Self { _lib: lib, vision_v2, reference, $($name,)* })
+                let omnijev_vision=OmniJevVision::resolve(&lib);
+                Ok(Self { _lib: lib, vision_v2, reference, omnijev_vision, $($name,)* })
             }
         }
     };

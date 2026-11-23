@@ -6,6 +6,74 @@ use omni_omnijev_native::processing::{self, Processor};
 use omni_qwen3_5_native::inputs::image_positions;
 use sha2::{Digest, Sha256};
 
+#[test]
+fn reference_lm_chunks_keep_request_rows_and_inner_token_order() {
+    use processing::{OPTION_CLOSE, OPTION_OPEN, Row, reference_lm_chunks};
+    let mut rows: Vec<Row> = (0..65)
+        .map(|i| Row {
+            tokens: vec![10, OPTION_OPEN, 100 + i, 200 + i, OPTION_CLOSE],
+            zq: 0,
+            u: 4,
+            targets: vec![(1, 100 + i), (2, 200 + i)],
+            first: Some(100 + i),
+        })
+        .collect();
+    // An empty option stays in the chunk's row extent without projection targets.
+    rows[7] = Row {
+        tokens: vec![10, OPTION_OPEN, OPTION_CLOSE],
+        zq: 0,
+        u: 2,
+        targets: vec![],
+        first: None,
+    };
+    let chunks = reference_lm_chunks(&rows.iter().collect::<Vec<_>>()).unwrap();
+    assert_eq!(chunks.len(), 2);
+    assert_eq!(chunks[0].rows, 0..64);
+    assert_eq!(chunks[1].rows, 64..65);
+    assert_eq!(chunks[0].option_targets.len(), 126);
+    assert_eq!(chunks[0].first_targets.len(), 63);
+    assert_eq!(chunks[0].option_targets[0..2], [(0, 2, 100), (0, 3, 200)]);
+    assert_eq!(chunks[0].option_targets[14..16], [(8, 2, 108), (8, 3, 208)]);
+    assert_eq!(chunks[1].option_targets, [(0, 2, 164), (0, 3, 264)]);
+    assert_eq!(chunks[1].first_targets, [(0, 164)]);
+    assert!(reference_lm_chunks(&[]).is_err());
+    rows[0].first = None;
+    assert!(reference_lm_chunks(&rows.iter().collect::<Vec<_>>()).is_err());
+    rows[0].first = Some(100);
+    rows[0].targets.swap(0, 1);
+    assert!(reference_lm_chunks(&rows.iter().collect::<Vec<_>>()).is_err());
+    rows[0].zq = usize::MAX;
+    assert!(reference_lm_chunks(&rows.iter().collect::<Vec<_>>()).is_err());
+}
+
+#[test]
+fn reference_lm_chunk_budget_and_empty_option_policy() {
+    let empty = processing::Row {
+        tokens: vec![10, processing::OPTION_OPEN, processing::OPTION_CLOSE],
+        zq: 0,
+        u: 2,
+        targets: vec![],
+        first: None,
+    };
+    let chunks = processing::reference_lm_chunks(&[&empty]).unwrap();
+    assert!(chunks[0].option_targets.is_empty() && chunks[0].first_targets.is_empty());
+    let mut full = processing::Row {
+        tokens: vec![10, processing::OPTION_OPEN, 100, processing::OPTION_CLOSE],
+        zq: 0,
+        u: 3,
+        targets: vec![(1, 100)],
+        first: Some(100),
+    };
+    let rows = vec![&full; processing::MAX_TARGETS / 2];
+    assert!(processing::reference_lm_chunks(&rows).is_ok());
+    let rows = vec![&full; processing::MAX_TARGETS / 2 + 1];
+    assert!(processing::reference_lm_chunks(&rows).is_err());
+    full.tokens[2] = 248_079;
+    full.targets[0].1 = 248_079;
+    full.first = Some(248_079);
+    assert!(processing::reference_lm_chunks(&[&full]).is_err());
+}
+
 fn positions_sha256(positions: &[Vec<i64>; 3]) -> String {
     let mut hash = Sha256::new();
     for axis in positions {

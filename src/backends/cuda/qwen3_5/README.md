@@ -237,3 +237,24 @@ run the matched projection regression in `tests/qwen3_5/kernels.rs` and the
 [Cua screenshot qualification](../../../../recipe/cua_s1/native_screenshot.md#full-prompt-matched-algorithms)
 for each supported GPU/library/model combination. Other numerical profiles,
 vision GEMMs and the existing default/fixed policies stay on their own handles.
+
+## Optional OmniJev-4B vision arithmetic
+
+The additive ABI 9 `cs1_omnijev_vision_*` group is resolved only when explicitly
+requested by `VisionModel::enable_omnijev_numerics`. Older libraries remain
+loadable by existing callers. The group is separate from JEMM's guarded 27B
+entry points: it accepts only unadapted 1024-wide/head-64 single-image vision,
+and reuses the existing framework GEMM handle with the pinned Torch vision
+1 MiB heuristic budget, without changing generic policies.
+`cs1_reference_patch_create_v2(rows, hidden, stream)` adds a width-aware cuDNN
+plan constructor; the original constructor still fixes hidden size to 1152.
+Execute/destroy and synchronization ownership are shared. Build with cuDNN 9
+and rebuild the library before selecting the profile.
+
+The 4B attention workspace query returns FP32 elements for the exact bounded
+row count (up to 4608), without the head-72 padding region. Q/K are compact;
+V stays interleaved in QKV. Rust owns descriptor/workspace/Graph lifetimes and
+rejects a bounded cache because opaque cuDNN allocations are not counted by
+that cache. The default shared vision path and JEMM numerics stay unchanged.
+See the [OmniJev recipe](../../../../recipe/omnijev/native.md#explicit-bf16-reference-vision)
+and [regressions](../../../../tests/qwen3_5/README.md#omnijev-4b-reference-vision).

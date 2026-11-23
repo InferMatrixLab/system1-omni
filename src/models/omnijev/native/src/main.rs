@@ -160,7 +160,15 @@ async fn main() -> Result<()> {
         .map(PathBuf::from)
         .map_or_else(cuda::default_library, Ok)?;
     let shared = tokio::task::spawn_blocking(move || -> Result<Shared> {
-        let (mut executor, processor) = Executor::load(&dir, &library)?;
+        let profile = std::env::var("OMNIJEV_PROFILE").or_else(|error| match error {
+            std::env::VarError::NotPresent => Ok("merged-fixed".to_owned()),
+            error => Err(error),
+        })?;
+        let (mut executor, processor) = match profile.as_str() {
+            "merged-fixed" => Executor::load(&dir, &library)?,
+            "unmerged-reference" => Executor::load_one_shot_reference(&dir, &library)?,
+            _ => anyhow::bail!("OMNIJEV_PROFILE must be merged-fixed or unmerged-reference"),
+        };
         let warmup = processor.prepare(&warmup_request())?;
         executor.execute(&warmup).context("warmup request")?;
         Ok(Shared {
