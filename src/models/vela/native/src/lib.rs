@@ -7,15 +7,17 @@
 //! `head-input-*` fixtures and the oracle responses; every width is
 //! derived from the tensors' shapes, so one implementation serves all
 //! members), and backbone execution on CUDA through the shared
-//! qwen3_5 crate. The HTTP worker is not part of this crate.
+//! qwen3_5 crate. The HTTP worker serves the pinned 0.8B member.
 
 pub mod bundle;
 pub mod contract;
 pub mod executor;
 pub mod heads;
+pub mod pipeline;
 pub mod processing;
 pub mod questions;
 pub mod render;
 pub mod scoring;
 pub mod state;
 pub mod words;
+pub mod worker;

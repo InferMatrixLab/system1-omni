@@ -6,6 +6,10 @@ publish = false
 description = "Native library for the Vela 2.0 decoder members (0.8B/4B/9B): bundle gate, wire contract, processing, F32 heads, scoring and CUDA execution"
 
 [dependencies]
+axum = "0.8.8"
+http-body-util = "0.1.3"
+omni-runtime = { path = "../../../runtime" }
+tokio = { version = "1.49.0", features = ["macros", "net", "rt-multi-thread", "time"] }
 anyhow = "1.0.100"
 libm = "0.2"
 safetensors = "0.8.0"
@@ -46,3 +50,11 @@ path = "../../../../tests/vela/native_executor.rs"
 [[test]]
 name = "vela_native_response"
 path = "../../../../tests/vela/native_response.rs"
+
+[[bin]]
+name = "omni-vela-native"
+path = "src/main.rs"
+
+[[test]]
+name = "vela_native_pipeline"
+path = "../../../../tests/vela/native_pipeline.rs"

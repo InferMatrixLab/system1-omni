@@ -63,7 +63,7 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
   five SystemOne question kinds (`choice`/`noul`/`score` plus the `span`/`set`
   extensions) through the Python worker and the Rust frontend on CPU FP32;
   or a decoder member (0.8B `326b01d8`, 4B `d6923941`, 9B `068425bb`) behind its own 10-file gate.
-- [Vela 2.0 decoder native library](vela/native.md): export the pinned-bundle
+- [Vela 2.0 native decoder and 0.8B CUDA worker](vela/native.md): export the pinned-bundle
   manifest gate, wire contract and token-level processing for the decoder
   members (0.8B, 4B and 9B), checked against frozen fixtures; serving stays
   with the reference Python worker.

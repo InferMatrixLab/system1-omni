@@ -144,6 +144,10 @@ impl Encoder {
         Ok(entry)
     }
 
+    pub(crate) fn clear(&self) {
+        self.cache.borrow_mut().clear();
+    }
+
     /// Memoized token ids of a whole string (the reference's `_ids`).
     pub fn ids(&self, text: &str) -> Result<Vec<u32>, RequestError> {
         Ok(self.encode(text)?.0)

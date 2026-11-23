@@ -235,3 +235,36 @@ fn an_oversized_window_rejects_even_when_the_primary_row_fits() {
     );
     rejected(processor.plan(&body));
 }
+
+#[test]
+fn mixed_window_rows_only_render_their_span_question() {
+    let processor = processor();
+    let plan = planned(
+        &processor,
+        &body(
+            2_300,
+            json!({
+                "topic": question("noul", 1),
+                "first": question("span", 1),
+                "second": question("span", 2),
+            }),
+        ),
+    );
+    assert_eq!(plan.rows.len(), 2);
+    assert_eq!(plan.spans.len(), 2);
+    let first = plan.spans[0].as_ref().unwrap();
+    let second = plan.spans[1].as_ref().unwrap();
+    assert_eq!(first.qid, "first");
+    assert_eq!(second.qid, "second");
+    assert!(!first.windows.is_empty() && !second.windows.is_empty());
+    assert_eq!(first.windows.start, 0);
+    assert_eq!(first.windows.end, second.windows.start);
+    assert_eq!(second.windows.end, plan.window_rows.len());
+    assert!(matches!(
+        plan.rows[0].blocks.as_slice(),
+        [Block::Question { .. }, Block::Span { .. }]
+    ));
+    for window in plan.window_rows {
+        assert!(matches!(window.blocks.as_slice(), [Block::Span { .. }]));
+    }
+}
