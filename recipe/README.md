@@ -78,6 +78,8 @@ For a first real decision, follow the [complete CPU walkthrough](../docs/getting
 
 - [LFM2.5-350M choice worker](lfm2/README.md): score text decisions with independent
   questions, hybrid cache branching and configurable candidate batches.
+  The [Rust preparation recipe](lfm2/native.md) covers Choice token plans,
+  same-score replay, and CPU F32 export.
 
 Recipes contain setup, launch commands and examples. Reusable implementation code
 belongs under `src/`.

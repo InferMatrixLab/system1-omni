@@ -192,7 +192,7 @@ checkpoint. Public231 concurrency-1 latency for heads `1ba07d1`, `f968e576`,
 | StartLux-Decision v1.1 4B Instant | [Native Rust/CUDA text worker](recipe/startlux/README.md); `choice` / `noul` / `score`; weights CC BY-NC 4.0; Instant only (no AutoThink, no 27B); GPU parity unverified; [L20X latency recipe](recipe/startlux/latency.md) |
 | autotrust/JEV-27B-VL | [Experimental Rust/CUDA worker](recipe/jev_vl/README.md); single-question text, online inline PNG/JPEG and offline-preencoded image inputs; [validation scope and limits](recipe/jev_vl/validation.md) |
 | CLM-v0.1-8B | [External worker with a CPU stub encoder](recipe/clm/README.md); contract checks only, real Qwen3-8B decisions unverified by this recipe |
-| LFM2.5-350M | [Transformers worker](recipe/lfm2/README.md); text state and independent choice questions |
+| LFM2.5-350M | [Transformers Choice worker](recipe/lfm2/README.md) and [Rust preparation with F32 export](recipe/lfm2/native.md) |
 | OmniJev-4B v1.1 | [Native Rust/CUDA worker](recipe/omnijev/native.md), eager: one image, Choice, Noul and Score; [reference comparison on sm_89](recipe/omnijev/native.md#comparison-with-the-reference) |
 | Kev-4B | [Pinned CPU export and Rust pointer head](recipe/kev/README.md); no worker or full-model parity yet ([#27](https://github.com/InferMatrixLab/system1-omni/issues/27)) |
 | D3 (Decision 3.0) | [Python reference worker](recipe/d3/reference.md) on the checkpoint's pinned runtime; `choice`/`noul`/`score` over text, image and video state; author-run on A100 for text and media serving (see the integration and media PRs) |

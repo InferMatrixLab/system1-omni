@@ -104,6 +104,8 @@ the Rust `omni-clef` worker. It admits one complete text request through
 process runs the checkpoint's joint schema head on its main thread, which is
 the thread that initialized CUDA. The joint head is still that Python module.
 Clef does not use the shared Qwen CUDA executor.
+[LFM2.5-350M Rust preparation](../recipe/lfm2/native.md) produces Choice token
+plans and verifies the F32 artifact for a future executor.
 
 The shared Qwen executor also exposes a single-row eager
 `forward_prompt_prefix_bidirectional` prerequisite: state queries read state

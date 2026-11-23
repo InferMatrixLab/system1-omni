@@ -1,0 +1,25 @@
+{
+  "model": "LiquidAI/LFM2.5-350M",
+  "revision": "9e6c6ccf47cd318696e137d381a7ded8fe4df09f",
+  "checkpoint": {
+    "LICENSE": "4d28ca14dedc0b3d0fcc2b3339f0e79931faa33874f3d24f522183a8fc70068c",
+    "chat_template.jinja": "ba551d58630afa3190b1be3602e28301f3d2e9bbac978dfc49d6d825171648b6",
+    "config.json": "720b43d6ddc2ed25be23eed355aefcf342434a176dedad23dbe0a5e3ac24bbb8",
+    "model.safetensors": "1c9c77a4471a7f590f85240f74ed1fc26df7fbde88c3006724e2f93ca993ea4e",
+    "tokenizer.json": "df1d8d5ec5d091b460562ffd545e4a5e91d17d4a0db7ebe733be34ed374377bd",
+    "tokenizer_config.json": "3701f370c70034d06e28947ff51c1063983393319f429e3ce58f06a45fae67cc"
+  },
+  "reference": {
+    "source": "f1e674f2d324f5bb4e1ba2162551d0b633f20be0",
+    "rlcd_revision": "deb589d803d141cabd158ef55f6617b128529f36",
+    "rlcd_engine_sha256": "f6231cae0413fce75a5468533e44923cbc0ef796eb038e4c779fc149ec543736",
+    "modeling_lfm2_sha256": "9a2b5aca091018c3350a545bcdedf1908837dc07002d26814e815b5e51b91d93",
+    "profile_sha256": "76ec83a4cd771feb000865f46d9fc2510684eeef46734c0cfc48eea789516123",
+    "public_capture_sha256": "1e8786bb3ffb29f56ffb55090e0dc3206ab4dd7ec0fd2994cb597cfc185206f4"
+  },
+  "storage_dtype": "BF16",
+  "artifact_dtype": "F32",
+  "lm_head_tie": {
+    "lm_head.weight": "model.embed_tokens.weight"
+  }
+}

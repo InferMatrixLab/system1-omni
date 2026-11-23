@@ -10,6 +10,9 @@ This recipe covers text `state` and `choice` questions only. Each public
 question is evaluated independently; only candidates within one question share a
 prefill. Question IDs are never placed in the prompt.
 
+The [Rust preparation recipe](native.md) covers token plans, frozen-score replay,
+CPU F32 export, and the opt-in Q12 Transformers reference.
+
 ## Pinned artifacts
 
 | Artifact | Pin |

@@ -1292,6 +1292,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "omni-lfm2-native"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ryu",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokenizers 0.22.2",
+]
+
+[[package]]
 name = "omni-omnijev-native"
 version = "0.2.2"
 dependencies = [

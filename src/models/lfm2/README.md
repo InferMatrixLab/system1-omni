@@ -127,6 +127,47 @@ attention layers and ten short-convolution layers; forking deep-copies the cache
 and calls `reorder_cache`, which copies both KV tensors and convolution state via
 `index_select` (independent storage, no shared mutable views).
 
+## Rust preparation and executor boundary
+
+The [Rust preparation recipe](../../../recipe/lfm2/native.md) validates complete
+Choice requests, produces token plans, interprets supplied FP32 sequence
+scores, and verifies a CPU-exported F32 package. The runnable worker above
+continues to use Transformers. The Rust CLI performs no forward pass.
+
+- Each question owns one unpadded prefix. Field names and ordered candidates
+  carry origin within a question. The executor assembles each row as
+  `prefix_ids + suffix_ids + value_ids` for an uncached pass, or
+  `suffix_ids + value_ids` after capturing a prefix. Readout ranges are
+  half-open logit intervals whose rows predict the candidate IDs, including the
+  newline. Position IDs in a continuation begin at the original prefix length.
+- The checkpoint has 16 layers, hidden width 1,024 and a 65,536-row tied
+  embedding/output projection. The tokenizer has 64,402 entries. The log-softmax
+  denominator still covers all 65,536 model rows. SwiGLU projects to 4,608
+  channels. Attention layers 2, 5, 8, 10, 12 and 14 use 16 query heads, eight KV
+  heads and head width 64, with per-head Q/K RMSNorm and split-half RoPE.
+  The other ten layers use the bias-free width-three short convolution over
+  `B * x` with `C` gating after convolution. Both mixers retain their native
+  operator norm, residual, and separate FFN norm. Final RMSNorm feeds the
+  tied vocabulary projection.
+- The future executor owns persistent F32 weights, scratch and stream
+  synchronization. A prefix carries two F32 KV tensors per attention layer
+  with shape `[batch, 8, positions, 64]` and one F32 conv-history tensor per
+  convolution layer with shape `[batch, 1024, 3]`. The reference forks both
+  kinds of state per candidate batch. Forked storage and model work remain
+  live until synchronized completion. No prefix state spans requests or
+  independent questions in the reference.
+- Start device validation with an uncached FP32 single-row path and compare
+  primitive outputs and complete sequence scores. Return one FP32 total per
+  candidate in prepared order, summing full-vocabulary FP32 log-softmax
+  gathers. Add cached branching after uncached parity, check padding, cache
+  isolation and the original batch tags, then qualify actual serving.
+  Finishing normalizes all candidates together within each question.
+- The config records 128,000 positions. For F32 cache payloads alone, one
+  row costs 24,576 bytes per cached position across the six attention layers,
+  plus 122,880 bytes of convolution history. Those figures exclude allocation
+  overhead, weights, fork copies, logits and scratch. Any supported device
+  budget needs measurement on the future executor.
+
 ## Tests
 
 ```sh
