@@ -575,3 +575,27 @@ fn response_parity_rejects_missing_spans() {
         );
     }
 }
+
+#[test]
+fn response_finishing_keeps_wire_field_order_for_part_spans() {
+    let plan = json!({"qid": "pii", "type": "span", "range": null, "part": "user"});
+    let prediction = json!({
+        "id": "pii", "type": "span", "head": "router", "threshold": 0.15,
+        "spans": [{"start": 1, "end": 3, "label": "PERSON", "probability": 0.7, "text": "😀李"}]
+    });
+    let got = system_one_response(
+        "m",
+        &[plan],
+        &[prediction],
+        &HashMap::new(),
+        &HashMap::new(),
+        42,
+    )
+    .unwrap();
+    let span = got["spans"]["pii"][0].as_object().unwrap();
+    assert_eq!(
+        span.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["label", "start", "end", "text", "probability"]
+    );
+    assert_eq!(span["text"], "😀李");
+}
