@@ -1,0 +1,215 @@
+{
+ "case": "example-request-unicode.json",
+ "request": {
+  "model": "vllm-sr/Vela-2.0-0.3B",
+  "state": {
+   "request": "😀 客户张伟，邮箱 zhang.wei@example.cn。尾部🚀",
+   "source": "订单将在三个工作日内审核。",
+   "answer": "张伟的订单已经完成。"
+  },
+  "questions": {
+   "pii": {
+    "type": "span",
+    "instructions": "Which spans are personal information?",
+    "criteria": {
+     "PERSON": "a person's name",
+     "EMAIL_ADDRESS": "an e-mail address"
+    },
+    "over": "request",
+    "threshold": 0.05
+   },
+   "topics": {
+    "type": "set",
+    "instructions": "Which topics are mentioned?",
+    "criteria": {
+     "contact": "a customer's contact information",
+     "order": "an order or its processing status"
+    },
+    "threshold": 0.5
+   },
+   "kind": {
+    "type": "choice",
+    "instructions": "What is the customer's message about?",
+    "criteria": {
+     "profile": "customer profile or contact information",
+     "billing": "an invoice or payment"
+    }
+   },
+   "tone": {
+    "type": "score",
+    "instructions": "How formal is the message?",
+    "criteria": [
+     "casual",
+     "neutral",
+     "formal"
+    ]
+   },
+   "billing": {
+    "type": "noul",
+    "instructions": "Does the message concern an invoice or payment?"
+   }
+  }
+ },
+ "system_one": {
+  "model": "vllm-sr/Vela-2.0-0.3B",
+  "answers": {
+   "pii": {
+    "type": "noul",
+    "noul": 0.488608729974243
+   },
+   "topics.contact": {
+    "type": "noul",
+    "noul": 0.43475786270781963
+   },
+   "topics.order": {
+    "type": "noul",
+    "noul": 0.9338471738856106
+   },
+   "kind": {
+    "type": "choice",
+    "choice": "profile",
+    "confidence": 0.5812821969558832,
+    "probabilities": {
+     "profile": 0.7906410984779416,
+     "billing": 0.20935890152205835
+    }
+   },
+   "tone": {
+    "type": "score",
+    "score": 1.0749506674540588,
+    "confidence": 0.17860283610656524,
+    "legend": {
+     "0": "casual",
+     "1": "neutral",
+     "2": "formal"
+    },
+    "probabilities": {
+     "0": 0.23913252218001999,
+     "1": 0.4467842881859013,
+     "2": 0.3140831896340787
+    }
+   },
+   "billing": {
+    "type": "noul",
+    "noul": 0.7967674039907597
+   }
+  },
+  "usage": {
+   "input_tokens": 155,
+   "output_tokens": 0
+  },
+  "spans": {
+   "pii": [
+    {
+     "label": "PERSON",
+     "start": 4,
+     "end": 5,
+     "text": "张",
+     "probability": 0.10246830433607101
+    },
+    {
+     "label": "EMAIL_ADDRESS",
+     "start": 10,
+     "end": 30,
+     "text": "zhang.wei@example.cn",
+     "probability": 0.488608717918396
+    }
+   ]
+  },
+  "sets": {
+   "topics": {
+    "selected": [
+     "order"
+    ],
+    "probabilities": {
+     "contact": 0.43475786270781963,
+     "order": 0.9338471738856106
+    }
+   }
+  },
+  "thresholds": {
+   "pii": 0.05,
+   "topics": 0.5
+  }
+ },
+ "predict": {
+  "answers": [
+   {
+    "id": "pii",
+    "type": "span",
+    "target_part": "user",
+    "spans": [
+     {
+      "start": 4,
+      "end": 5,
+      "label": "PERSON",
+      "probability": 0.10246830433607101,
+      "text": "张"
+     },
+     {
+      "start": 10,
+      "end": 30,
+      "label": "EMAIL_ADDRESS",
+      "probability": 0.488608717918396,
+      "text": "zhang.wei@example.cn"
+     }
+    ],
+    "threshold": 0.05,
+    "threshold_rule": "given"
+   },
+   {
+    "id": "topics",
+    "type": "set",
+    "answer": [
+     "order"
+    ],
+    "probabilities": {
+     "contact": 0.43475786270781963,
+     "order": 0.9338471738856106
+    },
+    "threshold": 0.5
+   },
+   {
+    "id": "kind",
+    "type": "choice",
+    "answer": "profile",
+    "probabilities": {
+     "profile": 0.7906410984779416,
+     "billing": 0.20935890152205835
+    },
+    "abstain_probability": 0.19304637686297574
+   },
+   {
+    "id": "tone",
+    "type": "score",
+    "answer": "neutral",
+    "probabilities": {
+     "casual": 0.23913252218001999,
+     "neutral": 0.4467842881859013,
+     "formal": 0.3140831896340787
+    },
+    "expected_index": 1.0749506674540588,
+    "score": 0.5374753337270294
+   },
+   {
+    "id": "billing",
+    "type": "choice",
+    "answer": "yes",
+    "probabilities": {
+     "no": 0.20323259600924032,
+     "yes": 0.7967674039907597
+    },
+    "abstain_probability": 0.01893785421896126
+   }
+  ],
+  "meta": {
+   "tokens": {
+    "user": 17,
+    "context": 8,
+    "answer": 7
+   },
+   "windows": 0,
+   "sequences": 1
+  }
+ }
+}
