@@ -4,6 +4,21 @@ use super::*;
 #[path = "common.rs"]
 mod common;
 
+#[test]
+fn vision_profile_is_explicit_and_rejects_unknown_settings() {
+    assert_eq!(
+        "legacy".parse::<VisionNumerics>().unwrap(),
+        VisionNumerics::Legacy
+    );
+    assert_eq!(
+        "reference".parse::<VisionNumerics>().unwrap(),
+        VisionNumerics::Reference
+    );
+    for unknown in ["", "1", "jemm", "Reference", "reference "] {
+        assert!(unknown.parse::<VisionNumerics>().is_err(), "{unknown:?}");
+    }
+}
+
 // Replace the model only after dropping its prefix states and the old model.
 // This selects both modes without mutating process-wide environment variables.
 fn language_mode(executor: Executor, dir: &Path, library: &Path, graph: bool) -> Executor {
@@ -12,6 +27,7 @@ fn language_mode(executor: Executor, dir: &Path, library: &Path, graph: bool) ->
         language,
         heads,
         calibration,
+        reference_language,
         request,
         question,
     } = executor;
@@ -21,6 +37,7 @@ fn language_mode(executor: Executor, dir: &Path, library: &Path, graph: bool) ->
         language: Model::load_with_graph(dir, library, graph).unwrap(),
         heads,
         calibration,
+        reference_language,
         request: None,
         question: None,
     }

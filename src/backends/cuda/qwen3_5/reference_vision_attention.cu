@@ -194,3 +194,23 @@ extern "C" int cs1_reference_vision_attention_padded(const void* q,const void* k
 }
 
 extern "C" size_t cs1_reference_vision_attention_workspace_floats(int capacity,int heads) { return cs1::reference::workspace_floats(capacity,heads,80,128); }
+
+// The pinned 4B SDPA uses noncausal head-64 FlashAttention with 128-key tiles,
+// reverse key traversal and unscaled maxima. Keep Q/K compact and V in QKV.
+extern "C" size_t cs1_omnijev_vision_attention_workspace_floats(int rows,int heads) {
+    if(rows<=0 || rows>4608 || heads!=16) return 0;
+    return (size_t)rows*heads*65;
+}
+extern "C" int cs1_omnijev_vision_attention(const void* q,const void* k,const void* v,void* out,int rows,int heads,int dh,void* workspace,void* stream) {
+    using namespace cs1;namespace f=vision_reference;
+    if(rows<=0 || rows>4608 || heads!=16 || dh!=64 || !workspace) return cudaErrorInvalidValue;
+    float* memory=(float*)workspace;float* lse=memory+(size_t)rows*heads*64;
+    cudaFuncSetAttribute(f::flash_kernel<64,128>,cudaFuncAttributeMaxDynamicSharedMemorySize,f::SMEM_BYTES<64,128>);
+    f::flash_kernel<64,128><<<dim3((rows+63)/64,heads),128,f::SMEM_BYTES<64,128>,(cudaStream_t)stream>>>((const bf16*)q,(const bf16*)k,(const bf16*)v,heads*64*3,memory,lse,rows,heads,heads,0.125f,1);
+    auto status=cudaGetLastError();
+    if(status==cudaSuccess) {
+        f::combine<<<((size_t)rows*heads*64+127)/128,128,0,(cudaStream_t)stream>>>(memory,lse,(bf16*)out,rows,heads,64,1);
+        status=cudaGetLastError();
+    }
+    return status;
+}

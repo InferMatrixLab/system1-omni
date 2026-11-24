@@ -95,3 +95,51 @@ full-checkpoint replay needs its own frozen inputs, artifact identity and model
 acceptance. Standard workspace checks compile these tests but leave GPU cases
 ignored; `graph_loading` checks missing capability, unsupported graph/adapter
 profiles and input rejection without a GPU.
+
+## OmniJev-4B reference vision
+
+The optional profile has two independent checks, run on the reserved GPU with
+`torch==2.14.0`, `transformers==5.17.0` and `peft==0.19.1` in the documented
+OmniJev reference environment. The first needs no model weights:
+
+```sh
+CUA_S1_CUDA_LIB=/absolute/backend/libqwen3_5_cuda.so \
+    python -m unittest discover -s tests/qwen3_5 -p test_vision_omnijev.py -v
+```
+
+It compares LayerNorm and strided-V noncausal attention with Torch BF16 exactly,
+including short grids, 64/128-key tile tails and the 4608-patch limit. Invalid
+dimensions are rejected before dereferencing device pointers; the existing 27B
+entry still rejects the 4B layout.
+The cuDNN build also checks that the original patch constructor retains its
+1152-wide layout. Optionally set `QWEN_LEGACY_CUDA_LIB` to an immutable pre-change
+library to compare existing 4B and JEMM-27B norm/attention outputs bit for bit.
+
+For the real-weight regression, capture the official MSO1 visual output and its
+FP32 `pixel_values` in the pinned environment, preserving the original image,
+grid, source/checkpoint hashes and complete request. The generator uses the
+unchanged exported visual weights, and refuses its oracle unless the complete
+HF visual output equals that actual MSO1 capture bit for bit. Inputs and all
+40 expected stages stay in the supplied external directory:
+
+```sh
+python tests/qwen3_5/vision_omnijev_reference.py \
+    --base /absolute/qwen3.5-4b --export /absolute/omnijev-export \
+    --pixels /absolute/official-pixels.f32 --grid 1 36 64 \
+    --mso1-output /absolute/official-vision.bf16 --out /absolute/new-stage-oracle
+OMNIJEV_EXPORT=/absolute/omnijev-export \
+CUA_S1_CUDA_LIB=/absolute/backend/libqwen3_5_cuda.so \
+OMNIJEV_VISION_ORACLE=/absolute/new-stage-oracle \
+    cargo test --release --locked -p omni-qwen3-5-native --lib \
+    omnijev_reference_matches_official_vision_stages_and_graph_replay \
+    -- --ignored --test-threads=1
+```
+
+The test requires exact patch, position, all 24 blocks, merger and block0
+operator outputs. It also checks profile/adapter/cache/late-selection errors,
+actual vision Graph capture/replay, resident-output readback and recovery after
+a trace callback error. The existing `forward_with_trace` keeps its 29 events;
+`forward_with_block_trace` adds one selected block's operator boundaries and
+never captures or replays a Graph while tracing. Ordinary CPU CI compiles and
+skips the device case. This vision oracle does not replace the original full
+280-answer probability and protected-decision gates, or language/LoRA parity.

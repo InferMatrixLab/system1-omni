@@ -98,3 +98,16 @@ extern "C" int cs1_reference_vision_attention(const void* q,const void* k,const 
     reference_vision::unpack_attention_kernel<<<((size_t)n*heads*dh+255)/256,256,0,(cudaStream_t)stream>>>(po,(bf16*)out,(size_t)n*heads*dh,dh);
     return cudaGetLastError();
 }
+
+// Additive, explicit OmniJev-4B operators. The 27B guards and callers stay unchanged.
+extern "C" int cs1_omnijev_vision_norm(const void* x,const void* w,const void* b,void* y,int rows,int d,void* stream) {
+    if(rows<=0 || d!=1024) return cudaErrorInvalidValue;
+    reference_vision::reference_norm_kernel<<<rows,128,0,(cudaStream_t)stream>>>((const bf16*)x,(const bf16*)w,(const bf16*)b,(bf16*)y,d);
+    return cudaGetLastError();
+}
+extern "C" int cs1_omnijev_vision_rope(const void* qkv,const float* co,const float* si,void* q,void* k,int n,int hidden,int dh,void* stream) {
+    if(n<=0 || hidden!=1024 || dh!=64) return cudaErrorInvalidValue;
+    const size_t count=(size_t)n*hidden;
+    reference_vision::rope_v2_kernel<<<(count+255)/256,256,0,(cudaStream_t)stream>>>((const bf16*)qkv,co,si,(bf16*)q,(bf16*)k,count,hidden,dh);
+    return cudaGetLastError();
+}

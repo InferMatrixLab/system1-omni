@@ -23,11 +23,29 @@ use crate::processing::{IMAGE_TOKEN, PreparedRequest, Processor, Row};
 #[path = "../../../../../tests/omnijev/window_graph.rs"]
 mod window_graph_tests;
 
+/// Vision arithmetic only; language weights/readout and finishing are unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VisionNumerics {
+    Legacy,
+    Reference,
+}
+impl std::str::FromStr for VisionNumerics {
+    type Err = anyhow::Error;
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "legacy" => Ok(Self::Legacy),
+            "reference" => Ok(Self::Reference),
+            _ => anyhow::bail!("OMNIJEV_VISION_NUMERICS must be legacy or reference"),
+        }
+    }
+}
+
 pub struct Executor {
     vision: VisionModel,
     language: Model,
     heads: Heads,
     calibration: Calibration,
+    reference_language: bool,
     /// Buffers for the state after the request's prefix and after a question's text. Each
     /// request or question that uses one captures it again; only the allocations outlive a
     /// request, grown as needed.
@@ -96,19 +114,76 @@ struct RowReadout {
     first: Option<f32>,
 }
 
+/// An explicitly selected Score question from a complete prepared request.
+/// This is a one-shot library result, not an all-question serving mode.
+pub struct ScoreReadout {
+    pub zq: Vec<f32>,
+    pub u: Vec<Vec<f32>>,
+    pub probabilities: Vec<f32>,
+    pub answer: Value,
+}
+
 impl Executor {
     /// Check the export at `dir`, then load the processor, the vision tower, the
     /// language model and the heads.
     pub fn load(dir: &Path, library: &Path) -> Result<(Self, Processor)> {
-        let export = export::load(dir)?;
+        let numerics = std::env::var("OMNIJEV_VISION_NUMERICS")
+            .or_else(|error| match error {
+                std::env::VarError::NotPresent => Ok("legacy".to_owned()),
+                error => Err(error),
+            })?
+            .parse()?;
+        Self::load_with_vision_numerics(dir, library, numerics)
+    }
+    /// An explicit selection for callers that do not use worker environment settings.
+    pub fn load_with_vision_numerics(
+        dir: &Path,
+        library: &Path,
+        numerics: VisionNumerics,
+    ) -> Result<(Self, Processor)> {
+        Self::load_profile(dir, library, numerics, false)
+    }
+
+    /// Explicit, eager-only unmerged reference library profile. The existing
+    /// worker/default loader does not select it. Only `score_one_shot` is supported;
+    /// full requests, prefix reuse, Graphs and LM targets fail closed.
+    pub fn load_one_shot_reference(dir: &Path, library: &Path) -> Result<(Self, Processor)> {
+        ensure!(
+            std::env::var("CUA_S1_GRAPH").as_deref() != Ok("1"),
+            "one-shot reference requires CUA_S1_GRAPH=0"
+        );
+        Self::load_profile(dir, library, VisionNumerics::Reference, true)
+    }
+
+    fn load_profile(
+        dir: &Path,
+        library: &Path,
+        numerics: VisionNumerics,
+        reference_language: bool,
+    ) -> Result<(Self, Processor)> {
+        let export = if reference_language {
+            export::load_reference(dir)?
+        } else {
+            export::load(dir)?
+        };
         let processor = Processor::load(dir)?;
-        let language = Model::load(dir, library)?;
+        let mut language = if reference_language {
+            Model::load_with_lora(dir, library, &dir.join(export::ADAPTER), 2.0)?
+        } else {
+            Model::load(dir, library)?
+        };
+        if reference_language {
+            language.enable_reference_text_numerics()?;
+        }
         ensure!(
             language.cfg.image_token_id == Some(IMAGE_TOKEN)
                 && language.cfg.hidden == heads::HIDDEN,
             "export config does not match OmniJev-4B"
         );
-        let vision = VisionModel::load(dir, library)?;
+        let mut vision = VisionModel::load(dir, library)?;
+        if numerics == VisionNumerics::Reference {
+            vision.enable_omnijev_numerics()?;
+        }
         let heads = Heads::load(&dir.join("heads.safetensors"))?;
         Ok((
             Self {
@@ -116,6 +191,7 @@ impl Executor {
                 language,
                 heads,
                 calibration: export.calibration,
+                reference_language,
                 request: None,
                 question: None,
             },
@@ -163,6 +239,10 @@ impl Executor {
         prepared: &PreparedRequest,
         reuse: bool,
     ) -> Result<Vec<Vec<f32>>> {
+        ensure!(
+            !self.reference_language,
+            "one-shot reference supports only score_one_shot; full requests/reuse/LM targets are unsupported"
+        );
         let result = self.run(prepared, reuse);
         // Also finish queued work on an error before releasing admission.
         let vision = self.vision.synchronize();
@@ -171,6 +251,59 @@ impl Executor {
         vision?;
         language?;
         Ok(outputs)
+    }
+
+    /// Run one Score question, using the original complete request's prefix,
+    /// positions and readout indices. Other questions must remain in `prepared`
+    /// so compiling a selection cannot change the longest-common-prefix rule.
+    pub fn score_one_shot(
+        &mut self,
+        prepared: &PreparedRequest,
+        index: usize,
+    ) -> Result<ScoreReadout> {
+        ensure!(
+            self.reference_language,
+            "score_one_shot requires the unmerged reference profile"
+        );
+        let question = prepared
+            .questions
+            .get(index)
+            .context("Score question index outside request")?;
+        ensure!(
+            question.kind == Kind::Score,
+            "one-shot reference currently supports Score only; LM targets are unsupported"
+        );
+        let start = Instant::now();
+        let result = (|| {
+            let features = self.vision.forward(&prepared.pixels)?;
+            let prefix = &prepared.inputs.first().context("no questions")?.token_ids
+                [..prepared.layout.prefix];
+            let input = prepared
+                .inputs
+                .get(index)
+                .context("missing question input")?;
+            let rows = input
+                .rows
+                .iter()
+                .map(|row| self.row(prefix, row, prepared.grid, &features, false))
+                .collect::<Result<Vec<_>>>()?;
+            let zq = rows.first().context("Score has no rows")?.zq.clone();
+            let u: Vec<_> = rows.into_iter().map(|row| row.u).collect();
+            let probabilities = self.heads.ordinal(&zq, &u)?;
+            let elapsed = prepared.preparation_seconds + start.elapsed().as_secs_f64();
+            let answer = contract::answer(question, &probabilities, &self.calibration, elapsed)?;
+            Ok(ScoreReadout {
+                zq,
+                u,
+                probabilities,
+                answer,
+            })
+        })();
+        let vision = self.vision.synchronize();
+        let language = self.language.synchronize();
+        vision?;
+        language?;
+        result
     }
 
     fn run(&mut self, prepared: &PreparedRequest, reuse: bool) -> Result<Vec<Vec<f32>>> {
@@ -363,16 +496,20 @@ impl Executor {
             targets.extend(row.first.map(|token| (at + row.zq, token)));
             targets.extend(row.targets.iter().map(|&(p, token)| (at + p, token)));
         }
-        let readout = self.language.forward_multimodal_readout(
-            &MultimodalInput {
-                token_ids: &ids,
-                image_token_indices: &image_rows,
-                image_embeddings: features,
-                position_ids: [&positions[0], &positions[1], &positions[2]],
-            },
-            &[at + row.zq, at + row.u],
-            &targets,
-        )?;
+        let input = MultimodalInput {
+            token_ids: &ids,
+            image_token_indices: &image_rows,
+            image_embeddings: features,
+            position_ids: [&positions[0], &positions[1], &positions[2]],
+        };
+        let selected = [at + row.zq, at + row.u];
+        let readout = if self.reference_language {
+            self.language
+                .forward_multimodal_reference_readout(&input, &selected, &targets)?
+        } else {
+            self.language
+                .forward_multimodal_readout(&input, &selected, &targets)?
+        };
         let mut hidden = readout.hidden.into_iter();
         let (zq, u) = (hidden.next().unwrap(), hidden.next().unwrap());
         let mut logprobs = readout.logprobs.into_iter();
