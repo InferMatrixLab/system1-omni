@@ -80,6 +80,7 @@ VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
   VELA_NATIVE_MANIFEST_SHA256=<the digest the exporter prints> \
   cargo test -p omni-vela-native --test vela_native_processing -- --ignored --nocapture
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
+  VELA_NATIVE_MANIFEST_SHA256=<the digest the exporter prints> \
   cargo test -p omni-vela-native --test vela_native_heads -- --ignored --nocapture
 ~~~
 
