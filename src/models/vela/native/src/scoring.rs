@@ -908,9 +908,16 @@ pub fn aggregate_windows(
     // The reference accumulates in float64; the result casts to f32.
     let mut acc = vec![vec![0.0f64; labels]; original_offs.len()];
     let mut cnt = vec![0usize; original_offs.len()];
+    // First-match index per offset, as `position` found it, without the
+    // per-window linear scan.
+    let mut index: std::collections::HashMap<&(usize, usize), usize> =
+        std::collections::HashMap::with_capacity(original_offs.len());
+    for (u, off) in original_offs.iter().enumerate() {
+        index.entry(off).or_insert(u);
+    }
     for (logits, offs) in window_logits.iter().zip(window_offs) {
         for ((s, e), row) in offs.iter().zip(logits) {
-            if let Some(u) = original_offs.iter().position(|(os, oe)| os == s && oe == e) {
+            if let Some(&u) = index.get(&(*s, *e)) {
                 for (l, value) in row.iter().enumerate() {
                     acc[u][l] += *value as f64;
                 }
