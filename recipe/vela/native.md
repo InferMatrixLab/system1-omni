@@ -95,6 +95,7 @@ replay the fixtures through the Rust implementation:
 
 ~~~sh
 VELA_NATIVE_BUNDLE="$PWD/weights/vela-2.0-0.8b-native" \
+  VELA_NATIVE_MANIFEST_SHA256=<the digest the exporter prints> \
   cargo run -p omni-vela-native --example parity -- example-request
 ~~~
 
