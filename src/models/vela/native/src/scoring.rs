@@ -75,7 +75,7 @@ impl Calibration {
                 )
             })
             .collect();
-        points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        points.sort_by(|a, b| a.0.total_cmp(&b.0));
         let x = (n_tokens.max(1) as f64).ln();
         let (xs, ys): (Vec<f64>, Vec<f64>) = points.into_iter().unzip();
         interp(&xs, &ys, x).exp()
