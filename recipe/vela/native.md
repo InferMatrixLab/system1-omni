@@ -9,21 +9,25 @@ through the shared qwen3_5 crate — all mirrored from the pinned
 runtime and checked against frozen fixtures. This is a library; the
 HTTP worker is the [reference recipe](reference.md)'s Python worker.
 The recorded fixtures and parity evidence below are the 0.8B's (CPU
-FP32 recordings). Historical 4B/9B runs on an RTX 4090 48 GB (sm_89,
-CUDA 13.2 toolkit) recorded exact-match plans and native executor
-replays with worst drifts 0.2271 and 0.2281 respectively, but their
-head/response checks used the former span-structure exemption. They are
-not current full-parity evidence.
+FP32 recordings). The 4B/9B runs on an RTX 4090 48 GB (sm_89, CUDA
+13.2 toolkit) recorded exact-match plans and native executor replays
+with worst drifts 0.2271 and 0.2281 respectively; their head/response
+checks used the former span-structure exemption and were superseded by
+the regenerated fixtures described next.
 
-Those 4B/9B head/response measurements used the former exemption for
-mismatching span structures and do not establish full parity. The
-9B CJK address merge reported in [PR #195](https://github.com/InferMatrixLab/system1-omni/pull/195#issuecomment-6516691352)
+The 9B CJK address merge reported in [PR #195](https://github.com/InferMatrixLab/system1-omni/pull/195#issuecomment-6516691352)
 was a decoding error: a rejected valid word must end the current span.
 The tests now retain all spans and require their counts, labels and
 offsets to match; logit comparisons also reject non-finite values and
-dimension mismatches. The numeric ceilings are unchanged. Full 4B/9B
-head/response replay under these assertions remains unverified until
-rerun with the corresponding exported bundles.
+dimension mismatches. The numeric ceilings are unchanged. The 4B/9B
+fixtures were then regenerated from one `_predict` execution per case
+(the JSON sidecars record `execution_batches`), and with fresh exports
+both members pass the strict head, processing and response replays
+under these assertions — heads 5/5, processing 2/2 and response 1/1 per
+member — with exactly 76 spans for 4B and 373 for 9B in the regenerated
+long-span fixtures ([author-run, reported in the PR](https://github.com/InferMatrixLab/system1-omni/pull/195#issuecomment-6845764203)).
+No executor rerun against the regenerated fixtures is recorded; the
+executor drifts above are the earlier runs'.
 
 The current 0.8B SM89 replay uses one `forward_fixed` call per readout;
 this keeps the GEMM rounding independent of readout grouping. On the
