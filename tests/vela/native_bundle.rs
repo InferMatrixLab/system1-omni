@@ -110,6 +110,38 @@ fn a_rewritten_manifest_fails_the_anchor() {
 }
 
 #[test]
+fn a_pinned_bf16_directory_loads() {
+    let dir = temp_dir("bf16-ok");
+    write_bundle(&dir);
+    std::fs::create_dir(dir.join("bf16")).expect("dir");
+    std::fs::write(dir.join("bf16/model.safetensors"), b"bf16 backbone").expect("write");
+    std::fs::write(dir.join("bf16/config.json"), b"{}").expect("write");
+    edit_manifest(&dir, |manifest| {
+        manifest["files_sha256"]["bf16/model.safetensors"] =
+            json!(sha256(b"bf16 backbone").as_str());
+        manifest["files_sha256"]["bf16/config.json"] = json!(sha256(b"{}").as_str());
+    });
+    Bundle::load(&dir, &manifest_sha(&dir)).expect("loads");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_stray_file_inside_the_pinned_directory_fails_the_gate() {
+    let dir = temp_dir("bf16-stray");
+    write_bundle(&dir);
+    std::fs::create_dir(dir.join("bf16")).expect("dir");
+    std::fs::write(dir.join("bf16/model.safetensors"), b"bf16 backbone").expect("write");
+    std::fs::write(dir.join("bf16/stray.bin"), b"stray").expect("write");
+    edit_manifest(&dir, |manifest| {
+        manifest["files_sha256"]["bf16/model.safetensors"] =
+            json!(sha256(b"bf16 backbone").as_str());
+    });
+    let error = Bundle::load(&dir, &manifest_sha(&dir)).unwrap_err();
+    assert!(error.to_string().contains("bf16/stray.bin"), "{error}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn a_foreign_revision_is_refused() {
     let dir = temp_dir("foreign");
     write_bundle(&dir);
@@ -183,6 +215,19 @@ fn a_symlinked_files_key_is_refused() {
     assert!(error.to_string().contains("symlink"), "{error}");
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&outside);
+}
+
+#[test]
+#[cfg(unix)]
+fn a_symlinked_pinned_file_fails_the_gate() {
+    let dir = temp_dir("symlink-entry");
+    write_bundle(&dir);
+    let target = dir.join("tokenizer.json");
+    std::fs::rename(&target, dir.join("tokenizer.real")).expect("rename");
+    std::os::unix::fs::symlink(dir.join("tokenizer.real"), &target).expect("symlink");
+    let error = Bundle::load(&dir, &manifest_sha(&dir)).unwrap_err();
+    assert!(error.to_string().contains("symlink"), "{error}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
