@@ -96,6 +96,11 @@ pub struct Encoder {
     cache: RefCell<HashMap<String, Encoded>>,
 }
 
+/// The encode memo holds per-request text fragments; cap it so a
+/// long-lived process cannot grow it without bound (whole-table reset,
+/// not LRU — a miss just re-encodes).
+const ENCODER_CACHE_LIMIT: usize = 4096;
+
 impl Encoder {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let tokenizer = Tokenizer::from_file(path).map_err(anyhow::Error::msg)?;
@@ -104,11 +109,6 @@ impl Encoder {
             cache: RefCell::new(HashMap::new()),
         })
     }
-
-    /// The memoization cap. The reference's cache grows without bound;
-    /// a long-lived worker cannot afford that, so past the cap a miss
-    /// simply re-encodes instead of storing another entry.
-    const CACHE_MAX: usize = 4096;
 
     fn encode(&self, text: &str) -> Result<Encoded, RequestError> {
         if let Some(hit) = self.cache.borrow().get(text) {
@@ -136,11 +136,11 @@ impl Encoder {
             .map(|(start, end)| (to_char(*start), to_char(*end)))
             .collect();
         let entry = (encoding.get_ids().to_vec(), offsets);
-        if self.cache.borrow().len() < Self::CACHE_MAX {
-            self.cache
-                .borrow_mut()
-                .insert(text.to_owned(), entry.clone());
+        let mut cache = self.cache.borrow_mut();
+        if cache.len() >= ENCODER_CACHE_LIMIT {
+            cache.clear();
         }
+        cache.insert(text.to_owned(), entry.clone());
         Ok(entry)
     }
 
@@ -197,7 +197,7 @@ pub fn span_head_for(
     if let Some(head) = head_override {
         if !matches!(head, "router" | "broad") {
             return Err(format!(
-                "head must be one of ['router', 'broad'], got '{head}'"
+                "head must be one of ['router', 'broad'], got '{head:?}'"
             ));
         }
         if head == "broad" && !broad_available {
@@ -564,9 +564,7 @@ impl RenderContext<'_> {
         questions: &[GenericQuestion],
         dispatch: &SpanDispatch,
     ) -> Result<RenderedRow, RequestError> {
-        let ids_of = |text: &str| -> Result<Vec<u32>, RequestError> {
-            self.encoder.ids(text).map_err(|_| RequestError::internal())
-        };
+        let ids_of = |text: &str| self.encoder.ids(text);
         let roles: Vec<String> = parts.iter().map(|p| p.role.clone()).collect();
         // Question blocks and their schema costs.
         struct RenderedQ {
