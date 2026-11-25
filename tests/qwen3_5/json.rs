@@ -11,6 +11,20 @@ fn precision_features_preserve_numbers_and_private_marker_keys() {
     assert!(err(r#"{"a":{"b":1,"b":2}}"#).contains("duplicate key"));
 }
 
+#[test]
+fn exact_integer_mode_preserves_nested_values_outside_machine_ranges() {
+    let values = parse_preserving_integers(
+        br#"{"positive":{"nested":18446744073709551617},"negative":-9223372036854775809}"#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        values["positive"]["nested"].to_string(),
+        "18446744073709551617"
+    );
+    assert_eq!(values["negative"].to_string(), "-9223372036854775809");
+}
+
 fn err(body: &str) -> String {
     parse(body.as_bytes()).unwrap_err()
 }

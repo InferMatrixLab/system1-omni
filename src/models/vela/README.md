@@ -225,3 +225,50 @@ the shared worker-contract issue, and nothing is posted upstream.
   a deployment option outside these slices' evidence.
 - The serving procedure, hardware requirements and the recorded
   evidence pointer are [recipe/vela/reference.md](../../recipe/vela/reference.md).
+
+## Native path (0.8B)
+
+The native implementation lives in [`native/`](native/) as the
+`omni-vela-native` crate, a library around the exported bundle:
+
+- [`recipe/vela/export_native.py`](../../recipe/vela/export_native.py)
+  exports the pinned package into a native bundle: the 320 backbone
+  tensors re-keyed `backbone.` → `model.` with **per-tensor dtypes
+  preserved** (204 BF16 Linear/conv1d + 116 F32 embed/norms/A_log/
+  dt_bias — the reference's own layout), the 37 F32 head tensors
+  (CandidateHead, `set_bias`, span2 router, span_broad) in one file,
+  `backbone_config` at the config root, calibration and tokenizer
+  copied, and a manifest pinning the source revision, the worker
+  gate's own file table, the tensor inventory and every bundle file's
+  SHA-256.
+- `native/src/bundle.rs` re-verifies that manifest (revision,
+  inventory counts, per-file hashes) before anything loads it.
+- `native/src/contract.rs` is the wire admission, mirroring
+  `protocol.py` and the pinned runtime's preamble with byte-equal
+  422/400 bodies.
+- `native/src/{state,questions,words,render,processing}.rs` are the
+  token-level processing: the state → parts mapping, the SystemOne →
+  predict mapping with the pinned runtime's validation triples (Noul
+  folded into a two-option choice; choice renders `[ABS]`, the
+  reference's abstain default), the GLiNER2/CJK word splitter, the
+  six-rule span-head dispatch with the hallucination-alias label
+  replacement, the DEV2.0 prompt rendering (parts pass, question
+  blocks with option end and query positions, span layout a/c with
+  word positions, the truncation budget, the 16,384-window 413) and
+  the long-target window rows. All five frozen token plans
+  (`tests/vela/fixtures/native-plan-*.json`) match field-for-field.
+
+- `native/src/{heads,scoring}.rs` are the F32 heads and the scoring
+  path: CandidateHead, both SpanHeadV2 heads, `set_bias`, the
+  per-type temperatures, set thresholds, the PII length rule and
+  sparse gate, `span_decode_r4` (word units, unit vote, fill,
+  edge/URL trimming), label aliasing, score normalization and the
+  window aggregation. Replaying the recorded head-input fixtures
+  (`tests/vela/fixtures/head-input-*`): head-logit drift ≤ 3.8e-5,
+  predict-answer drift ≤ 7.3e-7, discrete picks and span structures
+  equal on all five cases.
+
+Backbone execution and an HTTP worker are not implemented. Checks:
+`cargo test -p omni-vela-native` (27 tests, no weights, no GPU;
+render and head parity opt-in with `VELA_NATIVE_BUNDLE`; see
+[recipe/vela/native.md](../../recipe/vela/native.md)).
