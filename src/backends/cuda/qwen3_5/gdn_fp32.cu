@@ -15,6 +15,7 @@ struct Context {
   size_t bytes = 0;
   cudaStream_t stream = nullptr;
   int device = 0;
+  bool torch28 = false;
 };
 struct Layout {
   size_t q, k, kbeta, qd, kd, u, w, a, p, cum, state, vnew, temp, out, plus,
@@ -112,6 +113,7 @@ __global__ void cumulative(const float *g, float *out, int tokens, int heads,
     __syncthreads();
   }
 }
+template<bool Torch28>
 __global__ void prepare(const cs1::bf16 *q, const cs1::bf16 *k,
                         const cs1::bf16 *v, const cs1::bf16 *beta, Work ws,
                         int tokens, int heads, int key_heads, int nc,
@@ -122,7 +124,7 @@ __global__ void prepare(const cs1::bf16 *q, const cs1::bf16 *k,
   float qv[4], kv[4], qs[4] = {}, ks[4] = {};
 #pragma unroll
   for (int j = 0; j < 4; j++) {
-    int d = lane * 4 + j;
+    int d = Torch28 ? lane + 32*j : lane*4+j;
     qv[j] = token < tokens
                 ? cs1::f32(q[((size_t)token * key_heads + kh) * D + d])
                 : 0.f;
@@ -134,7 +136,7 @@ __global__ void prepare(const cs1::bf16 *q, const cs1::bf16 *k,
   }
   float qsum = ((qs[0] + qs[1]) + qs[2]) + qs[3],
         ksum = ((ks[0] + ks[1]) + ks[2]) + ks[3];
-  for (int step = 16; step > 0; step /= 2) {
+  for (int step = Torch28 ? 1 : 16; Torch28 ? step < 32 : step > 0; step = Torch28 ? step*2 : step/2) {
     qsum += __shfl_down_sync(0xffffffff, qsum, step);
     ksum += __shfl_down_sync(0xffffffff, ksum, step);
   }
@@ -146,7 +148,7 @@ __global__ void prepare(const cs1::bf16 *q, const cs1::bf16 *k,
   float ec = expf(cum), er = expf(last - cum);
 #pragma unroll
   for (int j = 0; j < 4; j++) {
-    int d = lane * 4 + j;
+    int d = Torch28 ? lane + 32*j : lane*4+j;
     size_t index = ((size_t)head * nc * C + row) * D + d;
     float qn = __fmul_rn(__fmul_rn(qv[j], qi), scale),
           kn = __fmul_rn(kv[j], ki), kb = __fmul_rn(kn, b);
@@ -259,11 +261,11 @@ extern "C" size_t cs1_gdn_fp32_workspace_floats(int tokens, int heads) {
     return 0;
   return Layout(tokens, heads).total / 4;
 }
-extern "C" int cs1_gdn_prefill_fp32(void *opaque, const void *q, const void *k,
+extern "C" int cs1_gdn_prefill_fp32_x(void *opaque, const void *q, const void *k,
                                     const void *v, const float *g,
                                     const void *beta, void *out,
                                     float *workspace, int tokens, int heads,
-                                    int key_heads, float scale, void *stream) {
+                                    int key_heads, float scale, const void *initial, void *final_state, void *stream) {
   auto *c = (Context *)opaque;
   if (!c || !workspace || !q || !k || !v || !g || !beta || !out ||
       !cs1_gdn_fp32_workspace_floats(tokens, heads) || key_heads <= 0 ||
@@ -287,9 +289,15 @@ extern "C" int cs1_gdn_prefill_fp32(void *opaque, const void *q, const void *k,
   int width = 1 << max(4, min(9, log_width));
   cumulative<<<batches, 32, 0, c->stream>>>(g, ws.cum, tokens, heads, nc,
                                             width);
-  prepare<<<heads * nc * C, 32, 0, c->stream>>>(
+  if(c->torch28) {
+  prepare<true><<<heads * nc * C, 32, 0, c->stream>>>(
       (const cs1::bf16 *)q, (const cs1::bf16 *)k, (const cs1::bf16 *)v,
       (const cs1::bf16 *)beta, ws, tokens, heads, key_heads, nc, scale);
+  } else {
+  prepare<false><<<heads * nc * C, 32, 0, c->stream>>>(
+      (const cs1::bf16 *)q, (const cs1::bf16 *)k, (const cs1::bf16 *)v,
+      (const cs1::bf16 *)beta, ws, tokens, heads, key_heads, nc, scale);
+  }
   rc = cudaGetLastError();
   if (rc)
     return rc;
@@ -318,7 +326,7 @@ extern "C" int cs1_gdn_prefill_fp32(void *opaque, const void *q, const void *k,
   BLAS(cublasStrsmBatched(c->blas, CUBLAS_SIDE_RIGHT, CUBLAS_FILL_MODE_UPPER,
                           CUBLAS_OP_N, CUBLAS_DIAG_UNIT, D, C, &one, ws.pa, C,
                           ws.pw, D, batches));
-  rc = cudaMemsetAsync(ws.state, 0, (size_t)heads * D * D * 4, c->stream);
+  rc = initial ? cudaMemcpyAsync(ws.state, initial, (size_t)heads*D*D*4, cudaMemcpyDeviceToDevice, c->stream) : cudaMemsetAsync(ws.state, 0, (size_t)heads*D*D*4, c->stream);
   if (rc)
     return rc;
   for (int chunk = 0; chunk < nc; chunk++) {
@@ -348,5 +356,13 @@ extern "C" int cs1_gdn_prefill_fp32(void *opaque, const void *q, const void *k,
       return rc;
   }
 #undef BLAS
+  if(final_state) return cudaMemcpyAsync(final_state,ws.state,(size_t)heads*D*D*4,cudaMemcpyDeviceToDevice,c->stream);
   return cudaSuccess;
+}
+
+extern "C" void* cs1_gdn_fp32_create_torch28(size_t bytes) {
+ auto* c=(Context*)cs1_gdn_fp32_create(bytes);if(c)c->torch28=true;return c;
+}
+extern "C" int cs1_gdn_prefill_fp32(void* context,const void* q,const void* k,const void* v,const float* g,const void* beta,void* out,float* work,int t,int h,int hk,float scale,void* stream) {
+ return cs1_gdn_prefill_fp32_x(context,q,k,v,g,beta,out,work,t,h,hk,scale,nullptr,nullptr,stream);
 }

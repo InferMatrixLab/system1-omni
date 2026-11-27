@@ -1,4 +1,4 @@
-"""Export pinned Kev-4B language weights and pointer head on CPU (no serving)."""
+"""Export pinned Kev-4B language weights and pointer head (no serving)."""
 
 import argparse
 import hashlib
@@ -170,7 +170,7 @@ def pointer_head(meta):
     return {name: value.contiguous() for name, value in head.items()}, temperature
 
 
-def export(base, checkpoint, out):
+def export(base, checkpoint, out, merge_device="cpu"):
     if out.exists():
         raise ValueError("output already exists; choose a new directory")
     verify_files(base, BASE_FILES)
@@ -184,6 +184,15 @@ def export(base, checkpoint, out):
         load_file(checkpoint / "adapter_model.safetensors", device="cpu")
     )
     validate_targets(pairs)
+    if merge_device not in ("cpu", "cuda"):
+        raise ValueError("merge device must be cpu or cuda")
+    if merge_device == "cuda":
+        if torch.__version__ != "2.8.0+cu128":
+            raise ValueError("official-service export requires torch==2.8.0+cu128")
+        if not torch.cuda.is_available():
+            raise ValueError("CUDA export requires a reserved GPU; use gpu run")
+        torch.set_float32_matmul_precision("highest")
+        torch.backends.cuda.matmul.allow_tf32 = False
     out.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{out.name}-", dir=out.parent))
     used, weight_map = set(), {}
@@ -193,13 +202,13 @@ def export(base, checkpoint, out):
                 continue
             weights = {}
             with safe_open(base / name, framework="pt", device="cpu") as source:
-                for key in source.keys():
+                for key in source.keys():  # noqa: SIM118 - safe_open exposes keys(), not iteration
                     if not key.startswith("model.language_model."):
                         continue  # Kev is text-only; exclude vision and MTP.
                     weight = source.get_tensor(key)
                     if key in pairs:
                         pair = pairs[key]
-                        weight = merge_weight(weight, pair["A"], pair["B"])
+                        weight = merge_weight(weight.to(merge_device), pair["A"].to(merge_device), pair["B"].to(merge_device)).cpu()
                         used.add(key)
                     else:
                         weight = weight.to(torch.bfloat16).contiguous()
@@ -237,6 +246,10 @@ def export(base, checkpoint, out):
             "inputs": {"base": BASE_FILES, "checkpoint": CHECKPOINT_FILES},
             "files": {p.name: sha256(p) for p in sorted(staging.iterdir())},
         }
+        if merge_device == "cuda":
+            manifest["merge_numerics"] = {
+                "device": merge_device, "accumulation": "float32", "torch": torch.__version__,
+            }
         (staging / "kev_export.json").write_text(json.dumps(manifest, indent=2) + "\n")
         os.rename(staging, out)
     finally:
@@ -250,9 +263,11 @@ def main():
     parser.add_argument("--base", required=True, type=Path)
     parser.add_argument("--checkpoint", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--merge-device", choices=("cuda", "cpu"), default="cpu",
+                        help="CPU prepares the FP32 head; native serving requires CUDA")
     args = parser.parse_args()
     torch.set_num_threads(8)
-    manifest = export(args.base, args.checkpoint, args.out)
+    manifest = export(args.base, args.checkpoint, args.out, args.merge_device)
     print(
         f"Exported {len(manifest['merged_targets'])} merged projections to {args.out}"
     )
