@@ -1,0 +1,127 @@
+{
+ "case": "example-request-cjk",
+ "request": {
+  "model": "vllm-sr/Vela-2.0-4B",
+  "state": {
+   "request": "客户张伟（zhang.wei@example.cn）于2026年10月1日在上海市浦东新区世纪大道100号办理了业务，联系电话13800138000。",
+   "source": "客户的业务申请需要在三个工作日内审核完成。",
+   "answer": "客户的业务已经即时完成了。"
+  },
+  "questions": {
+   "pii": {
+    "type": "span",
+    "instructions": "Which spans are personal information?",
+    "criteria": {
+     "PERSON": "a person's name",
+     "EMAIL_ADDRESS": "an e-mail address",
+     "PHONE_NUMBER": "a telephone number",
+     "STREET_ADDRESS": "a street address or postal address"
+    },
+    "over": "request"
+   },
+   "unsupported": {
+    "type": "span",
+    "instructions": "Which spans of the answer are not supported by the context?",
+    "criteria": {
+     "unsupported": "a claim not supported by the context"
+    }
+   },
+   "billing": {
+    "type": "noul",
+    "instructions": "这个请求是否与账单有关？"
+   }
+  }
+ },
+ "system_one": {
+  "model": "vllm-sr/Vela-2.0-4B",
+  "answers": {
+   "pii": {
+    "type": "noul",
+    "noul": 0.4655455382237692
+   },
+   "unsupported": {
+    "type": "noul",
+    "noul": 0.7571192969322452
+   },
+   "billing": {
+    "type": "noul",
+    "noul": 0.043428893911146474
+   }
+  },
+  "usage": {
+   "input_tokens": 597,
+   "output_tokens": 0
+  },
+  "spans": {
+   "pii": [],
+   "unsupported": [
+    {
+     "label": "unsupported",
+     "start": 5,
+     "end": 12,
+     "text": "已经即时完成了",
+     "probability": 0.7004485726356506
+    }
+   ]
+  },
+  "span_heads": {
+   "pii": "router",
+   "unsupported": "router"
+  },
+  "thresholds": {
+   "pii": 0.5,
+   "unsupported": 0.5
+  }
+ },
+ "predict": {
+  "answers": [
+   {
+    "id": "pii",
+    "type": "span",
+    "target_part": "user",
+    "spans": [],
+    "threshold": 0.5,
+    "threshold_rule": "pii:length+sparse",
+    "head": "router",
+    "head_reason": "id"
+   },
+   {
+    "id": "unsupported",
+    "type": "span",
+    "target_part": "answer",
+    "spans": [
+     {
+      "start": 5,
+      "end": 12,
+      "label": "unsupported",
+      "probability": 0.7004485726356506,
+      "text": "已经即时完成了"
+     }
+    ],
+    "threshold": 0.5,
+    "threshold_rule": "span:*",
+    "head": "router",
+    "head_reason": "label_set"
+   },
+   {
+    "id": "billing",
+    "type": "choice",
+    "answer": "no",
+    "probabilities": {
+     "no": 0.9565711060888535,
+     "yes": 0.043428893911146474
+    },
+    "abstain_probability": 0.00017862510528338015
+   }
+  ],
+  "meta": {
+   "tokens": {
+    "user": 46,
+    "context": 10,
+    "answer": 6
+   },
+   "windows": 0,
+   "sequences": 2
+  }
+ }
+}

@@ -1,0 +1,21 @@
+//! Native library for the Vela 2.0 decoder members (0.8B/4B/9B): the
+//! exported-bundle gate, the wire contract, the token-level processing
+//! (state → parts, the SystemOne → predict mapping with the pinned
+//! runtime's validation triples, word units, the DEV2.0 prompt
+//! rendering — mirrored against the frozen `native-plan-*` fixtures),
+//! the F32 heads and scoring (checked against the recorded
+//! `head-input-*` fixtures and the oracle responses; every width is
+//! derived from the tensors' shapes, so one implementation serves all
+//! members), and backbone execution on CUDA through the shared
+//! qwen3_5 crate. The HTTP worker is not part of this crate.
+
+pub mod bundle;
+pub mod contract;
+pub mod executor;
+pub mod heads;
+pub mod processing;
+pub mod questions;
+pub mod render;
+pub mod scoring;
+pub mod state;
+pub mod words;

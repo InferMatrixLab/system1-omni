@@ -29,7 +29,7 @@ the three envelope 422s (missing field, extra field, wrong model
 name) that freeze the worker's preamble admission against the pinned
 runtime's. The example files' ``model`` field is rewritten to the
 served member's name, and the hybrid member's oracle fixtures export
-under an ``oracle-hybrid-`` prefix, so both members share one tool.
+under an ``oracle-hybrid-<member>-`` prefix, so every member shares one tool.
 CPU FP32 is the oracle setting; GPU bf16-autocast is a deployment
 option, not this tool's default.
 """
@@ -279,9 +279,13 @@ def main(argv=None):
     app = vela2_serve.create_app(executor.engine, model_name=executor.model_name, api_key=None)
     client = TestClient(app)
     served = executor.model_name
-    # The hybrid member's oracle fixtures get their own prefix so both
-    # members' frozen baselines can live in one directory.
-    prefix = "oracle-hybrid-" if getattr(executor, "is_hybrid", False) else "oracle-"
+    # The decoder members share one runtime, so their oracle fixtures
+    # carry the member's label: every frozen baseline lives in one
+    # directory without one member overwriting another.
+    if getattr(executor, "is_hybrid", False):
+        prefix = f"oracle-hybrid-{served.rsplit('/', 1)[-1]}-"
+    else:
+        prefix = "oracle-"
 
     exported = 0
     failed = 0
