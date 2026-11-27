@@ -1,13 +1,51 @@
-# D3 reference contract
+# D3 reference profiles
 
-This directory contains the System1-Omni integration slice for
-D3 (Decision 3.0, [`vllm-sr/d3`](https://huggingface.co/vllm-sr/d3)). It is a
-reference-serving boundary only: a Python worker that runs the checkpoint's
-own pinned runtime for text, image and video state and the three typed
-question kinds (`choice`, `noul`, `score`) on `/v1/systemone`. Native CUDA
-execution is not part of this slice.
+This directory owns two explicitly selected reference profiles on the same
+`/v1/systemone` worker/frontend boundary. The default `legacy` profile serves
+`vllm-sr/d3` with the contract below. `--profile turbo` serves the independently
+pinned `vllm-sr/d3-turbo` package described in the [turbo recipe](../../../recipe/d3/turbo.md).
+Neither profile is a native CUDA executor.
 
-## Pinned artifacts
+## Turbo profile
+
+- Package: `vllm-sr/d3-turbo@a0f3e9e59ebd1202fe1d4de1c4c0f9a986758cbb`;
+  exact manifest SHA-256
+  `54a65af0871c21b3440cbdadaccfd752a8e2173b86334d1b3290f005e49699fe`.
+- The public `AutoModel.system_one` owns normalization, preprocessing, batching,
+  forward, FP32 255-code readout, calibration and response accounting. The
+  adapter never assumes legacy `prepare/run/respond` error admission.
+- `turbo_protocol.py` admits only text/JSON and zero or one top-level inline
+  PNG/JPEG, and `choice`/`noul`/`score`. Unsupported fields, question kinds and
+  media placements receive explicit 422. Per-image budgets are 8,000,000 bytes
+  and 16,000,000 source pixels; total HTTP body cap is 64 MiB. See the recipe
+  for every intentional wire restriction.
+- Supported-kind invalid/over-limit questions retain the oracle's per-question
+  error in HTTP 200. The 32,768-token default policy never silently truncates.
+  Question/code ordering, confidence, probabilities and usage pass through.
+- `prefix_bidir` full-attention state tokens see only the complete state;
+  questions see that state plus their own full block. GDN is causal. The bundled
+  state-once implementation runs once per request, with its own branch batches;
+  no shared System1-Omni cache or batcher is added. The processor and executor
+  belong to the selected upstream runtime. One worker admits one complete
+  request at a time; request-local preparation, image tensors and temporary
+  state belong to that call, while model weights/device state live until close.
+- `turbo.py` verifies identity and the complete runtime/wrapper/compose and
+  non-weight load closure before import. Legacy retains its own package gate.
+  Both loaders bind one package/profile to the process, even after close or a
+  failed import; changing profile requires a fresh process. Real warmup and a
+  typed inference precede readiness. The worker's transport/busy handling is
+  shared; model-specific wire admission remains separate from execution.
+- Preparation and answer fixtures, generation tools and tests live under
+  [`tests/d3/`](../../../tests/d3/). Exact preparation/order/decisions/usage and
+  predeclared 1e-6 numerical checks are required. State-once and full-row
+  `prefix_bidir` response oracles remain separate and reference one shared,
+  hash-verified preparation/tensor fixture. Loading reconstructs the original
+  comparison inputs without changing answers, usage or tolerances.
+  Native bring-up must first establish
+  the full-row baseline, then qualify state-once against state-once; an exact
+  semantic state cut cannot be replaced by causal 64-token rounding.
+
+## Legacy pinned artifacts
 
 | Artifact | Value |
 | --- | --- |
